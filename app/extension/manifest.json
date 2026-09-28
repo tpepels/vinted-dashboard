@@ -1,9 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Vinted Dashboard Sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Syncs Vinted dashboard data from your signed-in Vinted tab to your local media-server dashboard.",
-  "permissions": ["storage", "alarms", "tabs"],
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs",
+    "scripting"
+  ],
   "host_permissions": [
     "https://www.vinted.pt/*",
     "http://media-server/*"
@@ -13,8 +18,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.vinted.pt/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.vinted.pt/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
