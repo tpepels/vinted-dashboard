@@ -177,7 +177,7 @@ function renderSession(){
   let label;
   if(sync.active){
     const who=auth.current_user?.username||auth.current_user?.id||"Vinted user";
-    label=`Chrome sync · ${who}${sync.collected_at?` · ${age(Number(sync.collected_at)*1000)} ago`:""}`;
+    label=`Chrome sync · ${who}${sync.collected_at?` · ${when(Number(sync.collected_at)*1000)}`:""}`;
   }else if(auth.authenticated){
     label=`Server session · ${auth.current_user?.username||auth.current_user?.id||"Vinted user"} · ${auth.refresh_token_available?"auto-refresh ready":"refresh token missing"}`;
   }else{
