@@ -531,8 +531,11 @@ class VintedClient:
         price, currency = _money(
             _first(raw, "price", "total_price", "total", "amount")
         )
+        lifecycle_status = str(
+            _first(raw, "transaction_user_status", "state") or ""
+        ).lower().strip().replace(" ", "_").replace("-", "_")
         status = str(
-            _first(raw, "transaction_user_status", "status", "state") or "open"
+            _first(raw, "status") or lifecycle_status or "open"
         ).lower().strip().replace(" ", "_").replace("-", "_")
 
         conversation_id = _first(raw, "conversation_id", "thread_id")
@@ -555,7 +558,7 @@ class VintedClient:
             "total_cents": price,
             "currency": currency,
             "status": status,
-            "is_closed": is_closed_status(status),
+            "is_closed": is_closed_status(lifecycle_status or status),
             "tracking_code": _first(
                 raw, "tracking_code", "tracking_number", "shipment_tracking_code"
             ),
