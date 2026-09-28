@@ -51,6 +51,12 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_listing_obs_item
             ON listing_observations(listing_id, sync_id);
 
+        CREATE TABLE IF NOT EXISTS profile_observations (
+            sync_id INTEGER PRIMARY KEY REFERENCES sync_runs(id) ON DELETE CASCADE,
+            followers INTEGER,
+            following INTEGER
+        );
+
         CREATE TABLE IF NOT EXISTS favorite_events (
             notification_id TEXT PRIMARY KEY,
             item_id TEXT,
@@ -175,6 +181,20 @@ def record_snapshot(snapshot: dict[str, Any]) -> None:
         if not run:
             return
         sync_id = int(run["id"])
+
+        current_user = snapshot.get("current_user") or {}
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO profile_observations(
+                sync_id, followers, following
+            ) VALUES(?, ?, ?)
+            """,
+            (
+                sync_id,
+                _int(current_user.get("followers_count")),
+                _int(current_user.get("following_count")),
+            ),
+        )
 
         for item in listings:
             listing_id = str(item.get("id") or "")
@@ -549,6 +569,139 @@ def _favorite_analytics(conn: sqlite3.Connection, now: float) -> dict[str, Any]:
     }
 
 
+def _daily_last(rows: list[sqlite3.Row], value_keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    by_day: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        collected_at = float(row["collected_at"])
+        day = datetime.fromtimestamp(collected_at, tz=timezone.utc).strftime("%Y-%m-%d")
+        item = {"day": day, "collected_at": collected_at}
+        for key in value_keys:
+            item[key] = row[key]
+        by_day[day] = item
+    return [by_day[key] for key in sorted(by_day)]
+
+
+def _audience_analytics(conn: sqlite3.Connection) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        SELECT sr.collected_at, po.followers, po.following
+        FROM profile_observations po
+        JOIN sync_runs sr ON sr.id=po.sync_id
+        WHERE po.followers IS NOT NULL OR po.following IS NOT NULL
+        ORDER BY sr.collected_at ASC
+        """
+    ).fetchall()
+    daily = _daily_last(rows, ("followers", "following"))
+    follower_values = [row for row in daily if row.get("followers") is not None]
+    current = int(follower_values[-1]["followers"]) if follower_values else None
+    first = int(follower_values[0]["followers"]) if follower_values else None
+    return {
+        "followers": current,
+        "following": next(
+            (
+                int(row["following"])
+                for row in reversed(daily)
+                if row.get("following") is not None
+            ),
+            None,
+        ),
+        "followers_change": (current - first)
+        if current is not None and first is not None
+        else None,
+        "daily": daily[-180:],
+    }
+
+
+def _views_analytics(conn: sqlite3.Connection) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        SELECT sr.collected_at, lo.listing_id, lo.title, lo.views, lo.favourites,
+               lo.status
+        FROM listing_observations lo
+        JOIN sync_runs sr ON sr.id=lo.sync_id
+        WHERE lo.views IS NOT NULL
+        ORDER BY sr.collected_at ASC, lo.listing_id ASC
+        """
+    ).fetchall()
+
+    previous_by_listing: dict[str, int] = {}
+    gained_by_day: dict[str, int] = {}
+    active_totals_by_sync: dict[float, int] = {}
+    listing_daily: dict[str, dict[str, dict[str, Any]]] = {}
+    titles: dict[str, str] = {}
+
+    for row in rows:
+        listing_id = str(row["listing_id"])
+        views = int(row["views"])
+        collected_at = float(row["collected_at"])
+        day = datetime.fromtimestamp(collected_at, tz=timezone.utc).strftime("%Y-%m-%d")
+        titles[listing_id] = str(row["title"] or "Listing")
+
+        previous = previous_by_listing.get(listing_id)
+        if previous is not None and views >= previous:
+            gained_by_day[day] = gained_by_day.get(day, 0) + (views - previous)
+        previous_by_listing[listing_id] = views
+
+        if str(row["status"] or "").lower() == "active":
+            active_totals_by_sync[collected_at] = active_totals_by_sync.get(collected_at, 0) + views
+
+        item = {
+            "day": day,
+            "collected_at": collected_at,
+            "views": views,
+            "favourites": _int(row["favourites"]),
+        }
+        listing_daily.setdefault(listing_id, {})[day] = item
+
+    active_rows = [
+        {"collected_at": ts, "views": total}
+        for ts, total in sorted(active_totals_by_sync.items())
+    ]
+    active_daily = _daily_last(
+        [
+            {
+                "collected_at": row["collected_at"],
+                "views": row["views"],
+            }
+            for row in active_rows
+        ],
+        ("views",),
+    ) if active_rows else []
+
+    gained_daily = [
+        {"day": day, "views_gained": gained_by_day[day]}
+        for day in sorted(gained_by_day)
+    ]
+
+    current_listing_rows = []
+    for listing_id, days in listing_daily.items():
+        series = [days[key] for key in sorted(days)]
+        latest = series[-1]
+        current_listing_rows.append(
+            {
+                "listing_id": listing_id,
+                "title": titles.get(listing_id) or "Listing",
+                "views": latest["views"],
+                "favourites": latest.get("favourites"),
+                "daily": series[-180:],
+            }
+        )
+    current_listing_rows.sort(
+        key=lambda row: (-int(row.get("views") or 0), str(row.get("title") or ""))
+    )
+
+    return {
+        "daily_views_gained": gained_daily[-180:],
+        "daily_active_total": active_daily[-180:],
+        "listings": current_listing_rows[:250],
+        "total_active_views": active_daily[-1]["views"] if active_daily else None,
+        "views_gained_7d": sum(
+            int(row["views_gained"])
+            for row in gained_daily[-7:]
+        ),
+    }
+
+
 def intelligence_payload(current_listings: list[dict[str, Any]]) -> dict[str, Any]:
     now = time.time()
     active = [
@@ -663,6 +816,8 @@ def intelligence_payload(current_listings: list[dict[str, Any]]) -> dict[str, An
             },
             "sales": _sales_analytics(conn, now),
             "favorites": _favorite_analytics(conn, now),
+            "audience": _audience_analytics(conn),
+            "views": _views_analytics(conn),
             "market": {
                 "queued": int(queued or 0),
                 "recent": [dict(row) for row in market_recent],
