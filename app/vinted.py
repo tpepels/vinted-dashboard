@@ -566,7 +566,7 @@ class VintedClient:
         # Current authenticated clients use this endpoint with a status filter.
         # Query each lifecycle view because Vinted does not include sold/draft
         # inventory in the public wardrobe feed.
-        for status in ("active", "sold", "reserved", "draft", "closed", "hidden"):
+        for status in ("active", "sold", "reserved", "draft", "closed"):
             for page in range(1, self.max_pages + 1):
                 try:
                     payload = self._request(
@@ -580,9 +580,12 @@ class VintedClient:
                         auth=True,
                         allow_404=True,
                     )
+                except (VintedAuthRequired, VintedBlocked, VintedRateLimited):
+                    raise
                 except VintedError:
-                    # Some markets reject individual status values (notably
-                    # hidden). Continue with the supported views.
+                    # Some markets reject individual lifecycle filters.
+                    # Keep the other supported views rather than failing all
+                    # inventory loading.
                     break
 
                 if payload is None:
