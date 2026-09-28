@@ -122,7 +122,7 @@ $("#csv-file").addEventListener("change",async e=>{
 
 $("#sync-btn").addEventListener("click",async()=>{
   const btn=$("#sync-btn");btn.disabled=true;btn.textContent="Syncing…";
-  try{const r=await api("/api/sync/email",{method:"POST"});flash(`Email sync checked ${r.checked} messages and found ${r.vinted_messages} Vinted messages.`);await load()}catch(err){flash(err.message,true)}
+  try{const r=await api("/api/sync/email",{method:"POST"});flash(`Email sync checked ${r.checked} messages, found ${r.vinted_messages} Vinted messages and imported ${r.imported} new events.`);await load()}catch(err){flash(err.message,true)}
   finally{btn.disabled=false;btn.textContent="Sync email"}
 });
 $("#read-all-btn").addEventListener("click",async()=>{await api("/api/notifications/read-all",{method:"POST"});await load()});

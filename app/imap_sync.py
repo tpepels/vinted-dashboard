@@ -3,7 +3,6 @@ from __future__ import annotations
 import email
 import imaplib
 import os
-import re
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from email.message import Message
@@ -83,9 +82,15 @@ def _parse_date(msg: Message) -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _looks_like_vinted(sender: str, subject: str, body: str) -> bool:
-    text = f"{sender}\n{subject}\n{body[:1000]}".lower()
-    return "vinted" in text
+def _looks_like_vinted(sender: str, body: str) -> bool:
+    sender_lower = sender.lower()
+    body_lower = body.lower()
+    return (
+        "vinted" in sender_lower
+        or "this email was sent by vinted" in body_lower
+        or "vinted forwarded this email" in body_lower
+        or "we are required to send you this email" in body_lower and "vinted" in body_lower
+    )
 
 
 def sync_imap(session: Session) -> dict:
@@ -131,7 +136,7 @@ def sync_imap(session: Session) -> dict:
             sender = _decode(msg.get("From"))
             body = _message_body(msg)
 
-            if not _looks_like_vinted(sender, subject, body):
+            if not _looks_like_vinted(sender, body):
                 continue
 
             message_id = (msg.get("Message-ID") or f"imap:{imap_id.decode()}").strip("<>")
@@ -142,7 +147,6 @@ def sync_imap(session: Session) -> dict:
         imported = 0
         for occurred_at, message_id, sender, subject, body in messages:
             event = parse_vinted_email(subject, body)
-            before = session.new.__len__()
             notification = apply_event(
                 session=session,
                 event=event,
@@ -155,7 +159,11 @@ def sync_imap(session: Session) -> dict:
                 imported += 1
 
         session.commit()
-        return {"checked": len(ids), "vinted_messages": len(messages), "imported_or_seen": imported}
+        return {
+            "checked": len(ids),
+            "vinted_messages": len(messages),
+            "imported": imported,
+        }
     finally:
         try:
             client.logout()

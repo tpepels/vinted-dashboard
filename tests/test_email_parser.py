@@ -42,6 +42,42 @@ def test_buyer_pickup_update():
     assert event.status == "ready_for_pickup"
 
 
+def test_buyer_received_update():
+    event = parse_vinted_email(
+        "Order update for Clive Barker – Books of Blood: Volumes 1–3",
+        "Hi,\n\nmetaltaffer has received their order. You'll receive payment automatically by 30 Sep 12:50, unless the buyer reports an issue during this time.",
+    )
+    assert event.direction == "sell"
+    assert event.status == "buyer_received"
+
+
+def test_sale_completed():
+    event = parse_vinted_email(
+        "This order is completed",
+        """tom_waits, your sale is complete.
+
+Your sale of Richard Powers – The Overstory was completed successfully.
+
+Transaction ID: #21854080278
+Date: 01/09/2026 20:49
+""",
+    )
+    assert event.direction == "sell"
+    assert event.status == "completed"
+    assert event.title == "Richard Powers – The Overstory"
+    assert event.transaction_id == "21854080278"
+
+
+def test_purchase_confirmation_needed():
+    event = parse_vinted_email(
+        "Atonement by Ian McEwan - Confirmation needed",
+        "Hi tom_waits, Your order has been marked as delivered.",
+    )
+    assert event.direction == "buy"
+    assert event.status == "confirmation_needed"
+    assert event.title == "Atonement by Ian McEwan"
+
+
 def test_purchase_receipt():
     body = """Hello tom_waits,
 

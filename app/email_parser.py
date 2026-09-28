@@ -126,8 +126,34 @@ def parse_vinted_email(subject: str, body: str) -> ParsedEvent:
             item_cents=money_to_cents(_field(body, "Item")),
             shipping_cents=money_to_cents(_field(body, "Postage")),
             protection_cents=money_to_cents(_field(body, "Buyer Protection fee")),
-            transaction_id=_field(body, "Transaction ID"),
+            transaction_id=(_field(body, "Transaction ID") or "").lstrip("#") or None,
             body="Purchase payment received by Vinted.",
+        )
+
+    if lower_subject == "this order is completed":
+        match = re.search(
+            r"(?is)your sale of\s+(?P<title>.+?)\s+was completed successfully",
+            body,
+        )
+        title = match.group("title").strip() if match else subject
+        transaction = re.search(r"(?im)^\s*Transaction ID:\s*#?([^\s]+)", body)
+        return ParsedEvent(
+            kind="sale_completed",
+            direction="sell",
+            status="completed",
+            title=title,
+            transaction_id=transaction.group(1).strip() if transaction else None,
+            body="Sale completed and payment released.",
+        )
+
+    if lower_subject.endswith(" - confirmation needed"):
+        title = subject[: -len(" - Confirmation needed")].strip()
+        return ParsedEvent(
+            kind="purchase_confirmation_needed",
+            direction="buy",
+            status="confirmation_needed",
+            title=title,
+            body="Purchase was marked delivered and needs confirmation.",
         )
 
     if lower_subject.startswith("order update for "):
@@ -144,6 +170,14 @@ def parse_vinted_email(subject: str, body: str) -> ParsedEvent:
                 title=title,
                 estimated_delivery=est,
                 body="Parcel is on its way to the buyer.",
+            )
+        if "has received their order" in lower_body:
+            return ParsedEvent(
+                kind="buyer_received",
+                direction="sell",
+                status="buyer_received",
+                title=title,
+                body="Buyer received the parcel. Vinted is waiting out the issue-reporting window before releasing payment.",
             )
         if re.search(r"we(?:'re| are) waiting for .+ to collect their order", lower_body):
             return ParsedEvent(

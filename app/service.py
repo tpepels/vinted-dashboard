@@ -17,6 +17,8 @@ STATUS_RANK = {
     "label_ready": 20,
     "shipped": 30,
     "ready_for_pickup": 40,
+    "buyer_received": 50,
+    "confirmation_needed": 50,
     "completed": 100,
     "cancelled": 100,
 }
@@ -29,9 +31,12 @@ def _short_title(event: ParsedEvent) -> str:
         "sale_shipped": "Sale shipped",
         "carrier_received": "Carrier received parcel",
         "buyer_pickup": "Buyer pickup pending",
+        "buyer_received": "Buyer received order",
+        "sale_completed": "Sale completed",
         "purchase_created": "Purchase paid",
         "purchase_shipped": "Purchase shipped",
         "purchase_pickup": "Purchase ready for pickup",
+        "purchase_confirmation_needed": "Purchase needs confirmation",
         "purchase_completed": "Purchase completed",
         "order_cancelled": "Order cancelled",
         "order_completed": "Order completed",
@@ -54,7 +59,6 @@ def _find_order(session: Session, event: ParsedEvent) -> Order | None:
     if order:
         return order
 
-    # Vinted sometimes changes bundle wording between emails. Use a conservative fallback.
     tokens = [t for t in re.split(r"\W+", normalized) if len(t) >= 5][:4]
     if not tokens:
         return None
@@ -98,17 +102,14 @@ def apply_event(
     sender: str,
     subject: str,
     occurred_at: datetime,
-) -> Notification:
+) -> Notification | None:
     occurred_at = occurred_at if occurred_at.tzinfo else occurred_at.replace(tzinfo=timezone.utc)
 
     processed = session.scalar(
         select(ProcessedMessage).where(ProcessedMessage.source_message_id == source_message_id)
     )
     if processed:
-        notification = session.scalar(
-            select(Notification).where(Notification.source_message_id == source_message_id)
-        )
-        return notification
+        return None
 
     order = _find_order(session, event)
 

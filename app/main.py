@@ -153,7 +153,7 @@ def summary(db: Session = Depends(db_session)):
     attention = db.scalars(
         select(Order)
         .where(
-            Order.status.in_(["awaiting_shipment", "label_ready", "ready_for_pickup"])
+            Order.status.in_(["awaiting_shipment", "label_ready", "ready_for_pickup", "confirmation_needed"])
         )
         .order_by(Order.updated_at.desc())
         .limit(8)
