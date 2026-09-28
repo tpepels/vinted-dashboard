@@ -16,6 +16,7 @@
 
       <nav id="nav">
         <button class="nav-item active" data-view="overview">Overview</button>
+        <button class="nav-item" data-view="insights">Insights <span id="nav-insights"></span></button>
         <button class="nav-item" data-view="listings">Listings <span id="nav-listings"></span></button>
         <button class="nav-item" data-view="sales">Sales <span id="nav-sales"></span></button>
         <button class="nav-item" data-view="purchases">Purchases <span id="nav-purchases"></span></button>
@@ -83,6 +84,63 @@
             <div class="panel-head"><div><p class="eyebrow">RECENT</p><h2>Notifications</h2></div></div>
             <div id="recent-notifications"></div>
           </div>
+        </div>
+      </section>
+
+      <section id="insights" class="view">
+        <div class="insight-stat-grid">
+          <article class="stat"><span>High-priority actions</span><strong id="insight-actions">0</strong></article>
+          <article class="stat"><span>90+ day listings</span><strong id="insight-stale90">0</strong></article>
+          <article class="stat"><span>Favorites last 7 days</span><strong id="insight-favorites7">0</strong></article>
+          <article class="stat"><span>Net cashflow YTD</span><strong id="insight-net">€0</strong></article>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">TODAY</p><h2>What should I do?</h2></div>
+            <span class="panel-note" id="today-action-count"></span>
+          </div>
+          <div id="today-actions"></div>
+        </div>
+
+        <div class="grid-2 insight-grid">
+          <div class="panel">
+            <div class="panel-head"><div><p class="eyebrow">SALES</p><h2>YTD performance</h2></div></div>
+            <div class="insight-body">
+              <div class="metric-row">
+                <div><span>Sales</span><strong id="analytics-sales">€0</strong></div>
+                <div><span>Average</span><strong id="analytics-average">—</strong></div>
+                <div><span>Median</span><strong id="analytics-median">—</strong></div>
+                <div><span>Median time to sell</span><strong id="analytics-days-to-sell">—</strong></div>
+              </div>
+              <div id="sales-monthly-chart" class="bar-chart"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><div><p class="eyebrow">INTEREST</p><h2>Favorites</h2></div></div>
+            <div class="insight-body">
+              <div class="metric-row compact">
+                <div><span>7 days</span><strong id="favorites-7d">0</strong></div>
+                <div><span>30 days</span><strong id="favorites-30d">0</strong></div>
+              </div>
+              <div id="favorite-top-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel table-panel">
+          <div class="panel-head"><div><p class="eyebrow">STALE STOCK</p><h2>Listings to watch</h2></div></div>
+          <div id="stale-table"></div>
+        </div>
+
+        <div class="panel table-panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">MARKET</p><h2>Comparable prices</h2></div>
+            <span class="panel-note" id="market-queue-count"></span>
+          </div>
+          <div class="market-help">Research is deliberately on-demand. The Chrome extension searches Vinted publicly and stores a compact comparable-price sample here.</div>
+          <div id="market-table"></div>
         </div>
       </section>
 

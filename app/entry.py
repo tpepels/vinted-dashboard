@@ -10,9 +10,15 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import main as main_module
+from app.intelligence import (
+    intelligence_payload,
+    queued_market_jobs,
+    record_snapshot,
+    request_market_research,
+)
 
 
 BROWSER_SYNC_FILE = Path("/app/data/vinted-browser-sync.json")
@@ -26,17 +32,25 @@ class BrowserSyncPayload(BaseModel):
     listings: list[dict[str, Any]]
     notifications: list[dict[str, Any]]
     orders: list[dict[str, Any]]
+    market_results: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MarketResearchRequest(BaseModel):
+    listing_id: str
+    title: str
 
 
 def _save_snapshot(payload: BrowserSyncPayload) -> None:
+    data = payload.model_dump()
     BROWSER_SYNC_FILE.parent.mkdir(parents=True, exist_ok=True)
     temp = BROWSER_SYNC_FILE.with_suffix(".tmp")
     temp.write_text(
-        json.dumps(payload.model_dump(), ensure_ascii=False),
+        json.dumps(data, ensure_ascii=False),
         encoding="utf-8",
     )
     temp.chmod(0o600)
     temp.replace(BROWSER_SYNC_FILE)
+    record_snapshot(data)
 
 
 def _load_snapshot(*, allow_stale: bool = False) -> dict[str, Any] | None:
@@ -122,6 +136,32 @@ def browser_sync(payload: BrowserSyncPayload):
         "notifications": len(payload.notifications),
         "orders": len(payload.orders),
     }
+
+
+@app.get("/api/intelligence")
+def intelligence():
+    snapshot = _load_snapshot(allow_stale=True) or {}
+    listings = list(snapshot.get("listings") or [])
+    if not listings:
+        try:
+            listings = main_module.client.get_listings()
+        except Exception:
+            listings = []
+    return intelligence_payload(listings)
+
+
+@app.post("/api/market-research/request")
+def market_research_request(payload: MarketResearchRequest):
+    try:
+        result = request_market_research(payload.listing_id, payload.title)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "job": result}
+
+
+@app.get("/api/market-research/queue")
+def market_research_queue(limit: int = 3):
+    return {"jobs": queued_market_jobs(limit)}
 
 
 @app.get("/api/browser-sync/status")
