@@ -568,7 +568,10 @@ function renderInsights(){
   $("#market-table").innerHTML=recent.length?`
     <table><thead><tr><th>Search</th><th>Status</th><th>Comparables</th><th>Range</th><th>Median</th><th>Checked</th></tr></thead><tbody>
       ${recent.map(x=>`<tr>
-        <td class="title-cell">${esc(x.query)}</td>
+        <td class="title-cell">
+          ${esc(x.query)}
+          ${x.error?`<div class="meta market-error">${esc(x.error)}</div>`:""}
+        </td>
         <td>${badge(x.status)}</td>
         <td>${x.sample_count??"—"}</td>
         <td>${x.min_cents==null?"—":`${money(x.min_cents,x.currency||"EUR")} - ${money(x.max_cents,x.currency||"EUR")}`}</td>
