@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -135,19 +135,40 @@ def browser_sync_status():
     }
 
 
-@app.get("/downloads/vinted-session-sync.zip")
-def download_extension():
+def _extension_zip(dashboard_url: str) -> bytes:
     if not EXTENSION_DIR.exists():
         raise HTTPException(status_code=404, detail="Extension files are not installed")
+
+    from urllib.parse import urlparse
+
+    origin = dashboard_url.rstrip("/")
+    parsed = urlparse(origin)
+    host = parsed.hostname or "media-server"
+    dashboard_pattern = f"{parsed.scheme or 'http'}://{host}/*"
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(EXTENSION_DIR.rglob("*")):
-            if path.is_file():
-                archive.write(path, path.relative_to(EXTENSION_DIR))
+            if not path.is_file():
+                continue
 
+            relative = path.relative_to(EXTENSION_DIR)
+            if path.suffix.lower() in {".js", ".json", ".html", ".txt"}:
+                text = path.read_text(encoding="utf-8")
+                text = text.replace("http://media-server:5050", origin)
+                text = text.replace("http://media-server/*", dashboard_pattern)
+                archive.writestr(str(relative), text)
+            else:
+                archive.write(path, relative)
+
+    return buffer.getvalue()
+
+
+@app.get("/downloads/vinted-session-sync.zip")
+def download_extension(request: Request):
+    dashboard_url = str(request.base_url).rstrip("/")
     return Response(
-        content=buffer.getvalue(),
+        content=_extension_zip(dashboard_url),
         media_type="application/zip",
         headers={
             "Content-Disposition": 'attachment; filename="vinted-dashboard-session-sync.zip"'

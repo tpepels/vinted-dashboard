@@ -25,17 +25,34 @@ async function waitForTab(tabId, timeoutMs = 20000) {
   throw new Error("Vinted tab did not finish loading.");
 }
 
+async function ensureContentScript(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: "collect-vinted-data" });
+    return response;
+  } catch (error) {
+    const message = String(error?.message || error || "");
+    if (!message.includes("Receiving end does not exist")) throw error;
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"]
+    });
+    await sleep(250);
+    return await chrome.tabs.sendMessage(tabId, { type: "collect-vinted-data" });
+  }
+}
+
 async function collectFromTab(tabId) {
   let lastError = null;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
-      const response = await chrome.tabs.sendMessage(tabId, { type: "collect-vinted-data" });
+      const response = await ensureContentScript(tabId);
       if (response?.ok) return response.snapshot;
       if (response?.error) throw new Error(response.error);
     } catch (error) {
       lastError = error;
     }
-    await sleep(350);
+    await sleep(500);
   }
   throw lastError || new Error("Could not connect to the Vinted page.");
 }
