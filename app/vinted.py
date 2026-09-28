@@ -187,9 +187,11 @@ class VintedClient:
         self.session_file = Path("/app/data/vinted-session.cookie")
         self._lock = threading.Lock()
         self._session: requests.Session | None = None
+        self._public_session: requests.Session | None = None
         self._diagnostics: list[EndpointResult] = []
         self._orders_source: str | None = None
         self._notifications_source: str | None = None
+        self._listings_source: str | None = None
 
     @property
     def host(self) -> str:
@@ -234,9 +236,13 @@ class VintedClient:
         with self._lock:
             if self._session is not None:
                 self._session.close()
+            if self._public_session is not None:
+                self._public_session.close()
             self._session = None
+            self._public_session = None
             self._orders_source = None
             self._notifications_source = None
+            self._listings_source = None
 
     def _headers(self) -> dict[str, str]:
         user_agent = os.getenv("VINTED_USER_AGENT", "").strip()
@@ -277,6 +283,37 @@ class VintedClient:
             headers["X-Anon-Id"] = anon
         return headers
 
+    def _public_headers(self) -> dict[str, str]:
+        headers = self._headers()
+        for key in ("Cookie", "Authorization", "X-Csrf-Token", "X-Anon-Id"):
+            headers.pop(key, None)
+        return headers
+
+    def _get_public_session(self) -> requests.Session:
+        with self._lock:
+            if self._public_session is None:
+                session = requests.Session(impersonate="chrome")
+                session.headers.update(self._public_headers())
+                try:
+                    response = session.get(self.base_url + "/", timeout=self.timeout)
+                    csrf = response.headers.get("X-Csrf-Token") or _extract_csrf_token(
+                        response.text
+                    )
+                    anon = response.headers.get("X-Anon-Id") or response.cookies.get(
+                        "anon_id"
+                    )
+                    access = response.cookies.get("access_token_web")
+                    if csrf:
+                        session.headers["X-Csrf-Token"] = csrf
+                    if anon:
+                        session.headers["X-Anon-Id"] = anon
+                    if access:
+                        session.headers["Authorization"] = f"Bearer {access}"
+                except Exception:
+                    pass
+                self._public_session = session
+            return self._public_session
+
     def _get_session(self) -> requests.Session:
         with self._lock:
             if self._session is None:
@@ -315,6 +352,7 @@ class VintedClient:
         params: dict[str, Any] | None = None,
         auth: bool = False,
         allow_404: bool = False,
+        anonymous: bool = False,
     ) -> Any:
         if auth and not self.has_auth():
             raise VintedAuthRequired(
@@ -322,7 +360,7 @@ class VintedClient:
             )
 
         url = path if path.startswith("http") else urljoin(self.base_url + "/", path.lstrip("/"))
-        session = self._get_session()
+        session = self._get_public_session() if anonymous else self._get_session()
         try:
             response = session.get(url, params=params, timeout=self.timeout)
         except Exception as exc:
@@ -335,7 +373,7 @@ class VintedClient:
         if response.status_code in {401, 403}:
             detail = "authentication rejected" if auth else "request blocked"
             self._record(path, response.status_code, False, detail)
-            if response.status_code == 401:
+            if response.status_code == 401 and auth:
                 raise VintedAuthRequired(
                     "Vinted rejected the saved session. Replace the Vinted cookie."
                 )
@@ -410,27 +448,68 @@ class VintedClient:
     def get_listings(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
+        wardrobe_path = f"/api/v2/wardrobe/{self.user_id}/items"
 
         for page in range(1, self.max_pages + 1):
-            payload = self._request(
-                f"/api/v2/users/{self.user_id}/items",
-                params={
-                    "order": "newest_first",
-                    "page": page,
-                    "per_page": 96,
-                    "include_sold": "true",
-                },
-            )
+            params = {
+                "order": "newest_first",
+                "page": page,
+                "per_page": 96,
+            }
+
+            # Vinted's current profile grid uses the wardrobe endpoint. Keep it
+            # anonymous because Vinted can apply stricter anti-bot checks to this
+            # public endpoint when a logged-in cookie is attached.
+            try:
+                payload = self._request(
+                    wardrobe_path,
+                    params=params,
+                    allow_404=True,
+                    anonymous=True,
+                )
+            except VintedBlocked:
+                # Some installations behave the other way around, so retry once
+                # using the saved browser session before falling back.
+                payload = self._request(
+                    wardrobe_path,
+                    params=params,
+                    allow_404=True,
+                )
+
+            if payload is None:
+                # Compatibility fallback for older Vinted markets.
+                legacy_path = f"/api/v2/users/{self.user_id}/items"
+                payload = self._request(
+                    legacy_path,
+                    params=params,
+                    allow_404=True,
+                )
+                if payload is None:
+                    raise VintedError(
+                        "Vinted does not expose a working wardrobe endpoint for this market"
+                    )
+                self._listings_source = legacy_path
+            else:
+                self._listings_source = wardrobe_path
+
             items = self._list_from(payload, "items", "user_items")
             if not items:
                 break
 
             for raw in items:
+                owner = _first(raw, "user", "seller", "owner")
+                owner_id = _id(owner)
+                if owner_id and owner_id != self.user_id:
+                    # Safety belt: never show a general-catalog item if Vinted
+                    # changes how it interprets this endpoint.
+                    continue
+
                 item_id = str(_first(raw, "id", "item_id") or "")
                 if item_id and item_id in seen:
                     continue
                 if item_id:
                     seen.add(item_id)
+
                 price, currency = _money(
                     _first(raw, "price", "total_item_price", "item_price")
                 )
@@ -815,6 +894,7 @@ class VintedClient:
             "auth_configured": self.has_auth(),
             "orders_source": self._orders_source,
             "notifications_source": self._notifications_source,
+            "listings_source": self._listings_source,
             "endpoints": [
                 {
                     "path": x.path,
