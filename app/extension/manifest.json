@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Vinted Dashboard Sync",
-  "version": "1.1.0",
-  "description": "Syncs Vinted data to your local dashboard and performs on-demand comparable-price research.",
+  "version": "1.2.0",
+  "description": "Syncs Vinted inventory, audience metrics, views and on-demand market research to your local dashboard.",
   "permissions": [
     "storage",
     "alarms",

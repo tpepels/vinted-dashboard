@@ -19,6 +19,25 @@ async function collectVintedData(researchJobs=[]){
   const userId=idOf(currentRaw);
   if(!userId)throw new Error("This Vinted tab is not signed in.");
 
+  let profileRaw=currentRaw;
+  try{
+    const profilePayload=await fetchJson(`/api/v2/users/${userId}`,{localize:"false"});
+    profileRaw=profilePayload?.user||profilePayload||currentRaw;
+  }catch{}
+
+  const countValue=(...keys)=>{
+    const value=first(profileRaw,...keys);
+    if(Array.isArray(value))return value.length;
+    const parsed=Number(value);
+    return Number.isFinite(parsed)?Math.round(parsed):null;
+  };
+  const currentUser={
+    id:userId,
+    username:nameOf(profileRaw)||nameOf(currentRaw),
+    followers_count:countValue("followers_count","follower_count","followers"),
+    following_count:countValue("following_count","followings_count","following")
+  };
+
   const listings=new Map();
   for(const status of["active","sold","reserved","draft","closed"]){
     try{const rows=await paged(`/api/v2/users/${userId}/items`,["items","user_items"],{status,order:"newest_first"});for(const raw of rows||[]){const row=listingRow(raw,status);if(row.id)listings.set(row.id,row)}}catch{}
@@ -52,7 +71,7 @@ async function collectVintedData(researchJobs=[]){
     }
   }
 
-  return{collected_at:Date.now()/1000,current_user:{id:userId,username:nameOf(currentRaw)},listings:[...listings.values()],notifications,orders,market_results};
+  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results};
 }
 
 chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{if(message?.type!=="collect-vinted-data")return;collectVintedData(message.research_jobs||[]).then(snapshot=>sendResponse({ok:true,snapshot})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));return true});

@@ -1,4 +1,4 @@
-const state={data:null,intelligence:null};
+const state={data:null,intelligence:null,viewListingId:null};
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -38,6 +38,59 @@ function age(value){
 function timeValue(value){
   const n=new Date(value||0).getTime();
   return Number.isNaN(n)?0:n;
+}
+function shortDay(value){
+  const d=new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(d.getTime())?String(value):d.toLocaleDateString(undefined,{month:"short",day:"numeric"});
+}
+function renderLineChart(selector,rows,key,{emptyText="Not enough history yet.",suffix="",valuePrefix=""}={}){
+  const el=$(selector);
+  if(!el)return;
+  const data=(rows||[])
+    .map(row=>({day:row.day,value:Number(row[key])}))
+    .filter(row=>row.day&&Number.isFinite(row.value));
+  if(!data.length){el.innerHTML=empty(emptyText);return}
+
+  const width=760,height=220,left=48,right=18,top=20,bottom=34;
+  const values=data.map(row=>row.value);
+  let min=Math.min(...values),max=Math.max(...values);
+  if(min===max){min=Math.max(0,min-1);max=max+1}
+  const x=i=>data.length===1?(left+(width-right))/2:left+i*((width-left-right)/(data.length-1));
+  const y=value=>top+(max-value)*((height-top-bottom)/(max-min));
+  const points=data.map((row,i)=>`${x(i).toFixed(1)},${y(row.value).toFixed(1)}`).join(" ");
+  const grid=[0,.25,.5,.75,1].map(p=>{
+    const yy=top+p*(height-top-bottom);
+    const value=Math.round(max-p*(max-min));
+    return `<g><line x1="${left}" x2="${width-right}" y1="${yy}" y2="${yy}" class="chart-grid-line"/><text x="${left-8}" y="${yy+4}" text-anchor="end" class="chart-axis-label">${esc(valuePrefix+` ${value}`.trim()+suffix)}</text></g>`;
+  }).join("");
+  const labels=[
+    data[0],
+    data[Math.floor((data.length-1)/2)],
+    data[data.length-1]
+  ].filter((row,index,array)=>array.findIndex(x=>x.day===row.day)===index);
+  const labelSvg=labels.map(row=>{
+    const i=data.indexOf(row);
+    return `<text x="${x(i)}" y="${height-8}" text-anchor="${i===0?"start":i===data.length-1?"end":"middle"}" class="chart-axis-label">${esc(shortDay(row.day))}</text>`;
+  }).join("");
+  const dots=data.map((row,i)=>`<circle cx="${x(i)}" cy="${y(row.value)}" r="3" class="chart-point"><title>${esc(shortDay(row.day))}: ${esc(valuePrefix+row.value+suffix)}</title></circle>`).join("");
+  el.innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Trend chart">${grid}<polyline points="${points}" class="chart-line"/>${dots}${labelSvg}</svg>`;
+}
+function renderListingViewsTrend(){
+  const views=state.intelligence?.views||{};
+  const rows=views.listings||[];
+  if(!rows.length){
+    $("#view-listing-select").innerHTML='<option>No view history yet</option>';
+    renderLineChart("#listing-views-chart",[],"views",{emptyText:"View history will appear after Chrome sync records listing views."});
+    return;
+  }
+  const select=$("#view-listing-select");
+  const current=state.viewListingId&&rows.some(row=>String(row.listing_id)===String(state.viewListingId))
+    ?String(state.viewListingId)
+    :String(rows[0].listing_id);
+  state.viewListingId=current;
+  select.innerHTML=rows.map(row=>`<option value="${esc(row.listing_id)}"${String(row.listing_id)===current?" selected":""}>${esc(row.title)} · ${row.views??0} views</option>`).join("");
+  const selected=rows.find(row=>String(row.listing_id)===current);
+  renderLineChart("#listing-views-chart",selected?.daily||[],"views",{emptyText:"Only one snapshot so far. More points will appear automatically."});
 }
 function esc(value=""){
   return String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]));
@@ -390,7 +443,10 @@ function renderListings(){
           const delta=signals.get(String(x.id))?.favourites_7d;
           return `<td>${x.favourites??"—"}${Number.isFinite(delta)&&delta!==0?` <span class="delta ${delta>0?"up":"down"}">${delta>0?"+":""}${delta}/7d</span>`:""}</td>`;
         })():""}
-        ${showViews?`<td>${x.views??"—"}</td>`:""}
+        ${showViews?(()=>{
+          const delta=signals.get(String(x.id))?.views_7d;
+          return `<td>${x.views??"—"}${Number.isFinite(delta)&&delta!==0?` <span class="delta ${delta>0?"up":"down"}">${delta>0?"+":""}${delta}/7d</span>`:""}</td>`;
+        })():""}
         <td>${marketCell(x)}</td>
         <td class="money">${money(x.price_cents,x.currency)}</td>
       </tr>`;
@@ -436,6 +492,8 @@ function renderInsights(){
   const stale=d.stale||{};
   const sales=d.sales||{};
   const favorites=d.favorites||{};
+  const audience=d.audience||{};
+  const views=d.views||{};
   const market=d.market||{};
 
   $("#insight-actions").textContent=String(today.high_priority||0);
@@ -444,6 +502,18 @@ function renderInsights(){
   $("#insight-net").textContent=money(sales.net_cashflow_cents||0,"EUR");
   $("#nav-insights").textContent=today.high_priority?String(today.high_priority):"";
   $("#today-action-count").textContent=`${today.count||0} suggestions`;
+
+  $("#followers-current").textContent=audience.followers??"—";
+  const followerBits=[];
+  if(Number.isFinite(audience.followers_change_7d))followerBits.push(`${audience.followers_change_7d>=0?"+":""}${audience.followers_change_7d} / 7d`);
+  if(Number.isFinite(audience.followers_change))followerBits.push(`${audience.followers_change>=0?"+":""}${audience.followers_change} since tracking`);
+  $("#followers-change").textContent=followerBits.join(" · ");
+  renderLineChart("#followers-chart",audience.daily||[],"followers",{emptyText:"Follower history starts with the next Chrome sync."});
+
+  $("#views-total").textContent=views.total_active_views??"—";
+  $("#views-gained7").textContent=Number.isFinite(views.views_gained_7d)?`+${views.views_gained_7d} views / 7d`:"";
+  renderLineChart("#views-gained-chart",views.daily_views_gained||[],"views_gained",{emptyText:"Daily view gains appear after at least two Chrome syncs."});
+  renderListingViewsTrend();
 
   const actions=today.actions||[];
   $("#today-actions").innerHTML=actions.length?actions.map(a=>`
@@ -540,6 +610,10 @@ $("#listing-duplicate").addEventListener("change",renderListings);
 $("#listing-price-min").addEventListener("input",renderListings);
 $("#listing-price-max").addEventListener("input",renderListings);
 $("#listing-sort").addEventListener("change",renderListings);
+$("#view-listing-select").addEventListener("change",event=>{
+  state.viewListingId=event.target.value;
+  renderListingViewsTrend();
+});
 $("#listing-stat-duplicates").addEventListener("click",()=>{
   $("#listing-duplicate").value="duplicates";
   renderListings();
