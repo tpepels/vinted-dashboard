@@ -143,7 +143,9 @@ def _item_url(base_url: str, item: dict[str, Any]) -> str | None:
 
 
 def _listing_status(item: dict[str, Any]) -> str:
-    raw = str(_first(item, "status", "state", "item_status") or "").lower().replace(" ", "_")
+    # Vinted's generic "status" field is item condition (for example
+    # "Very good"), not listing lifecycle. Lifecycle is represented by
+    # boolean flags and, on some payloads, explicit state/item_status fields.
     if item.get("is_reserved"):
         return "reserved"
     if item.get("is_hidden"):
@@ -152,9 +154,26 @@ def _listing_status(item: dict[str, Any]) -> str:
         return "draft"
     if item.get("is_closed") or item.get("is_sold"):
         return "sold"
-    if raw in {"sold", "closed", "reserved", "hidden", "draft", "active"}:
+
+    raw = str(
+        _first(item, "state", "item_status", "listing_status") or ""
+    ).lower().strip().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "available": "active",
+        "published": "active",
+        "visible": "active",
+        "online": "active",
+        "for_sale": "active",
+        "for_sell": "active",
+        "closed": "sold",
+    }
+    raw = aliases.get(raw, raw)
+    if raw in {"sold", "reserved", "hidden", "draft", "active"}:
         return raw
-    return raw or "active"
+
+    # Items returned by the public wardrobe endpoint are active unless Vinted
+    # explicitly marks them otherwise with one of the lifecycle flags above.
+    return "active"
 
 
 CLOSED_STATUS_WORDS = {
