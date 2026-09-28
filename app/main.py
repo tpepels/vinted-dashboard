@@ -105,6 +105,7 @@ def _dashboard_uncached() -> dict[str, Any]:
         "confirmation_needed",
         "pending",
         "payment_pending",
+        "needs_action",
     }
     attention = [
         x
