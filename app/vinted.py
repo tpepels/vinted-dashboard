@@ -48,8 +48,8 @@ def _parse_cookie_header(value: str) -> dict[str, str]:
 
 def _extract_csrf_token(html: str) -> str | None:
     match = re.search(
-        r'<meta(?=[^>]*\\bname=["\\\']csrf[-_]?token["\\\'])'
-        r'(?=[^>]*\\bcontent=["\\\']([^"\\\']+))[^>]*>',
+        r'<meta(?=[^>]*\\bname=["\']csrf[-_]?token["\'])'
+        r'(?=[^>]*\\bcontent=["\']([^"\']+))[^>]*>',
         html or "",
         flags=re.IGNORECASE | re.DOTALL,
     )
