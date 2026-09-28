@@ -595,6 +595,19 @@ def _audience_analytics(conn: sqlite3.Connection) -> dict[str, Any]:
     follower_values = [row for row in daily if row.get("followers") is not None]
     current = int(follower_values[-1]["followers"]) if follower_values else None
     first = int(follower_values[0]["followers"]) if follower_values else None
+    change_7d = None
+    if follower_values and current is not None:
+        threshold = float(follower_values[-1]["collected_at"]) - 7 * 86400
+        baseline = next(
+            (
+                row
+                for row in reversed(follower_values)
+                if float(row["collected_at"]) <= threshold
+            ),
+            follower_values[0],
+        )
+        if baseline.get("followers") is not None:
+            change_7d = current - int(baseline["followers"])
     return {
         "followers": current,
         "following": next(
@@ -608,6 +621,7 @@ def _audience_analytics(conn: sqlite3.Connection) -> dict[str, Any]:
         "followers_change": (current - first)
         if current is not None and first is not None
         else None,
+        "followers_change_7d": change_7d,
         "daily": daily[-180:],
     }
 
