@@ -74,8 +74,19 @@
       </section>
 
       <section id="listings" class="view">
+        <div class="listing-stats" id="listing-stats">
+          <article class="mini-stat"><span>Shown</span><strong id="listing-stat-count">0</strong></article>
+          <article class="mini-stat"><span>Inventory value</span><strong id="listing-stat-value">€0</strong></article>
+          <article class="mini-stat"><span>Average price</span><strong id="listing-stat-average">€0</strong></article>
+          <article class="mini-stat"><span>Median price</span><strong id="listing-stat-median">€0</strong></article>
+          <article class="mini-stat"><span>Total favorites</span><strong id="listing-stat-favorites">0</strong></article>
+          <article class="mini-stat"><span>No favorites</span><strong id="listing-stat-zero-favorites">0</strong></article>
+          <button class="mini-stat duplicate-stat" id="listing-stat-duplicates" type="button" title="Show only potential duplicate listings">
+            <span>Duplicate groups</span><strong id="listing-stat-duplicate-groups">0</strong>
+          </button>
+        </div>
         <div class="toolbar listing-toolbar">
-          <input id="listing-search" class="search" placeholder="Search title or ISBN">
+          <input id="listing-search" class="search" placeholder="Search title">
           <select id="listing-status" aria-label="Listing status">
             <option value="">All statuses</option>
             <option value="active" selected>Active</option>
@@ -89,11 +100,16 @@
             <option value="liked">Has favorites</option>
             <option value="unliked">No favorites</option>
           </select>
+          <select id="listing-duplicate" aria-label="Duplicate filter">
+            <option value="">All listings</option>
+            <option value="duplicates">Potential duplicates</option>
+            <option value="unique">Unique titles</option>
+          </select>
           <input id="listing-price-min" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Min €" aria-label="Minimum price">
           <input id="listing-price-max" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Max €" aria-label="Maximum price">
           <select id="listing-sort" aria-label="Sort listings">
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
+            <option value="newest">Vinted order</option>
+            <option value="oldest">Vinted order - reversed</option>
             <option value="price-asc">Price - low to high</option>
             <option value="price-desc">Price - high to low</option>
             <option value="likes-desc">Most favorites</option>

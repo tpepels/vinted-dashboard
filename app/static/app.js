@@ -207,64 +207,118 @@ function renderSummary(){
   }).join("")||empty(d.auth?.authenticated?"No useful notifications.":"Connect your Vinted session to load notifications.");
 }
 
+function listingFingerprint(title){
+  return String(title||"")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/&/g," and ")
+    .replace(/[^a-z0-9]+/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+function duplicateInfo(rows){
+  const groups=new Map();
+  for(const row of rows){
+    const key=listingFingerprint(row.title);
+    if(!key)continue;
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(row);
+  }
+  const duplicateGroups=[...groups.values()].filter(group=>group.length>1);
+  const counts=new Map();
+  for(const group of duplicateGroups){
+    for(const row of group)counts.set(row._index,group.length);
+  }
+  return {duplicateGroups,counts};
+}
+function median(values){
+  const nums=values.filter(Number.isFinite).sort((a,b)=>a-b);
+  if(!nums.length)return null;
+  const mid=Math.floor(nums.length/2);
+  return nums.length%2?nums[mid]:Math.round((nums[mid-1]+nums[mid])/2);
+}
 function listingComparator(sort){
   const number=(value,fallback=-1)=>{
     const n=Number(value);
     return Number.isFinite(n)?n:fallback;
   };
-  const date=value=>timeValue(value);
-  if(sort==="oldest")return (a,b)=>{
-    const ad=date(a.listed_at),bd=date(b.listed_at);
-    if(ad&&bd)return ad-bd;
-    if(ad)return -1;
-    if(bd)return 1;
-    return b._index-a._index;
-  };
+  if(sort==="oldest")return (a,b)=>b._index-a._index;
   if(sort==="price-asc")return (a,b)=>number(a.price_cents,Infinity)-number(b.price_cents,Infinity);
   if(sort==="price-desc")return (a,b)=>number(b.price_cents,-1)-number(a.price_cents,-1);
   if(sort==="likes-desc")return (a,b)=>number(b.favourites,0)-number(a.favourites,0)||a._index-b._index;
   if(sort==="views-desc")return (a,b)=>number(b.views,0)-number(a.views,0)||a._index-b._index;
   if(sort==="title-asc")return (a,b)=>String(a.title||"").localeCompare(String(b.title||""),undefined,{sensitivity:"base"});
-  return (a,b)=>{
-    const ad=date(a.listed_at),bd=date(b.listed_at);
-    if(ad&&bd)return bd-ad;
-    if(ad)return -1;
-    if(bd)return 1;
-    return a._index-b._index;
-  };
+  return (a,b)=>a._index-b._index;
+}
+function renderListingStats(rows,duplicates){
+  const prices=rows
+    .map(x=>Number(x.price_cents))
+    .filter(Number.isFinite);
+  const total=prices.reduce((sum,n)=>sum+n,0);
+  const avg=prices.length?Math.round(total/prices.length):null;
+  const med=median(prices);
+  const currency=rows.find(x=>x.currency)?.currency||"EUR";
+  const favorites=rows.reduce((sum,x)=>sum+(Number(x.favourites)||0),0);
+  const zeroFavorites=rows.filter(x=>Number(x.favourites||0)===0).length;
+
+  $("#listing-stat-count").textContent=String(rows.length);
+  $("#listing-stat-value").textContent=money(total,currency);
+  $("#listing-stat-average").textContent=money(avg,currency);
+  $("#listing-stat-median").textContent=money(med,currency);
+  $("#listing-stat-favorites").textContent=String(favorites);
+  $("#listing-stat-zero-favorites").textContent=String(zeroFavorites);
+  $("#listing-stat-duplicate-groups").textContent=String(duplicates.duplicateGroups.length);
+  $("#listing-stat-duplicates").classList.toggle("has-duplicates",duplicates.duplicateGroups.length>0);
 }
 function renderListings(){
   const rows=(state.data?.listings||[]).map((row,_index)=>({...row,_index}));
   const q=$("#listing-search").value.trim().toLowerCase();
   const status=$("#listing-status").value;
   const interest=$("#listing-interest").value;
+  const duplicateMode=$("#listing-duplicate").value;
   const minRaw=parseFloat($("#listing-price-min").value);
   const maxRaw=parseFloat($("#listing-price-max").value);
   const minCents=Number.isFinite(minRaw)?Math.round(minRaw*100):null;
   const maxCents=Number.isFinite(maxRaw)?Math.round(maxRaw*100):null;
   const sort=$("#listing-sort").value;
 
-  const filtered=rows
+  const baseFiltered=rows
     .filter(x=>!status||String(x.status||"").toLowerCase()===status)
-    .filter(x=>!q||String(x.title||"").toLowerCase().includes(q)||String(x.isbn||"").toLowerCase().includes(q))
+    .filter(x=>!q||String(x.title||"").toLowerCase().includes(q))
     .filter(x=>interest!=="liked"||Number(x.favourites||0)>0)
     .filter(x=>interest!=="unliked"||Number(x.favourites||0)===0)
     .filter(x=>minCents===null||x.price_cents===null||x.price_cents===undefined||Number(x.price_cents)>=minCents)
-    .filter(x=>maxCents===null||x.price_cents===null||x.price_cents===undefined||Number(x.price_cents)<=maxCents)
+    .filter(x=>maxCents===null||x.price_cents===null||x.price_cents===undefined||Number(x.price_cents)<=maxCents);
+
+  const duplicates=duplicateInfo(baseFiltered);
+  const filtered=baseFiltered
+    .filter(x=>duplicateMode!=="duplicates"||duplicates.counts.has(x._index))
+    .filter(x=>duplicateMode!=="unique"||!duplicates.counts.has(x._index))
     .sort(listingComparator(sort));
 
+  const statsDuplicates=duplicateInfo(filtered);
+  renderListingStats(filtered,duplicateMode==="unique"?statsDuplicates:duplicates);
   $("#listing-count").textContent=`${filtered.length} of ${rows.length}`;
+
+  const showLikes=filtered.some(x=>x.favourites!==null&&x.favourites!==undefined);
+  const showViews=filtered.some(x=>x.views!==null&&x.views!==undefined);
+  const extraHeaders=`${showLikes?"<th>Favorites</th>":""}${showViews?"<th>Views</th>":""}`;
+
   $("#listings-table").innerHTML=filtered.length?`
-    <table><thead><tr><th>Listing</th><th>Status</th><th>ISBN</th><th>Listed</th><th>Likes</th><th>Views</th><th class="money">Price</th></tr></thead><tbody>
-    ${filtered.map(x=>`<tr>
-      <td class="title-cell">${linkedTitle(x)}</td>
-      <td>${badge(x.status)}</td>
-      <td>${esc(x.isbn||"—")}</td>
-      <td>${when(x.listed_at)}</td>
-      <td>${x.favourites??"—"}</td>
-      <td>${x.views??"—"}</td>
-      <td class="money">${money(x.price_cents,x.currency)}</td>
-    </tr>`).join("")}</tbody></table>`:empty("No matching Vinted listings.");
+    <table><thead><tr><th>Listing</th><th>Status</th>${extraHeaders}<th class="money">Price</th></tr></thead><tbody>
+    ${filtered.map(x=>{
+      const duplicateCount=duplicates.counts.get(x._index);
+      return `<tr class="${duplicateCount?"duplicate-row":""}">
+        <td class="title-cell">
+          <div class="listing-title-line">${linkedTitle(x)}${duplicateCount?`<span class="duplicate-pill" title="Potential duplicate title">${duplicateCount} copies</span>`:""}</div>
+        </td>
+        <td>${badge(x.status)}</td>
+        ${showLikes?`<td>${x.favourites??"—"}</td>`:""}
+        ${showViews?`<td>${x.views??"—"}</td>`:""}
+        <td class="money">${money(x.price_cents,x.currency)}</td>
+      </tr>`;
+    }).join("")}</tbody></table>`:empty("No matching Vinted listings.");
 }
 
 function filterOrders(rows,scope){
@@ -321,9 +375,14 @@ $$(".nav-item").forEach(btn=>btn.addEventListener("click",()=>{
 $("#listing-search").addEventListener("input",renderListings);
 $("#listing-status").addEventListener("change",renderListings);
 $("#listing-interest").addEventListener("change",renderListings);
+$("#listing-duplicate").addEventListener("change",renderListings);
 $("#listing-price-min").addEventListener("input",renderListings);
 $("#listing-price-max").addEventListener("input",renderListings);
 $("#listing-sort").addEventListener("change",renderListings);
+$("#listing-stat-duplicates").addEventListener("click",()=>{
+  $("#listing-duplicate").value="duplicates";
+  renderListings();
+});
 $("#notification-filter").addEventListener("change",renderNotifications);
 $("#sales-scope").addEventListener("change",renderOrders);
 $("#purchases-scope").addEventListener("change",renderOrders);
