@@ -39,7 +39,29 @@ http://SERVER_IP:5050
 
 The public Listings view can work without an authenticated session. Notifications and buy/sell orders are read directly from Vinted's authenticated web API and require your Vinted web session.
 
-## Connect your Vinted session
+## Chrome session sync (recommended)
+
+The easiest setup is the bundled Chrome extension. Open the dashboard, click **Chrome sync / session**, then **Download Chrome extension ZIP**.
+
+Install it once:
+
+1. Extract the ZIP somewhere permanent.
+2. Open `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Click **Load unpacked** and select the extracted folder.
+5. Click the **Vinted Dashboard Sync** extension and choose **Sync now**.
+
+The extension is deliberately narrow: it runs only on `www.vinted.pt` and can talk only to `http://media-server:5050`. It does **not** export Vinted cookie values. Instead it reads the same Vinted JSON data that the signed-in page can access and sends the resulting listings, orders and notifications to the local dashboard.
+
+It syncs every 10 minutes. If no Vinted tab is open, it briefly opens an inactive Vinted tab, collects the data, and closes it again. The server uses a fresh Chrome snapshot in preference to its own Vinted session and falls back to the server-side session when Chrome sync is stale or unavailable.
+
+Direct download from the running dashboard:
+
+```
+http://media-server:5050/downloads/vinted-session-sync.zip
+```
+
+## Manual Vinted session fallback
 
 This dashboard is read-only. It does not need your Vinted password.
 
