@@ -160,7 +160,14 @@ def _similarity(a: str, b: str) -> float:
     right = _tokens(b)
     if not left or not right:
         return 0.0
-    return len(left & right) / len(left | right)
+    shared = len(left & right)
+    if not shared:
+        return 0.0
+    # Vinted already performs a relevance search. Here we only reject obviously
+    # unrelated cards, so reward containment as well as strict Jaccard overlap.
+    jaccard = shared / len(left | right)
+    containment = shared / min(len(left), len(right))
+    return max(jaccard, containment)
 
 
 def record_snapshot(snapshot: dict[str, Any]) -> None:
@@ -312,7 +319,7 @@ def _complete_market_result(
 
     for row in raw_results:
         title = str(row.get("title") or "")
-        if _similarity(str(job["query"]), title) < 0.22:
+        if _similarity(str(job["query"]), title) <= 0:
             continue
         price = _int(row.get("price_cents"))
         if price is None or price <= 0:
@@ -327,6 +334,12 @@ def _complete_market_result(
         currency = compact["currency"]
         prices.append(price)
         filtered.append(compact)
+
+    if not error and raw_results and not filtered:
+        error = (
+            f"Vinted returned {len(raw_results)} priced search cards, "
+            "but none shared a meaningful title word with this listing."
+        )
 
     prices.sort()
     median = int(statistics.median(prices)) if prices else None

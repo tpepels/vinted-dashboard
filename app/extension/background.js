@@ -25,29 +25,27 @@ async function waitForTab(tabId, timeoutMs = 20000) {
   throw new Error("Vinted tab did not finish loading.");
 }
 
-async function ensureContentScript(tabId, researchJobs = []) {
-  const message = { type: "collect-vinted-data", research_jobs: researchJobs };
+async function sendContentMessage(tabId, message) {
   try {
-    const response = await chrome.tabs.sendMessage(tabId, message);
-    return response;
+    return await chrome.tabs.sendMessage(tabId, message);
   } catch (error) {
-    const message = String(error?.message || error || "");
-    if (!message.includes("Receiving end does not exist")) throw error;
+    const detail = String(error?.message || error || "");
+    if (!detail.includes("Receiving end does not exist")) throw error;
 
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ["content.js"]
     });
-    await sleep(250);
+    await sleep(300);
     return await chrome.tabs.sendMessage(tabId, message);
   }
 }
 
-async function collectFromTab(tabId, researchJobs = []) {
+async function collectFromTab(tabId) {
   let lastError = null;
   for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
-      const response = await ensureContentScript(tabId, researchJobs);
+      const response = await sendContentMessage(tabId, { type: "collect-vinted-data" });
       if (response?.ok) return response.snapshot;
       if (response?.error) throw new Error(response.error);
     } catch (error) {
@@ -76,6 +74,91 @@ async function getResearchQueue() {
   } catch {
     return [];
   }
+}
+
+function marketSearchUrl(query) {
+  const url = new URL("/catalog", VINTED_URL);
+  url.searchParams.set("search_text", String(query || "").trim());
+  url.searchParams.set("order", "relevance");
+  return url.href;
+}
+
+async function researchMarketJob(job) {
+  const jobId = Number(job?.id || 0);
+  const listingId = String(job?.listing_id || "");
+  const query = String(job?.query || "").trim();
+  if (!jobId || !query) {
+    return { job_id: jobId || null, error: "Invalid market research job", results: [] };
+  }
+
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({
+      url: marketSearchUrl(query),
+      active: false
+    });
+    tabId = tab.id;
+    if (!tabId) throw new Error("Could not open Vinted search page.");
+
+    await waitForTab(tabId, 25000);
+    await sleep(1200);
+
+    let response = null;
+    let lastError = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        response = await sendContentMessage(tabId, { type: "scrape-market-page" });
+        if (response?.ok) break;
+        if (response?.error) throw new Error(response.error);
+      } catch (error) {
+        lastError = error;
+      }
+      await sleep(700);
+    }
+    if (!response?.ok) throw lastError || new Error("Could not read Vinted search results.");
+
+    const results = (response.results || []).filter(row => String(row.id || "") !== listingId);
+    if (!results.length) {
+      const detail = Number(response.anchors_seen || 0) === 0
+        ? "Vinted search page rendered no listing cards."
+        : `Vinted page had ${response.anchors_seen} item links but no priced cards could be parsed.`;
+      return {
+        job_id: jobId,
+        error: detail,
+        results: [],
+        raw_count: Number(response.anchors_seen || 0),
+        parsed_count: Number(response.cards_with_price || 0)
+      };
+    }
+
+    return {
+      job_id: jobId,
+      results,
+      raw_count: Number(response.anchors_seen || 0),
+      parsed_count: results.length
+    };
+  } catch (error) {
+    return {
+      job_id: jobId,
+      error: error instanceof Error ? error.message : String(error),
+      results: []
+    };
+  } finally {
+    if (tabId !== null) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {}
+    }
+  }
+}
+
+async function collectMarketResearch(jobs) {
+  const results = [];
+  for (const job of (Array.isArray(jobs) ? jobs.slice(0, 3) : [])) {
+    results.push(await researchMarketJob(job));
+    await sleep(350);
+  }
+  return results;
 }
 
 async function pushSnapshot(snapshot, reason) {
@@ -122,7 +205,8 @@ async function runSync(reason = "manual") {
       }
 
       const researchJobs = await getResearchQueue();
-      const snapshot = await collectFromTab(tab.id, researchJobs);
+      const snapshot = await collectFromTab(tab.id);
+      snapshot.market_results = await collectMarketResearch(researchJobs);
       return await pushSnapshot(snapshot, reason);
     } catch (error) {
       const status = {

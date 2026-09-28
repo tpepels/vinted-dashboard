@@ -50,28 +50,99 @@ async function collectVintedData(researchJobs=[]){
   const orders=[];
   for(const[type,direction]of[["sold","sell"],["purchased","buy"]]){try{const rows=await paged("/api/v2/my_orders",["my_orders","orders","items"],{type,status:"all"},100);for(const raw of rows||[])orders.push(orderRow(raw,direction))}catch{}}
 
-  const market_results=[];
-  for(const job of (Array.isArray(researchJobs)?researchJobs.slice(0,3):[])){
-    const jobId=Number(job?.id||0);
-    const query=String(job?.query||"").trim();
-    if(!jobId||!query)continue;
-    try{
-      const payload=await fetchJson("/api/v2/catalog/items",{search_text:query,order:"relevance",page:1,per_page:36});
-      const results=[];
-      for(const raw of listFrom(payload,["items"])){
-        const sellerId=idOf(first(raw,"user","seller","owner"));
-        if(sellerId&&sellerId===userId)continue;
-        const row=listingRow(raw,null);
-        if(!row.id||row.price_cents==null)continue;
-        results.push({id:row.id,title:row.title,price_cents:row.price_cents,currency:row.currency,url:row.vinted_url});
-      }
-      market_results.push({job_id:jobId,results});
-    }catch(error){
-      market_results.push({job_id:jobId,error:error instanceof Error?error.message:String(error),results:[]});
-    }
-  }
-
-  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results};
+  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[]};
 }
 
-chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{if(message?.type!=="collect-vinted-data")return;collectVintedData(message.research_jobs||[]).then(snapshot=>sendResponse({ok:true,snapshot})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));return true});
+function parseCatalogPrice(text){
+  const source=String(text||"").replace(/\u00a0/g," ");
+  const patterns=[
+    /€\s*([0-9]+(?:[.,][0-9]{1,2})?)/,
+    /([0-9]+(?:[.,][0-9]{1,2})?)\s*€/,
+    /EUR\s*([0-9]+(?:[.,][0-9]{1,2})?)/i,
+    /([0-9]+(?:[.,][0-9]{1,2})?)\s*EUR/i
+  ];
+  for(const pattern of patterns){
+    const match=source.match(pattern);
+    if(!match)continue;
+    const value=Number.parseFloat(match[1].replace(",","."));
+    if(Number.isFinite(value)&&value>0)return Math.round(value*100);
+  }
+  return null;
+}
+
+function catalogCardFor(anchor){
+  let node=anchor;
+  for(let depth=0;depth<7&&node;depth++,node=node.parentElement){
+    const text=String(node.innerText||node.textContent||"");
+    if(parseCatalogPrice(text)!==null&&text.length<1800)return node;
+  }
+  return anchor.parentElement||anchor;
+}
+
+function titleFromCatalogCard(anchor,card,id){
+  const candidates=[
+    anchor.getAttribute("title"),
+    anchor.getAttribute("aria-label"),
+    anchor.querySelector("img")?.getAttribute("alt"),
+    card?.querySelector("img")?.getAttribute("alt")
+  ].filter(Boolean);
+  for(const candidate of candidates){
+    const text=String(candidate).trim();
+    if(text&&text.length>2&&!/^imagem|^image$/i.test(text))return text;
+  }
+  try{
+    const url=new URL(anchor.href,location.origin);
+    const match=url.pathname.match(new RegExp("/items/"+id+"-([^/?#]+)"));
+    if(match)return decodeURIComponent(match[1]).replaceAll("-"," ").trim();
+  }catch{}
+  const text=String(anchor.textContent||"").trim().replace(/\s+/g," ");
+  return text||"Vinted listing";
+}
+
+async function scrapeMarketPage(){
+  window.scrollTo(0,Math.min(document.body.scrollHeight,1800));
+  await new Promise(resolve=>setTimeout(resolve,700));
+
+  const results=[];
+  const seen=new Set();
+  const anchors=[...document.querySelectorAll('a[href*="/items/"]')];
+  for(const anchor of anchors){
+    let url;
+    try{url=new URL(anchor.href,location.origin)}catch{continue}
+    const match=url.pathname.match(/\/items\/(\d+)/);
+    if(!match)continue;
+    const id=match[1];
+    if(seen.has(id))continue;
+    const card=catalogCardFor(anchor);
+    const price=parseCatalogPrice(card?.innerText||card?.textContent||"");
+    if(price===null)continue;
+    const title=titleFromCatalogCard(anchor,card,id);
+    seen.add(id);
+    results.push({
+      id,
+      title,
+      price_cents:price,
+      currency:"EUR",
+      url:url.href.split("?")[0]
+    });
+    if(results.length>=60)break;
+  }
+  return{
+    results,
+    anchors_seen:anchors.length,
+    cards_with_price:results.length,
+    page_title:document.title,
+    page_url:location.href
+  };
+}
+
+chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
+  if(message?.type==="collect-vinted-data"){
+    collectVintedData().then(snapshot=>sendResponse({ok:true,snapshot})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
+    return true;
+  }
+  if(message?.type==="scrape-market-page"){
+    scrapeMarketPage().then(result=>sendResponse({ok:true,...result})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
+    return true;
+  }
+});
