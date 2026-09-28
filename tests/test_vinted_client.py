@@ -236,9 +236,11 @@ def test_public_headers_strip_account_session(monkeypatch, tmp_path):
     assert headers["X-Platform"] == "web"
 
 
-def test_listings_use_current_wardrobe_endpoint(monkeypatch):
+def test_listings_use_public_wardrobe_without_auth(monkeypatch, tmp_path):
     monkeypatch.setenv("VINTED_USER_ID", "58344842")
+    monkeypatch.delenv("VINTED_COOKIE", raising=False)
     client = VintedClient()
+    client.session_file = tmp_path / "no-session.cookie"
     calls = []
 
     def fake_request(path, *, params=None, **kwargs):
@@ -271,43 +273,113 @@ def test_listings_use_current_wardrobe_endpoint(monkeypatch):
     assert calls[0][1]["order"] == "newest_first"
     assert len(rows) == 1
     assert rows[0]["id"] == "101"
-    assert rows[0]["title"] == "A Lost Lady - Willa Cather"
-    assert rows[0]["price_cents"] == 750
+    assert rows[0]["status"] == "active"
     assert client._listings_source == "/api/v2/wardrobe/58344842/items"
 
 
-def test_listings_fall_back_to_legacy_endpoint_on_404(monkeypatch):
+def test_authenticated_owner_inventory_merges_lifecycle_views(monkeypatch, tmp_path):
     monkeypatch.setenv("VINTED_USER_ID", "58344842")
+    monkeypatch.setenv("VINTED_COOKIE", "access_token_web=test-token")
     client = VintedClient()
+    client.session_file = tmp_path / "no-session.cookie"
     calls = []
 
     def fake_request(path, *, params=None, **kwargs):
-        calls.append((path, kwargs))
-        if path == "/api/v2/wardrobe/58344842/items":
-            return None
+        calls.append((path, params, kwargs))
+
         if path == "/api/v2/users/58344842/items":
+            status = params["status"]
+            payloads = {
+                "active": [
+                    {
+                        "id": 101,
+                        "title": "Active book",
+                        "status": "Very good",
+                        "price": {"amount": "7.50", "currency_code": "EUR"},
+                    }
+                ],
+                "sold": [
+                    {
+                        "id": 202,
+                        "title": "Sold book",
+                        "status": "Good",
+                        "price": {"amount": "8.00", "currency_code": "EUR"},
+                    }
+                ],
+                "reserved": [],
+                "draft": [],
+                "closed": [],
+            }
+            return {"items": payloads[status], "pagination": {"total_pages": 1}}
+
+        if path == "/api/v2/wardrobe/58344842/items":
+            assert kwargs.get("auth") is True
             return {
                 "items": [
                     {
-                        "id": 202,
-                        "title": "Legacy listing",
-                        "price": {"amount": "5.00", "currency_code": "EUR"},
-                    }
+                        "id": 101,
+                        "title": "Active book",
+                        "status": "Very good",
+                    },
+                    {
+                        "id": 303,
+                        "title": "Hidden book",
+                        "status": "Good",
+                        "is_hidden": True,
+                        "price": {"amount": "6.00", "currency_code": "EUR"},
+                    },
                 ],
                 "pagination": {"total_pages": 1},
             }
+
         raise AssertionError(path)
 
     monkeypatch.setattr(client, "_request", fake_request)
     rows = client.get_listings()
 
-    assert rows[0]["id"] == "202"
-    assert client._listings_source == "/api/v2/users/58344842/items"
-    assert [call[0] for call in calls] == [
-        "/api/v2/wardrobe/58344842/items",
-        "/api/v2/users/58344842/items",
+    assert {row["id"]: row["status"] for row in rows} == {
+        "101": "active",
+        "202": "sold",
+        "303": "hidden",
+    }
+    assert client._listings_source == "authenticated owner inventory"
+    owner_statuses = [
+        params["status"]
+        for path, params, _kwargs in calls
+        if path == "/api/v2/users/58344842/items"
     ]
+    assert owner_statuses == ["active", "sold", "reserved", "draft", "closed"]
 
+
+def test_authenticated_inventory_falls_back_to_public_wardrobe(monkeypatch, tmp_path):
+    monkeypatch.setenv("VINTED_USER_ID", "58344842")
+    monkeypatch.setenv("VINTED_COOKIE", "access_token_web=test-token")
+    client = VintedClient()
+    client.session_file = tmp_path / "no-session.cookie"
+
+    def fake_request(path, *, params=None, **kwargs):
+        if path == "/api/v2/users/58344842/items":
+            return None
+        if path == "/api/v2/wardrobe/58344842/items" and kwargs.get("auth"):
+            return None
+        if path == "/api/v2/wardrobe/58344842/items" and kwargs.get("anonymous"):
+            return {
+                "items": [
+                    {
+                        "id": 404,
+                        "title": "Public active book",
+                        "price": {"amount": "4.00", "currency_code": "EUR"},
+                    }
+                ],
+                "pagination": {"total_pages": 1},
+            }
+        raise AssertionError((path, kwargs))
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    rows = client.get_listings()
+
+    assert [(row["id"], row["status"]) for row in rows] == [("404", "active")]
+    assert client._listings_source == "/api/v2/wardrobe/58344842/items"
 
 
 def test_favorite_notification_classification():
