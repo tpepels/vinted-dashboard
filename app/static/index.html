@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vinted Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">V</div>
+        <div>
+          <strong>Vinted</strong>
+          <span>dashboard</span>
+        </div>
+      </div>
+
+      <nav id="nav">
+        <button class="nav-item active" data-view="overview">Overview</button>
+        <button class="nav-item" data-view="listings">Listings <span id="nav-listings"></span></button>
+        <button class="nav-item" data-view="sales">Sales <span id="nav-sales"></span></button>
+        <button class="nav-item" data-view="purchases">Purchases <span id="nav-purchases"></span></button>
+        <button class="nav-item" data-view="notifications">Notifications <span id="nav-notifications"></span></button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <a id="profile-link" href="https://www.vinted.pt/member/58344842" target="_blank" rel="noreferrer">Open Vinted profile ↗</a>
+        <div class="source-note">Local database<br><span id="sync-source">Email sync not checked</span></div>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">PRIVATE INVENTORY</p>
+          <h1 id="page-title">Overview</h1>
+        </div>
+        <div class="header-actions">
+          <input type="file" id="csv-file" accept=".csv,text/csv" hidden>
+          <button class="btn secondary" id="import-btn">Import CSV</button>
+          <button class="btn primary" id="sync-btn">Sync email</button>
+        </div>
+      </header>
+
+      <div id="flash"></div>
+
+      <section id="overview" class="view active">
+        <div class="stat-grid">
+          <article class="stat"><span>Active listings</span><strong id="stat-active">0</strong></article>
+          <article class="stat"><span>Open sales</span><strong id="stat-sales">0</strong></article>
+          <article class="stat"><span>Open purchases</span><strong id="stat-purchases">0</strong></article>
+          <article class="stat"><span>Unread</span><strong id="stat-unread">0</strong></article>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">ACTION QUEUE</p><h2>Needs attention</h2></div>
+          </div>
+          <div id="attention"></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-head"><div><p class="eyebrow">RECENT</p><h2>Latest sales</h2></div></div>
+            <div id="recent-sales"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><p class="eyebrow">RECENT</p><h2>Notifications</h2></div></div>
+            <div id="recent-notifications"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="listings" class="view">
+        <div class="toolbar">
+          <input id="listing-search" class="search" placeholder="Search title or ISBN">
+          <select id="listing-status">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="sold">Sold</option>
+            <option value="reserved">Reserved</option>
+            <option value="draft">Draft</option>
+          </select>
+          <button class="btn secondary" id="add-listing-btn">Add listing</button>
+        </div>
+        <div class="panel table-panel"><div id="listings-table"></div></div>
+      </section>
+
+      <section id="sales" class="view">
+        <div class="toolbar">
+          <select id="sales-scope">
+            <option value="open">Open sales</option>
+            <option value="closed">Closed sales</option>
+            <option value="all">All sales</option>
+          </select>
+        </div>
+        <div class="panel table-panel"><div id="sales-table"></div></div>
+      </section>
+
+      <section id="purchases" class="view">
+        <div class="toolbar">
+          <select id="purchases-scope">
+            <option value="open">Open purchases</option>
+            <option value="closed">Closed purchases</option>
+            <option value="all">All purchases</option>
+          </select>
+        </div>
+        <div class="panel table-panel"><div id="purchases-table"></div></div>
+      </section>
+
+      <section id="notifications" class="view">
+        <div class="toolbar right"><button class="btn secondary" id="read-all-btn">Mark all read</button></div>
+        <div class="panel"><div id="notifications-list"></div></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="listing-dialog">
+    <form id="listing-form" method="dialog">
+      <div class="dialog-head"><h2>Add listing</h2><button value="cancel" class="icon-btn">×</button></div>
+      <label>Title<input name="title" required></label>
+      <div class="two-fields">
+        <label>Price (€)<input name="price" type="number" min="0" step="0.01"></label>
+        <label>ISBN<input name="isbn"></label>
+      </div>
+      <label>Vinted URL<input name="vinted_url" type="url"></label>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn secondary">Cancel</button>
+        <button type="submit" value="default" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
