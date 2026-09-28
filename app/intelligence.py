@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 import sqlite3
@@ -136,14 +135,11 @@ def _iso_year(value: Any) -> int | None:
 
 
 def _void_order(row: sqlite3.Row | dict[str, Any]) -> bool:
-    text = " ".join(
-        str(row[key] or "")
-        for key in ("status", "lifecycle_status")
-        if key in row.keys() if isinstance(row, sqlite3.Row)
-    ) if isinstance(row, sqlite3.Row) else " ".join(
-        str(row.get(key) or "") for key in ("status", "lifecycle_status")
-    )
-    lower = text.lower()
+    if isinstance(row, sqlite3.Row):
+        values = [row[key] if key in row.keys() else None for key in ("status", "lifecycle_status")]
+    else:
+        values = [row.get(key) for key in ("status", "lifecycle_status")]
+    lower = " ".join(str(value or "") for value in values).lower()
     return any(word in lower for word in ("cancel", "refund", "failed"))
 
 
