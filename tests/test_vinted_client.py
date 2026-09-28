@@ -112,6 +112,65 @@ def test_auth_headers_from_browser_cookie(monkeypatch, tmp_path):
     assert "access_token_web=access-123" in headers["Cookie"]
 
 
+def test_refresh_token_detection_and_rotation(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "VINTED_COOKIE",
+        "access_token_web=old-access; refresh_token_web=old-refresh; anon_id=anon-1",
+    )
+    client = VintedClient()
+    client.session_file = tmp_path / "vinted-session.cookie"
+
+    assert client.has_refresh_token() is True
+
+    client._persist_refreshed_tokens("new-access", "new-refresh")
+
+    saved = client.session_file.read_text(encoding="utf-8")
+    assert "access_token_web=new-access" in saved
+    assert "refresh_token_web=new-refresh" in saved
+    assert "anon_id=anon-1" in saved
+
+    headers = client._headers()
+    assert headers["Authorization"] == "Bearer new-access"
+
+
+def test_authenticated_request_retries_once_after_refresh(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "VINTED_COOKIE",
+        "access_token_web=old-access; refresh_token_web=refresh-token",
+    )
+    client = VintedClient()
+    client.session_file = tmp_path / "no-session.cookie"
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.reason = "Unauthorized" if status_code == 401 else "OK"
+            self.ok = status_code == 200
+
+        def json(self):
+            return self._payload
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return FakeResponse(401)
+            return FakeResponse(200, {"user": {"id": 58344842}})
+
+    session = FakeSession()
+    monkeypatch.setattr(client, "_get_session", lambda: session)
+    monkeypatch.setattr(client, "_refresh_auth_session", lambda: True)
+
+    payload = client._request("/api/v2/users/current", auth=True)
+
+    assert payload["user"]["id"] == 58344842
+    assert session.calls == 2
+
+
 def test_notifications_use_direct_vinted_endpoint(monkeypatch):
     client = VintedClient()
     calls = []
