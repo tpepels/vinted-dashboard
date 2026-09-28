@@ -185,14 +185,14 @@ def _notification_details(body: str, link: str | None) -> dict[str, str | None]:
             "actor": None,
         }
 
-    item_match = re.search(r"/items/(\\d+)", link_text)
+    item_match = re.search(r"/items/(\d+)", link_text)
     item_id = item_match.group(1) if item_match else None
     actor = None
     item_title = None
 
     patterns = (
-        r"^(?P<actor>.+?) adicionou o teu (?P<title>.+?) aos seus favoritos\\.?$",
-        r"^(?P<actor>.+?) added your (?P<title>.+?) to (?:their|his|her) favou?rites\\.?$",
+        r"^(?P<actor>.+?) adicionou o teu (?P<title>.+?) aos seus favoritos\.?$",
+        r"^(?P<actor>.+?) added your (?P<title>.+?) to (?:their|his|her) favou?rites\.?$",
     )
     for pattern in patterns:
         match = re.match(pattern, text, flags=re.IGNORECASE)
@@ -207,7 +207,6 @@ def _notification_details(body: str, link: str | None) -> dict[str, str | None]:
         "item_title": item_title,
         "actor": actor,
     }
-
 
 class VintedClient:
     def __init__(self) -> None:
