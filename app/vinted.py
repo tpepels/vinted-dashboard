@@ -175,11 +175,11 @@ class VintedClient:
         return urlparse(self.base_url).netloc
 
     def cookie_string(self) -> str:
+        if self.session_file.exists():
+            return self.session_file.read_text(encoding="utf-8").strip()
         env_cookie = os.getenv("VINTED_COOKIE", "").strip()
         if env_cookie:
             return env_cookie
-        if self.session_file.exists():
-            return self.session_file.read_text(encoding="utf-8").strip()
 
         access = os.getenv("VINTED_ACCESS_TOKEN_WEB", "").strip()
         refresh = os.getenv("VINTED_REFRESH_TOKEN_WEB", "").strip()
@@ -232,6 +232,10 @@ class VintedClient:
         if cookie:
             headers["Cookie"] = cookie
         anon = os.getenv("VINTED_ANON_ID", "").strip()
+        if not anon and cookie:
+            match = re.search(r"(?:^|;\\s*)anon_id=([^;]+)", cookie)
+            if match:
+                anon = match.group(1)
         if anon:
             headers["X-Anon-Id"] = anon
         return headers
@@ -239,7 +243,7 @@ class VintedClient:
     def _get_session(self) -> requests.Session:
         with self._lock:
             if self._session is None:
-                session = requests.Session()
+                session = requests.Session(impersonate="chrome")
                 session.headers.update(self._headers())
                 self._session = session
             return self._session
@@ -261,7 +265,7 @@ class VintedClient:
         session = self._get_session()
         try:
             response = session.get(url, params=params, timeout=self.timeout)
-        except requests.RequestException as exc:
+        except Exception as exc:
             self._record(path, None, False, type(exc).__name__)
             raise VintedError(f"Vinted request failed: {exc}") from exc
 
