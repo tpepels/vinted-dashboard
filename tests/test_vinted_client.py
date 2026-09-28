@@ -3,6 +3,7 @@ from app.vinted import (
     _listing_status,
     _money,
     _notification_details,
+    _timestamp,
     is_closed_status,
 )
 
@@ -11,6 +12,12 @@ def test_money_shapes():
     assert _money({"amount": "12.79", "currency_code": "EUR"}) == (1279, "EUR")
     assert _money("3,50") == (350, "EUR")
     assert _money(None) == (None, "EUR")
+
+
+def test_timestamp_parses_numeric_strings_and_milliseconds():
+    assert _timestamp("1790594212") == "2026-09-28T11:16:52+00:00"
+    assert _timestamp(1790594212000) == "2026-09-28T11:16:52+00:00"
+    assert _timestamp("2026-09-28T11:16:52Z") == "2026-09-28T11:16:52Z"
 
 
 def test_listing_status():
@@ -295,6 +302,7 @@ def test_authenticated_owner_inventory_merges_lifecycle_views(monkeypatch, tmp_p
                         "id": 101,
                         "title": "Active book",
                         "status": "Very good",
+                        "created_at_ts": "1790594212",
                         "price": {"amount": "7.50", "currency_code": "EUR"},
                     }
                 ],
@@ -342,6 +350,8 @@ def test_authenticated_owner_inventory_merges_lifecycle_views(monkeypatch, tmp_p
         "202": "sold",
         "303": "hidden",
     }
+    active = next(row for row in rows if row["id"] == "101")
+    assert active["listed_at"] == "2026-09-28T11:16:52+00:00"
     assert client._listings_source == "authenticated owner inventory"
     owner_statuses = [
         params["status"]

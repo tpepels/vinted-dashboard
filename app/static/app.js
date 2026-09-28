@@ -13,6 +13,28 @@ function when(value){
   if(Number.isNaN(d.getTime()))return String(value);
   return new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(d);
 }
+function dateOnly(value){
+  if(!value)return "—";
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime()))return String(value);
+  return new Intl.DateTimeFormat(undefined,{dateStyle:"medium"}).format(d);
+}
+function age(value){
+  if(!value)return "—";
+  const d=new Date(value);
+  const ts=d.getTime();
+  if(Number.isNaN(ts))return "—";
+  const days=Math.max(0,Math.floor((Date.now()-ts)/86400000));
+  if(days===0)return "Today";
+  if(days===1)return "1 day";
+  if(days<30)return `${days} days`;
+  if(days<365){
+    const months=Math.max(1,Math.floor(days/30.44));
+    return `${months} month${months===1?"":"s"}`;
+  }
+  const years=Math.max(1,Math.floor(days/365.25));
+  return `${years} year${years===1?"":"s"}`;
+}
 function timeValue(value){
   const n=new Date(value||0).getTime();
   return Number.isNaN(n)?0:n;
@@ -249,13 +271,25 @@ function listingComparator(sort){
     const n=Number(value);
     return Number.isFinite(n)?n:fallback;
   };
-  if(sort==="oldest")return (a,b)=>b._index-a._index;
+  if(sort==="oldest")return (a,b)=>{
+    const ad=timeValue(a.listed_at),bd=timeValue(b.listed_at);
+    if(ad&&bd)return ad-bd;
+    if(ad)return -1;
+    if(bd)return 1;
+    return b._index-a._index;
+  };
   if(sort==="price-asc")return (a,b)=>number(a.price_cents,Infinity)-number(b.price_cents,Infinity);
   if(sort==="price-desc")return (a,b)=>number(b.price_cents,-1)-number(a.price_cents,-1);
   if(sort==="likes-desc")return (a,b)=>number(b.favourites,0)-number(a.favourites,0)||a._index-b._index;
   if(sort==="views-desc")return (a,b)=>number(b.views,0)-number(a.views,0)||a._index-b._index;
   if(sort==="title-asc")return (a,b)=>String(a.title||"").localeCompare(String(b.title||""),undefined,{sensitivity:"base"});
-  return (a,b)=>a._index-b._index;
+  return (a,b)=>{
+    const ad=timeValue(a.listed_at),bd=timeValue(b.listed_at);
+    if(ad&&bd)return bd-ad;
+    if(ad)return -1;
+    if(bd)return 1;
+    return a._index-b._index;
+  };
 }
 function renderListingStats(rows,duplicates){
   const prices=rows
@@ -309,7 +343,8 @@ function renderListings(){
 
   const showLikes=filtered.some(x=>x.favourites!==null&&x.favourites!==undefined);
   const showViews=filtered.some(x=>x.views!==null&&x.views!==undefined);
-  const extraHeaders=`${showLikes?"<th>Favorites</th>":""}${showViews?"<th>Views</th>":""}`;
+  const showDate=filtered.some(x=>timeValue(x.listed_at)>0);
+  const extraHeaders=`${showDate?"<th>Listed</th><th>Age</th>":""}${showLikes?"<th>Favorites</th>":""}${showViews?"<th>Views</th>":""}`;
 
   $("#listings-table").innerHTML=filtered.length?`
     <table><thead><tr><th>Listing</th><th>Status</th>${extraHeaders}<th class="money">Price</th></tr></thead><tbody>
@@ -320,6 +355,7 @@ function renderListings(){
           <div class="listing-title-line">${linkedTitle(x)}${duplicateCount?`<span class="duplicate-pill" title="Potential duplicate title">${duplicateCount} copies</span>`:""}</div>
         </td>
         <td>${badge(x.status)}</td>
+        ${showDate?`<td>${dateOnly(x.listed_at)}</td><td>${age(x.listed_at)}</td>`:""}
         ${showLikes?`<td>${x.favourites??"—"}</td>`:""}
         ${showViews?`<td>${x.views??"—"}</td>`:""}
         <td class="money">${money(x.price_cents,x.currency)}</td>

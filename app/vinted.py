@@ -98,9 +98,21 @@ def _money(value: Any) -> tuple[int | None, str]:
 def _timestamp(value: Any) -> str | None:
     if value in (None, ""):
         return None
+
+    numeric: float | None = None
     if isinstance(value, (int, float)):
-        # Some Vinted payloads use seconds, others milliseconds.
-        seconds = float(value)
+        numeric = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        try:
+            numeric = float(text)
+        except ValueError:
+            numeric = None
+
+    if numeric is not None:
+        # Some Vinted payloads use seconds, others milliseconds, and several
+        # endpoints serialize the Unix timestamp as a string.
+        seconds = numeric
         if seconds > 10_000_000_000:
             seconds /= 1000
         try:
@@ -109,6 +121,7 @@ def _timestamp(value: Any) -> str | None:
             return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
         except (OSError, OverflowError, ValueError):
             return str(value)
+
     return str(value)
 
 
@@ -527,7 +540,15 @@ class VintedClient:
             "vinted_url": _item_url(self.base_url, raw),
             "image_url": _photo_url(raw),
             "listed_at": _timestamp(
-                _first(raw, "created_at_ts", "created_at", "upload_date")
+                _first(
+                    raw,
+                    "created_at_ts",
+                    "created_timestamp_ts",
+                    "created_at",
+                    "uploaded_at",
+                    "posted_at",
+                    "upload_date_dte",
+                )
             ),
             "favourites": _first(
                 raw, "favourite_count", "favorites_count", "favourites_count"
