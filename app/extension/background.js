@@ -25,9 +25,10 @@ async function waitForTab(tabId, timeoutMs = 20000) {
   throw new Error("Vinted tab did not finish loading.");
 }
 
-async function ensureContentScript(tabId) {
+async function ensureContentScript(tabId, researchJobs = []) {
+  const message = { type: "collect-vinted-data", research_jobs: researchJobs };
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: "collect-vinted-data" });
+    const response = await chrome.tabs.sendMessage(tabId, message);
     return response;
   } catch (error) {
     const message = String(error?.message || error || "");
@@ -38,15 +39,15 @@ async function ensureContentScript(tabId) {
       files: ["content.js"]
     });
     await sleep(250);
-    return await chrome.tabs.sendMessage(tabId, { type: "collect-vinted-data" });
+    return await chrome.tabs.sendMessage(tabId, message);
   }
 }
 
-async function collectFromTab(tabId) {
+async function collectFromTab(tabId, researchJobs = []) {
   let lastError = null;
   for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
-      const response = await ensureContentScript(tabId);
+      const response = await ensureContentScript(tabId, researchJobs);
       if (response?.ok) return response.snapshot;
       if (response?.error) throw new Error(response.error);
     } catch (error) {
@@ -64,6 +65,17 @@ async function findOrOpenVintedTab() {
   const tab = await chrome.tabs.create({ url: VINTED_URL, active: false });
   await waitForTab(tab.id);
   return { tab, temporary: true };
+}
+
+async function getResearchQueue() {
+  try {
+    const response = await fetch(`${DASHBOARD_URL}/api/market-research/queue?limit=3`);
+    if (!response.ok) return [];
+    const body = await response.json();
+    return Array.isArray(body?.jobs) ? body.jobs : [];
+  } catch {
+    return [];
+  }
 }
 
 async function pushSnapshot(snapshot, reason) {
@@ -109,7 +121,8 @@ async function runSync(reason = "manual") {
         throw new Error("Chrome is not signed in to vinted.pt.");
       }
 
-      const snapshot = await collectFromTab(tab.id);
+      const researchJobs = await getResearchQueue();
+      const snapshot = await collectFromTab(tab.id, researchJobs);
       return await pushSnapshot(snapshot, reason);
     } catch (error) {
       const status = {
