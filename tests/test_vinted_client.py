@@ -204,3 +204,94 @@ def test_my_orders_falls_back_to_conversations(monkeypatch):
     assert source == "/api/v2/conversations"
     assert rows[0]["direction"] == "sell"
     assert rows[0]["counterparty"] == "buyer77"
+
+
+
+def test_public_headers_strip_account_session(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "VINTED_COOKIE",
+        "access_token_web=secret-access; anon_id=secret-anon; csrf_token=secret-csrf",
+    )
+    client = VintedClient()
+    client.session_file = tmp_path / "vinted-session.cookie"
+
+    headers = client._public_headers()
+
+    assert "Cookie" not in headers
+    assert "Authorization" not in headers
+    assert "X-Anon-Id" not in headers
+    assert "X-Csrf-Token" not in headers
+    assert headers["X-Platform"] == "web"
+
+
+def test_listings_use_current_wardrobe_endpoint(monkeypatch):
+    monkeypatch.setenv("VINTED_USER_ID", "58344842")
+    client = VintedClient()
+    calls = []
+
+    def fake_request(path, *, params=None, **kwargs):
+        calls.append((path, params, kwargs))
+        return {
+            "items": [
+                {
+                    "id": 101,
+                    "title": "A Lost Lady - Willa Cather",
+                    "price": {"amount": "7.50", "currency_code": "EUR"},
+                    "user": {"id": 58344842},
+                    "photo": {"url": "https://images.example/101.jpg"},
+                    "favourite_count": 4,
+                },
+                {
+                    "id": 999,
+                    "title": "Wrong seller",
+                    "price": {"amount": "1.00", "currency_code": "EUR"},
+                    "user": {"id": 999999},
+                },
+            ],
+            "pagination": {"total_pages": 1},
+        }
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    rows = client.get_listings()
+
+    assert calls[0][0] == "/api/v2/wardrobe/58344842/items"
+    assert calls[0][2]["anonymous"] is True
+    assert calls[0][1]["order"] == "newest_first"
+    assert len(rows) == 1
+    assert rows[0]["id"] == "101"
+    assert rows[0]["title"] == "A Lost Lady - Willa Cather"
+    assert rows[0]["price_cents"] == 750
+    assert client._listings_source == "/api/v2/wardrobe/58344842/items"
+
+
+def test_listings_fall_back_to_legacy_endpoint_on_404(monkeypatch):
+    monkeypatch.setenv("VINTED_USER_ID", "58344842")
+    client = VintedClient()
+    calls = []
+
+    def fake_request(path, *, params=None, **kwargs):
+        calls.append((path, kwargs))
+        if path == "/api/v2/wardrobe/58344842/items":
+            return None
+        if path == "/api/v2/users/58344842/items":
+            return {
+                "items": [
+                    {
+                        "id": 202,
+                        "title": "Legacy listing",
+                        "price": {"amount": "5.00", "currency_code": "EUR"},
+                    }
+                ],
+                "pagination": {"total_pages": 1},
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    rows = client.get_listings()
+
+    assert rows[0]["id"] == "202"
+    assert client._listings_source == "/api/v2/users/58344842/items"
+    assert [call[0] for call in calls] == [
+        "/api/v2/wardrobe/58344842/items",
+        "/api/v2/users/58344842/items",
+    ]

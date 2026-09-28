@@ -13,7 +13,7 @@ There is no Gmail/IMAP integration, CSV import, or locally reconstructed order h
 
 The dashboard uses the same Vinted web endpoints that the Vinted site uses:
 
-- public profile + listings: `/api/v2/users/{id}` and `/api/v2/users/{id}/items`
+- public profile + listings: `/api/v2/users/{id}` and `/api/v2/wardrobe/{id}/items`
 - authenticated account: `/api/v2/users/current`
 - notifications: `/api/v2/notifications` (with a web-notifications fallback)
 - buy/sell orders: `/api/v2/my_orders?type=sold|purchased&status=all`
