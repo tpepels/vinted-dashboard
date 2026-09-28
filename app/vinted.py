@@ -284,9 +284,9 @@ class VintedClient:
 
     def has_refresh_token(self) -> bool:
         cookies = _parse_cookie_header(self.cookie_string())
-        refresh = os.getenv("VINTED_REFRESH_TOKEN_WEB", "").strip() or cookies.get(
-            "refresh_token_web", ""
-        )
+        refresh = cookies.get("refresh_token_web", "") or os.getenv(
+            "VINTED_REFRESH_TOKEN_WEB", ""
+        ).strip()
         return bool(refresh)
 
     def _write_cookie_map(self, cookies: dict[str, str]) -> None:
@@ -354,9 +354,9 @@ class VintedClient:
         if cookie:
             headers["Cookie"] = cookie
 
-        access = os.getenv("VINTED_ACCESS_TOKEN_WEB", "").strip() or cookies.get(
-            "access_token_web", ""
-        )
+        access = cookies.get("access_token_web", "") or os.getenv(
+            "VINTED_ACCESS_TOKEN_WEB", ""
+        ).strip()
         if access:
             headers["Authorization"] = f"Bearer {access}"
 
@@ -369,7 +369,7 @@ class VintedClient:
         if csrf:
             headers["X-Csrf-Token"] = csrf
 
-        anon = os.getenv("VINTED_ANON_ID", "").strip() or cookies.get("anon_id", "")
+        anon = cookies.get("anon_id", "") or os.getenv("VINTED_ANON_ID", "").strip()
         if anon:
             headers["X-Anon-Id"] = anon
         return headers
@@ -408,8 +408,8 @@ class VintedClient:
     def _refresh_auth_session(self) -> bool:
         cookies = _parse_cookie_header(self.cookie_string())
         refresh_token = (
-            os.getenv("VINTED_REFRESH_TOKEN_WEB", "").strip()
-            or cookies.get("refresh_token_web", "")
+            cookies.get("refresh_token_web", "")
+            or os.getenv("VINTED_REFRESH_TOKEN_WEB", "").strip()
         )
         if not refresh_token:
             return False
