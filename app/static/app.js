@@ -173,9 +173,16 @@ function renderErrors(){
 }
 function renderSession(){
   const auth=state.data?.auth||{};
-  const label=auth.authenticated
-    ? `Connected as ${auth.current_user?.username||auth.current_user?.id||"Vinted user"} · ${auth.refresh_token_available?"auto-refresh ready":"refresh token missing"}`
-    : auth.configured ? "Session configured, but not authenticated" : "Public data only";
+  const sync=state.data?.browser_sync||{};
+  let label;
+  if(sync.active){
+    const who=auth.current_user?.username||auth.current_user?.id||"Vinted user";
+    label=`Chrome sync · ${who}${sync.collected_at?` · ${when(Number(sync.collected_at)*1000)}`:""}`;
+  }else if(auth.authenticated){
+    label=`Server session · ${auth.current_user?.username||auth.current_user?.id||"Vinted user"} · ${auth.refresh_token_available?"auto-refresh ready":"refresh token missing"}`;
+  }else{
+    label=auth.configured?"Session configured, but not authenticated":"Public data only";
+  }
   $("#session-state").textContent=label;
   $("#dialog-session-status").textContent=label;
 }
