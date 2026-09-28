@@ -216,18 +216,15 @@ class VintedClient:
             self._orders_source = None
 
     def _headers(self) -> dict[str, str]:
-        user_agent = os.getenv("VINTED_USER_AGENT", "").strip() or (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
-        )
+        user_agent = os.getenv("VINTED_USER_AGENT", "").strip()
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-GB,en;q=0.9,pt-PT;q=0.8,pt;q=0.7",
-            "Accept-Encoding": "gzip, deflate",
-            "User-Agent": user_agent,
             "Referer": self.base_url + "/",
             "X-Requested-With": "XMLHttpRequest",
         }
+        if user_agent:
+            headers["User-Agent"] = user_agent
         cookie = self.cookie_string()
         if cookie:
             headers["Cookie"] = cookie
