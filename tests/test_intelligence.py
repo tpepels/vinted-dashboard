@@ -91,6 +91,17 @@ def test_followers_and_view_trends(monkeypatch, tmp_path):
     assert [point["views"] for point in listing["daily"]] == [20, 35]
 
 
+def test_market_similarity_accepts_vinted_relevance_containment():
+    assert intelligence._similarity(
+        "A Lost Lady - Willa Cather",
+        "A Lost Lady",
+    ) > 0
+    assert intelligence._similarity(
+        "A Lost Lady - Willa Cather",
+        "Completely unrelated book",
+    ) == 0
+
+
 def test_market_research_queue_and_result(monkeypatch, tmp_path):
     monkeypatch.setattr(intelligence, "DB_PATH", tmp_path / "history.sqlite3")
 
