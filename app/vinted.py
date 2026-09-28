@@ -696,6 +696,7 @@ class VintedClient:
             "total_cents": price,
             "currency": currency,
             "status": status,
+            "lifecycle_status": lifecycle_status or status,
             "is_closed": is_closed_status(lifecycle_status or status),
             "tracking_code": _first(
                 raw, "tracking_code", "tracking_number", "shipment_tracking_code"
@@ -892,6 +893,7 @@ class VintedClient:
             "total_cents": price,
             "currency": currency,
             "status": status,
+            "lifecycle_status": status,
             "is_closed": is_closed_status(status),
             "tracking_code": _first(
                 transaction, "tracking_code", "tracking_number", "shipment_tracking_code"

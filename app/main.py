@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,46 @@ def _error_text(exc: Exception) -> str:
     if isinstance(exc, VintedError):
         return str(exc)
     return f"{type(exc).__name__}: {exc}"
+
+
+def _order_year(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        text = str(value).strip().replace("Z", "+00:00")
+        return datetime.fromisoformat(text).year
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_void_order(order: dict[str, Any]) -> bool:
+    values = (order.get("lifecycle_status"), order.get("status"))
+    status = " ".join(str(value or "").lower() for value in values)
+    status = status.replace("-", "_").replace(" ", "_")
+    void_words = ("cancel", "refund", "failed")
+    return any(word in status for word in void_words)
+
+
+def _ytd_aggregate(orders: list[dict[str, Any]], year: int) -> dict[str, Any]:
+    rows = [
+        order
+        for order in orders
+        if _order_year(order.get("updated_at")) == year and not _is_void_order(order)
+    ]
+    amounts = [
+        int(order["total_cents"])
+        for order in rows
+        if order.get("total_cents") is not None
+    ]
+    currency = next(
+        (str(order.get("currency")) for order in rows if order.get("currency")),
+        "EUR",
+    )
+    return {
+        "count": len(rows),
+        "total_cents": sum(amounts),
+        "currency": currency,
+    }
 
 
 def _dashboard_uncached() -> dict[str, Any]:
@@ -98,6 +139,10 @@ def _dashboard_uncached() -> dict[str, Any]:
     open_purchases = [x for x in purchases if not x.get("is_closed")]
     unread = [x for x in notifications if not x.get("read")]
 
+    current_year = datetime.now().year
+    ytd_sales = _ytd_aggregate(sales, current_year)
+    ytd_purchases = _ytd_aggregate(purchases, current_year)
+
     attention_statuses = {
         "awaiting_shipment",
         "label_ready",
@@ -142,6 +187,13 @@ def _dashboard_uncached() -> dict[str, Any]:
             "open_purchases": len(open_purchases),
             "unread_notifications": len(unread),
             "total_listings": len(listings),
+            "ytd_year": current_year,
+            "ytd_sales_count": ytd_sales["count"],
+            "ytd_sales_cents": ytd_sales["total_cents"],
+            "ytd_sales_currency": ytd_sales["currency"],
+            "ytd_purchases_count": ytd_purchases["count"],
+            "ytd_purchases_cents": ytd_purchases["total_cents"],
+            "ytd_purchases_currency": ytd_purchases["currency"],
         },
         "listings": listings,
         "sales": sales,

@@ -165,6 +165,12 @@ function renderSummary(){
   $("#stat-sales").textContent=s.open_sales||0;
   $("#stat-purchases").textContent=s.open_purchases||0;
   $("#stat-unread").textContent=s.unread_notifications||0;
+  $("#ytd-sales-label").textContent=`Sales ${s.ytd_year||""} YTD`;
+  $("#ytd-purchases-label").textContent=`Purchases ${s.ytd_year||""} YTD`;
+  $("#stat-ytd-sales").textContent=money(s.ytd_sales_cents||0,s.ytd_sales_currency||"EUR");
+  $("#stat-ytd-purchases").textContent=money(s.ytd_purchases_cents||0,s.ytd_purchases_currency||"EUR");
+  $("#stat-ytd-sales-count").textContent=`${s.ytd_sales_count||0} order${s.ytd_sales_count===1?"":"s"}`;
+  $("#stat-ytd-purchases-count").textContent=`${s.ytd_purchases_count||0} order${s.ytd_purchases_count===1?"":"s"}`;
   $("#nav-listings").textContent=s.active_listings?String(s.active_listings):"";
   $("#nav-sales").textContent=s.open_sales?String(s.open_sales):"";
   $("#nav-purchases").textContent=s.open_purchases?String(s.open_purchases):"";
