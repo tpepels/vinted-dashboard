@@ -48,7 +48,7 @@ def money_to_cents(value: str | None) -> int | None:
 
 
 def _field(body: str, label: str) -> Optional[str]:
-    match = re.search(rf"(?im)^\s*{re.escape(label)}\s*$\s*^\s*(.+?)\s*$", body)
+    match = re.search(rf"(?im)^\s*{re.escape(label)}\s*:?\s*$\n\s*(.+?)\s*$", body)
     return match.group(1).strip() if match else None
 
 
