@@ -174,7 +174,7 @@ function renderErrors(){
 function renderSession(){
   const auth=state.data?.auth||{};
   const label=auth.authenticated
-    ? `Connected as ${auth.current_user?.username||auth.current_user?.id||"Vinted user"}`
+    ? `Connected as ${auth.current_user?.username||auth.current_user?.id||"Vinted user"} · ${auth.refresh_token_available?"auto-refresh ready":"refresh token missing"}`
     : auth.configured ? "Session configured, but not authenticated" : "Public data only";
   $("#session-state").textContent=label;
   $("#dialog-session-status").textContent=label;
@@ -449,7 +449,9 @@ $("#session-form").addEventListener("submit",async e=>{
   if(!cookie){flash("Paste the Vinted Cookie header first.",true);return}
   try{
     const result=await api("/api/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cookie})});
-    $("#dialog-session-status").textContent=result.authenticated?`Connected as ${result.current_user?.username||result.current_user?.id}`:"Session saved";
+    $("#dialog-session-status").textContent=result.authenticated
+      ? `Connected as ${result.current_user?.username||result.current_user?.id} · ${result.refresh_token_available?"auto-refresh ready":"refresh token missing"}`
+      : "Session saved";
     $("#session-cookie").value="";
     dialog.close();
     await load(true);

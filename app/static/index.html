@@ -176,7 +176,7 @@
         <h2>Vinted session</h2>
         <button type="button" class="icon-btn" id="session-close">×</button>
       </div>
-      <p class="dialog-copy">Paste the complete <code>Cookie</code> request header from a signed-in request to <code>www.vinted.pt</code>. It is stored only on this server.</p>
+      <p class="dialog-copy">Paste Vinted's signed-in cookies. For automatic renewal, the saved value must include both <code>access_token_web</code> and <code>refresh_token_web</code>. If the request Cookie header does not contain the refresh token, copy <code>refresh_token_web</code> from DevTools → Application → Cookies → <code>https://www.vinted.pt</code> and append it as <code>; refresh_token_web=...</code>. The value is stored only on this server.</p>
       <label>Cookie header
         <textarea id="session-cookie" rows="8" placeholder="access_token_web=...; refresh_token_web=...; ..."></textarea>
       </label>

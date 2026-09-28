@@ -177,6 +177,7 @@ def _dashboard_uncached() -> dict[str, Any]:
         "auth": {
             "configured": client.has_auth(),
             "authenticated": authenticated,
+            "refresh_token_available": client.has_refresh_token(),
             "current_user": current_user,
         },
         "summary": {
@@ -260,6 +261,7 @@ def session_status():
     result = {
         "configured": client.has_auth(),
         "authenticated": False,
+        "refresh_token_available": client.has_refresh_token(),
         "current_user": None,
     }
     if not client.has_auth():
@@ -282,6 +284,7 @@ def set_session(payload: SessionCookie):
         return {
             "configured": True,
             "authenticated": bool(current.get("id")),
+            "refresh_token_available": client.has_refresh_token(),
             "current_user": current,
         }
     except ValueError as exc:

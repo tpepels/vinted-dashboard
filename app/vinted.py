@@ -282,6 +282,31 @@ class VintedClient:
     def has_auth(self) -> bool:
         return bool(self.cookie_string())
 
+    def has_refresh_token(self) -> bool:
+        cookies = _parse_cookie_header(self.cookie_string())
+        refresh = cookies.get("refresh_token_web", "") or os.getenv(
+            "VINTED_REFRESH_TOKEN_WEB", ""
+        ).strip()
+        return bool(refresh)
+
+    def _write_cookie_map(self, cookies: dict[str, str]) -> None:
+        value = "; ".join(f"{key}={item}" for key, item in cookies.items() if key)
+        self.session_file.parent.mkdir(parents=True, exist_ok=True)
+        self.session_file.write_text(value, encoding="utf-8")
+        self.session_file.chmod(0o600)
+
+    def _persist_refreshed_tokens(
+        self,
+        access_token: str,
+        refresh_token: str | None = None,
+    ) -> None:
+        cookies = _parse_cookie_header(self.cookie_string())
+        cookies["access_token_web"] = access_token
+        if refresh_token:
+            cookies["refresh_token_web"] = refresh_token
+        self._write_cookie_map(cookies)
+        self.reset_session()
+
     def save_cookie(self, value: str) -> None:
         value = value.strip()
         if value.lower().startswith("cookie:"):
@@ -329,9 +354,9 @@ class VintedClient:
         if cookie:
             headers["Cookie"] = cookie
 
-        access = os.getenv("VINTED_ACCESS_TOKEN_WEB", "").strip() or cookies.get(
-            "access_token_web", ""
-        )
+        access = cookies.get("access_token_web", "") or os.getenv(
+            "VINTED_ACCESS_TOKEN_WEB", ""
+        ).strip()
         if access:
             headers["Authorization"] = f"Bearer {access}"
 
@@ -344,7 +369,7 @@ class VintedClient:
         if csrf:
             headers["X-Csrf-Token"] = csrf
 
-        anon = os.getenv("VINTED_ANON_ID", "").strip() or cookies.get("anon_id", "")
+        anon = cookies.get("anon_id", "") or os.getenv("VINTED_ANON_ID", "").strip()
         if anon:
             headers["X-Anon-Id"] = anon
         return headers
@@ -379,6 +404,115 @@ class VintedClient:
                     pass
                 self._public_session = session
             return self._public_session
+
+    def _refresh_auth_session(self) -> bool:
+        cookies = _parse_cookie_header(self.cookie_string())
+        refresh_token = (
+            cookies.get("refresh_token_web", "")
+            or os.getenv("VINTED_REFRESH_TOKEN_WEB", "").strip()
+        )
+        if not refresh_token:
+            return False
+
+        refresh_session = requests.Session(impersonate="chrome")
+        headers = self._headers().copy()
+        headers.pop("Authorization", None)
+        headers["Referer"] = self.base_url + "/session-refresh?ref_url=%2F"
+        headers["Origin"] = self.base_url
+        refresh_session.headers.update(headers)
+
+        access_token = ""
+        rotated_refresh = ""
+
+        try:
+            response = refresh_session.post(
+                self.base_url + "/web/api/auth/refresh",
+                data="",
+                timeout=self.timeout,
+            )
+            if response.ok:
+                access_token = (
+                    response.cookies.get("access_token_web")
+                    or refresh_session.cookies.get("access_token_web")
+                    or ""
+                )
+                rotated_refresh = (
+                    response.cookies.get("refresh_token_web")
+                    or refresh_session.cookies.get("refresh_token_web")
+                    or ""
+                )
+                if not access_token:
+                    try:
+                        body = response.json()
+                    except ValueError:
+                        body = {}
+                    if isinstance(body, dict):
+                        access_token = str(
+                            body.get("access_token")
+                            or body.get("access_token_web")
+                            or ""
+                        )
+                        rotated_refresh = str(
+                            body.get("refresh_token")
+                            or body.get("refresh_token_web")
+                            or rotated_refresh
+                            or ""
+                        )
+        except Exception:
+            response = None
+
+        # Compatibility fallback used by some current Vinted web clients.
+        if not access_token:
+            try:
+                response = refresh_session.post(
+                    self.base_url + "/oauth/token",
+                    data={
+                        "grant_type": "refresh_token",
+                        "client_id": "web",
+                        "refresh_token": refresh_token,
+                    },
+                    timeout=self.timeout,
+                )
+                if response.ok:
+                    try:
+                        body = response.json()
+                    except ValueError:
+                        body = {}
+                    if isinstance(body, dict):
+                        access_token = str(
+                            body.get("access_token")
+                            or body.get("access_token_web")
+                            or ""
+                        )
+                        rotated_refresh = str(
+                            body.get("refresh_token")
+                            or body.get("refresh_token_web")
+                            or ""
+                        )
+                    if not access_token:
+                        access_token = (
+                            response.cookies.get("access_token_web")
+                            or refresh_session.cookies.get("access_token_web")
+                            or ""
+                        )
+                    if not rotated_refresh:
+                        rotated_refresh = (
+                            response.cookies.get("refresh_token_web")
+                            or refresh_session.cookies.get("refresh_token_web")
+                            or ""
+                        )
+            except Exception:
+                return False
+
+        if not access_token:
+            return False
+
+        self._persist_refreshed_tokens(
+            access_token,
+            rotated_refresh or refresh_token,
+        )
+        self._record("/web/api/auth/refresh", 200, True, "session refreshed")
+        return True
 
     def _get_session(self) -> requests.Session:
         with self._lock:
@@ -419,6 +553,7 @@ class VintedClient:
         auth: bool = False,
         allow_404: bool = False,
         anonymous: bool = False,
+        retry_auth: bool = True,
     ) -> Any:
         if auth and not self.has_auth():
             raise VintedAuthRequired(
@@ -439,12 +574,27 @@ class VintedClient:
         if response.status_code in {401, 403}:
             detail = "authentication rejected" if auth else "request blocked"
             self._record(path, response.status_code, False, detail)
-            if response.status_code == 401 and auth:
+
+            if auth and retry_auth and self._refresh_auth_session():
+                return self._request(
+                    path,
+                    params=params,
+                    auth=auth,
+                    allow_404=allow_404,
+                    anonymous=anonymous,
+                    retry_auth=False,
+                )
+
+            if auth:
+                if self.has_refresh_token():
+                    raise VintedAuthRequired(
+                        "Vinted rejected the session and automatic token refresh failed."
+                    )
                 raise VintedAuthRequired(
-                    "Vinted rejected the saved session. Replace the Vinted cookie."
+                    "Vinted rejected the saved session. Add refresh_token_web so the dashboard can renew it automatically."
                 )
             raise VintedBlocked(
-                "Vinted returned 403. The session may be stale or Cloudflare may be blocking this request."
+                "Vinted returned 403. Cloudflare or DataDome may be blocking this request."
             )
         if response.status_code == 429:
             self._record(path, 429, False, "rate limited")
@@ -492,7 +642,11 @@ class VintedClient:
         return []
 
     def get_profile(self) -> dict[str, Any]:
-        payload = self._request(f"/api/v2/users/{self.user_id}", params={"localize": "false"})
+        payload = self._request(
+            f"/api/v2/users/{self.user_id}",
+            params={"localize": "false"},
+            anonymous=True,
+        )
         raw = payload.get("user", payload) if isinstance(payload, dict) else {}
         return {
             "id": _id(raw) or self.user_id,
@@ -1077,6 +1231,7 @@ class VintedClient:
             "base_url": self.base_url,
             "user_id": self.user_id,
             "auth_configured": self.has_auth(),
+            "refresh_token_available": self.has_refresh_token(),
             "orders_source": self._orders_source,
             "notifications_source": self._notifications_source,
             "listings_source": self._listings_source,
