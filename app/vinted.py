@@ -498,93 +498,145 @@ class VintedClient:
             "username": _username(raw),
         }
 
-    def get_listings(self) -> list[dict[str, Any]]:
+    def _normalize_listing(
+        self,
+        raw: dict[str, Any],
+        *,
+        forced_status: str | None = None,
+    ) -> dict[str, Any] | None:
+        owner = _first(raw, "user", "seller", "owner")
+        owner_id = _id(owner)
+        if owner_id and owner_id != self.user_id:
+            return None
+
+        item_id = str(_first(raw, "id", "item_id") or "")
+        price, currency = _money(
+            _first(raw, "price", "total_item_price", "item_price")
+        )
+        status = _listing_status(raw)
+        if forced_status and status == "active":
+            status = "sold" if forced_status == "closed" else forced_status
+
+        return {
+            "id": item_id or None,
+            "title": str(_first(raw, "title", "name") or "Untitled"),
+            "price_cents": price,
+            "currency": currency,
+            "status": status,
+            "isbn": _first(raw, "isbn"),
+            "vinted_url": _item_url(self.base_url, raw),
+            "image_url": _photo_url(raw),
+            "listed_at": _timestamp(
+                _first(raw, "created_at_ts", "created_at", "upload_date")
+            ),
+            "favourites": _first(
+                raw, "favourite_count", "favorites_count", "favourites_count"
+            ),
+            "views": _first(raw, "view_count", "views_count"),
+        }
+
+    def _append_listing_rows(
+        self,
+        rows: list[dict[str, Any]],
+        seen: set[str],
+        items: list[dict[str, Any]],
+        *,
+        forced_status: str | None = None,
+    ) -> None:
+        for raw in items:
+            row = self._normalize_listing(raw, forced_status=forced_status)
+            if row is None:
+                continue
+            item_id = str(row.get("id") or "")
+            if item_id and item_id in seen:
+                continue
+            if item_id:
+                seen.add(item_id)
+            rows.append(row)
+
+    def _get_owner_listings(self) -> list[dict[str, Any]] | None:
+        if not self.has_auth():
+            return None
+
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
+        owner_path = f"/api/v2/users/{self.user_id}/items"
+        endpoint_supported = False
+
+        # Current authenticated clients use this endpoint with a status filter.
+        # Query each lifecycle view because Vinted does not include sold/draft
+        # inventory in the public wardrobe feed.
+        for status in ("active", "sold", "reserved", "draft", "closed", "hidden"):
+            for page in range(1, self.max_pages + 1):
+                try:
+                    payload = self._request(
+                        owner_path,
+                        params={
+                            "status": status,
+                            "order": "newest_first",
+                            "page": page,
+                            "per_page": 96,
+                        },
+                        auth=True,
+                        allow_404=True,
+                    )
+                except VintedError:
+                    # Some markets reject individual status values (notably
+                    # hidden). Continue with the supported views.
+                    break
+
+                if payload is None:
+                    if status == "active" and page == 1:
+                        break
+                    break
+
+                endpoint_supported = True
+                items = self._list_from(payload, "items", "user_items")
+                if not items:
+                    break
+
+                self._append_listing_rows(
+                    rows,
+                    seen,
+                    items,
+                    forced_status=status,
+                )
+
+                pagination = payload.get("pagination") if isinstance(payload, dict) else None
+                if isinstance(pagination, dict):
+                    total_pages = pagination.get("total_pages")
+                    if isinstance(total_pages, int) and page >= total_pages:
+                        break
+                    if pagination.get("next_page") is None and len(items) < 96:
+                        break
+                elif len(items) < 96:
+                    break
+
+        # The own-wardrobe response can contain lifecycle flags that are not
+        # represented by the status-filter API, especially hidden items.
         wardrobe_path = f"/api/v2/wardrobe/{self.user_id}/items"
-
         for page in range(1, self.max_pages + 1):
-            params = {
-                "order": "newest_first",
-                "page": page,
-                "per_page": 96,
-            }
-
-            # Vinted's current profile grid uses the wardrobe endpoint. Keep it
-            # anonymous because Vinted can apply stricter anti-bot checks to this
-            # public endpoint when a logged-in cookie is attached.
             try:
                 payload = self._request(
                     wardrobe_path,
-                    params=params,
-                    allow_404=True,
-                    anonymous=True,
-                )
-            except VintedBlocked:
-                # Some installations behave the other way around, so retry once
-                # using the saved browser session before falling back.
-                payload = self._request(
-                    wardrobe_path,
-                    params=params,
+                    params={
+                        "order": "newest_first",
+                        "page": page,
+                        "per_page": 96,
+                    },
+                    auth=True,
                     allow_404=True,
                 )
+            except VintedError:
+                break
 
             if payload is None:
-                # Compatibility fallback for older Vinted markets.
-                legacy_path = f"/api/v2/users/{self.user_id}/items"
-                payload = self._request(
-                    legacy_path,
-                    params=params,
-                    allow_404=True,
-                )
-                if payload is None:
-                    raise VintedError(
-                        "Vinted does not expose a working wardrobe endpoint for this market"
-                    )
-                self._listings_source = legacy_path
-            else:
-                self._listings_source = wardrobe_path
-
+                break
+            endpoint_supported = True
             items = self._list_from(payload, "items", "user_items")
             if not items:
                 break
-
-            for raw in items:
-                owner = _first(raw, "user", "seller", "owner")
-                owner_id = _id(owner)
-                if owner_id and owner_id != self.user_id:
-                    # Safety belt: never show a general-catalog item if Vinted
-                    # changes how it interprets this endpoint.
-                    continue
-
-                item_id = str(_first(raw, "id", "item_id") or "")
-                if item_id and item_id in seen:
-                    continue
-                if item_id:
-                    seen.add(item_id)
-
-                price, currency = _money(
-                    _first(raw, "price", "total_item_price", "item_price")
-                )
-                rows.append(
-                    {
-                        "id": item_id or None,
-                        "title": str(_first(raw, "title", "name") or "Untitled"),
-                        "price_cents": price,
-                        "currency": currency,
-                        "status": _listing_status(raw),
-                        "isbn": _first(raw, "isbn"),
-                        "vinted_url": _item_url(self.base_url, raw),
-                        "image_url": _photo_url(raw),
-                        "listed_at": _timestamp(
-                            _first(raw, "created_at_ts", "created_at", "upload_date")
-                        ),
-                        "favourites": _first(
-                            raw, "favourite_count", "favorites_count", "favourites_count"
-                        ),
-                        "views": _first(raw, "view_count", "views_count"),
-                    }
-                )
+            self._append_listing_rows(rows, seen, items)
 
             pagination = payload.get("pagination") if isinstance(payload, dict) else None
             if isinstance(pagination, dict):
@@ -596,7 +648,55 @@ class VintedClient:
             elif len(items) < 96:
                 break
 
+        if endpoint_supported:
+            self._listings_source = "authenticated owner inventory"
+            return rows
+        return None
+
+    def _get_public_listings(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        wardrobe_path = f"/api/v2/wardrobe/{self.user_id}/items"
+
+        for page in range(1, self.max_pages + 1):
+            payload = self._request(
+                wardrobe_path,
+                params={
+                    "order": "newest_first",
+                    "page": page,
+                    "per_page": 96,
+                },
+                allow_404=True,
+                anonymous=True,
+            )
+            if payload is None:
+                raise VintedError(
+                    "Vinted does not expose a working wardrobe endpoint for this market"
+                )
+
+            items = self._list_from(payload, "items", "user_items")
+            if not items:
+                break
+            self._append_listing_rows(rows, seen, items, forced_status="active")
+
+            pagination = payload.get("pagination") if isinstance(payload, dict) else None
+            if isinstance(pagination, dict):
+                total_pages = pagination.get("total_pages")
+                if isinstance(total_pages, int) and page >= total_pages:
+                    break
+                if pagination.get("next_page") is None and len(items) < 96:
+                    break
+            elif len(items) < 96:
+                break
+
+        self._listings_source = wardrobe_path
         return rows
+
+    def get_listings(self) -> list[dict[str, Any]]:
+        owner_rows = self._get_owner_listings()
+        if owner_rows is not None:
+            return owner_rows
+        return self._get_public_listings()
 
     def get_notifications(self) -> list[dict[str, Any]]:
         candidates = []
