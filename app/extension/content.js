@@ -13,7 +13,7 @@ function notificationRow(raw){let body=first(raw,"body","text","message","descri
 async function fetchJson(path,params={}){const url=new URL(path,location.origin);for(const[k,v]of Object.entries(params))url.searchParams.set(k,String(v));const r=await fetch(url,{headers:{"Accept":"application/json, text/plain, */*","X-Platform":"web"}});if(r.status===404)return null;if(!r.ok)throw new Error(`Vinted returned HTTP ${r.status} for ${url.pathname}`);return await r.json()}
 async function paged(path,keys,params={},perPage=96){const rows=[];for(let page=1;page<=10;page++){const payload=await fetchJson(path,{...params,page,per_page:perPage});if(payload===null)return null;const chunk=listFrom(payload,keys);rows.push(...chunk);if(!chunk.length)break;const p=payload?.pagination;if(p&&typeof p==="object"){if(Number.isInteger(p.total_pages)&&page>=p.total_pages)break;if(p.next_page==null&&chunk.length<perPage)break}else if(chunk.length<perPage)break}return rows}
 
-async function collectVintedData(){
+async function collectVintedData(researchJobs=[]){
   const currentPayload=await fetchJson("/api/v2/users/current");
   const currentRaw=currentPayload?.user||currentPayload||{};
   const userId=idOf(currentRaw);
@@ -31,7 +31,28 @@ async function collectVintedData(){
   const orders=[];
   for(const[type,direction]of[["sold","sell"],["purchased","buy"]]){try{const rows=await paged("/api/v2/my_orders",["my_orders","orders","items"],{type,status:"all"},100);for(const raw of rows||[])orders.push(orderRow(raw,direction))}catch{}}
 
-  return{collected_at:Date.now()/1000,current_user:{id:userId,username:nameOf(currentRaw)},listings:[...listings.values()],notifications,orders};
+  const market_results=[];
+  for(const job of (Array.isArray(researchJobs)?researchJobs.slice(0,3):[])){
+    const jobId=Number(job?.id||0);
+    const query=String(job?.query||"").trim();
+    if(!jobId||!query)continue;
+    try{
+      const payload=await fetchJson("/api/v2/catalog/items",{search_text:query,order:"relevance",page:1,per_page:36});
+      const results=[];
+      for(const raw of listFrom(payload,["items"])){
+        const sellerId=idOf(first(raw,"user","seller","owner"));
+        if(sellerId&&sellerId===userId)continue;
+        const row=listingRow(raw,null);
+        if(!row.id||row.price_cents==null)continue;
+        results.push({id:row.id,title:row.title,price_cents:row.price_cents,currency:row.currency,url:row.vinted_url});
+      }
+      market_results.push({job_id:jobId,results});
+    }catch(error){
+      market_results.push({job_id:jobId,error:error instanceof Error?error.message:String(error),results:[]});
+    }
+  }
+
+  return{collected_at:Date.now()/1000,current_user:{id:userId,username:nameOf(currentRaw)},listings:[...listings.values()],notifications,orders,market_results};
 }
 
-chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{if(message?.type!=="collect-vinted-data")return;collectVintedData().then(snapshot=>sendResponse({ok:true,snapshot})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));return true});
+chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{if(message?.type!=="collect-vinted-data")return;collectVintedData(message.research_jobs||[]).then(snapshot=>sendResponse({ok:true,snapshot})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));return true});
