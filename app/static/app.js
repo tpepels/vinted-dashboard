@@ -1,4 +1,4 @@
-const state={data:null};
+const state={data:null,intelligence:null};
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -64,6 +64,28 @@ function linkedTitle(row){
   return row.vinted_url
     ? `<a href="${esc(row.vinted_url)}" target="_blank" rel="noreferrer">${esc(row.title)}</a>`
     : esc(row.title);
+}
+function signalMap(){
+  return new Map((state.intelligence?.listing_signals||[]).map(row=>[String(row.id),row]));
+}
+function marketByListing(){
+  const map=new Map();
+  for(const row of state.intelligence?.market?.recent||[]){
+    const key=String(row.listing_id||"");
+    if(key&&!map.has(key))map.set(key,row);
+  }
+  return map;
+}
+function marketCell(row){
+  const signal=signalMap().get(String(row.id));
+  const market=signal?.market||marketByListing().get(String(row.id));
+  if(market?.median_cents!==null&&market?.median_cents!==undefined){
+    return `<div class="market-cell"><strong>${money(market.median_cents,market.currency||row.currency||"EUR")}</strong><span>median · ${market.sample_count||0} comps</span><button class="link-button research-btn" data-id="${esc(row.id)}">Refresh</button></div>`;
+  }
+  if(market?.status==="queued"){
+    return `<span class="market-pending">Queued</span>`;
+  }
+  return `<button class="link-button research-btn" data-id="${esc(row.id)}">Research</button>`;
 }
 
 function isFavoriteNotification(n){
@@ -351,7 +373,8 @@ function renderListings(){
   const showLikes=filtered.some(x=>x.favourites!==null&&x.favourites!==undefined);
   const showViews=filtered.some(x=>x.views!==null&&x.views!==undefined);
   const showDate=filtered.some(x=>timeValue(x.listed_at)>0);
-  const extraHeaders=`${showDate?"<th>Listed</th><th>Age</th>":""}${showLikes?"<th>Favorites</th>":""}${showViews?"<th>Views</th>":""}`;
+  const signals=signalMap();
+  const extraHeaders=`${showDate?"<th>Listed</th><th>Age</th>":""}${showLikes?"<th>Favorites</th>":""}${showViews?"<th>Views</th>":""}<th>Market</th>`;
 
   $("#listings-table").innerHTML=filtered.length?`
     <table><thead><tr><th>Listing</th><th>Status</th>${extraHeaders}<th class="money">Price</th></tr></thead><tbody>
@@ -363,8 +386,12 @@ function renderListings(){
         </td>
         <td>${badge(x.status)}</td>
         ${showDate?`<td>${dateOnly(x.listed_at)}</td><td>${age(x.listed_at)}</td>`:""}
-        ${showLikes?`<td>${x.favourites??"—"}</td>`:""}
+        ${showLikes?(()=>{
+          const delta=signals.get(String(x.id))?.favourites_7d;
+          return `<td>${x.favourites??"—"}${Number.isFinite(delta)&&delta!==0?` <span class="delta ${delta>0?"up":"down"}">${delta>0?"+":""}${delta}/7d</span>`:""}</td>`;
+        })():""}
         ${showViews?`<td>${x.views??"—"}</td>`:""}
+        <td>${marketCell(x)}</td>
         <td class="money">${money(x.price_cents,x.currency)}</td>
       </tr>`;
     }).join("")}</tbody></table>`:empty("No matching Vinted listings.");
@@ -403,15 +430,100 @@ function renderNotifications(){
       : "Connect your Vinted session to load notifications.");
 }
 
+function renderInsights(){
+  const d=state.intelligence||{};
+  const today=d.today||{};
+  const stale=d.stale||{};
+  const sales=d.sales||{};
+  const favorites=d.favorites||{};
+  const market=d.market||{};
+
+  $("#insight-actions").textContent=String(today.high_priority||0);
+  $("#insight-stale90").textContent=String(stale.count_90d||0);
+  $("#insight-favorites7").textContent=String(favorites.events_7d||0);
+  $("#insight-net").textContent=money(sales.net_cashflow_cents||0,"EUR");
+  $("#nav-insights").textContent=today.high_priority?String(today.high_priority):"";
+  $("#today-action-count").textContent=`${today.count||0} suggestions`;
+
+  const actions=today.actions||[];
+  $("#today-actions").innerHTML=actions.length?actions.map(a=>`
+    <div class="action-row priority-${a.priority>=90?"high":a.priority>=80?"medium":"low"}">
+      <div class="action-priority">${a.priority>=90?"Now":a.priority>=80?"Review":"Watch"}</div>
+      <div class="action-copy">
+        <div class="row-title">${a.vinted_url?`<a href="${esc(a.vinted_url)}" target="_blank" rel="noreferrer">${esc(a.title)}</a>`:esc(a.title)}</div>
+        <div class="action-name">${esc(a.action)}</div>
+        <div class="meta">${esc(a.reason)} · ${a.favourites||0} favorites${Number.isFinite(a.favourites_7d)?` · ${a.favourites_7d>=0?"+":""}${a.favourites_7d}/7d`:""}</div>
+      </div>
+      <div class="action-buttons">
+        ${a.action==="Research market"||!a.market?`<button class="btn secondary research-btn" data-id="${esc(a.listing_id)}">Research</button>`:""}
+        ${a.market?.median_cents!=null?`<span class="market-price">${money(a.market.median_cents,a.market.currency||"EUR")} median</span>`:""}
+      </div>
+    </div>`).join(""):empty("No intelligence actions yet. History becomes more useful after a few Chrome syncs.");
+
+  $("#analytics-sales").textContent=money(sales.sales_cents||0,"EUR");
+  $("#analytics-average").textContent=money(sales.average_sale_cents,"EUR");
+  $("#analytics-median").textContent=money(sales.median_sale_cents,"EUR");
+  $("#analytics-days-to-sell").textContent=sales.median_days_to_sell==null?"Building history":`${sales.median_days_to_sell} days`;
+
+  const monthly=sales.monthly||[];
+  const max=Math.max(1,...monthly.map(x=>Number(x.cents)||0));
+  $("#sales-monthly-chart").innerHTML=monthly.length?monthly.map(x=>{
+    const height=Math.max(5,Math.round((Number(x.cents)||0)/max*100));
+    const label=new Date(`${x.month}-01T00:00:00Z`).toLocaleDateString(undefined,{month:"short"});
+    return `<div class="bar-column" title="${esc(label)}: ${money(x.cents,"EUR")}"><div class="bar-value">${money(x.cents,"EUR")}</div><div class="bar-track"><div class="bar-fill" style="height:${height}%"></div></div><div class="bar-label">${esc(label)}</div></div>`;
+  }).join(""):empty("Sales history will appear after Chrome sync records orders.");
+
+  $("#favorites-7d").textContent=String(favorites.events_7d||0);
+  $("#favorites-30d").textContent=String(favorites.events_30d||0);
+  const top=favorites.top_30d||[];
+  $("#favorite-top-list").innerHTML=top.length?top.map(x=>`
+    <div class="mini-row"><span>${esc(x.title||"Listing")}</span><strong>${x.events}</strong></div>
+  `).join(""):empty("No favorite events recorded yet.");
+
+  const staleRows=stale.listings||[];
+  $("#stale-table").innerHTML=staleRows.length?`
+    <table><thead><tr><th>Listing</th><th>Age</th><th>Favorites</th><th>7d change</th><th>Market</th><th class="money">Price</th></tr></thead><tbody>
+      ${staleRows.map(x=>`<tr>
+        <td class="title-cell">${linkedTitle(x)}</td>
+        <td>${x.age_days} days</td>
+        <td>${x.favourites??0}</td>
+        <td>${Number.isFinite(x.favourites_7d)?`${x.favourites_7d>=0?"+":""}${x.favourites_7d}`:"—"}</td>
+        <td>${marketCell(x)}</td>
+        <td class="money">${money(x.price_cents,x.currency||"EUR")}</td>
+      </tr>`).join("")}
+    </tbody></table>`:empty("Nothing is 30+ days old yet, or listing dates are unavailable.");
+
+  $("#market-queue-count").textContent=market.queued?`${market.queued} queued`:"";
+  const recent=market.recent||[];
+  $("#market-table").innerHTML=recent.length?`
+    <table><thead><tr><th>Search</th><th>Status</th><th>Comparables</th><th>Range</th><th>Median</th><th>Checked</th></tr></thead><tbody>
+      ${recent.map(x=>`<tr>
+        <td class="title-cell">${esc(x.query)}</td>
+        <td>${badge(x.status)}</td>
+        <td>${x.sample_count??"—"}</td>
+        <td>${x.min_cents==null?"—":`${money(x.min_cents,x.currency||"EUR")} - ${money(x.max_cents,x.currency||"EUR")}`}</td>
+        <td><strong>${money(x.median_cents,x.currency||"EUR")}</strong></td>
+        <td>${x.completed_at?when(Number(x.completed_at)*1000):x.requested_at?when(Number(x.requested_at)*1000):"—"}</td>
+      </tr>`).join("")}
+    </tbody></table>`:empty("No market research yet. Use Research on a listing.");
+}
+
+
 function render(){
   const profile=state.data?.profile||{};
   if(profile.profile_url)$("#profile-link").href=profile.profile_url;
-  renderErrors();renderSession();renderSummary();renderListings();renderOrders();renderNotifications();
+  renderErrors();renderSession();renderSummary();renderInsights();renderListings();renderOrders();renderNotifications();
 }
 
 async function load(refresh=false){
   try{
-    state.data=await api(refresh?"/api/dashboard?refresh=true":"/api/dashboard");
+    const dashboardPath=refresh?"/api/dashboard?refresh=true":"/api/dashboard";
+    const [dashboard,intelligence]=await Promise.all([
+      api(dashboardPath),
+      api("/api/intelligence")
+    ]);
+    state.data=dashboard;
+    state.intelligence=intelligence;
     render();
   }catch(err){flash(err.message,true)}
 }
@@ -432,6 +544,31 @@ $("#listing-stat-duplicates").addEventListener("click",()=>{
   $("#listing-duplicate").value="duplicates";
   renderListings();
 });
+document.addEventListener("click",async event=>{
+  const button=event.target.closest(".research-btn");
+  if(!button)return;
+  const id=String(button.dataset.id||"");
+  const listing=(state.data?.listings||[]).find(row=>String(row.id)===id);
+  if(!listing)return;
+  button.disabled=true;
+  const oldText=button.textContent;
+  button.textContent="Queued…";
+  try{
+    await api("/api/market-research/request",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({listing_id:id,title:listing.title})
+    });
+    state.intelligence=await api("/api/intelligence");
+    renderInsights();
+    renderListings();
+    flash("Market research queued. Chrome sync will pick it up automatically.");
+  }catch(err){
+    flash(err.message,true);
+  }finally{
+    if(button.isConnected){button.disabled=false;button.textContent=oldText}
+  }
+});
 $("#notification-filter").addEventListener("change",renderNotifications);
 $("#sales-scope").addEventListener("change",renderOrders);
 $("#purchases-scope").addEventListener("change",renderOrders);
@@ -440,8 +577,9 @@ $("#refresh-btn").addEventListener("click",async()=>{
   const btn=$("#refresh-btn");btn.disabled=true;btn.textContent="Refreshing…";
   try{
     state.data=await api("/api/refresh",{method:"POST"});
+    state.intelligence=await api("/api/intelligence");
     render();
-    flash("Refreshed directly from Vinted.");
+    flash(state.data?.browser_sync?.active?"Refreshed from the latest Chrome snapshot.":"Refreshed directly from Vinted.");
   }catch(err){flash(err.message,true)}
   finally{btn.disabled=false;btn.textContent="Refresh Vinted"}
 });
