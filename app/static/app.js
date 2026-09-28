@@ -75,9 +75,15 @@ function orderTable(rows){
     ${rows.map(o=>`<tr><td class="title-cell">${esc(o.title)}</td><td>${badge(o.status)}</td><td>${esc(o.counterparty||"—")}</td><td>${when(o.updated_at)}</td><td class="money">${money(o.total_cents,o.currency)}</td></tr>`).join("")}
   </tbody></table>`;
 }
+function filterOrders(rows,scope){
+  const closed=new Set(["completed","cancelled"]);
+  if(scope==="closed")return rows.filter(o=>closed.has(o.status));
+  if(scope==="open")return rows.filter(o=>!closed.has(o.status));
+  return rows;
+}
 function renderOrders(){
-  $("#sales-table").innerHTML=orderTable(state.sales);
-  $("#purchases-table").innerHTML=orderTable(state.purchases);
+  $("#sales-table").innerHTML=orderTable(filterOrders(state.sales,$("#sales-scope").value));
+  $("#purchases-table").innerHTML=orderTable(filterOrders(state.purchases,$("#purchases-scope").value));
 }
 function renderNotifications(){
   $("#notifications-list").innerHTML=state.notifications.length?state.notifications.map(n=>`
@@ -111,6 +117,8 @@ $$(".nav-item").forEach(btn=>btn.addEventListener("click",()=>{
 }));
 $("#listing-search").addEventListener("input",renderListings);
 $("#listing-status").addEventListener("change",renderListings);
+$("#sales-scope").addEventListener("change",renderOrders);
+$("#purchases-scope").addEventListener("change",renderOrders);
 
 $("#import-btn").addEventListener("click",()=>$("#csv-file").click());
 $("#csv-file").addEventListener("change",async e=>{
