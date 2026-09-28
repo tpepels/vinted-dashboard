@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-import requests
+from curl_cffi import requests
 
 
 class VintedError(RuntimeError):
