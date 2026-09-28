@@ -38,7 +38,7 @@
           <h1 id="page-title">Overview</h1>
         </div>
         <div class="header-actions">
-          <button class="btn secondary" id="session-btn">Vinted session</button>
+          <button class="btn secondary" id="session-btn">Chrome sync / session</button>
           <button class="btn primary" id="refresh-btn">Refresh Vinted</button>
         </div>
       </header>
@@ -173,20 +173,37 @@
   <dialog id="session-dialog">
     <form id="session-form">
       <div class="dialog-head">
-        <h2>Vinted session</h2>
+        <h2>Vinted connection</h2>
         <button type="button" class="icon-btn" id="session-close">×</button>
       </div>
-      <p class="dialog-copy">Paste Vinted's signed-in cookies. For automatic renewal, the saved value must include both <code>access_token_web</code> and <code>refresh_token_web</code>. If the request Cookie header does not contain the refresh token, copy <code>refresh_token_web</code> from DevTools → Application → Cookies → <code>https://www.vinted.pt</code> and append it as <code>; refresh_token_web=...</code>. The value is stored only on this server.</p>
-      <label>Cookie header
-        <textarea id="session-cookie" rows="8" placeholder="access_token_web=...; refresh_token_web=...; ..."></textarea>
-      </label>
-      <div class="session-status" id="dialog-session-status"></div>
-      <div class="dialog-actions split">
-        <button type="button" class="btn danger" id="session-clear">Clear saved session</button>
-        <div>
-          <button type="button" class="btn secondary" id="session-cancel">Cancel</button>
+
+      <div class="extension-install">
+        <p class="eyebrow">RECOMMENDED</p>
+        <h3>Chrome sync extension</h3>
+        <p class="dialog-copy">Use the Vinted session already signed in on this laptop. The extension sends only dashboard data to <code>media-server:5050</code> - it does not export Vinted cookie values.</p>
+        <a class="btn primary extension-download" href="/downloads/vinted-session-sync.zip">Download Chrome extension ZIP</a>
+        <ol class="install-steps">
+          <li>Extract the ZIP somewhere permanent.</li>
+          <li>Open <code>chrome://extensions</code>, enable Developer mode, then choose <strong>Load unpacked</strong>.</li>
+          <li>Select the extracted folder and click <strong>Sync now</strong> in the extension.</li>
+        </ol>
+      </div>
+
+      <details class="manual-session">
+        <summary>Manual cookie session fallback</summary>
+        <p class="dialog-copy">If you do not want to use Chrome sync, paste Vinted's signed-in cookies here. For automatic renewal, include both <code>access_token_web</code> and <code>refresh_token_web</code>.</p>
+        <label>Cookie header
+          <textarea id="session-cookie" rows="7" placeholder="access_token_web=...; refresh_token_web=...; ..."></textarea>
+        </label>
+        <div class="manual-session-actions">
+          <button type="button" class="btn danger" id="session-clear">Clear saved session</button>
           <button type="submit" class="btn primary">Save & test</button>
         </div>
+      </details>
+
+      <div class="session-status" id="dialog-session-status"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn secondary" id="session-cancel">Close</button>
       </div>
     </form>
   </dialog>
