@@ -653,6 +653,7 @@ def intelligence_payload(current_listings: list[dict[str, Any]]) -> dict[str, An
 
         return {
             "generated_at": now,
+            "listing_signals": enriched,
             "today": {
                 "actions": actions[:30],
                 "count": len(actions),
