@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from html import unescape
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -34,6 +35,25 @@ class EndpointResult:
     status: int | None
     ok: bool
     detail: str
+
+
+def _parse_cookie_header(value: str) -> dict[str, str]:
+    cookies: dict[str, str] = {}
+    for part in (value or "").split(";"):
+        key, sep, item = part.strip().partition("=")
+        if sep and key:
+            cookies[key.strip()] = item.strip()
+    return cookies
+
+
+def _extract_csrf_token(html: str) -> str | None:
+    match = re.search(
+        r'<meta(?=[^>]*\bname=["\']csrf[-_]?token["\'])'
+        r'(?=[^>]*\bcontent=["\']([^"\']+))[^>]*>',
+        html or "",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return unescape(match.group(1)) if match else None
 
 
 def _first(mapping: dict[str, Any] | None, *keys: str) -> Any:
@@ -169,6 +189,7 @@ class VintedClient:
         self._session: requests.Session | None = None
         self._diagnostics: list[EndpointResult] = []
         self._orders_source: str | None = None
+        self._notifications_source: str | None = None
 
     @property
     def host(self) -> str:
@@ -215,25 +236,43 @@ class VintedClient:
                 self._session.close()
             self._session = None
             self._orders_source = None
+            self._notifications_source = None
 
     def _headers(self) -> dict[str, str]:
         user_agent = os.getenv("VINTED_USER_AGENT", "").strip()
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-GB,en;q=0.9,pt-PT;q=0.8,pt;q=0.7",
+            "Origin": self.base_url,
             "Referer": self.base_url + "/",
+            "X-Platform": "web",
+            "X-Money-Object": "true",
             "X-Requested-With": "XMLHttpRequest",
         }
         if user_agent:
             headers["User-Agent"] = user_agent
+
         cookie = self.cookie_string()
+        cookies = _parse_cookie_header(cookie)
         if cookie:
             headers["Cookie"] = cookie
-        anon = os.getenv("VINTED_ANON_ID", "").strip()
-        if not anon and cookie:
-            match = re.search(r"(?:^|;\\s*)anon_id=([^;]+)", cookie)
-            if match:
-                anon = match.group(1)
+
+        access = os.getenv("VINTED_ACCESS_TOKEN_WEB", "").strip() or cookies.get(
+            "access_token_web", ""
+        )
+        if access:
+            headers["Authorization"] = f"Bearer {access}"
+
+        csrf = (
+            os.getenv("VINTED_CSRF_TOKEN", "").strip()
+            or cookies.get("x-csrf-token", "")
+            or cookies.get("csrf_token", "")
+            or cookies.get("csrf", "")
+        )
+        if csrf:
+            headers["X-Csrf-Token"] = csrf
+
+        anon = os.getenv("VINTED_ANON_ID", "").strip() or cookies.get("anon_id", "")
         if anon:
             headers["X-Anon-Id"] = anon
         return headers
@@ -243,6 +282,29 @@ class VintedClient:
             if self._session is None:
                 session = requests.Session(impersonate="chrome")
                 session.headers.update(self._headers())
+
+                # A normal Vinted page load can return the request identity headers
+                # used by its own frontend. Capture them when available.
+                try:
+                    response = session.get(self.base_url + "/", timeout=self.timeout)
+                    csrf = response.headers.get("X-Csrf-Token") or _extract_csrf_token(
+                        response.text
+                    )
+                    anon = response.headers.get("X-Anon-Id") or response.cookies.get(
+                        "anon_id"
+                    )
+                    access = response.cookies.get("access_token_web")
+                    if csrf and "X-Csrf-Token" not in session.headers:
+                        session.headers["X-Csrf-Token"] = csrf
+                    if anon and "X-Anon-Id" not in session.headers:
+                        session.headers["X-Anon-Id"] = anon
+                    if access and "Authorization" not in session.headers:
+                        session.headers["Authorization"] = f"Bearer {access}"
+                except Exception:
+                    # The API calls below still have a chance to succeed with the
+                    # browser cookie supplied by the user.
+                    pass
+
                 self._session = session
             return self._session
 
@@ -405,19 +467,42 @@ class VintedClient:
         return rows
 
     def get_notifications(self) -> list[dict[str, Any]]:
-        payload = self._request(
-            "/web/api/notifications/notifications",
-            params={"page": 1, "per_page": 100},
-            auth=True,
+        candidates = []
+        if self._notifications_source:
+            candidates.append(self._notifications_source)
+        candidates.extend(
+            [
+                "/api/v2/notifications",
+                "/web/api/notifications/notifications",
+            ]
         )
-        raw_rows = self._list_from(payload, "notifications", "items", "entries")
+
+        payload = None
+        raw_rows: list[dict[str, Any]] = []
+        tried: set[str] = set()
+        for path in candidates:
+            if path in tried:
+                continue
+            tried.add(path)
+            payload = self._request(
+                path,
+                params={"page": 1, "per_page": 100},
+                auth=True,
+                allow_404=True,
+            )
+            if payload is None:
+                continue
+            raw_rows = self._list_from(payload, "notifications", "items", "entries")
+            self._notifications_source = path
+            break
+
         rows = []
         for raw in raw_rows:
             title = _first(raw, "title", "subject", "heading")
             body = _first(raw, "body", "text", "message", "description")
             if isinstance(body, dict):
                 body = _first(body, "text", "value")
-            link = _first(raw, "url", "link", "deep_link", "target_url")
+            link = _first(raw, "link", "url", "deep_link", "target_url")
             if link and not str(link).startswith("http"):
                 link = urljoin(self.base_url, str(link))
             is_read = _first(raw, "is_read", "read", "seen")
@@ -425,17 +510,96 @@ class VintedClient:
             rows.append(
                 {
                     "id": str(_first(raw, "id", "notification_id") or ""),
-                    "kind": str(_first(raw, "type", "notification_type", "event_type") or "notification"),
+                    "kind": str(
+                        _first(raw, "entry_type", "type", "notification_type", "event_type")
+                        or "notification"
+                    ),
                     "title": str(title or body or "Vinted notification"),
                     "body": str(body or ""),
                     "occurred_at": _timestamp(
-                        _first(raw, "created_at", "created_at_ts", "timestamp", "updated_at")
+                        _first(raw, "updated_at", "created_at", "created_at_ts", "timestamp")
                     ),
                     "read": bool(is_read or read_at),
                     "url": str(link) if link else None,
                 }
             )
         return rows
+
+    def _normalize_my_order(
+        self, raw: dict[str, Any], direction: str
+    ) -> dict[str, Any]:
+        price, currency = _money(
+            _first(raw, "price", "total_price", "total", "amount")
+        )
+        lifecycle_status = str(
+            _first(raw, "transaction_user_status", "state") or ""
+        ).lower().strip().replace(" ", "_").replace("-", "_")
+        status = str(
+            _first(raw, "status") or lifecycle_status or "open"
+        ).lower().strip().replace(" ", "_").replace("-", "_")
+
+        conversation_id = _first(raw, "conversation_id", "thread_id")
+        order_id = _first(raw, "id", "transaction_id", "order_id") or conversation_id
+        url = _first(raw, "url", "web_url", "link")
+        if not url and conversation_id:
+            url = f"{self.base_url}/inbox/{conversation_id}"
+        elif url and not str(url).startswith("http"):
+            url = urljoin(self.base_url, str(url))
+
+        other_user = _first(raw, "opposite_user", "other_user", "user")
+        counterparty = _username(other_user)
+
+        return {
+            "id": str(order_id or ""),
+            "thread_id": str(conversation_id or ""),
+            "direction": direction,
+            "title": str(_first(raw, "title", "item_title", "name") or "Vinted order"),
+            "counterparty": counterparty,
+            "total_cents": price,
+            "currency": currency,
+            "status": status,
+            "is_closed": is_closed_status(lifecycle_status or status),
+            "tracking_code": _first(
+                raw, "tracking_code", "tracking_number", "shipment_tracking_code"
+            ),
+            "updated_at": _timestamp(
+                _first(raw, "updated_at", "date", "created_at", "created_at_ts")
+            ),
+            "vinted_url": str(url) if url else None,
+        }
+
+    def _get_my_orders(
+        self, order_type: str, direction: str
+    ) -> tuple[list[dict[str, Any]], bool]:
+        rows: list[dict[str, Any]] = []
+        for page in range(1, self.max_pages + 1):
+            payload = self._request(
+                "/api/v2/my_orders",
+                params={
+                    "type": order_type,
+                    "status": "all",
+                    "page": page,
+                    "per_page": 100,
+                },
+                auth=True,
+                allow_404=True,
+            )
+            if payload is None:
+                return [], False
+
+            raw_rows = self._list_from(payload, "my_orders", "orders", "items")
+            rows.extend(self._normalize_my_order(raw, direction) for raw in raw_rows)
+
+            pagination = payload.get("pagination") if isinstance(payload, dict) else None
+            if isinstance(pagination, dict):
+                total_pages = pagination.get("total_pages")
+                if isinstance(total_pages, int) and page >= total_pages:
+                    break
+                if pagination.get("next_page") is None and len(raw_rows) < 100:
+                    break
+            elif len(raw_rows) < 100:
+                break
+        return rows, True
 
     def _get_threads(self) -> tuple[list[dict[str, Any]], str]:
         candidates = []
@@ -602,6 +766,28 @@ class VintedClient:
         }
 
     def get_orders(self) -> tuple[list[dict[str, Any]], str]:
+        direct_rows: list[dict[str, Any]] = []
+        direct_supported = True
+        for order_type, direction in (("sold", "sell"), ("purchased", "buy")):
+            rows, supported = self._get_my_orders(order_type, direction)
+            if not supported:
+                direct_supported = False
+                break
+            direct_rows.extend(rows)
+
+        if direct_supported:
+            self._orders_source = "/api/v2/my_orders"
+            seen: set[tuple[str, str]] = set()
+            deduped = []
+            for row in direct_rows:
+                key = (row["direction"], row["id"] or row["thread_id"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(row)
+            return deduped, self._orders_source
+
+        # Fallback for Vinted variants that do not expose my_orders.
         current = self.get_current_user()
         current_user_id = current.get("id")
         threads, source = self._get_threads()
@@ -628,6 +814,7 @@ class VintedClient:
             "user_id": self.user_id,
             "auth_configured": self.has_auth(),
             "orders_source": self._orders_source,
+            "notifications_source": self._notifications_source,
             "endpoints": [
                 {
                     "path": x.path,

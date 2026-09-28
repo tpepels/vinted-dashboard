@@ -15,8 +15,9 @@ The dashboard uses the same Vinted web endpoints that the Vinted site uses:
 
 - public profile + listings: `/api/v2/users/{id}` and `/api/v2/users/{id}/items`
 - authenticated account: `/api/v2/users/current`
-- notifications: `/web/api/notifications/notifications`
-- buy/sell orders: transaction data exposed by Vinted's authenticated conversation/inbox endpoints
+- notifications: `/api/v2/notifications` (with a web-notifications fallback)
+- buy/sell orders: `/api/v2/my_orders?type=sold|purchased&status=all`
+- conversation/inbox data is used only as a compatibility fallback if `my_orders` is unavailable
 
 Vinted does not document these web endpoints as a stable public API, so they can change. All endpoint-specific code is isolated in `app/vinted.py`.
 
@@ -36,7 +37,7 @@ Open:
 http://SERVER_IP:5050
 ```
 
-The public Listings view can work without an authenticated session. Notifications and private buy/sell orders require your Vinted web session.
+The public Listings view can work without an authenticated session. Notifications and buy/sell orders are read directly from Vinted's authenticated web API and require your Vinted web session.
 
 ## Connect your Vinted session
 
@@ -92,6 +93,7 @@ VINTED_COOKIE=
 VINTED_ACCESS_TOKEN_WEB=
 VINTED_REFRESH_TOKEN_WEB=
 VINTED_ANON_ID=
+VINTED_CSRF_TOKEN=
 VINTED_USER_AGENT=
 ```
 
