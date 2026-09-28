@@ -60,7 +60,9 @@ def _order_year(value: Any) -> int | None:
 
 
 def _is_void_order(order: dict[str, Any]) -> bool:
-    status = str(order.get("status") or "").lower().replace("-", "_").replace(" ", "_")
+    values = (order.get("lifecycle_status"), order.get("status"))
+    status = " ".join(str(value or "").lower() for value in values)
+    status = status.replace("-", "_").replace(" ", "_")
     void_words = ("cancel", "refund", "failed")
     return any(word in status for word in void_words)
 
