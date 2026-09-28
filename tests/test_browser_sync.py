@@ -32,12 +32,19 @@ def test_browser_sync_snapshot_roundtrip(monkeypatch, tmp_path):
     assert saved["listings"][0]["title"] == "Stoner"
 
 
-def test_extension_zip_contains_manifest():
-    response = entry.download_extension()
-    archive = zipfile.ZipFile(BytesIO(response.body))
+def test_extension_zip_contains_manifest_and_uses_download_host():
+    archive = zipfile.ZipFile(
+        BytesIO(entry._extension_zip("http://192.168.1.200:5050"))
+    )
     names = set(archive.namelist())
 
     assert "manifest.json" in names
     assert "background.js" in names
     assert "content.js" in names
     assert "popup.html" in names
+
+    background = archive.read("background.js").decode("utf-8")
+    manifest = archive.read("manifest.json").decode("utf-8")
+    assert 'const DASHBOARD_URL = "http://192.168.1.200:5050";' in background
+    assert "http://192.168.1.200/*" in manifest
+    assert "http://media-server:5050" not in background
