@@ -146,17 +146,28 @@ async function runSync(reason = "manual") {
   return syncInFlight;
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+function installAlarms() {
   chrome.alarms.create("vinted-dashboard-sync", { periodInMinutes: 10 });
+  chrome.alarms.create("vinted-market-research", { periodInMinutes: 2 });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  installAlarms();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create("vinted-dashboard-sync", { periodInMinutes: 10 });
+  installAlarms();
 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === "vinted-dashboard-sync") {
     runSync("periodic");
+    return;
+  }
+  if (alarm.name === "vinted-market-research") {
+    getResearchQueue().then(jobs => {
+      if (jobs.length) runSync("market-research");
+    });
   }
 });
 
