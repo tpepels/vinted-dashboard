@@ -16,7 +16,13 @@ def test_money_shapes():
 def test_listing_status():
     assert _listing_status({"is_reserved": True}) == "reserved"
     assert _listing_status({"is_closed": True}) == "sold"
-    assert _listing_status({"status": "active"}) == "active"
+    assert _listing_status({"is_hidden": True}) == "hidden"
+    assert _listing_status({"is_draft": True}) == "draft"
+    assert _listing_status({"state": "available"}) == "active"
+    assert _listing_status({"item_status": "published"}) == "active"
+    # Vinted's generic status field is item condition, not listing lifecycle.
+    assert _listing_status({"status": "Very good", "is_visible": 1, "is_closed": 0}) == "active"
+    assert _listing_status({"status": "Muito bom", "is_for_sell": True}) == "active"
     assert _listing_status({}) == "active"
 
 
