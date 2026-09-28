@@ -13,6 +13,10 @@ function when(value){
   if(Number.isNaN(d.getTime()))return String(value);
   return new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(d);
 }
+function timeValue(value){
+  const n=new Date(value||0).getTime();
+  return Number.isNaN(n)?0:n;
+}
 function esc(value=""){
   return String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]));
 }
@@ -38,6 +42,107 @@ function linkedTitle(row){
   return row.vinted_url
     ? `<a href="${esc(row.vinted_url)}" target="_blank" rel="noreferrer">${esc(row.title)}</a>`
     : esc(row.title);
+}
+
+function isFavoriteNotification(n){
+  return n?.category==="favorite"||String(n?.url||"").includes("/want_it/");
+}
+function favoriteItemTitle(n){
+  if(n?.item_title)return String(n.item_title);
+  const text=String(n?.body||n?.title||"");
+  const pt=text.match(/adicionou o teu (.+?) aos seus favoritos\.?$/i);
+  if(pt)return pt[1].trim();
+  const en=text.match(/added your (.+?) to (?:their|his|her) favou?rites\.?$/i);
+  if(en)return en[1].trim();
+  return "Listing";
+}
+function favoriteActor(n){
+  if(n?.actor)return String(n.actor);
+  const text=String(n?.body||n?.title||"");
+  const pt=text.match(/^(.+?) adicionou o teu /i);
+  if(pt)return pt[1].trim();
+  const en=text.match(/^(.+?) added your /i);
+  return en?en[1].trim():null;
+}
+function favoriteItemUrl(n){
+  const url=String(n?.url||"");
+  return url?url.replace(/\/want_it\/new(?:\?.*)?$/,""):null;
+}
+function groupFavoriteNotifications(rows){
+  const groups=new Map();
+  for(const n of rows.filter(isFavoriteNotification)){
+    const title=favoriteItemTitle(n);
+    const url=favoriteItemUrl(n);
+    const key=String(n.item_id||url||title);
+    const existing=groups.get(key)||{
+      category:"favorite_group",
+      item_id:n.item_id||null,
+      item_title:title,
+      title,
+      url,
+      count:0,
+      actors:[],
+      occurred_at:n.occurred_at,
+      read:true,
+    };
+    existing.count+=1;
+    existing.read=existing.read&&Boolean(n.read);
+    if(timeValue(n.occurred_at)>timeValue(existing.occurred_at))existing.occurred_at=n.occurred_at;
+    const actor=favoriteActor(n);
+    if(actor&&!existing.actors.includes(actor))existing.actors.push(actor);
+    groups.set(key,existing);
+  }
+  return [...groups.values()].sort((a,b)=>timeValue(b.occurred_at)-timeValue(a.occurred_at));
+}
+function meaningfulNotifications(rows){
+  return rows.filter(n=>!isFavoriteNotification(n));
+}
+function notificationFeed(mode){
+  const rows=state.data?.notifications||[];
+  const favorites=groupFavoriteNotifications(rows);
+  const useful=meaningfulNotifications(rows);
+  if(mode==="favorites")return favorites;
+  if(mode==="all")return [...useful,...favorites].sort((a,b)=>timeValue(b.occurred_at)-timeValue(a.occurred_at));
+  return useful.sort((a,b)=>timeValue(b.occurred_at)-timeValue(a.occurred_at));
+}
+function favoriteGroupSubtitle(n){
+  const actors=n.actors||[];
+  if(!actors.length)return `${n.count} favorite${n.count===1?"":"s"}`;
+  const shown=actors.slice(0,3).join(", ");
+  const extra=actors.length-3;
+  return `${n.count} favorite${n.count===1?"":"s"} · ${shown}${extra>0?` +${extra} more`:""}`;
+}
+function notificationRow(n){
+  if(n.category==="favorite_group"){
+    const title=`${n.item_title} - ${n.count} favorite${n.count===1?"":"s"}`;
+    const linked=n.url
+      ? `<a href="${esc(n.url)}" target="_blank" rel="noreferrer">${esc(title)}</a>`
+      : esc(title);
+    return `
+      <div class="notification ${n.read?"":"unread"} favorite-group">
+        <div class="dot"></div>
+        <div>
+          <div class="notification-title">${linked}</div>
+          <div class="notification-body">${esc(favoriteGroupSubtitle(n))}</div>
+        </div>
+        <div class="notification-time">${when(n.occurred_at)}</div>
+      </div>`;
+  }
+
+  const linked=n.url
+    ? `<a href="${esc(n.url)}" target="_blank" rel="noreferrer">${esc(n.title)}</a>`
+    : esc(n.title);
+  const body=String(n.body||"").trim();
+  const showBody=body&&body!==String(n.title||"").trim();
+  return `
+    <div class="notification ${n.read?"":"unread"}">
+      <div class="dot"></div>
+      <div>
+        <div class="notification-title">${linked}</div>
+        ${showBody?`<div class="notification-body">${esc(body)}</div>`:""}
+      </div>
+      <div class="notification-time">${when(n.occurred_at)}</div>
+    </div>`;
 }
 
 function renderErrors(){
@@ -77,17 +182,78 @@ function renderSummary(){
     <div class="row"><div><div class="row-title">${linkedTitle(o)}</div><div class="meta">${money(o.total_cents,o.currency)} · ${when(o.updated_at)}</div></div>${badge(o.status)}</div>
   `).join("")||empty(d.auth?.authenticated?"No sales returned by Vinted.":"Connect your Vinted session to load sales.");
 
-  const notifications=d.notifications||[];
-  $("#recent-notifications").innerHTML=notifications.slice(0,5).map(n=>`
-    <div class="row"><div><div class="row-title">${n.url?`<a href="${esc(n.url)}" target="_blank" rel="noreferrer">${esc(n.title)}</a>`:esc(n.title)}</div><div class="meta">${when(n.occurred_at)}</div></div>${n.read?"":'<span class="badge">new</span>'}</div>
-  `).join("")||empty(d.auth?.authenticated?"No notifications returned by Vinted.":"Connect your Vinted session to load notifications.");
+  const rawNotifications=d.notifications||[];
+  const useful=meaningfulNotifications(rawNotifications)
+    .sort((a,b)=>timeValue(b.occurred_at)-timeValue(a.occurred_at))
+    .slice(0,4);
+  const favoriteGroups=groupFavoriteNotifications(rawNotifications);
+  const favoriteCount=favoriteGroups.reduce((sum,n)=>sum+n.count,0);
+  const recent=[...useful];
+  if(favoriteCount){
+    recent.push({
+      category:"favorite_summary",
+      title:`${favoriteCount} favorite${favoriteCount===1?"":"s"} across ${favoriteGroups.length} listing${favoriteGroups.length===1?"":"s"}`,
+      occurred_at:favoriteGroups[0]?.occurred_at,
+      read:favoriteGroups.every(n=>n.read),
+    });
+  }
+  recent.sort((a,b)=>timeValue(b.occurred_at)-timeValue(a.occurred_at));
+
+  $("#recent-notifications").innerHTML=recent.slice(0,5).map(n=>{
+    if(n.category==="favorite_summary"){
+      return `<div class="row"><div><div class="row-title">${esc(n.title)}</div><div class="meta">Favorite activity · ${when(n.occurred_at)}</div></div><span class="badge">favorites</span></div>`;
+    }
+    return `<div class="row"><div><div class="row-title">${n.url?`<a href="${esc(n.url)}" target="_blank" rel="noreferrer">${esc(n.title)}</a>`:esc(n.title)}</div><div class="meta">${when(n.occurred_at)}</div></div>${n.read?"":'<span class="badge">new</span>'}</div>`;
+  }).join("")||empty(d.auth?.authenticated?"No useful notifications.":"Connect your Vinted session to load notifications.");
 }
 
+function listingComparator(sort){
+  const number=(value,fallback=-1)=>{
+    const n=Number(value);
+    return Number.isFinite(n)?n:fallback;
+  };
+  const date=value=>timeValue(value);
+  if(sort==="oldest")return (a,b)=>{
+    const ad=date(a.listed_at),bd=date(b.listed_at);
+    if(ad&&bd)return ad-bd;
+    if(ad)return -1;
+    if(bd)return 1;
+    return b._index-a._index;
+  };
+  if(sort==="price-asc")return (a,b)=>number(a.price_cents,Infinity)-number(b.price_cents,Infinity);
+  if(sort==="price-desc")return (a,b)=>number(b.price_cents,-1)-number(a.price_cents,-1);
+  if(sort==="likes-desc")return (a,b)=>number(b.favourites,0)-number(a.favourites,0)||a._index-b._index;
+  if(sort==="views-desc")return (a,b)=>number(b.views,0)-number(a.views,0)||a._index-b._index;
+  if(sort==="title-asc")return (a,b)=>String(a.title||"").localeCompare(String(b.title||""),undefined,{sensitivity:"base"});
+  return (a,b)=>{
+    const ad=date(a.listed_at),bd=date(b.listed_at);
+    if(ad&&bd)return bd-ad;
+    if(ad)return -1;
+    if(bd)return 1;
+    return a._index-b._index;
+  };
+}
 function renderListings(){
-  const rows=state.data?.listings||[];
+  const rows=(state.data?.listings||[]).map((row,_index)=>({...row,_index}));
   const q=$("#listing-search").value.trim().toLowerCase();
   const status=$("#listing-status").value;
-  const filtered=rows.filter(x=>(!status||x.status===status)&&(!q||x.title.toLowerCase().includes(q)||(x.isbn||"").includes(q)));
+  const interest=$("#listing-interest").value;
+  const minRaw=parseFloat($("#listing-price-min").value);
+  const maxRaw=parseFloat($("#listing-price-max").value);
+  const minCents=Number.isFinite(minRaw)?Math.round(minRaw*100):null;
+  const maxCents=Number.isFinite(maxRaw)?Math.round(maxRaw*100):null;
+  const sort=$("#listing-sort").value;
+
+  const filtered=rows
+    .filter(x=>!status||String(x.status||"").toLowerCase()===status)
+    .filter(x=>!q||String(x.title||"").toLowerCase().includes(q)||String(x.isbn||"").toLowerCase().includes(q))
+    .filter(x=>interest!=="liked"||Number(x.favourites||0)>0)
+    .filter(x=>interest!=="unliked"||Number(x.favourites||0)===0)
+    .filter(x=>minCents===null||x.price_cents===null||x.price_cents===undefined||Number(x.price_cents)>=minCents)
+    .filter(x=>maxCents===null||x.price_cents===null||x.price_cents===undefined||Number(x.price_cents)<=maxCents)
+    .sort(listingComparator(sort));
+
+  $("#listing-count").textContent=`${filtered.length} of ${rows.length}`;
   $("#listings-table").innerHTML=filtered.length?`
     <table><thead><tr><th>Listing</th><th>Status</th><th>ISBN</th><th>Listed</th><th>Likes</th><th>Views</th><th class="money">Price</th></tr></thead><tbody>
     ${filtered.map(x=>`<tr>
@@ -117,13 +283,21 @@ function renderOrders(){
   $("#purchases-table").innerHTML=orderTable(filterOrders(state.data?.purchases||[],$("#purchases-scope").value));
 }
 function renderNotifications(){
-  const rows=state.data?.notifications||[];
-  $("#notifications-list").innerHTML=rows.length?rows.map(n=>`
-    <div class="notification ${n.read?"":"unread"}">
-      <div class="dot"></div>
-      <div><div class="notification-title">${n.url?`<a href="${esc(n.url)}" target="_blank" rel="noreferrer">${esc(n.title)}</a>`:esc(n.title)}</div><div class="notification-body">${esc(n.body||"")}</div></div>
-      <div class="notification-time">${when(n.occurred_at)}</div>
-    </div>`).join(""):empty(state.data?.auth?.authenticated?"No notifications returned by Vinted.":"Connect your Vinted session to load notifications.");
+  const mode=$("#notification-filter").value;
+  const rows=notificationFeed(mode);
+  const raw=state.data?.notifications||[];
+  const favoriteCount=raw.filter(isFavoriteNotification).length;
+  const usefulCount=raw.length-favoriteCount;
+  $("#notification-count").textContent=mode==="favorites"
+    ? `${favoriteCount} events · ${rows.length} listings`
+    : mode==="useful"
+      ? `${usefulCount} useful`
+      : `${raw.length} events`;
+  $("#notifications-list").innerHTML=rows.length
+    ? rows.map(notificationRow).join("")
+    : empty(state.data?.auth?.authenticated
+      ? mode==="useful"?"No useful notifications right now.":"No notifications in this view."
+      : "Connect your Vinted session to load notifications.");
 }
 
 function render(){
@@ -146,6 +320,11 @@ $$(".nav-item").forEach(btn=>btn.addEventListener("click",()=>{
 }));
 $("#listing-search").addEventListener("input",renderListings);
 $("#listing-status").addEventListener("change",renderListings);
+$("#listing-interest").addEventListener("change",renderListings);
+$("#listing-price-min").addEventListener("input",renderListings);
+$("#listing-price-max").addEventListener("input",renderListings);
+$("#listing-sort").addEventListener("change",renderListings);
+$("#notification-filter").addEventListener("change",renderNotifications);
 $("#sales-scope").addEventListener("change",renderOrders);
 $("#purchases-scope").addEventListener("change",renderOrders);
 
