@@ -1,4 +1,10 @@
-from app.vinted import VintedClient, _listing_status, _money, is_closed_status
+from app.vinted import (
+    VintedClient,
+    _listing_status,
+    _money,
+    _notification_details,
+    is_closed_status,
+)
 
 
 def test_money_shapes():
@@ -295,3 +301,30 @@ def test_listings_fall_back_to_legacy_endpoint_on_404(monkeypatch):
         "/api/v2/wardrobe/58344842/items",
         "/api/v2/users/58344842/items",
     ]
+
+
+
+def test_favorite_notification_classification():
+    details = _notification_details(
+        "teratomabrain adicionou o teu A Lost Lady - Willa Cather aos seus favoritos.",
+        "https://www.vinted.pt/items/10166311063/want_it/new?offering_id=170824145",
+    )
+
+    assert details == {
+        "category": "favorite",
+        "item_id": "10166311063",
+        "item_title": "A Lost Lady - Willa Cather",
+        "actor": "teratomabrain",
+    }
+
+
+def test_non_favorite_notification_classification():
+    details = _notification_details(
+        "Your parcel is ready for collection",
+        "https://www.vinted.pt/inbox/123",
+    )
+
+    assert details["category"] == "other"
+    assert details["item_id"] is None
+    assert details["item_title"] is None
+    assert details["actor"] is None

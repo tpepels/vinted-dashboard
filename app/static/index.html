@@ -74,15 +74,33 @@
       </section>
 
       <section id="listings" class="view">
-        <div class="toolbar">
+        <div class="toolbar listing-toolbar">
           <input id="listing-search" class="search" placeholder="Search title or ISBN">
-          <select id="listing-status">
+          <select id="listing-status" aria-label="Listing status">
             <option value="">All statuses</option>
-            <option value="active">Active</option>
+            <option value="active" selected>Active</option>
             <option value="sold">Sold</option>
             <option value="reserved">Reserved</option>
             <option value="hidden">Hidden</option>
+            <option value="draft">Draft</option>
           </select>
+          <select id="listing-interest" aria-label="Favorite filter">
+            <option value="">All interest</option>
+            <option value="liked">Has favorites</option>
+            <option value="unliked">No favorites</option>
+          </select>
+          <input id="listing-price-min" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Min €" aria-label="Minimum price">
+          <input id="listing-price-max" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Max €" aria-label="Maximum price">
+          <select id="listing-sort" aria-label="Sort listings">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="price-asc">Price - low to high</option>
+            <option value="price-desc">Price - high to low</option>
+            <option value="likes-desc">Most favorites</option>
+            <option value="views-desc">Most views</option>
+            <option value="title-asc">Title A-Z</option>
+          </select>
+          <span class="toolbar-count" id="listing-count"></span>
         </div>
         <div class="panel table-panel"><div id="listings-table"></div></div>
       </section>
@@ -110,6 +128,14 @@
       </section>
 
       <section id="notifications" class="view">
+        <div class="toolbar">
+          <select id="notification-filter" aria-label="Notification filter">
+            <option value="useful" selected>Useful</option>
+            <option value="all">All activity</option>
+            <option value="favorites">Favorites</option>
+          </select>
+          <span class="toolbar-count" id="notification-count"></span>
+        </div>
         <div class="panel"><div id="notifications-list"></div></div>
       </section>
     </main>

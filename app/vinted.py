@@ -174,6 +174,40 @@ def is_closed_status(value: str | None) -> bool:
     return any(word in status for word in CLOSED_STATUS_WORDS)
 
 
+def _notification_details(body: str, link: str | None) -> dict[str, str | None]:
+    text = (body or "").strip()
+    link_text = str(link or "")
+    if "/want_it/" not in link_text:
+        return {
+            "category": "other",
+            "item_id": None,
+            "item_title": None,
+            "actor": None,
+        }
+
+    item_match = re.search(r"/items/(\d+)", link_text)
+    item_id = item_match.group(1) if item_match else None
+    actor = None
+    item_title = None
+
+    patterns = (
+        r"^(?P<actor>.+?) adicionou o teu (?P<title>.+?) aos seus favoritos\.?$",
+        r"^(?P<actor>.+?) added your (?P<title>.+?) to (?:their|his|her) favou?rites\.?$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, text, flags=re.IGNORECASE)
+        if match:
+            actor = match.group("actor").strip()
+            item_title = match.group("title").strip()
+            break
+
+    return {
+        "category": "favorite",
+        "item_id": item_id,
+        "item_title": item_title,
+        "actor": actor,
+    }
+
 class VintedClient:
     def __init__(self) -> None:
         self.base_url = os.getenv("VINTED_BASE_URL", "https://www.vinted.pt").rstrip("/")
@@ -584,6 +618,8 @@ class VintedClient:
             link = _first(raw, "link", "url", "deep_link", "target_url")
             if link and not str(link).startswith("http"):
                 link = urljoin(self.base_url, str(link))
+            body_text = str(body or "")
+            details = _notification_details(body_text, str(link) if link else None)
             is_read = _first(raw, "is_read", "read", "seen")
             read_at = _first(raw, "read_at", "seen_at")
             rows.append(
@@ -593,8 +629,12 @@ class VintedClient:
                         _first(raw, "entry_type", "type", "notification_type", "event_type")
                         or "notification"
                     ),
+                    "category": details["category"],
+                    "item_id": details["item_id"],
+                    "item_title": details["item_title"],
+                    "actor": details["actor"],
                     "title": str(title or body or "Vinted notification"),
-                    "body": str(body or ""),
+                    "body": body_text,
                     "occurred_at": _timestamp(
                         _first(raw, "updated_at", "created_at", "created_at_ts", "timestamp")
                     ),
