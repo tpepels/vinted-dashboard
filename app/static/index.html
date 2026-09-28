@@ -11,10 +11,7 @@
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">V</div>
-        <div>
-          <strong>Vinted</strong>
-          <span>dashboard</span>
-        </div>
+        <div><strong>Vinted</strong><span>dashboard</span></div>
       </div>
 
       <nav id="nav">
@@ -27,24 +24,27 @@
 
       <div class="sidebar-bottom">
         <a id="profile-link" href="https://www.vinted.pt/member/58344842" target="_blank" rel="noreferrer">Open Vinted profile ↗</a>
-        <div class="source-note">Local database<br><span id="sync-source">Email sync not checked</span></div>
+        <div class="source-note">
+          Source: Vinted<br>
+          <span id="session-state">Checking session…</span>
+        </div>
       </div>
     </aside>
 
     <main>
       <header>
         <div>
-          <p class="eyebrow">PRIVATE INVENTORY</p>
+          <p class="eyebrow">LIVE VINTED DATA</p>
           <h1 id="page-title">Overview</h1>
         </div>
         <div class="header-actions">
-          <input type="file" id="csv-file" accept=".csv,text/csv" hidden>
-          <button class="btn secondary" id="import-btn">Import CSV</button>
-          <button class="btn primary" id="sync-btn">Sync email</button>
+          <button class="btn secondary" id="session-btn">Vinted session</button>
+          <button class="btn primary" id="refresh-btn">Refresh Vinted</button>
         </div>
       </header>
 
       <div id="flash"></div>
+      <div id="source-errors"></div>
 
       <section id="overview" class="view active">
         <div class="stat-grid">
@@ -81,9 +81,8 @@
             <option value="active">Active</option>
             <option value="sold">Sold</option>
             <option value="reserved">Reserved</option>
-            <option value="draft">Draft</option>
+            <option value="hidden">Hidden</option>
           </select>
-          <button class="btn secondary" id="add-listing-btn">Add listing</button>
         </div>
         <div class="panel table-panel"><div id="listings-table"></div></div>
       </section>
@@ -111,24 +110,28 @@
       </section>
 
       <section id="notifications" class="view">
-        <div class="toolbar right"><button class="btn secondary" id="read-all-btn">Mark all read</button></div>
         <div class="panel"><div id="notifications-list"></div></div>
       </section>
     </main>
   </div>
 
-  <dialog id="listing-dialog">
-    <form id="listing-form" method="dialog">
-      <div class="dialog-head"><h2>Add listing</h2><button value="cancel" class="icon-btn">×</button></div>
-      <label>Title<input name="title" required></label>
-      <div class="two-fields">
-        <label>Price (€)<input name="price" type="number" min="0" step="0.01"></label>
-        <label>ISBN<input name="isbn"></label>
+  <dialog id="session-dialog">
+    <form id="session-form">
+      <div class="dialog-head">
+        <h2>Vinted session</h2>
+        <button type="button" class="icon-btn" id="session-close">×</button>
       </div>
-      <label>Vinted URL<input name="vinted_url" type="url"></label>
-      <div class="dialog-actions">
-        <button value="cancel" class="btn secondary">Cancel</button>
-        <button type="submit" value="default" class="btn primary">Save</button>
+      <p class="dialog-copy">Paste the complete <code>Cookie</code> request header from a signed-in request to <code>www.vinted.pt</code>. It is stored only on this server.</p>
+      <label>Cookie header
+        <textarea id="session-cookie" rows="8" placeholder="access_token_web=...; refresh_token_web=...; ..."></textarea>
+      </label>
+      <div class="session-status" id="dialog-session-status"></div>
+      <div class="dialog-actions split">
+        <button type="button" class="btn danger" id="session-clear">Clear saved session</button>
+        <div>
+          <button type="button" class="btn secondary" id="session-cancel">Cancel</button>
+          <button type="submit" class="btn primary">Save & test</button>
+        </div>
       </div>
     </form>
   </dialog>
