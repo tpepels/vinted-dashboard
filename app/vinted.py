@@ -191,11 +191,12 @@ class VintedClient:
         return "; ".join(parts)
 
     def has_auth(self) -> bool:
-        cookie = self.cookie_string()
-        return "access_token_web=" in cookie or "refresh_token_web=" in cookie
+        return bool(self.cookie_string())
 
     def save_cookie(self, value: str) -> None:
         value = value.strip()
+        if value.lower().startswith("cookie:"):
+            value = value.split(":", 1)[1].strip()
         if not value:
             raise ValueError("Cookie header is empty")
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
