@@ -611,8 +611,28 @@ def maybe_auto_sync_biblio() -> dict[str, Any] | None:
     status = biblio_ftp_status()
     if not status["configured"] or not status["auto_sync"]:
         return None
+
+    preview = preview_biblio_ftp_sync()
     try:
-        return sync_biblio_ftp()
+        if preview["ready"]:
+            return sync_biblio_ftp()
+        if preview["delete_count"]:
+            result = sync_biblio_ftp(
+                include_inventory=False,
+                include_deletes=True,
+            )
+            result["warning"] = (
+                "Active inventory upload skipped because required BIBLIO fields "
+                "are incomplete; pending deletes were still uploaded."
+            )
+            return result
+        return {
+            "ok": False,
+            "error": (
+                "Automatic BIBLIO upload is waiting for a full BIBLIO inventory "
+                "download with the required Description field."
+            ),
+        }
     except RuntimeError as exc:
         return {"ok": False, "error": str(exc)}
 
