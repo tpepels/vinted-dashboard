@@ -199,12 +199,26 @@
 
         <div class="grid-2 stock-connectors">
           <div class="panel">
-            <div class="panel-head"><div><p class="eyebrow">BIBLIO</p><h2>Import inventory</h2></div></div>
+            <div class="panel-head">
+              <div><p class="eyebrow">BIBLIO</p><h2>FTP inventory sync</h2></div>
+              <span id="biblio-ftp-state" class="connector-badge">Not configured</span>
+            </div>
             <div class="connector-body">
-              <p>Export your active inventory from BIBLIOdirect and import the tab-delimited file here. SKU/BookID is used as the stable stock key.</p>
-              <input id="biblio-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv">
-              <button id="biblio-import-btn" class="btn primary" type="button">Import BIBLIO stock</button>
-              <div id="biblio-import-status" class="connector-status"></div>
+              <p>The server uploads inventory updates directly to BIBLIO's FTP account. Credentials stay in the server <code>.env</code>.</p>
+              <div id="biblio-ftp-summary" class="connector-summary"></div>
+              <div class="connector-actions">
+                <button id="biblio-ftp-test-btn" class="btn secondary" type="button">Test FTP</button>
+                <button id="biblio-ftp-sync-btn" class="btn primary" type="button">Upload now</button>
+              </div>
+              <div id="biblio-ftp-status" class="connector-status"></div>
+
+              <details class="connector-backup">
+                <summary>Initial import / reconciliation</summary>
+                <p>Import a full BIBLIOdirect inventory download once so the local database has complete descriptions and SKUs. This remains available as a reconciliation fallback.</p>
+                <input id="biblio-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv">
+                <button id="biblio-import-btn" class="btn secondary" type="button">Import BIBLIO stock</button>
+                <div id="biblio-import-status" class="connector-status"></div>
+              </details>
             </div>
           </div>
           <div class="panel">
