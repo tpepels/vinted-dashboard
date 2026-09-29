@@ -204,12 +204,17 @@ def upsert_channel_snapshot(
             (source, synced_at, len(seen), active_count, note),
         )
 
-    return {
+    result = {
         "source": source,
         "synced_at": synced_at,
         "items": len(seen),
         "active": active_count,
     }
+    if source == "biblio":
+        auto = maybe_auto_sync_biblio()
+        if auto:
+            result["ftp_sync"] = auto
+    return result
 
 
 def record_vinted_items(items: list[dict[str, Any]], synced_at: float) -> dict[str, Any]:
@@ -322,16 +327,12 @@ def import_biblio_inventory(text: str, filename: str | None = None) -> dict[str,
     rows = parse_biblio_inventory(text, currency=currency)
     if not rows:
         raise ValueError("No BIBLIO inventory rows could be read")
-    result = upsert_channel_snapshot(
+    return upsert_channel_snapshot(
         "biblio",
         rows,
         full_snapshot=True,
         note=f"Imported {filename or 'inventory file'}",
     )
-    auto = maybe_auto_sync_biblio()
-    if auto:
-        result["ftp_sync"] = auto
-    return result
 
 
 def biblio_ftp_status() -> dict[str, Any]:
@@ -610,7 +611,10 @@ def maybe_auto_sync_biblio() -> dict[str, Any] | None:
     status = biblio_ftp_status()
     if not status["configured"] or not status["auto_sync"]:
         return None
-    return sync_biblio_ftp()
+    try:
+        return sync_biblio_ftp()
+    except RuntimeError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def _ebay_access_token() -> str:
