@@ -429,14 +429,31 @@ def _biblio_export_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         rows = conn.execute(
             """
             SELECT source_id, sku, isbn, title, author, description, status,
-                   quantity, price_cents, currency
+                   quantity, price_cents, currency, last_seen_at
             FROM channel_items
             WHERE source='biblio'
             ORDER BY source_id
             """
         ).fetchall()
-    active = [dict(row) for row in rows if row["status"] == "active" and int(row["quantity"] or 0) > 0]
-    inactive = [dict(row) for row in rows if row["status"] != "active" or int(row["quantity"] or 0) <= 0]
+        last_success = conn.execute(
+            """
+            SELECT MAX(attempted_at) AS attempted_at
+            FROM biblio_ftp_runs
+            WHERE action='sync' AND status='success'
+            """
+        ).fetchone()
+    cutoff = float(last_success["attempted_at"] or 0) if last_success else 0
+    active = [
+        dict(row)
+        for row in rows
+        if row["status"] == "active" and int(row["quantity"] or 0) > 0
+    ]
+    inactive = [
+        dict(row)
+        for row in rows
+        if (row["status"] != "active" or int(row["quantity"] or 0) <= 0)
+        and float(row["last_seen_at"] or 0) > cutoff
+    ]
     return active, inactive
 
 
