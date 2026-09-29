@@ -610,6 +610,33 @@ function renderStock(){
   $("#stock-total-active").textContent=String(totalActive);
   $("#nav-stock").textContent=totalActive?String(totalActive):"";
 
+  const ftp=payload.biblio_ftp||{};
+  const ftpState=$("#biblio-ftp-state");
+  const ftpSummary=$("#biblio-ftp-summary");
+  const ftpStatus=$("#biblio-ftp-status");
+  const ftpSyncButton=$("#biblio-ftp-sync-btn");
+  const ftpTestButton=$("#biblio-ftp-test-btn");
+  if(ftpState){
+    ftpState.textContent=ftp.configured
+      ? (ftp.auto_sync?"Connected · auto":"Connected")
+      : "Not configured";
+    ftpState.className=`connector-badge ${ftp.configured?"ok":"muted"}`;
+  }
+  if(ftpSummary){
+    const bits=[];
+    if(ftp.username)bits.push(`${ftp.username}@${ftp.host||"ftp.biblio.com"}`);
+    bits.push(ftp.auto_sync?"Automatic upload enabled":"Automatic upload disabled");
+    if(ftp.last_run?.attempted_at){
+      bits.push(`last ${ftp.last_run.status}: ${when(Number(ftp.last_run.attempted_at)*1000)}`);
+    }
+    ftpSummary.textContent=bits.join(" · ");
+  }
+  if(ftpStatus&&ftp.last_run?.detail&&!ftpStatus.dataset.transient){
+    ftpStatus.textContent=ftp.last_run.detail;
+  }
+  if(ftpSyncButton)ftpSyncButton.disabled=!ftp.configured;
+  if(ftpTestButton)ftpTestButton.disabled=!ftp.configured;
+
   const q=$("#stock-search").value.trim().toLowerCase();
   const source=$("#stock-source").value;
   const status=$("#stock-status").value;
@@ -667,6 +694,53 @@ $$(".nav-item").forEach(btn=>btn.addEventListener("click",()=>{
   $("#page-title").textContent=btn.childNodes[0].textContent.trim();
 }));
 $("#stock-search").addEventListener("input",renderStock);
+$("#biblio-ftp-test-btn").addEventListener("click",async()=>{
+  const button=$("#biblio-ftp-test-btn");
+  const status=$("#biblio-ftp-status");
+  button.disabled=true;
+  button.textContent="Testing…";
+  status.dataset.transient="1";
+  status.textContent="Connecting to BIBLIO FTP…";
+  try{
+    const result=await api("/api/channels/biblio/ftp/test",{method:"POST"});
+    state.channels=await api("/api/channels");
+    renderStock();
+    status.textContent=result.detail||"FTP connection succeeded.";
+    flash("BIBLIO FTP connection succeeded.");
+  }catch(err){
+    status.textContent=err.message;
+    flash(err.message,true);
+  }finally{
+    delete status.dataset.transient;
+    button.disabled=false;
+    button.textContent="Test FTP";
+  }
+});
+$("#biblio-ftp-sync-btn").addEventListener("click",async()=>{
+  const button=$("#biblio-ftp-sync-btn");
+  const status=$("#biblio-ftp-status");
+  button.disabled=true;
+  button.textContent="Uploading…";
+  status.dataset.transient="1";
+  status.textContent="Preparing BIBLIO inventory upload…";
+  try{
+    const result=await api("/api/channels/biblio/ftp/sync",{method:"POST"});
+    state.channels=await api("/api/channels");
+    renderStock();
+    const parts=[];
+    if(result.inventory_filename)parts.push(`${result.active} active → ${result.inventory_filename}`);
+    if(result.deletes_filename)parts.push(`${result.deletes} deletes → ${result.deletes_filename}`);
+    status.textContent=parts.join(" · ")||result.detail||"Nothing to upload.";
+    flash("BIBLIO FTP upload completed.");
+  }catch(err){
+    status.textContent=err.message;
+    flash(err.message,true);
+  }finally{
+    delete status.dataset.transient;
+    button.disabled=false;
+    button.textContent="Upload now";
+  }
+});
 $("#stock-source").addEventListener("change",renderStock);
 $("#stock-status").addEventListener("change",renderStock);
 $("#biblio-import-btn").addEventListener("click",async()=>{
