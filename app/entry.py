@@ -20,10 +20,14 @@ from app.intelligence import (
     request_market_research,
 )
 from app.channels import (
+    biblio_ftp_status,
     channel_inventory_payload,
     import_biblio_inventory,
+    preview_biblio_ftp_sync,
     record_vinted_items,
+    sync_biblio_ftp,
     sync_ebay_inventory,
+    test_biblio_ftp,
 )
 
 
@@ -188,6 +192,30 @@ def biblio_import(payload: BiblioImportRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, **result}
+
+
+@app.get("/api/channels/biblio/ftp/preview")
+def biblio_ftp_preview():
+    return {
+        "status": biblio_ftp_status(),
+        "preview": preview_biblio_ftp_sync(),
+    }
+
+
+@app.post("/api/channels/biblio/ftp/test")
+def biblio_ftp_test():
+    try:
+        return test_biblio_ftp()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/channels/biblio/ftp/sync")
+def biblio_ftp_sync():
+    try:
+        return sync_biblio_ftp()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/channels/ebay/sync")
