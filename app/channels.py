@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import ftplib
 import csv
 import io
 import json
@@ -32,6 +33,7 @@ def _connect() -> sqlite3.Connection:
             isbn TEXT,
             title TEXT NOT NULL,
             author TEXT,
+            description TEXT,
             status TEXT NOT NULL,
             quantity INTEGER,
             price_cents INTEGER,
@@ -59,6 +61,27 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_channel_sync_source
             ON channel_sync_runs(source, synced_at DESC);
+        """
+    )
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(channel_items)").fetchall()
+    }
+    if "description" not in columns:
+        conn.execute("ALTER TABLE channel_items ADD COLUMN description TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS biblio_ftp_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            attempted_at REAL NOT NULL,
+            action TEXT NOT NULL,
+            status TEXT NOT NULL,
+            inventory_filename TEXT,
+            deletes_filename TEXT,
+            active_count INTEGER NOT NULL DEFAULT 0,
+            delete_count INTEGER NOT NULL DEFAULT 0,
+            detail TEXT
+        )
         """
     )
     return conn
@@ -118,14 +141,15 @@ def upsert_channel_snapshot(
             conn.execute(
                 """
                 INSERT INTO channel_items(
-                    source, source_id, sku, isbn, title, author, status, quantity,
+                    source, source_id, sku, isbn, title, author, description, status, quantity,
                     price_cents, currency, url, first_seen_at, last_seen_at, raw_json
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source, source_id) DO UPDATE SET
                     sku=excluded.sku,
                     isbn=excluded.isbn,
                     title=excluded.title,
                     author=excluded.author,
+                    description=excluded.description,
                     status=excluded.status,
                     quantity=excluded.quantity,
                     price_cents=excluded.price_cents,
@@ -141,6 +165,7 @@ def upsert_channel_snapshot(
                     _clean_isbn(item.get("isbn")),
                     str(item.get("title") or "Untitled").strip(),
                     str(item.get("author") or "").strip() or None,
+                    str(item.get("description") or "").strip() or None,
                     status,
                     _int(item.get("quantity"), 1),
                     _int(item.get("price_cents")),
@@ -179,12 +204,17 @@ def upsert_channel_snapshot(
             (source, synced_at, len(seen), active_count, note),
         )
 
-    return {
+    result = {
         "source": source,
         "synced_at": synced_at,
         "items": len(seen),
         "active": active_count,
     }
+    if source == "biblio":
+        auto = maybe_auto_sync_biblio()
+        if auto:
+            result["ftp_sync"] = auto
+    return result
 
 
 def record_vinted_items(items: list[dict[str, Any]], synced_at: float) -> dict[str, Any]:
@@ -219,6 +249,7 @@ _HEADER_ALIASES = {
     "author": {"author"},
     "isbn": {"isbn", "isbn10", "isbn13", "isbn-10", "isbn-13"},
     "price": {"price", "asking price"},
+    "description": {"description", "desc", "book description"},
     "status": {"status"},
     "quantity": {"quantity", "qty"},
 }
@@ -281,6 +312,7 @@ def parse_biblio_inventory(text: str, *, currency: str = "EUR") -> list[dict[str
                 "isbn": raw.get(fields.get("isbn", "")),
                 "title": title,
                 "author": raw.get(fields.get("author", "")),
+                "description": raw.get(fields.get("description", "")),
                 "status": status,
                 "quantity": quantity,
                 "price_cents": _money(raw.get(fields.get("price", ""))),
@@ -301,6 +333,308 @@ def import_biblio_inventory(text: str, filename: str | None = None) -> dict[str,
         full_snapshot=True,
         note=f"Imported {filename or 'inventory file'}",
     )
+
+
+def biblio_ftp_status() -> dict[str, Any]:
+    host = os.getenv("BIBLIO_FTP_HOST", "ftp.biblio.com").strip() or "ftp.biblio.com"
+    username = os.getenv("BIBLIO_FTP_USERNAME", "").strip()
+    password = os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
+    auto_sync = os.getenv("BIBLIO_FTP_AUTO_SYNC", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    with _connect() as conn:
+        latest = conn.execute(
+            """
+            SELECT attempted_at, action, status, inventory_filename, deletes_filename,
+                   active_count, delete_count, detail
+            FROM biblio_ftp_runs
+            ORDER BY attempted_at DESC LIMIT 1
+            """
+        ).fetchone()
+    return {
+        "configured": bool(username and password),
+        "host": host,
+        "username": username or None,
+        "auto_sync": auto_sync,
+        "last_run": dict(latest) if latest else None,
+    }
+
+
+def _biblio_ftp_connect() -> ftplib.FTP:
+    status = biblio_ftp_status()
+    username = status.get("username")
+    password = os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
+    if not username or not password:
+        raise RuntimeError(
+            "BIBLIO FTP is not configured. Set BIBLIO_FTP_USERNAME and "
+            "BIBLIO_FTP_PASSWORD in the server .env."
+        )
+    timeout = _int(os.getenv("BIBLIO_FTP_TIMEOUT_SECONDS", "20"), 20) or 20
+    ftp = ftplib.FTP()
+    ftp.connect(str(status["host"]), timeout=timeout)
+    ftp.login(str(username), password)
+    ftp.set_pasv(True)
+    directory = os.getenv("BIBLIO_FTP_DIRECTORY", "").strip()
+    if directory and directory not in {".", "./"}:
+        ftp.cwd(directory)
+    return ftp
+
+
+def test_biblio_ftp() -> dict[str, Any]:
+    started = time.time()
+    try:
+        ftp = _biblio_ftp_connect()
+        try:
+            pwd = ftp.pwd()
+        finally:
+            try:
+                ftp.quit()
+            except Exception:
+                ftp.close()
+        detail = f"Connected successfully; directory {pwd}"
+        _record_biblio_ftp_run("test", "success", detail=detail)
+        return {"ok": True, "detail": detail, "elapsed_ms": round((time.time() - started) * 1000)}
+    except Exception as exc:
+        detail = str(exc)
+        _record_biblio_ftp_run("test", "error", detail=detail)
+        raise RuntimeError(detail) from exc
+
+
+def _record_biblio_ftp_run(
+    action: str,
+    status: str,
+    *,
+    inventory_filename: str | None = None,
+    deletes_filename: str | None = None,
+    active_count: int = 0,
+    delete_count: int = 0,
+    detail: str | None = None,
+) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO biblio_ftp_runs(
+                attempted_at, action, status, inventory_filename, deletes_filename,
+                active_count, delete_count, detail
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time.time(), action, status, inventory_filename, deletes_filename,
+                int(active_count), int(delete_count), detail,
+            ),
+        )
+
+
+def _biblio_export_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT source_id, sku, isbn, title, author, description, status,
+                   quantity, price_cents, currency, last_seen_at
+            FROM channel_items
+            WHERE source='biblio'
+            ORDER BY source_id
+            """
+        ).fetchall()
+        last_success = conn.execute(
+            """
+            SELECT MAX(attempted_at) AS attempted_at
+            FROM biblio_ftp_runs
+            WHERE action='sync' AND status='success'
+            """
+        ).fetchone()
+    cutoff = float(last_success["attempted_at"] or 0) if last_success else 0
+    active = [
+        dict(row)
+        for row in rows
+        if row["status"] == "active" and int(row["quantity"] or 0) > 0
+    ]
+    inactive = [
+        dict(row)
+        for row in rows
+        if (row["status"] != "active" or int(row["quantity"] or 0) <= 0)
+        and float(row["last_seen_at"] or 0) > cutoff
+    ]
+    return active, inactive
+
+
+def _biblio_required_missing(row: dict[str, Any]) -> list[str]:
+    missing = []
+    if not str(row.get("sku") or row.get("source_id") or "").strip():
+        missing.append("SKU")
+    if not str(row.get("title") or "").strip():
+        missing.append("title")
+    if not str(row.get("author") or "").strip():
+        missing.append("author")
+    if not str(row.get("description") or "").strip():
+        missing.append("description")
+    if row.get("price_cents") in (None, ""):
+        missing.append("price")
+    return missing
+
+
+def _biblio_tsv(rows: list[dict[str, Any]], *, sold: bool = False) -> bytes:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, delimiter="\t", lineterminator="\n")
+    writer.writerow(
+        ["Book ID", "Author", "Title", "Description", "Price", "Status", "ISBN", "Quantity"]
+    )
+    for row in rows:
+        price = (
+            f"{int(row['price_cents']) / 100:.2f}"
+            if row.get("price_cents") not in (None, "")
+            else "0.00"
+        )
+        writer.writerow(
+            [
+                str(row.get("sku") or row.get("source_id") or ""),
+                str(row.get("author") or ""),
+                str(row.get("title") or ""),
+                str(row.get("description") or ""),
+                price,
+                "sold" if sold else "for sale",
+                str(row.get("isbn") or ""),
+                0 if sold else max(1, int(row.get("quantity") or 1)),
+            ]
+        )
+    return output.getvalue().encode("utf-8")
+
+
+def preview_biblio_ftp_sync() -> dict[str, Any]:
+    active, inactive = _biblio_export_rows()
+    incomplete = []
+    for row in active:
+        missing = _biblio_required_missing(row)
+        if missing:
+            incomplete.append(
+                {
+                    "sku": row.get("sku") or row.get("source_id"),
+                    "title": row.get("title"),
+                    "missing": missing,
+                }
+            )
+    return {
+        "configured": biblio_ftp_status()["configured"],
+        "auto_sync": biblio_ftp_status()["auto_sync"],
+        "active_count": len(active),
+        "delete_count": len(inactive),
+        "ready": not incomplete,
+        "incomplete": incomplete[:50],
+    }
+
+
+def sync_biblio_ftp(*, include_inventory: bool = True, include_deletes: bool = True) -> dict[str, Any]:
+    active, inactive = _biblio_export_rows()
+    if include_inventory:
+        incomplete = [
+            (row, _biblio_required_missing(row))
+            for row in active
+            if _biblio_required_missing(row)
+        ]
+        if incomplete:
+            examples = ", ".join(
+                f"{row.get('sku') or row.get('source_id')} ({'/'.join(missing)})"
+                for row, missing in incomplete[:5]
+            )
+            raise RuntimeError(
+                "BIBLIO active upload blocked: some listings are missing required "
+                f"fields. Examples: {examples}. Import a full BIBLIO download first."
+            )
+
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    prefix = re.sub(
+        r"[^A-Za-z0-9_-]+",
+        "-",
+        os.getenv("BIBLIO_FTP_FILENAME_PREFIX", "vinted-dashboard").strip()
+        or "vinted-dashboard",
+    ).strip("-")
+    inventory_filename = f"{prefix}-{stamp}.txt" if include_inventory and active else None
+    deletes_filename = (
+        f"{prefix}-{stamp}-deletes.txt" if include_deletes and inactive else None
+    )
+    if not inventory_filename and not deletes_filename:
+        detail = "Nothing to upload"
+        _record_biblio_ftp_run("sync", "success", detail=detail)
+        return {"ok": True, "detail": detail, "active": 0, "deletes": 0}
+
+    try:
+        ftp = _biblio_ftp_connect()
+        try:
+            if inventory_filename:
+                ftp.storbinary(
+                    f"STOR {inventory_filename}",
+                    io.BytesIO(_biblio_tsv(active, sold=False)),
+                )
+            if deletes_filename:
+                ftp.storbinary(
+                    f"STOR {deletes_filename}",
+                    io.BytesIO(_biblio_tsv(inactive, sold=True)),
+                )
+        finally:
+            try:
+                ftp.quit()
+            except Exception:
+                ftp.close()
+    except Exception as exc:
+        _record_biblio_ftp_run(
+            "sync",
+            "error",
+            inventory_filename=inventory_filename,
+            deletes_filename=deletes_filename,
+            active_count=len(active) if inventory_filename else 0,
+            delete_count=len(inactive) if deletes_filename else 0,
+            detail=str(exc),
+        )
+        raise RuntimeError(str(exc)) from exc
+
+    detail = "Uploaded to BIBLIO FTP"
+    _record_biblio_ftp_run(
+        "sync",
+        "success",
+        inventory_filename=inventory_filename,
+        deletes_filename=deletes_filename,
+        active_count=len(active) if inventory_filename else 0,
+        delete_count=len(inactive) if deletes_filename else 0,
+        detail=detail,
+    )
+    return {
+        "ok": True,
+        "detail": detail,
+        "inventory_filename": inventory_filename,
+        "deletes_filename": deletes_filename,
+        "active": len(active) if inventory_filename else 0,
+        "deletes": len(inactive) if deletes_filename else 0,
+    }
+
+
+def maybe_auto_sync_biblio() -> dict[str, Any] | None:
+    status = biblio_ftp_status()
+    if not status["configured"] or not status["auto_sync"]:
+        return None
+
+    preview = preview_biblio_ftp_sync()
+    try:
+        if preview["ready"]:
+            return sync_biblio_ftp()
+        if preview["delete_count"]:
+            result = sync_biblio_ftp(
+                include_inventory=False,
+                include_deletes=True,
+            )
+            result["warning"] = (
+                "Active inventory upload skipped because required BIBLIO fields "
+                "are incomplete; pending deletes were still uploaded."
+            )
+            return result
+        return {
+            "ok": False,
+            "error": (
+                "Automatic BIBLIO upload is waiting for a full BIBLIO inventory "
+                "download with the required Description field."
+            ),
+        }
+    except RuntimeError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def _ebay_access_token() -> str:
@@ -435,7 +769,7 @@ def channel_inventory_payload() -> dict[str, Any]:
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT source, source_id, sku, isbn, title, author, status, quantity,
+            SELECT source, source_id, sku, isbn, title, author, description, status, quantity,
                    price_cents, currency, url, first_seen_at, last_seen_at
             FROM channel_items
             ORDER BY source, status='active' DESC, title COLLATE NOCASE
@@ -500,7 +834,7 @@ def channel_inventory_payload() -> dict[str, Any]:
         "sources": [sources[key] for key in ("vinted", "biblio", "ebay")],
         "items": items,
         "configured": {
-            "biblio": True,
+            "biblio": biblio_ftp_status()["configured"],
             "ebay": bool(
                 os.getenv("EBAY_OAUTH_TOKEN", "").strip()
                 or (
@@ -510,4 +844,6 @@ def channel_inventory_payload() -> dict[str, Any]:
                 )
             ),
         },
+        "biblio_ftp": biblio_ftp_status(),
+        "biblio_ftp_preview": preview_biblio_ftp_sync(),
     }

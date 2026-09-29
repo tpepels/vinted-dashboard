@@ -129,15 +129,36 @@ Vinted stock is written automatically whenever the Chrome sync extension sends a
 
 ### BIBLIO
 
-BIBLIO's seller tooling is file/FTP oriented. Export your active inventory from BIBLIOdirect (Inventory -> Download listings), then import the generated tab-delimited file in the Stock view. The importer uses BIBLIO's seller SKU/BookID as the stable inventory key.
+BIBLIO is integrated through its official FTP inventory workflow.
 
-BIBLIO's download is an active-inventory snapshot. On a new import, previously active SKUs missing from the file are marked inactive locally.
-
-Set the seller currency when needed:
+Configure the FTP account only in the server-side `.env`:
 
 ```env
 BIBLIO_CURRENCY=EUR
+BIBLIO_FTP_HOST=ftp.biblio.com
+BIBLIO_FTP_USERNAME=
+BIBLIO_FTP_PASSWORD=
+BIBLIO_FTP_DIRECTORY=
+BIBLIO_FTP_TIMEOUT_SECONDS=20
+BIBLIO_FTP_FILENAME_PREFIX=vinted-dashboard
+BIBLIO_FTP_AUTO_SYNC=false
 ```
+
+Recommended first setup:
+
+1. In BIBLIOdirect, request a complete active inventory download.
+2. Import that tab-delimited file once in **Stock -> BIBLIO -> Initial import / reconciliation**. BIBLIO's own download includes Book ID/SKU, author, title, description, price, status, ISBN and quantity, so it gives the local database enough data to safely reproduce inventory files.
+3. Click **Test FTP**.
+4. Click **Upload now** once and verify the upload in BIBLIOdirect's Upload History.
+5. After the format has been accepted by BIBLIO, set `BIBLIO_FTP_AUTO_SYNC=true` and rebuild/restart the container.
+
+The generated active inventory file is tab-delimited and contains the required Book ID, Author, Title, Description and Price fields, plus Status, ISBN and Quantity.
+
+Inactive/sold records are sent separately in a filename containing `deletes`, which is BIBLIO's documented FTP convention for delete-only uploads. Successfully sent deletes are not resent forever.
+
+The connector deliberately refuses to upload active listings that are missing BIBLIO's required fields. If automatic sync is enabled and only deletes are pending, those deletes can still be sent safely while the active upload waits for a complete initial import.
+
+The old file import remains available as a reconciliation/restore path.
 
 ### eBay
 
