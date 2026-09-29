@@ -623,9 +623,13 @@ function renderStock(){
     ftpState.className=`connector-badge ${ftp.configured?"ok":"muted"}`;
   }
   if(ftpSummary){
+    const preview=payload.biblio_ftp_preview||{};
     const bits=[];
     if(ftp.username)bits.push(`${ftp.username}@${ftp.host||"ftp.biblio.com"}`);
-    bits.push(ftp.auto_sync?"Automatic upload enabled":"Automatic upload disabled");
+    if(Number.isFinite(preview.active_count))bits.push(`${preview.active_count} active`);
+    if(Number(preview.delete_count||0)>0)bits.push(`${preview.delete_count} deletes pending`);
+    if(preview.ready===false)bits.push(`${(preview.incomplete||[]).length} incomplete listing${(preview.incomplete||[]).length===1?"":"s"}`);
+    bits.push(ftp.auto_sync?"automatic upload enabled":"automatic upload disabled");
     if(ftp.last_run?.attempted_at){
       bits.push(`last ${ftp.last_run.status}: ${when(Number(ftp.last_run.attempted_at)*1000)}`);
     }
