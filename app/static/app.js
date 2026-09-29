@@ -764,7 +764,13 @@ $("#biblio-import-btn").addEventListener("click",async()=>{
     });
     state.channels=await api("/api/channels");
     renderStock();
-    $("#biblio-import-status").textContent=`Imported ${result.items} books · ${result.active} active`;
+    const ftpResult=result.ftp_sync;
+    const ftpPart=ftpResult
+      ? ftpResult.ok
+        ? " · FTP synced"
+        : ` · FTP waiting: ${ftpResult.error||ftpResult.warning||"not ready"}`
+      : "";
+    $("#biblio-import-status").textContent=`Imported ${result.items} books · ${result.active} active${ftpPart}`;
     flash("BIBLIO inventory imported.");
   }catch(err){
     $("#biblio-import-status").textContent=err.message;
