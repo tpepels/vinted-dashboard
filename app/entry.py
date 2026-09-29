@@ -19,6 +19,12 @@ from app.intelligence import (
     record_snapshot,
     request_market_research,
 )
+from app.channels import (
+    channel_inventory_payload,
+    import_biblio_inventory,
+    record_vinted_items,
+    sync_ebay_inventory,
+)
 
 
 BROWSER_SYNC_FILE = Path("/app/data/vinted-browser-sync.json")
@@ -40,6 +46,11 @@ class MarketResearchRequest(BaseModel):
     title: str
 
 
+class BiblioImportRequest(BaseModel):
+    filename: str | None = None
+    content: str
+
+
 def _save_snapshot(payload: BrowserSyncPayload) -> None:
     data = payload.model_dump()
     BROWSER_SYNC_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +62,7 @@ def _save_snapshot(payload: BrowserSyncPayload) -> None:
     temp.chmod(0o600)
     temp.replace(BROWSER_SYNC_FILE)
     record_snapshot(data)
+    record_vinted_items(list(data.get("listings") or []), float(data.get("collected_at") or time.time()))
 
 
 def _load_snapshot(*, allow_stale: bool = False) -> dict[str, Any] | None:
@@ -162,6 +174,29 @@ def market_research_request(payload: MarketResearchRequest):
 @app.get("/api/market-research/queue")
 def market_research_queue(limit: int = 3):
     return {"jobs": queued_market_jobs(limit)}
+
+
+@app.get("/api/channels")
+def channels():
+    return channel_inventory_payload()
+
+
+@app.post("/api/channels/biblio/import")
+def biblio_import(payload: BiblioImportRequest):
+    try:
+        result = import_biblio_inventory(payload.content, payload.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
+@app.post("/api/channels/ebay/sync")
+def ebay_sync():
+    try:
+        result = sync_ebay_inventory()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
 
 
 @app.get("/api/browser-sync/status")
