@@ -845,4 +845,5 @@ def channel_inventory_payload() -> dict[str, Any]:
             ),
         },
         "biblio_ftp": biblio_ftp_status(),
+        "biblio_ftp_preview": preview_biblio_ftp_sync(),
     }
