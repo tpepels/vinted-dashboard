@@ -189,7 +189,7 @@ def channels():
 def biblio_import(payload: BiblioImportRequest):
     try:
         result = import_biblio_inventory(payload.content, payload.filename)
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, **result}
 
