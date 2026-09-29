@@ -17,6 +17,7 @@
       <nav id="nav">
         <button class="nav-item active" data-view="overview">Overview</button>
         <button class="nav-item" data-view="insights">Insights <span id="nav-insights"></span></button>
+        <button class="nav-item" data-view="stock">Stock <span id="nav-stock"></span></button>
         <button class="nav-item" data-view="listings">Listings <span id="nav-listings"></span></button>
         <button class="nav-item" data-view="sales">Sales <span id="nav-sales"></span></button>
         <button class="nav-item" data-view="purchases">Purchases <span id="nav-purchases"></span></button>
@@ -173,6 +174,70 @@
           </div>
           <div class="market-help">Research is deliberately on-demand. The Chrome extension searches Vinted publicly and stores a compact comparable-price sample here.</div>
           <div id="market-table"></div>
+        </div>
+      </section>
+
+      <section id="stock" class="view">
+        <div class="stock-source-grid">
+          <article class="stat stock-source-card">
+            <span>Vinted</span><strong id="stock-vinted-active">0</strong>
+            <small id="stock-vinted-meta">Chrome sync</small>
+          </article>
+          <article class="stat stock-source-card">
+            <span>BIBLIO</span><strong id="stock-biblio-active">0</strong>
+            <small id="stock-biblio-meta">No inventory imported yet</small>
+          </article>
+          <article class="stat stock-source-card">
+            <span>eBay</span><strong id="stock-ebay-active">0</strong>
+            <small id="stock-ebay-meta">Not connected</small>
+          </article>
+          <article class="stat stock-source-card">
+            <span>Across channels</span><strong id="stock-total-active">0</strong>
+            <small id="stock-total-meta">Active listings</small>
+          </article>
+        </div>
+
+        <div class="grid-2 stock-connectors">
+          <div class="panel">
+            <div class="panel-head"><div><p class="eyebrow">BIBLIO</p><h2>Import inventory</h2></div></div>
+            <div class="connector-body">
+              <p>Export your active inventory from BIBLIOdirect and import the tab-delimited file here. SKU/BookID is used as the stable stock key.</p>
+              <input id="biblio-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv">
+              <button id="biblio-import-btn" class="btn primary" type="button">Import BIBLIO stock</button>
+              <div id="biblio-import-status" class="connector-status"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><p class="eyebrow">EBAY</p><h2>Seller inventory</h2></div></div>
+            <div class="connector-body">
+              <p>Uses eBay's seller API to retrieve your current active listings. OAuth credentials stay on the server.</p>
+              <button id="ebay-sync-btn" class="btn primary" type="button">Sync eBay stock</button>
+              <div id="ebay-sync-status" class="connector-status"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel table-panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">INVENTORY</p><h2>Stock by channel</h2></div>
+          </div>
+          <div class="toolbar stock-toolbar">
+            <input id="stock-search" class="search" placeholder="Search title, author, SKU or ISBN">
+            <select id="stock-source">
+              <option value="">All channels</option>
+              <option value="vinted">Vinted</option>
+              <option value="biblio">BIBLIO</option>
+              <option value="ebay">eBay</option>
+            </select>
+            <select id="stock-status">
+              <option value="active">Active</option>
+              <option value="">All statuses</option>
+              <option value="inactive">Inactive</option>
+              <option value="sold">Sold</option>
+            </select>
+            <span id="stock-count" class="toolbar-count"></span>
+          </div>
+          <div id="stock-table"></div>
         </div>
       </section>
 
