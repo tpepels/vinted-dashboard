@@ -1,4 +1,4 @@
-const state={data:null,intelligence:null,viewListingId:null};
+const state={data:null,intelligence:null,channels:null,viewListingId:null};
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -582,21 +582,81 @@ function renderInsights(){
 }
 
 
+function renderStock(){
+  const payload=state.channels||{};
+  const sources=new Map((payload.sources||[]).map(row=>[String(row.source),row]));
+  const sourceLabel={vinted:"Vinted",biblio:"BIBLIO",ebay:"eBay"};
+
+  let totalActive=0;
+  for(const source of ["vinted","biblio","ebay"]){
+    const row=sources.get(source)||{};
+    const active=Number(row.active||0);
+    totalActive+=active;
+    const activeEl=$("#stock-"+source+"-active");
+    const metaEl=$("#stock-"+source+"-meta");
+    if(activeEl)activeEl.textContent=String(active);
+    if(metaEl){
+      if(row.last_sync?.synced_at){
+        metaEl.textContent=`${row.quantity??active} units · ${when(Number(row.last_sync.synced_at)*1000)}`;
+      }else if(source==="ebay"&&!payload.configured?.ebay){
+        metaEl.textContent="Needs eBay OAuth setup";
+      }else if(source==="biblio"){
+        metaEl.textContent="No inventory imported yet";
+      }else{
+        metaEl.textContent="No sync yet";
+      }
+    }
+  }
+  $("#stock-total-active").textContent=String(totalActive);
+  $("#nav-stock").textContent=totalActive?String(totalActive):"";
+
+  const q=$("#stock-search").value.trim().toLowerCase();
+  const source=$("#stock-source").value;
+  const status=$("#stock-status").value;
+  const rows=(payload.items||[])
+    .filter(row=>!source||String(row.source||"")===source)
+    .filter(row=>!status||String(row.status||"")===status)
+    .filter(row=>{
+      if(!q)return true;
+      return [row.title,row.author,row.sku,row.isbn]
+        .some(value=>String(value||"").toLowerCase().includes(q));
+    });
+
+  $("#stock-count").textContent=`${rows.length} of ${(payload.items||[]).length}`;
+  $("#stock-table").innerHTML=rows.length?`
+    <table><thead><tr>
+      <th>Channel</th><th>Book</th><th>SKU</th><th>ISBN</th><th>Status</th><th>Qty</th><th class="money">Price</th><th>Last seen</th>
+    </tr></thead><tbody>
+      ${rows.map(row=>`<tr>
+        <td><span class="channel-pill channel-${esc(row.source)}">${esc(sourceLabel[row.source]||row.source)}</span></td>
+        <td class="title-cell">${row.url?`<a href="${esc(row.url)}" target="_blank" rel="noreferrer">${esc(row.title)}</a>`:esc(row.title)}${row.author?`<div class="meta">${esc(row.author)}</div>`:""}</td>
+        <td>${esc(row.sku||"—")}</td>
+        <td>${esc(row.isbn||"—")}</td>
+        <td>${badge(row.status)}</td>
+        <td>${row.quantity??"—"}</td>
+        <td class="money">${money(row.price_cents,row.currency||"EUR")}</td>
+        <td>${row.last_seen_at?when(Number(row.last_seen_at)*1000):"—"}</td>
+      </tr>`).join("")}
+    </tbody></table>`:empty("No stock matches these filters.");
+}
+
 function render(){
   const profile=state.data?.profile||{};
   if(profile.profile_url)$("#profile-link").href=profile.profile_url;
-  renderErrors();renderSession();renderSummary();renderInsights();renderListings();renderOrders();renderNotifications();
+  renderErrors();renderSession();renderSummary();renderInsights();renderStock();renderListings();renderOrders();renderNotifications();
 }
 
 async function load(refresh=false){
   try{
     const dashboardPath=refresh?"/api/dashboard?refresh=true":"/api/dashboard";
-    const [dashboard,intelligence]=await Promise.all([
+    const [dashboard,intelligence,channels]=await Promise.all([
       api(dashboardPath),
-      api("/api/intelligence")
+      api("/api/intelligence"),
+      api("/api/channels")
     ]);
     state.data=dashboard;
     state.intelligence=intelligence;
+    state.channels=channels;
     render();
   }catch(err){flash(err.message,true)}
 }
@@ -606,6 +666,55 @@ $$(".nav-item").forEach(btn=>btn.addEventListener("click",()=>{
   $$(".view").forEach(x=>x.classList.toggle("active",x.id===btn.dataset.view));
   $("#page-title").textContent=btn.childNodes[0].textContent.trim();
 }));
+$("#stock-search").addEventListener("input",renderStock);
+$("#stock-source").addEventListener("change",renderStock);
+$("#stock-status").addEventListener("change",renderStock);
+$("#biblio-import-btn").addEventListener("click",async()=>{
+  const input=$("#biblio-file");
+  const file=input.files?.[0];
+  if(!file){flash("Choose a BIBLIO inventory file first.",true);return}
+  const button=$("#biblio-import-btn");
+  button.disabled=true;
+  button.textContent="Importing…";
+  $("#biblio-import-status").textContent="";
+  try{
+    const content=await file.text();
+    const result=await api("/api/channels/biblio/import",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({filename:file.name,content})
+    });
+    state.channels=await api("/api/channels");
+    renderStock();
+    $("#biblio-import-status").textContent=`Imported ${result.items} books · ${result.active} active`;
+    flash("BIBLIO inventory imported.");
+  }catch(err){
+    $("#biblio-import-status").textContent=err.message;
+    flash(err.message,true);
+  }finally{
+    button.disabled=false;
+    button.textContent="Import BIBLIO stock";
+  }
+});
+$("#ebay-sync-btn").addEventListener("click",async()=>{
+  const button=$("#ebay-sync-btn");
+  button.disabled=true;
+  button.textContent="Syncing…";
+  $("#ebay-sync-status").textContent="";
+  try{
+    const result=await api("/api/channels/ebay/sync",{method:"POST"});
+    state.channels=await api("/api/channels");
+    renderStock();
+    $("#ebay-sync-status").textContent=`Synced ${result.items} listings · ${result.active} active`;
+    flash("eBay inventory synced.");
+  }catch(err){
+    $("#ebay-sync-status").textContent=err.message;
+    flash(err.message,true);
+  }finally{
+    button.disabled=false;
+    button.textContent="Sync eBay stock";
+  }
+});
 $("#listing-search").addEventListener("input",renderListings);
 $("#listing-status").addEventListener("change",renderListings);
 $("#listing-interest").addEventListener("change",renderListings);
@@ -654,7 +763,10 @@ $("#refresh-btn").addEventListener("click",async()=>{
   const btn=$("#refresh-btn");btn.disabled=true;btn.textContent="Refreshing…";
   try{
     state.data=await api("/api/refresh",{method:"POST"});
-    state.intelligence=await api("/api/intelligence");
+    [state.intelligence,state.channels]=await Promise.all([
+      api("/api/intelligence"),
+      api("/api/channels")
+    ]);
     render();
     flash(state.data?.browser_sync?.active?"Refreshed from the latest Chrome snapshot.":"Refreshed directly from Vinted.");
   }catch(err){flash(err.message,true)}

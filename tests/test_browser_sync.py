@@ -2,13 +2,14 @@ import json
 import zipfile
 from io import BytesIO
 
-from app import entry, intelligence
+from app import channels, entry, intelligence
 
 
 def test_browser_sync_snapshot_roundtrip(monkeypatch, tmp_path):
     snapshot_file = tmp_path / "browser-sync.json"
     monkeypatch.setattr(entry, "BROWSER_SYNC_FILE", snapshot_file)
     monkeypatch.setattr(intelligence, "DB_PATH", tmp_path / "history.sqlite3")
+    monkeypatch.setattr(channels, "DB_PATH", tmp_path / "history.sqlite3")
 
     payload = entry.BrowserSyncPayload(
         collected_at=1_900_000_000.0,

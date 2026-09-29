@@ -119,6 +119,48 @@ VINTED_CSRF_TOKEN=
 VINTED_USER_AGENT=
 ```
 
+## Multi-channel stock
+
+The **Stock** view tracks active inventory across Vinted, BIBLIO and eBay.
+
+### Vinted
+
+Vinted stock is written automatically whenever the Chrome sync extension sends a fresh snapshot.
+
+### BIBLIO
+
+BIBLIO's seller tooling is file/FTP oriented. Export your active inventory from BIBLIOdirect (Inventory -> Download listings), then import the generated tab-delimited file in the Stock view. The importer uses BIBLIO's seller SKU/BookID as the stable inventory key.
+
+BIBLIO's download is an active-inventory snapshot. On a new import, previously active SKUs missing from the file are marked inactive locally.
+
+Set the seller currency when needed:
+
+```env
+BIBLIO_CURRENCY=EUR
+```
+
+### eBay
+
+eBay stock uses the official Trading API `GetMyeBaySelling` call and retrieves the authenticated seller's active listings.
+
+For a short-lived setup, provide a current user OAuth access token:
+
+```env
+EBAY_OAUTH_TOKEN=
+```
+
+For automatic access-token renewal, configure:
+
+```env
+EBAY_CLIENT_ID=
+EBAY_CLIENT_SECRET=
+EBAY_REFRESH_TOKEN=
+EBAY_SITE_ID=0
+EBAY_COMPATIBILITY_LEVEL=1477
+```
+
+Keep eBay client secrets and tokens only in the server-side `.env`; never commit them.
+
 ## Health and diagnostics
 
 ```bash
