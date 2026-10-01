@@ -148,8 +148,15 @@ Flow:
 Mappings can be saved as reusable presets. Malformed or duplicate-SKU imports
 are blocked instead of partially applied.
 
-Inventory exports are available as CSV or XLSX. Workspace account-data export
-is also available under Settings.
+Inventory exports are available as CSV or XLSX. They can export the master
+inventory or a channel-specific view with marketplace listing IDs, prices,
+statuses and URLs. Workspace account-data export is also available under
+Settings.
+
+The product Analytics page reads Vinted listing snapshots directly from the
+workspace schema, including view/favourite gains, follower history, sales
+revenue and per-listing history. The Classic dashboard remains available for
+backwards compatibility rather than being required for normal analytics.
 
 ## Connections
 
