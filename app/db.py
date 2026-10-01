@@ -24,6 +24,7 @@ from sqlalchemy import JSON, DateTime, TypeDecorator, create_engine
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 #: Cross-dialect JSON column type: JSONB on PostgreSQL, JSON (TEXT-backed) on
 #: SQLite. Use this for any category-specific/opaque metadata column instead
@@ -74,7 +75,13 @@ def _engine_kwargs(url: str) -> dict:
     if url.startswith("sqlite"):
         # SQLite connections are not thread-safe by default; FastAPI/uvicorn
         # may use a session across threads within one logical request.
-        return {"connect_args": {"check_same_thread": False}}
+        kwargs = {"connect_args": {"check_same_thread": False}}
+        # A bare sqlite:// URL is an in-memory database. StaticPool makes all
+        # request/test threads share the same connection instead of each
+        # seeing an empty private database.
+        if url in {"sqlite://", "sqlite:///:memory:"}:
+            kwargs["poolclass"] = StaticPool
+        return kwargs
     return {"pool_pre_ping": True}
 
 
