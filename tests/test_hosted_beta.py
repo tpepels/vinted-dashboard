@@ -9,7 +9,7 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 
-from app import billing, db, entry, models
+from app import billing, db, entry, models, worker
 from app.constants import BillingStatus
 from app.runtime_config import (
     database_readiness,
@@ -247,3 +247,23 @@ def test_worker_heartbeat_is_database_visible(monkeypatch):
     assert current["healthy"] is True
     assert current["last_seen_at"]
     assert current["age_seconds"] is not None
+
+
+def test_worker_refuses_mutating_job_for_read_only_workspace(monkeypatch):
+    with db.session_scope() as session:
+        workspace = models.Workspace(
+            name="Locked",
+            slug="locked-worker",
+            billing_status=BillingStatus.PAST_DUE,
+            settings={},
+        )
+        session.add(workspace)
+        session.flush()
+        workspace_id = workspace.id
+    monkeypatch.setattr(billing, "BILLING_ENABLED", True)
+    with pytest.raises(RuntimeError, match="read-only"):
+        worker.handle({
+            "job_type": "ebay_sync",
+            "workspace_id": str(workspace_id),
+            "payload": {},
+        })
