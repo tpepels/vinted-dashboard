@@ -1044,11 +1044,107 @@ function seriesChart(target, points, valueKey, { moneyValues = false } = {}) {
     + "</svg>";
 }
 
+function analyticsBars(target, rows, labelKey, countKey, labelMap = {}) {
+  const element = $(target);
+  const max = Math.max(1, ...rows.map((row) => Number(row[countKey] || 0)));
+  element.innerHTML = rows.length
+    ? rows.map((row) => {
+      const value = Number(row[countKey] || 0);
+      const label = labelMap[row[labelKey]] || row[labelKey];
+      const width = Math.round(value * 100 / max);
+      return '<div class="analytics-bar-row"><div class="analytics-bar-label"><span>'
+        + esc(label) + '</span><strong>' + esc(value) + '</strong></div>'
+        + '<div class="analytics-bar-track"><span style="width:' + width + '%"></span></div></div>';
+    }).join("")
+    : '<div class="chart-empty">No data yet.</div>';
+}
+
+function renderVintedBehavior(data) {
+  const summary = data.summary || {};
+  const strategy = data.strategy || {};
+  $("#vinted-coverage").textContent =
+    (summary.tracked_active_listings || 0) + " of " + (summary.active_listings || 0)
+    + " active listings have snapshot history";
+
+  $("#vinted-metrics").innerHTML =
+    metric("Views gained", summary.views_gained || 0, data.days + " days")
+    + metric("Favourites gained", summary.favourites_gained || 0, data.days + " days")
+    + metric("Favourites / 100 views",
+      summary.favourites_per_100_views == null ? "—" : summary.favourites_per_100_views)
+    + metric("Median active age",
+      summary.median_active_age_days == null ? "—" : summary.median_active_age_days + " d")
+    + metric("Linked Vinted sales", summary.linked_sales || 0,
+      summary.median_days_to_sale == null ? "" : "median " + summary.median_days_to_sale + " d to sale")
+    + metric("Price changes", summary.price_changes_30d || 0, "last 30 days");
+
+  $("#vinted-thresholds").textContent =
+    "Segments use workspace thresholds: momentum = at least "
+    + (strategy.momentum_favourites_7d ?? "—") + " new favourites in 7 days; "
+    + "high-interest stale = at least " + (strategy.stale_days ?? "—") + " days old and "
+    + (strategy.high_favourites ?? "—") + "+ favourites; low-interest stale = at least "
+    + (strategy.very_stale_days ?? "—") + " days old and at most "
+    + (strategy.low_favourites ?? "—") + " favourite(s).";
+
+  analyticsBars("#vinted-age-bars", data.age_buckets || [], "label", "count");
+  analyticsBars(
+    "#vinted-segment-bars",
+    data.segments || [],
+    "segment",
+    "count",
+    {
+      momentum: "Momentum",
+      high_interest_stale: "High-interest stale",
+      low_interest_stale: "Low-interest stale",
+      steady: "Steady",
+    },
+  );
+
+  const categories = data.categories || [];
+  $("#vinted-categories").innerHTML = categories.length
+    ? '<table><thead><tr><th>Category</th><th>Active</th><th>Views</th><th>Views gained</th><th>Favourites</th><th>Favourites gained</th><th>Fav / 100 views</th><th>Linked sales</th></tr></thead><tbody>'
+      + categories.map((row) =>
+        "<tr><td>" + esc(row.category) + "</td><td>" + esc(row.active_listings)
+        + "</td><td>" + esc(row.views) + "</td><td>+" + esc(row.views_gain)
+        + "</td><td>" + esc(row.favourites) + "</td><td>+" + esc(row.favourites_gain)
+        + "</td><td>" + esc(row.favourites_per_100_views == null ? "—" : row.favourites_per_100_views)
+        + "</td><td>" + esc(row.linked_sales) + "</td></tr>"
+      ).join("")
+      + "</tbody></table>"
+    : '<div class="empty">No Vinted category history yet.</div>';
+
+  const rows = data.listings || [];
+  const segmentLabel = {
+    momentum: "Momentum",
+    high_interest_stale: "High-interest stale",
+    low_interest_stale: "Low-interest stale",
+    steady: "Steady",
+  };
+  $("#vinted-efficiency").innerHTML = rows.length
+    ? '<table><thead><tr><th>Listing</th><th>Age</th><th>Views</th><th>+7d</th><th>Favs</th><th>+7d</th><th>Fav / 100 views</th><th>Views/day</th><th>Price changes</th><th>Signal</th></tr></thead><tbody>'
+      + rows.map((row) => {
+        const title = row.url
+          ? '<a href="' + esc(row.url) + '" target="_blank" rel="noreferrer">' + esc(row.title) + "</a>"
+          : esc(row.title);
+        return '<tr class="analytics-listing" data-id="' + esc(row.listing_id) + '"><td><div class="title">'
+          + title + '</div><div class="sub">' + esc(row.category) + " · "
+          + money(row.price_cents, row.currency) + "</div></td><td>" + esc(row.age_days) + " d</td><td>"
+          + esc(row.views) + "</td><td class="gain">+" + esc(row.views_gain_7d)
+          + "</td><td>" + esc(row.favourites) + "</td><td class="gain">+" + esc(row.favourites_gain_7d)
+          + "</td><td>" + esc(row.favourites_per_100_views == null ? "—" : row.favourites_per_100_views)
+          + "</td><td>" + esc(row.views_per_day) + "</td><td>" + esc(row.price_changes_30d)
+          + '</td><td><span class="signal ' + esc(row.segment) + '">'
+          + esc(segmentLabel[row.segment] || row.segment) + "</span></td></tr>";
+      }).join("")
+      + "</tbody></table>"
+    : '<div class="empty">No active Vinted listing history yet.</div>';
+}
+
 async function analytics() {
   const days = Number($("#analytics-days").value || 90);
-  const [summary, history] = await Promise.all([
+  const [summary, history, vinted] = await Promise.all([
     api("/api/app/analytics"),
     api("/api/app/analytics/history?days=" + days),
+    api("/api/app/analytics/vinted?days=" + days),
   ]);
   $("#analytics-metrics").innerHTML =
     metric("Active inventory", summary.active_inventory)
@@ -1059,6 +1155,8 @@ async function analytics() {
     + metric("Gross profit YTD", money(summary.sales_ytd_gross_profit_cents, summary.currency),
       summary.sales_ytd_costed_count + " costed sale" + (summary.sales_ytd_costed_count === 1 ? "" : "s"))
     + metric("Followers", summary.followers == null ? "—" : summary.followers, summary.following == null ? "" : summary.following + " following");
+
+  renderVintedBehavior(vinted);
 
   seriesChart("#views-chart", history.daily, "views_gained");
   seriesChart("#favourites-chart", history.daily, "favourites_gained");
