@@ -9,3 +9,4 @@ psycopg2-binary==2.9.13
 openpyxl==3.1.5
 cryptography==46.0.1
 python-multipart==0.0.20
+httpx==0.28.1
