@@ -7,6 +7,7 @@ const state = {
   file: null,
   mapping: {},
   mappings: [],
+  onboarding: null,
   inventoryItems: [],
   listings: [],
   reconciliation: [],
@@ -201,15 +202,19 @@ async function load(view) {
 }
 
 async function today() {
-  const [todayData, analyticsData] = await Promise.all([
+  const [todayData, analyticsData, onboardingData] = await Promise.all([
     api("/api/app/today"),
     api("/api/app/analytics"),
+    api("/api/app/onboarding"),
   ]);
+  state.onboarding = onboardingData;
+  renderOnboarding(onboardingData);
   $("#today-metrics").innerHTML =
     metric("Active inventory", analyticsData.active_inventory)
     + metric("Active listings", analyticsData.active_listings)
     + metric("Sales YTD", analyticsData.sales_ytd_count, money(analyticsData.sales_ytd_cents, analyticsData.currency))
-    + metric("Followers", analyticsData.followers == null ? "—" : analyticsData.followers);
+    + metric("Potential margin", money(analyticsData.inventory_potential_margin_cents, analyticsData.currency),
+      analyticsData.priced_inventory_count + " priced item" + (analyticsData.priced_inventory_count === 1 ? "" : "s"));
 
   $("#today-actions").innerHTML = todayData.actions.length
     ? todayData.actions.map((row) =>
@@ -223,6 +228,59 @@ async function today() {
 
   renderStockActions(todayData.cross_channel_actions || [], todayData.unlinked_sell_count || 0);
 }
+
+function onboardingStep(label, done, detail) {
+  return '<div class="onboarding-step ' + (done ? "done" : "") + '"><strong>'
+    + (done ? "✓ " : "○ ") + esc(label) + '</strong>'
+    + (detail ? '<span>' + esc(detail) + '</span>' : "") + "</div>";
+}
+
+function renderOnboarding(data) {
+  const card = $("#onboarding-card");
+  card.classList.toggle("hidden", Boolean(data.completed));
+  if (data.completed) return;
+  $("#onboarding-category").value = data.steps?.choose_category ? data.primary_category : "";
+  const connected = [
+    ...(data.connected_channels || []),
+    ...(data.vinted_bridge_paired && !(data.connected_channels || []).includes("vinted") ? ["vinted"] : []),
+  ];
+  $("#onboarding-steps").innerHTML =
+    onboardingStep("Choose inventory category", Boolean(data.steps?.choose_category), data.primary_category)
+    + onboardingStep("Load stock", Boolean(data.steps?.stock_loaded), data.inventory_count + " item" + (data.inventory_count === 1 ? "" : "s"))
+    + onboardingStep("Connect marketplace", Boolean(data.steps?.marketplace_connected), connected.join(", ") || "not connected")
+    + onboardingStep("Review duplicate stock matches", Boolean(data.steps?.matches_reviewed),
+      data.reconciliation_count ? data.reconciliation_count + " suggestion" + (data.reconciliation_count === 1 ? "" : "s") : "clear");
+}
+
+$("#onboarding-category").onchange = async () => {
+  const value = $("#onboarding-category").value;
+  if (!value) return;
+  try {
+    await api("/api/app/onboarding", {
+      method: "PUT",
+      body: JSON.stringify({ primary_category: value }),
+    });
+    await today();
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
+
+$("#onboarding-finish").onclick = async () => {
+  try {
+    await api("/api/app/onboarding", {
+      method: "PUT",
+      body: JSON.stringify({ completed: true }),
+    });
+    await today();
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
+
+$("#onboarding-import").onclick = () => selectView("imports");
+$("#onboarding-connect").onclick = () => selectView("connections");
+$("#onboarding-reconcile").onclick = () => selectView("reconcile");
 
 function crossChannelActionControls(row) {
   const open = row.listing?.url
@@ -275,6 +333,22 @@ function renderStockActions(rows, unlinkedCount) {
   bindCrossChannelButtons(today);
 }
 
+function selectedInventoryIds() {
+  return $(".inventory-select:checked").map((box) => box.dataset.id);
+}
+
+function updateInventorySelection() {
+  const ids = selectedInventoryIds();
+  $("#inventory-selected").textContent = ids.length + " selected";
+  $("#bulk-edit").disabled = ids.length === 0;
+  const all = $("#inventory-select-all");
+  if (all) {
+    const boxes = $(".inventory-select");
+    all.checked = boxes.length > 0 && ids.length === boxes.length;
+    all.indeterminate = ids.length > 0 && ids.length < boxes.length;
+  }
+}
+
 async function inventory() {
   const q = encodeURIComponent($("#inventory-q").value.trim());
   const status = encodeURIComponent($("#inventory-status").value);
@@ -282,12 +356,16 @@ async function inventory() {
   state.inventoryItems = data.items;
 
   $("#inventory-table").innerHTML = data.items.length
-    ? '<table><thead><tr><th>Item</th><th>SKU</th><th>Category</th><th>Qty</th><th>Channels</th><th>Status</th><th></th></tr></thead><tbody>'
+    ? '<table><thead><tr><th><input id="inventory-select-all" type="checkbox" aria-label="Select all"></th><th>Item</th><th>SKU</th><th>Category</th><th>Qty</th><th>Location</th><th>Cost</th><th>Ask</th><th>Margin</th><th>Channels</th><th>Status</th><th></th></tr></thead><tbody>'
       + data.items.map((item) =>
-        '<tr><td><div class="title">' + esc(item.title) + '</div><div class="sub">'
-        + esc(item.condition || "") + (item.location ? " · " + esc(item.location) : "")
-        + '</div></td><td>' + esc(item.sku) + "</td><td>" + esc(item.category)
-        + "</td><td>" + item.quantity + "</td><td>"
+        '<tr><td><input class="inventory-select" type="checkbox" data-id="' + esc(item.id) + '" aria-label="Select ' + esc(item.title) + '"></td>'
+        + '<td><div class="title">' + esc(item.title) + '</div><div class="sub">' + esc(item.condition || "") + '</div></td>'
+        + '<td>' + esc(item.sku) + "</td><td>" + esc(item.category)
+        + "</td><td>" + item.quantity + "</td><td>" + esc(item.location || "—")
+        + "</td><td>" + money(item.cost_cents, item.currency)
+        + "</td><td>" + money(item.default_price_cents, item.currency)
+        + "</td><td>" + money(item.potential_margin_cents, item.currency)
+        + "</td><td>"
         + ((item.listings || []).map((listing) =>
           '<span class="pill ' + esc(listing.channel) + '">' + esc(listing.channel) + "</span>"
         ).join(" ") || "—")
@@ -297,10 +375,55 @@ async function inventory() {
       + "</tbody></table>"
     : '<div class="empty">No inventory yet. Add an item or import a file.</div>';
 
-  $$(".edit-item").forEach((button) => {
+  $(".edit-item").forEach((button) => {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
   });
+  $(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
+  const selectAll = $("#inventory-select-all");
+  if (selectAll) {
+    selectAll.onchange = () => {
+      $(".inventory-select").forEach((box) => { box.checked = selectAll.checked; });
+      updateInventorySelection();
+    };
+  }
+  updateInventorySelection();
 }
+
+$("#bulk-edit").onclick = () => {
+  if (!selectedInventoryIds().length) return;
+  $("#bulk-form").reset();
+  $("#bulk-form").classList.remove("hidden");
+  $("#bulk-form").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+$("#cancel-bulk").onclick = () => $("#bulk-form").classList.add("hidden");
+
+$("#bulk-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const itemIds = selectedInventoryIds();
+  if (!itemIds.length) return flash("Select at least one inventory item.", true);
+  const raw = Object.fromEntries(new FormData(event.currentTarget));
+  const payload = { item_ids: itemIds };
+  if (raw.category) payload.category = raw.category;
+  if (raw.condition) payload.condition = raw.condition;
+  if (raw.location) payload.location = raw.location;
+  if (raw.currency) payload.currency = raw.currency.trim().toUpperCase();
+  if (raw.status) payload.status = raw.status;
+  if (raw.cost !== "") payload.cost_cents = Math.round(Number(raw.cost) * 100);
+  if (raw.price !== "") payload.default_price_cents = Math.round(Number(raw.price) * 100);
+  if (Object.keys(payload).length === 1) return flash("Choose at least one field to update.", true);
+  try {
+    const result = await api("/api/app/inventory/bulk", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    flash("Updated " + result.updated + " inventory item" + (result.updated === 1 ? "." : "s."));
+    $("#bulk-form").classList.add("hidden");
+    await inventory();
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
 
 $("#inventory-q").oninput = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-status").onchange = () => inventory().catch((error) => flash(error.message, true));
@@ -911,8 +1034,12 @@ async function analytics() {
   ]);
   $("#analytics-metrics").innerHTML =
     metric("Active inventory", summary.active_inventory)
-    + metric("Active listings", summary.active_listings)
+    + metric("Inventory cost", money(summary.inventory_cost_cents, summary.currency), summary.priced_inventory_count + " priced")
+    + metric("Inventory ask", money(summary.inventory_ask_cents, summary.currency))
+    + metric("Potential margin", money(summary.inventory_potential_margin_cents, summary.currency))
     + metric("Sales YTD", summary.sales_ytd_count, money(summary.sales_ytd_cents, summary.currency))
+    + metric("Gross profit YTD", money(summary.sales_ytd_gross_profit_cents, summary.currency),
+      summary.sales_ytd_costed_count + " costed sale" + (summary.sales_ytd_costed_count === 1 ? "" : "s"))
     + metric("Followers", summary.followers == null ? "—" : summary.followers, summary.following == null ? "" : summary.following + " following");
 
   seriesChart("#views-chart", history.daily, "views_gained");
@@ -980,6 +1107,9 @@ $("#mapping-preset").onchange = () => {
   if (preset?.options?.full_snapshot != null) {
     $("#full-snapshot").checked = Boolean(preset.options.full_snapshot);
   }
+  if (preset?.options?.default_category) {
+    $("#import-default-category").value = preset.options.default_category;
+  }
 };
 
 $("#preview-import").onclick = async () => {
@@ -991,6 +1121,7 @@ $("#preview-import").onclick = async () => {
   form.append("file", file);
   form.append("mapping_json", same && Object.keys(state.mapping).length ? JSON.stringify(state.mapping) : JSON.stringify(state.mapping || {}));
   form.append("full_snapshot", $("#full-snapshot").checked ? "true" : "false");
+  form.append("default_category", $("#import-default-category").value);
   try {
     const data = await api("/api/app/import/preview", { method: "POST", body: form });
     if (!Object.keys(state.mapping).length) state.mapping = Object.assign({}, data.suggested_mapping);
@@ -1026,13 +1157,37 @@ function renderMapping(data) {
 
 function renderPreview(data) {
   const counts = data.counts || {};
+  const reviewCount = (data.preview || []).filter((row) => (row.potential_duplicates || []).length).length;
+  const rows = data.preview || [];
+  const rowTable = rows.length
+    ? '<div class="table-wrap"><table><thead><tr><th>Row</th><th>Action</th><th>SKU</th><th>Title</th><th>Review</th></tr></thead><tbody>'
+      + rows.map((row) => {
+        const duplicateText = (row.potential_duplicates || []).map((candidate) =>
+          "Possible existing item: " + candidate.sku + " · " + candidate.title
+        );
+        const notes = [...(row.errors || []), ...duplicateText];
+        return "<tr><td>" + esc(row.row) + "</td><td>" + esc(row.action)
+          + "</td><td>" + esc(row.sku || "—") + "</td><td>" + esc(row.title || "—")
+          + "</td><td>" + (notes.length ? notes.map(esc).join("<br>") : "—") + "</td></tr>";
+      }).join("")
+      + "</tbody></table></div>"
+    : "";
+  const missing = (data.missing_existing || []).length
+    ? '<div class="import-warning"><strong>Would archive:</strong> '
+      + data.missing_existing.map((row) => esc(row.sku + " · " + row.title)).join(", ")
+      + ((data.missing_existing_count || 0) > data.missing_existing.length ? " …" : "")
+      + "</div>"
+    : "";
   $("#preview").innerHTML =
     '<div class="card-head"><h2>Preview - nothing written yet</h2></div><div class="preview-stats">'
     + "<span>" + (counts.new || 0) + " new</span>"
     + "<span>" + (counts.update || 0) + " updates</span>"
     + "<span>" + (counts.unchanged || 0) + " unchanged</span>"
     + "<span>" + (counts.conflict || 0) + " conflicts</span>"
-    + "<span>" + (data.missing_existing_count || 0) + " would archive</span></div>";
+    + "<span>" + reviewCount + " need duplicate review</span>"
+    + "<span>" + (data.missing_existing_count || 0) + " would archive</span></div>"
+    + (reviewCount ? '<p class="muted">Potential duplicates are not auto-merged. Importing creates separate master records; reconcile them explicitly afterwards.</p>' : "")
+    + missing + rowTable;
   $("#apply-import").disabled = !data.can_apply;
 }
 
@@ -1042,6 +1197,7 @@ $("#apply-import").onclick = async () => {
   form.append("file", state.file);
   form.append("mapping_json", JSON.stringify(state.mapping));
   form.append("full_snapshot", $("#full-snapshot").checked ? "true" : "false");
+  form.append("default_category", $("#import-default-category").value);
   form.append("preset_name", $("#preset-name").value.trim());
   try {
     const result = await api("/api/app/import/apply", { method: "POST", body: form });
