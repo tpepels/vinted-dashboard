@@ -471,7 +471,10 @@ function quickType() {
 
 function captureQuickRequiredValues() {
   $("#quick-required input, #quick-required textarea").forEach((field) => {
-    state.quickRequiredValues[field.name] = field.value;
+    const targetName = field.dataset.target || field.name;
+    state.quickRequiredValues[targetName] = field.value;
+    const main = $("#quick-listing-form").elements.namedItem(targetName);
+    if (main && main !== field && "value" in main) main.value = field.value;
   });
 }
 
@@ -482,12 +485,12 @@ function quickRequirements() {
   const result = [];
 
   if (category === "book" && !String(form.elements.namedItem("isbn")?.value || "").trim()) {
-    result.push(["isbn", "ISBN", "text", "Required for the book listing"]);
+    result.push(["required_isbn", "ISBN", "text", "Required for the book listing", "isbn"]);
   }
   if (category === "clothing") {
     const shoeTypes = new Set(["shoes", "boots", "trainers", "sneakers"]);
     if (shoeTypes.has(itemType) && !String(form.elements.namedItem("size")?.value || "").trim()) {
-      result.push(["size", "Size", "text", "Enter the marked size"]);
+      result.push(["required_size", "Size", "text", "Enter the marked size", "size"]);
     }
     if (new Set(["jeans", "trousers", "pants", "shorts"]).has(itemType)) {
       result.push(["waist_cm", "Waist (cm)", "number", "Measure flat/according to your normal workflow"]);
@@ -514,18 +517,21 @@ function renderQuickRequired() {
     if (main && String(main.value || "").trim()) return main.value;
     return state.quickRequiredValues[name] || "";
   };
-  $("#quick-required").innerHTML = quickRequirements().map(([name, label, type, help]) => {
+  $("#quick-required").innerHTML = quickRequirements().map(([name, label, type, help, target]) => {
     const step = type === "number" ? ' step="0.01" min="0"' : "";
+    const targetName = target || name;
     return '<label>' + esc(label)
-      + '<input name="' + esc(name) + '" type="' + esc(type) + '"' + step
-      + ' value="' + esc(existing(name)) + '"><span class="field-help">'
+      + '<input name="' + esc(name) + '" data-target="' + esc(targetName)
+      + '" type="' + esc(type) + '"' + step
+      + ' value="' + esc(existing(targetName)) + '"><span class="field-help">'
       + esc(help) + "</span></label>";
   }).join("");
   $("#quick-required input").forEach((field) => {
     field.oninput = () => {
-      state.quickRequiredValues[field.name] = field.value;
-      const main = form.elements.namedItem(field.name);
-      if (main && main !== field) main.value = field.value;
+      const targetName = field.dataset.target || field.name;
+      state.quickRequiredValues[targetName] = field.value;
+      const main = form.elements.namedItem(targetName);
+      if (main && main !== field && "value" in main) main.value = field.value;
     };
   });
 }
