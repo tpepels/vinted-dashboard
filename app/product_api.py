@@ -56,6 +56,7 @@ from app.import_export import (
     inventory_export_rows,
     parse_table,
     preview_inventory_import,
+    EXPORT_HEADERS,
     render_csv,
     render_xlsx,
     suggest_mapping,
@@ -446,6 +447,8 @@ def update_inventory_item(
             raise HTTPException(status_code=400, detail="Quantity cannot be negative")
         for key, value in values.items():
             setattr(item, key, value)
+        if "quantity" in values and "status" not in values:
+            item.status = ItemStatus.ACTIVE if int(item.quantity or 0) > 0 else ItemStatus.ARCHIVED
         session.flush()
         listings = session.execute(
             select(models.ChannelListing).where(
@@ -974,11 +977,17 @@ def save_mapping(
 def export_inventory(
     format: str = "csv",
     status: str = "",
+    channel: str = "",
     context: RequestContext = Depends(require_context),
 ):
     kind = format.lower()
     if kind not in {"csv", "xlsx"}:
         raise HTTPException(status_code=400, detail="Export format must be csv or xlsx")
+    channel = channel.strip().lower()
+    known_channels = {row["channel"] for row in connector_catalog()}
+    if channel and channel not in known_channels:
+        raise HTTPException(status_code=400, detail="Unknown export channel")
+
     with db.session_scope() as session:
         query = select(models.InventoryItem).where(
             models.InventoryItem.workspace_id == context.workspace.id
@@ -986,27 +995,75 @@ def export_inventory(
         if status:
             query = query.where(models.InventoryItem.status == status)
         items = session.execute(query.order_by(models.InventoryItem.sku)).scalars().all()
-        rows = inventory_export_rows(items)
+
+        headers = None
+        if not channel:
+            rows = inventory_export_rows(items)
+        else:
+            item_by_id = {item.id: item for item in items}
+            listings = session.execute(
+                select(models.ChannelListing).where(
+                    models.ChannelListing.workspace_id == context.workspace.id,
+                    models.ChannelListing.channel == channel,
+                    models.ChannelListing.inventory_item_id.in_(list(item_by_id)) if item_by_id else False,
+                )
+                .order_by(models.ChannelListing.title)
+            ).scalars().all() if item_by_id else []
+            rows = []
+            for listing in listings:
+                item = item_by_id.get(listing.inventory_item_id)
+                if item is None:
+                    continue
+                row = inventory_export_rows([item])[0]
+                row.update(
+                    {
+                        "Channel": listing.channel,
+                        "Listing ID": listing.external_id,
+                        "External SKU": listing.external_sku or "",
+                        "Listing Title": listing.title,
+                        "Listing Price": (
+                            f"{int(listing.price_cents) / 100:.2f}"
+                            if listing.price_cents is not None else ""
+                        ),
+                        "Listing Currency": listing.currency or item.currency or "",
+                        "Listing Status": listing.status,
+                        "Listing URL": listing.url or "",
+                    }
+                )
+                rows.append(row)
+            headers = list(EXPORT_HEADERS) + [
+                "Channel",
+                "Listing ID",
+                "External SKU",
+                "Listing Title",
+                "Listing Price",
+                "Listing Currency",
+                "Listing Status",
+                "Listing URL",
+            ]
+
         job = ExportJob(
             workspace_id=context.workspace.id,
             user_id=context.user.id,
             file_type=kind,
             status="completed",
             mapping={},
-            options={"status": status or "all"},
+            options={"status": status or "all", "channel": channel or "master"},
             row_count=len(rows),
             completed_at=utcnow(),
         )
         session.add(job)
-    body = render_xlsx(rows) if kind == "xlsx" else render_csv(rows)
+
+    body = render_xlsx(rows, headers=headers) if kind == "xlsx" else render_csv(rows, headers=headers)
     media = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         if kind == "xlsx" else "text/csv; charset=utf-8"
     )
+    suffix = f"-{channel}" if channel else ""
     return Response(
         content=body,
         media_type=media,
-        headers={"Content-Disposition": f'attachment; filename="inventory.{kind}"'},
+        headers={"Content-Disposition": f'attachment; filename="inventory{suffix}.{kind}"'},
     )
 
 
@@ -1098,8 +1155,6 @@ def save_connector_credentials(
     if channel not in known or channel in {Channel.VINTED, Channel.CSV, Channel.EXCEL}:
         raise HTTPException(status_code=400, detail="This connector does not accept stored credentials")
     cleaned = {str(k): str(v) for k, v in payload.values.items() if str(v).strip()}
-    if not cleaned:
-        raise HTTPException(status_code=400, detail="No credentials supplied")
     with db.session_scope() as session:
         row = session.execute(
             select(ConnectorCredential).where(
@@ -1107,15 +1162,38 @@ def save_connector_credentials(
                 ConnectorCredential.channel == channel,
             )
         ).scalar_one_or_none()
+        existing: dict[str, Any] = {}
+        if row is not None:
+            try:
+                existing = decrypt_json(row.encrypted_payload)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        merged = {**existing, **cleaned}
+        if channel == Channel.BIBLIO:
+            if not str(merged.get("username") or "").strip() or not str(merged.get("password") or "").strip():
+                raise HTTPException(status_code=400, detail="BIBLIO needs username and password")
+        elif channel == Channel.EBAY:
+            direct = bool(str(merged.get("oauth_token") or "").strip())
+            refreshable = all(
+                str(merged.get(key) or "").strip()
+                for key in ("client_id", "client_secret", "refresh_token")
+            )
+            if not direct and not refreshable:
+                raise HTTPException(
+                    status_code=400,
+                    detail="eBay needs oauth_token, or client_id + client_secret + refresh_token",
+                )
+        if not merged:
+            raise HTTPException(status_code=400, detail="No credentials supplied")
         if row is None:
             row = ConnectorCredential(
                 workspace_id=context.workspace.id,
                 channel=channel,
-                encrypted_payload=encrypt_json(cleaned),
+                encrypted_payload=encrypt_json(merged),
             )
             session.add(row)
         else:
-            row.encrypted_payload = encrypt_json(cleaned)
+            row.encrypted_payload = encrypt_json(merged)
         account, _ = get_or_create_channel_account(session, context.workspace, channel, {})
         account.status = ChannelAccountStatus.DISCONNECTED
         account.config = {
@@ -1125,7 +1203,7 @@ def save_connector_credentials(
         }
     return {
         "ok": True,
-        "stored_keys": sorted(cleaned),
+        "stored_keys": sorted(merged),
         "encrypted": True,
         "operational": True,
     }
