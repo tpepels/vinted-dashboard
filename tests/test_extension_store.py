@@ -179,3 +179,8 @@ def test_host_permission_drops_port_but_keeps_scheme():
     assert build_extension.permission_for("https://dashboard.example:8443") == (
         "https://dashboard.example/*"
     )
+
+
+def test_source_extension_version_is_bumped_for_local_download():
+    manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == "2.1.0"
