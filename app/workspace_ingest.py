@@ -327,7 +327,7 @@ def record_workspace_snapshot(
 
 
 def maybe_record_legacy_snapshot(workspace_slug: str, snapshot: dict[str, Any]) -> None:
-    enabled = os.getenv("LEGACY_COMPAT_SYNC", "true").strip().lower() in {"1", "true", "yes", "on"}
+    enabled = os.getenv("LEGACY_COMPAT_SYNC", "false").strip().lower() in {"1", "true", "yes", "on"}
     if not enabled or workspace_slug != BOOTSTRAP_WORKSPACE_SLUG:
         return
     from app.intelligence import record_snapshot
