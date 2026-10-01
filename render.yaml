@@ -44,6 +44,10 @@ services:
         sync: false
       - key: LEGACY_COMPAT_SYNC
         value: "false"
+      - key: RUN_MIGRATIONS
+        value: "false"
+      - key: RUN_LEGACY_BACKFILL
+        value: "false"
 
 databases:
   - name: reseller-dashboard-db
