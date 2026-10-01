@@ -116,6 +116,16 @@ The first time the app starts against an empty new-schema database, it also runs
 
 The bootstrap workspace/owner can be customized via `.env` (see `BOOTSTRAP_WORKSPACE_NAME`/`BOOTSTRAP_WORKSPACE_SLUG`/`BOOTSTRAP_OWNER_EMAIL`); the legacy file location defaults to `VINTED_HISTORY_DB` and can be overridden separately via `LEGACY_SQLITE_PATH` if needed.
 
+### Connector architecture
+
+`app/connectors/` is the start of a generic per-channel connector layer:
+
+- `app/connectors/base.py` holds a small registry (`CONNECTORS`) describing each channel (Vinted, BIBLIO, eBay) and whether it supports import/export - metadata for later phases (e.g. a connectors status endpoint), not yet exposed anywhere itself.
+- `app/connectors/workspace_sync.py` is the live counterpart to the one-time backfill above. Every real sync already goes through one of two chokepoints in `app/channels.py` - `upsert_channel_snapshot` (Vinted/BIBLIO/eBay item snapshots) and `_record_biblio_ftp_run` (BIBLIO FTP push bookkeeping) - and both now also dual-write into the new ORM schema (`ChannelAccount`, `InventoryItem`, `ChannelListing`, `ConnectorSyncRun`) under the same bootstrap workspace, so it never drifts out of date between backfills. This is best-effort: a dual-write failure is logged but never breaks the legacy sync it rides along with, which remains the source of truth for the current UI.
+- Shared bootstrap helpers (`clean_isbn`, `normalize_sku`, `get_or_create_workspace`/`get_or_create_owner`/`get_or_create_channel_account`) live in `app/workspace_bootstrap.py` and are used by both the batch backfill and the live connectors, so the two paths can never disagree about how a workspace/account/SKU is resolved.
+- Live matching across channels is SKU-only (an item with no real SKU gets a synthesized `CHANNEL-external_id` one, same convention as the backfill). The batch backfill additionally links rows by ISBN across channels; live syncs don't, since every connector that can lack a SKU (Vinted, eBay) also never carries an ISBN, and the one that always carries an ISBN (BIBLIO) also always has a SKU.
+- Not yet dual-written: `app/intelligence.py`'s analytics tables (listing view/favourite history, market research) stay batch-backfill-only for now, since that data isn't part of the two chokepoints' payloads.
+
 ## Configuration
 
 ```env
