@@ -40,6 +40,12 @@ def handle(job: dict) -> None:
         from app.channels import sync_biblio_ftp
         sync_biblio_ftp()
         return
+    if job_type == "abebooks_sync":
+        if workspace_id is None:
+            raise RuntimeError("AbeBooks sync requires a workspace")
+        from app.connectors.abebooks import sync_workspace
+        sync_workspace(workspace_id)
+        return
     if job_type == "ebay_sync":
         if workspace_id is not None:
             from app.connectors.hosted import has_credentials, sync_ebay_workspace
