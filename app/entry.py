@@ -14,6 +14,11 @@ from pydantic import BaseModel, Field
 
 from app import main as main_module
 from app.product_api import router as product_router
+from app.runtime_config import (
+    is_production,
+    public_app_origin,
+    safe_runtime_summary,
+)
 from app.intelligence import (
     intelligence_payload,
     queued_market_jobs,
@@ -142,6 +147,30 @@ def _dashboard_data(force: bool = False) -> dict[str, Any]:
 main_module.dashboard_data = _dashboard_data
 app = main_module.app
 app.include_router(product_router)
+
+
+@app.middleware("http")
+async def production_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=()",
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; connect-src 'self'; object-src 'none'; "
+        "base-uri 'self'; frame-ancestors 'none'",
+    )
+    if is_production():
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
+    return response
 
 LEGACY_API_ENABLED = os.getenv("LEGACY_API_ENABLED", "false").strip().lower() in {
     "1", "true", "yes", "on"
@@ -341,7 +370,7 @@ def download_legacy_extension(request: Request):
 
 @app.get("/downloads/reseller-chrome-bridge.zip")
 def download_paired_extension(request: Request):
-    dashboard_url = str(request.base_url).rstrip("/")
+    dashboard_url = public_app_origin() or str(request.base_url).rstrip("/")
     return Response(
         content=_paired_extension_zip(dashboard_url),
         media_type="application/zip",
@@ -349,3 +378,9 @@ def download_paired_extension(request: Request):
             "Content-Disposition": 'attachment; filename="reseller-dashboard-chrome-bridge.zip"'
         },
     )
+
+
+@app.get("/api/runtime")
+def runtime_summary():
+    """Public, secret-free deployment posture for smoke checks."""
+    return safe_runtime_summary()
