@@ -525,16 +525,29 @@ async function inventory() {
   const q = encodeURIComponent($("#inventory-q").value.trim());
   const status = encodeURIComponent($("#inventory-status").value);
   const data = await api("/api/app/inventory?q=" + q + "&status=" + status);
-  state.inventoryItems = data.items;
+  state.inventoryItems = data.items || [];
+  const costFilter = $("#inventory-cost").value;
+  const visibleItems = state.inventoryItems.filter((item) => {
+    if (costFilter === "missing") return item.cost_cents == null;
+    if (costFilter === "recorded") return item.cost_cents != null;
+    return true;
+  });
 
-  $("#inventory-table").innerHTML = data.items.length
+  $("#inventory-table").innerHTML = visibleItems.length
     ? '<table><thead><tr><th><input id="inventory-select-all" type="checkbox" aria-label="Select all"></th><th>Item</th><th>SKU</th><th>Category</th><th>Qty</th><th>Location</th><th>Cost</th><th>Ask</th><th>Margin</th><th>Channels</th><th>Status</th><th></th></tr></thead><tbody>'
-      + data.items.map((item) =>
+      + visibleItems.map((item) =>
         '<tr><td><input class="inventory-select" type="checkbox" data-id="' + esc(item.id) + '" aria-label="Select ' + esc(item.title) + '"></td>'
         + '<td><div class="title">' + esc(item.title) + '</div><div class="sub">' + esc(item.condition || "") + '</div></td>'
         + '<td>' + esc(item.sku) + "</td><td>" + esc(item.category)
         + "</td><td>" + item.quantity + "</td><td>" + esc(item.location || "—")
         + "</td><td>" + money(item.cost_cents, item.currency)
+        + (item.attributes?.cost_source
+          ? '<div class="sub">' + esc(
+            item.attributes.cost_source === "vinted_purchase"
+              ? "Vinted purchase" + (item.attributes.cost_source_adjusted ? " · adjusted" : "")
+              : item.attributes.cost_source
+          ) + "</div>"
+          : "")
         + "</td><td>" + money(item.effective_ask_cents, item.currency)
         + (item.effective_ask_source === "marketplace" ? '<div class="sub">marketplace</div>' : "")
         + "</td><td>" + money(item.potential_margin_cents, item.currency)
@@ -600,6 +613,7 @@ $("#bulk-form").onsubmit = async (event) => {
 
 $("#inventory-q").oninput = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-status").onchange = () => inventory().catch((error) => flash(error.message, true));
+$("#inventory-cost").onchange = () => inventory().catch((error) => flash(error.message, true));
 function clearQuickPhotoUrls() {
   state.quickPhotoUrls.forEach((url) => URL.revokeObjectURL(url));
   state.quickPhotoUrls = [];
