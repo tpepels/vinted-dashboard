@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import uuid
 
 from app import jobs
 
@@ -17,11 +18,22 @@ POLL_SECONDS = max(1, int(os.getenv("WORKER_POLL_SECONDS", "5")))
 def handle(job: dict) -> None:
     job_type = job["job_type"]
     payload = job.get("payload") or {}
+    workspace_id = uuid.UUID(job["workspace_id"]) if job.get("workspace_id") else None
     if job_type == "biblio_sync":
+        if workspace_id is not None:
+            from app.connectors.hosted import has_credentials, sync_biblio_workspace
+            if has_credentials(workspace_id, "biblio"):
+                sync_biblio_workspace(workspace_id)
+                return
         from app.channels import sync_biblio_ftp
         sync_biblio_ftp()
         return
     if job_type == "ebay_sync":
+        if workspace_id is not None:
+            from app.connectors.hosted import has_credentials, sync_ebay_workspace
+            if has_credentials(workspace_id, "ebay"):
+                sync_ebay_workspace(workspace_id)
+                return
         from app.channels import sync_ebay_inventory
         sync_ebay_inventory()
         return
