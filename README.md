@@ -161,15 +161,14 @@ Current scope:
 - **Vinted** - paired Chrome bridge, listings/orders/history/analytics.
 - **CSV / TSV** - generic import/export.
 - **Excel** - generic import/export.
-- **BIBLIO** - existing import and FTP inventory/delete workflow for the
-  bootstrap/self-hosted workspace.
-- **eBay** - existing official seller inventory connector for the
-  bootstrap/self-hosted workspace.
+- **BIBLIO** - optional book connector with workspace-scoped inventory import,
+  FTP connection testing and inventory/delete synchronization.
+- **eBay** - workspace-scoped active seller inventory synchronization through
+  the official Trading API.
 
-BIBLIO and eBay remain fully usable for the existing personal deployment, but
-are not falsely advertised as hosted multi-tenant integrations. Hosted
-workspace credential records can be stored encrypted, while their
-per-workspace sync adapters remain marked non-operational until implemented.
+BIBLIO and eBay can be configured per workspace in **Connections**. The
+existing environment-variable configuration remains supported as a fallback
+for the migrated personal/bootstrap workspace.
 
 ### BIBLIO personal setup
 
