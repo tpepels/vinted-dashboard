@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import uuid
 
 from fastapi.testclient import TestClient
@@ -228,3 +228,129 @@ def test_analytics_reports_costed_sales_gross_profit(monkeypatch):
     assert body["sales_ytd_cost_cents"] == 500
     assert body["sales_ytd_costed_revenue_cents"] == 1200
     assert body["sales_ytd_gross_profit_cents"] == 700
+
+
+
+def test_analytics_uses_active_marketplace_price_without_manual_default(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    csrf = _register(client, "market-ask@example.test")
+    created = client.post(
+        "/api/app/inventory",
+        headers=_headers(csrf),
+        json={
+            "sku": "ASK-1",
+            "title": "Marketplace-priced item",
+            "category": "general",
+            "quantity": 1,
+            "currency": "EUR",
+        },
+    )
+    assert created.status_code == 200, created.text
+    item_id = uuid.UUID(created.json()["item"]["id"])
+
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        account = models.ChannelAccount(
+            workspace_id=item.workspace_id,
+            channel="vinted",
+            display_name="Vinted",
+            status="connected",
+            config={},
+        )
+        session.add(account)
+        session.flush()
+        session.add(
+            models.ChannelListing(
+                workspace_id=item.workspace_id,
+                inventory_item_id=item.id,
+                channel_account_id=account.id,
+                channel="vinted",
+                external_id="ASK-1",
+                title=item.title,
+                price_cents=1750,
+                currency="EUR",
+                status="active",
+                quantity=1,
+                first_seen_at=datetime.now(timezone.utc),
+                last_seen_at=datetime.now(timezone.utc),
+                extra={},
+            )
+        )
+
+    inventory = client.get("/api/app/inventory")
+    assert inventory.status_code == 200
+    row = inventory.json()["items"][0]
+    assert row["default_price_cents"] is None
+    assert row["effective_ask_cents"] == 1750
+    assert row["effective_ask_source"] == "marketplace"
+    assert row["potential_margin_cents"] is None
+
+    analytics = client.get("/api/app/analytics")
+    assert analytics.status_code == 200
+    body = analytics.json()
+    assert body["priced_inventory_count"] == 1
+    assert body["market_priced_inventory_count"] == 1
+    assert body["manual_priced_inventory_count"] == 0
+    assert body["inventory_ask_cents"] == 1750
+    assert body["costed_inventory_count"] == 0
+    assert body["margin_inventory_count"] == 0
+    assert body["inventory_cost_cents"] == 0
+    assert body["inventory_potential_margin_cents"] == 0
+
+
+def test_today_uses_vinted_behavior_thresholds_for_stale_listing(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    csrf = _register(client, "today-action@example.test")
+    created = client.post(
+        "/api/app/inventory",
+        headers=_headers(csrf),
+        json={
+            "sku": "STALE-1",
+            "title": "Very stale listing",
+            "category": "general",
+            "quantity": 1,
+            "currency": "EUR",
+        },
+    )
+    assert created.status_code == 200
+    item_id = uuid.UUID(created.json()["item"]["id"])
+    now = datetime.now(timezone.utc)
+
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        account = models.ChannelAccount(
+            workspace_id=item.workspace_id,
+            channel="vinted",
+            display_name="Vinted",
+            status="connected",
+            config={},
+        )
+        session.add(account)
+        session.flush()
+        session.add(
+            models.ChannelListing(
+                workspace_id=item.workspace_id,
+                inventory_item_id=item.id,
+                channel_account_id=account.id,
+                channel="vinted",
+                external_id="STALE-1",
+                title=item.title,
+                price_cents=900,
+                currency="EUR",
+                status="active",
+                quantity=1,
+                first_seen_at=now - timedelta(days=100),
+                last_seen_at=now,
+                extra={"listed_at": (now - timedelta(days=100)).isoformat()},
+            )
+        )
+
+    response = client.get("/api/app/today")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["actions"]
+    assert body["actions"][0]["title"] == "Very stale listing"
+    assert body["actions"][0]["action"] == "Refresh listing"
+    assert body["actions"][0]["age_days"] >= 99
