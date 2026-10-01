@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import uuid
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -198,7 +199,7 @@ def test_marketplace_export_contains_listing_columns():
     item_id = created.json()["item"]["id"]
 
     with db.session_scope() as session:
-        user_item = session.get(models.InventoryItem, item_id)
+        user_item = session.get(models.InventoryItem, uuid.UUID(item_id))
         account = models.ChannelAccount(
             workspace_id=user_item.workspace_id,
             channel=Channel.VINTED,
