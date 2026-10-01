@@ -35,6 +35,30 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _normalized_title(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _unique_item_by_title(
+    session: Session,
+    workspace_id: uuid.UUID,
+    title: str | None,
+) -> models.InventoryItem | None:
+    normalized = _normalized_title(title)
+    if not normalized:
+        return None
+    items = session.execute(
+        select(models.InventoryItem).where(
+            models.InventoryItem.workspace_id == workspace_id,
+        )
+    ).scalars().all()
+    matches = [
+        item for item in items
+        if _normalized_title(item.title) == normalized
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def resolve_sale_item(
     session: Session,
     sale: models.Sale,
@@ -65,9 +89,10 @@ def resolve_sale_item(
             sale.inventory_item_id = listing.inventory_item_id
             return session.get(models.InventoryItem, listing.inventory_item_id)
 
-    title = " ".join(str(sale.title or "").casefold().split())
+    title = _normalized_title(sale.title)
     if not title:
         return None
+
     candidates = session.execute(
         select(models.ChannelListing).where(
             models.ChannelListing.workspace_id == sale.workspace_id,
@@ -76,15 +101,30 @@ def resolve_sale_item(
     ).scalars().all()
     exact = [
         row for row in candidates
-        if " ".join(str(row.title or "").casefold().split()) == title
+        if _normalized_title(row.title) == title
         and row.inventory_item_id is not None
     ]
     item_ids = {row.inventory_item_id for row in exact}
-    if len(item_ids) != 1:
-        return None
-    item_id = next(iter(item_ids))
-    sale.inventory_item_id = item_id
-    return session.get(models.InventoryItem, item_id)
+    if len(item_ids) == 1:
+        item_id = next(iter(item_ids))
+        sale.inventory_item_id = item_id
+        extra = dict(sale.extra or {})
+        extra["auto_link_reason"] = "exact_unique_channel_title"
+        sale.extra = extra
+        return session.get(models.InventoryItem, item_id)
+
+    # Historical imports can predate the listing->master link.  If the sale
+    # title identifies exactly one master item in the workspace, that is still
+    # an exact deterministic match.  Duplicate titles remain deliberately
+    # ambiguous and are left for manual review.
+    item = _unique_item_by_title(session, sale.workspace_id, sale.title)
+    if item is not None:
+        sale.inventory_item_id = item.id
+        extra = dict(sale.extra or {})
+        extra["auto_link_reason"] = "exact_unique_inventory_title"
+        sale.extra = extra
+        return item
+    return None
 
 
 def _action_mode(channel: str) -> tuple[str, str]:
@@ -108,6 +148,59 @@ def _enqueue_action_job(session: Session, action: CrossChannelAction) -> None:
     # SessionLocal has autoflush disabled; make every planned action/job pair
     # immediately visible to subsequent queries in the same transaction.
     session.flush()
+
+
+def auto_link_unlinked_sales(
+    session: Session,
+    workspace_id: uuid.UUID,
+) -> dict[str, int]:
+    """Safely link historical seller-side sales to existing physical stock.
+
+    Only deterministic matches are accepted:
+    1. exact marketplace item id already stored on the sale;
+    2. exact normalized title resolving to one item through channel listings;
+    3. exact normalized title resolving to one inventory item in the workspace.
+
+    Ambiguous duplicate titles are intentionally left untouched.
+    """
+    sales = session.execute(
+        select(models.Sale).where(
+            models.Sale.workspace_id == workspace_id,
+            models.Sale.direction == "sell",
+            models.Sale.inventory_item_id.is_(None),
+        )
+    ).scalars().all()
+
+    linked = 0
+    ambiguous_or_unmatched = 0
+    actions_created = 0
+    for sale in sales:
+        if not sale_counts_as_sold(sale):
+            continue
+        extra = dict(sale.extra or {})
+        external_item_id = str(extra.get("item_external_id") or "").strip() or None
+        item = resolve_sale_item(
+            session,
+            sale,
+            external_item_id=external_item_id,
+        )
+        if item is None:
+            ambiguous_or_unmatched += 1
+            continue
+        session.flush()
+        created = reconcile_sale_state(
+            session,
+            sale,
+            external_item_id=external_item_id,
+        )
+        linked += 1
+        actions_created += len(created)
+
+    return {
+        "linked": linked,
+        "remaining": ambiguous_or_unmatched,
+        "actions_created": actions_created,
+    }
 
 
 def plan_sale_reconciliation(
