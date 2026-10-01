@@ -11,6 +11,7 @@ from app.connectors import hosted
 from app.connectors.workspace_sync import recompute_inventory_item
 from app.cross_channel import (
     acknowledge_manual_action,
+    auto_link_unlinked_sales,
     plan_sale_reconciliation,
     reconcile_sale_state,
 )
@@ -416,3 +417,131 @@ def test_vinted_snapshot_exact_item_id_links_sale_and_queues_other_channel_close
                 BackgroundJob.job_type == "cross_channel_close"
             )
         ).scalar_one() == 1
+
+
+
+def test_auto_link_historical_sale_by_unique_exact_channel_title():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="VINTED-UNIQUE",
+            title="The Left Hand of Darkness",
+            category="book",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        _listing(session, workspace_id, item, "vinted", "V-UNIQUE")
+        sale = _sale(session, workspace_id, None)
+        sale.title = "  the left hand of darkness  "
+        item_id = item.id
+        sale_id = sale.id
+
+        result = auto_link_unlinked_sales(session, workspace_id)
+        assert result == {"linked": 1, "remaining": 0, "actions_created": 0}
+        session.flush()
+
+        linked = session.get(models.Sale, sale_id)
+        assert linked.inventory_item_id == item_id
+        assert linked.extra["auto_link_reason"] == "exact_unique_channel_title"
+        assert session.get(models.InventoryItem, item_id).status == "sold"
+
+
+def test_auto_link_historical_sale_by_unique_master_title_without_listing():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="MASTER-ONLY",
+            title="Master only title",
+            category="book",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        sale = _sale(session, workspace_id, None)
+        sale.title = "master only title"
+        item_id = item.id
+        sale_id = sale.id
+
+        result = auto_link_unlinked_sales(session, workspace_id)
+        assert result["linked"] == 1
+        assert result["remaining"] == 0
+        linked = session.get(models.Sale, sale_id)
+        assert linked.inventory_item_id == item_id
+        assert linked.extra["auto_link_reason"] == "exact_unique_inventory_title"
+
+
+def test_auto_link_leaves_duplicate_exact_titles_ambiguous():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        first = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="COPY-1",
+            title="Stoner",
+            category="book",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        second = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="COPY-2",
+            title="Stoner",
+            category="book",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add_all([first, second])
+        session.flush()
+        _listing(session, workspace_id, first, "vinted", "COPY-V1")
+        _listing(session, workspace_id, second, "vinted", "COPY-V2")
+        sale = _sale(session, workspace_id, None)
+        sale.title = "STONER"
+        sale_id = sale.id
+
+        result = auto_link_unlinked_sales(session, workspace_id)
+        assert result == {"linked": 0, "remaining": 1, "actions_created": 0}
+        assert session.get(models.Sale, sale_id).inventory_item_id is None
+
+
+def test_vinted_sync_retries_historical_unlinked_sale_after_listing_arrives():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        sale = _sale(session, workspace_id, None)
+        sale.title = "Late arriving listing"
+        sale_id = sale.id
+
+    result = record_workspace_snapshot(
+        workspace_id,
+        {
+            "collected_at": NOW.timestamp(),
+            "current_user": {},
+            "listings": [
+                {
+                    "id": "LATE-1",
+                    "title": "Late arriving listing",
+                    "status": "active",
+                    "price_cents": 1200,
+                    "currency": "EUR",
+                }
+            ],
+            "notifications": [],
+            "orders": [],
+        },
+    )
+    assert result["sales_auto_linked"] == 1
+    assert result["sales_remaining_unlinked"] == 0
+
+    with db.session_scope() as session:
+        linked = session.get(models.Sale, sale_id)
+        assert linked.inventory_item_id is not None
+        item = session.get(models.InventoryItem, linked.inventory_item_id)
+        assert item.title == "Late arriving listing"
+        assert item.status == "sold"
