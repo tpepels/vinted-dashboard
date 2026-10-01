@@ -75,9 +75,11 @@ starting from an empty workspace.
 ## Current connector scope
 
 - Vinted: paired Chrome bridge, workspace-scoped inventory/orders/history.
-- CSV/TSV/XLSX: workspace-scoped import/export.
-- BIBLIO/eBay: remain operational for the bootstrap/self-hosted workspace using
-  the existing environment-backed integrations.
-- Hosted per-workspace BIBLIO/eBay credentials can be stored encrypted, but
-  those adapters are intentionally reported as non-operational until their
-  per-account sync implementations exist. The UI never claims otherwise.
+- CSV/TSV/XLSX: workspace-scoped import/export, including channel-specific
+  exports.
+- BIBLIO: workspace-scoped initial inventory import plus FTP test and
+  inventory/delete synchronization.
+- eBay: workspace-scoped active seller inventory synchronization.
+- The migrated personal/bootstrap workspace can keep using its existing
+  environment-backed BIBLIO/eBay setup when no workspace credential has been
+  saved.
