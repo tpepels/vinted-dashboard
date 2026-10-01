@@ -113,7 +113,8 @@
           <form id="settings-form" class="card form"><h2>Workspace</h2><label>Name<input id="settings-name"></label><button class="btn primary">Save</button></form>
           <div class="card form"><h2>Billing</h2><div id="billing"></div></div>
         </div>
-        <div class="card form"><h2>Your data</h2><a class="btn" href="/api/app/account/export">Download account data</a><p class="muted">Export before deleting a workspace. Destructive deletion requires explicit slug confirmation through the API.</p></div>
+        <div class="card form"><h2>Your data</h2><a class="btn" href="/api/app/account/export">Download account data</a><p class="muted">Your inventory, listings and sales remain exportable.</p></div>
+        <div class="card form"><h2>Delete workspace</h2><p class="muted">This permanently deletes this workspace and its marketplace data. Download an export first.</p><label>Type <code id="delete-workspace-slug"></code> to confirm<input id="delete-workspace-confirm" autocomplete="off"></label><button id="delete-workspace" class="btn danger" type="button">Delete workspace permanently</button></div>
       </section>
     </main>
   </div>
