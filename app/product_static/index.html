@@ -181,7 +181,7 @@
             <div><p class="eyebrow">PHYSICAL STOCK</p><h2>Reconcile marketplace records</h2></div>
             <span id="reconcile-summary" class="muted"></span>
           </div>
-          <p class="muted">Suggestions use exact SKU, ISBN or exact normalized metadata only. Nothing is merged automatically.</p>
+          <p class="muted">Cross-marketplace stock merges stay explicit because two physical copies can share the same title or ISBN. Sale-to-stock linkage is different: exact item IDs and unique exact-title matches are linked automatically.</p>
           <div class="actions reconcile-actions">
             <button id="reconcile-refresh" class="btn" type="button">Refresh suggestions</button>
             <button id="reconcile-select-high" class="btn" type="button">Select high confidence</button>
@@ -199,8 +199,8 @@
           <div class="actions"><button id="reconcile-manual" class="btn primary" type="button">Link to master item</button></div>
         </div>
         <div class="card form">
-          <div class="card-head inline-head"><div><p class="eyebrow">SOLD STOCK</p><h2>Link an unrecognized sale</h2></div><span id="unlinked-sale-count" class="muted"></span></div>
-          <p class="muted">Historical sales without an exact marketplace item ID are never guessed. Link one here only when you know which physical item was sold.</p>
+          <div class="card-head inline-head"><div><p class="eyebrow">SOLD STOCK</p><h2>Resolve ambiguous sales</h2></div><span id="unlinked-sale-count" class="muted"></span></div>
+          <p class="muted">Exact marketplace-item matches and unique exact-title matches are linked automatically. Only duplicate-title ambiguity requires a choice here. Historical sales with no retained stock record are counted for reference but need no action.</p>
           <div class="form-grid">
             <label>Sold order<select id="reconcile-sale"></select></label>
             <label>Master inventory item<select id="reconcile-sale-item"></select></label>

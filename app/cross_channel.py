@@ -35,6 +35,96 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _normalized_title(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _without_other_consuming_sales(
+    session: Session,
+    sale: models.Sale,
+    items: list[models.InventoryItem],
+) -> list[models.InventoryItem]:
+    if not items:
+        return []
+    item_ids = [item.id for item in items]
+    linked_sales = session.execute(
+        select(models.Sale).where(
+            models.Sale.workspace_id == sale.workspace_id,
+            models.Sale.direction == "sell",
+            models.Sale.inventory_item_id.in_(item_ids),
+            models.Sale.id != sale.id,
+        )
+    ).scalars().all()
+    consumed_ids = {
+        row.inventory_item_id
+        for row in linked_sales
+        if row.inventory_item_id is not None and sale_counts_as_sold(row)
+    }
+    return [item for item in items if item.id not in consumed_ids]
+
+
+def _sale_title_candidates(
+    session: Session,
+    sale: models.Sale,
+) -> list[models.InventoryItem]:
+    normalized = _normalized_title(sale.title)
+    if not normalized:
+        return []
+
+    listings = session.execute(
+        select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == sale.workspace_id,
+            models.ChannelListing.channel == sale.channel,
+        )
+    ).scalars().all()
+    listing_item_ids = {
+        row.inventory_item_id
+        for row in listings
+        if row.inventory_item_id is not None
+        and _normalized_title(row.title) == normalized
+        and (
+            sale.occurred_at is None
+            or row.first_seen_at is None
+            or row.first_seen_at <= sale.occurred_at
+        )
+    }
+    if listing_item_ids:
+        candidates = [
+            item
+            for item_id in sorted(listing_item_ids, key=str)
+            if (item := session.get(models.InventoryItem, item_id)) is not None
+        ]
+        return _without_other_consuming_sales(session, sale, candidates)
+
+    # A legacy sale may outlive the marketplace listing record. In that case
+    # only consider a non-active historical master item with the exact title.
+    # Never attach an old sale to a newer active copy merely because its title
+    # happens to be the same.
+    items = session.execute(
+        select(models.InventoryItem).where(
+            models.InventoryItem.workspace_id == sale.workspace_id,
+            models.InventoryItem.status != ItemStatus.ACTIVE,
+        )
+    ).scalars().all()
+    candidates = [
+        item for item in items
+        if _normalized_title(item.title) == normalized
+    ]
+    return _without_other_consuming_sales(session, sale, candidates)
+
+
+def _sale_match_kind(
+    session: Session,
+    sale: models.Sale,
+) -> tuple[str, list[models.InventoryItem]]:
+    candidates = _sale_title_candidates(session, sale)
+    if len(candidates) == 1:
+        return "unique", candidates
+    if len(candidates) > 1:
+        return "ambiguous", candidates
+    return "unmatched", []
+
+
 def resolve_sale_item(
     session: Session,
     sale: models.Sale,
@@ -65,26 +155,15 @@ def resolve_sale_item(
             sale.inventory_item_id = listing.inventory_item_id
             return session.get(models.InventoryItem, listing.inventory_item_id)
 
-    title = " ".join(str(sale.title or "").casefold().split())
-    if not title:
+    kind, candidates = _sale_match_kind(session, sale)
+    if kind != "unique":
         return None
-    candidates = session.execute(
-        select(models.ChannelListing).where(
-            models.ChannelListing.workspace_id == sale.workspace_id,
-            models.ChannelListing.channel == sale.channel,
-        )
-    ).scalars().all()
-    exact = [
-        row for row in candidates
-        if " ".join(str(row.title or "").casefold().split()) == title
-        and row.inventory_item_id is not None
-    ]
-    item_ids = {row.inventory_item_id for row in exact}
-    if len(item_ids) != 1:
-        return None
-    item_id = next(iter(item_ids))
-    sale.inventory_item_id = item_id
-    return session.get(models.InventoryItem, item_id)
+    item = candidates[0]
+    sale.inventory_item_id = item.id
+    extra = dict(sale.extra or {})
+    extra["auto_link_reason"] = "exact_unique_title"
+    sale.extra = extra
+    return item
 
 
 def _action_mode(channel: str) -> tuple[str, str]:
@@ -108,6 +187,113 @@ def _enqueue_action_job(session: Session, action: CrossChannelAction) -> None:
     # SessionLocal has autoflush disabled; make every planned action/job pair
     # immediately visible to subsequent queries in the same transaction.
     session.flush()
+
+
+def auto_link_unlinked_sales(
+    session: Session,
+    workspace_id: uuid.UUID,
+) -> dict[str, int]:
+    """Safely link historical seller-side sales to existing physical stock.
+
+    Only deterministic matches are accepted:
+    1. exact marketplace item id already stored on the sale;
+    2. exact normalized title resolving to one plausible historical item.
+
+    Same-title duplicates remain manual. Historical sales with no retained
+    stock record are left as unmatched history rather than forced onto a newer
+    active copy.
+    """
+    sales = session.execute(
+        select(models.Sale).where(
+            models.Sale.workspace_id == workspace_id,
+            models.Sale.direction == "sell",
+            models.Sale.inventory_item_id.is_(None),
+        )
+    ).scalars().all()
+
+    linked = 0
+    ambiguous = 0
+    unmatched = 0
+    actions_created = 0
+    for sale in sales:
+        if not sale_counts_as_sold(sale):
+            continue
+        extra = dict(sale.extra or {})
+        external_item_id = str(extra.get("item_external_id") or "").strip() or None
+        item = resolve_sale_item(
+            session,
+            sale,
+            external_item_id=external_item_id,
+        )
+        if item is None:
+            kind, _candidates = _sale_match_kind(session, sale)
+            if kind == "ambiguous":
+                ambiguous += 1
+            else:
+                unmatched += 1
+            continue
+        session.flush()
+        created = reconcile_sale_state(
+            session,
+            sale,
+            external_item_id=external_item_id,
+        )
+        linked += 1
+        actions_created += len(created)
+
+    return {
+        "linked": linked,
+        "remaining": ambiguous + unmatched,
+        "ambiguous": ambiguous,
+        "unmatched": unmatched,
+        "actions_created": actions_created,
+    }
+
+
+def unlinked_sale_reconciliation(
+    session: Session,
+    workspace_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Classify remaining historical sales for the Reconcile UI.
+
+    Only ambiguous exact-title matches require user input. Sales for which no
+    retained stock record exists are counted as historical unmatched records
+    but are not presented as mandatory reconciliation work.
+    """
+    sales = session.execute(
+        select(models.Sale).where(
+            models.Sale.workspace_id == workspace_id,
+            models.Sale.direction == "sell",
+            models.Sale.inventory_item_id.is_(None),
+        )
+    ).scalars().all()
+    review: list[dict[str, Any]] = []
+    historical_unmatched = 0
+    for sale in sales:
+        if not sale_counts_as_sold(sale):
+            continue
+        kind, candidates = _sale_match_kind(session, sale)
+        if kind == "ambiguous":
+            review.append(
+                {
+                    "id": str(sale.id),
+                    "channel": sale.channel,
+                    "external_order_id": sale.external_order_id,
+                    "title": sale.title,
+                    "status": sale.status,
+                    "lifecycle_status": sale.lifecycle_status,
+                    "occurred_at": sale.occurred_at.isoformat() if sale.occurred_at else None,
+                    "candidate_item_ids": [str(item.id) for item in candidates],
+                }
+            )
+        elif kind == "unmatched":
+            historical_unmatched += 1
+    review.sort(key=lambda row: row["occurred_at"] or "", reverse=True)
+    return {
+        "review": review,
+        "review_count": len(review),
+        "historical_unmatched_count": historical_unmatched,
+    }
 
 
 def plan_sale_reconciliation(
@@ -364,11 +550,4 @@ def serialize_actions(
 
 
 def unlinked_sell_count(session: Session, workspace_id: uuid.UUID) -> int:
-    sales = session.execute(
-        select(models.Sale).where(
-            models.Sale.workspace_id == workspace_id,
-            models.Sale.direction == "sell",
-            models.Sale.inventory_item_id.is_(None),
-        )
-    ).scalars().all()
-    return sum(1 for sale in sales if sale_counts_as_sold(sale))
+    return int(unlinked_sale_reconciliation(session, workspace_id)["review_count"])

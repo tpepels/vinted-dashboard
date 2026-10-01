@@ -1044,21 +1044,35 @@ function renderReconciliation(data, crossData) {
     ).join("")
     : '<option value="">No inventory</option>';
 
+  const historicalUnmatched = Number(crossData.historical_unmatched_sell_count || 0);
   $("#unlinked-sale-count").textContent = state.unlinkedSales.length
-    ? state.unlinkedSales.length + " needs review"
-    : "None";
+    ? state.unlinkedSales.length + " ambiguous"
+      + (historicalUnmatched ? " · " + historicalUnmatched + " historical unmatched" : "")
+    : (historicalUnmatched
+      ? "No ambiguous · " + historicalUnmatched + " historical without retained stock"
+      : "None");
   $("#reconcile-sale").innerHTML = state.unlinkedSales.length
     ? state.unlinkedSales.map((sale) =>
       '<option value="' + esc(sale.id) + '">' + esc(
         sale.channel + " · " + (sale.title || sale.external_order_id) + " · " + dateOnly(sale.occurred_at)
       ) + "</option>"
     ).join("")
-    : '<option value="">No unlinked sold orders</option>';
-  $("#reconcile-sale-item").innerHTML = state.inventoryItems.length
-    ? state.inventoryItems.map((item) =>
-      '<option value="' + esc(item.id) + '">' + esc(item.sku + " · " + item.title) + "</option>"
-    ).join("")
-    : '<option value="">No inventory</option>';
+    : '<option value="">No ambiguous sold orders</option>';
+
+  const renderSaleCandidates = () => {
+    const selectedSale = state.unlinkedSales.find((sale) => sale.id === $("#reconcile-sale").value);
+    const candidateIds = new Set(selectedSale?.candidate_item_ids || []);
+    const candidates = candidateIds.size
+      ? state.inventoryItems.filter((item) => candidateIds.has(item.id))
+      : [];
+    $("#reconcile-sale-item").innerHTML = candidates.length
+      ? candidates.map((item) =>
+        '<option value="' + esc(item.id) + '">' + esc(item.sku + " · " + item.title) + "</option>"
+      ).join("")
+      : '<option value="">No candidate stock items</option>';
+  };
+  renderSaleCandidates();
+  $("#reconcile-sale").onchange = renderSaleCandidates;
 
   $("#cross-channel-log").innerHTML = state.crossChannelActions.length
     ? '<table><thead><tr><th>Item</th><th>Triggered by</th><th>Target</th><th>Status</th><th>Attempts</th><th></th></tr></thead><tbody>'

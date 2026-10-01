@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app import db, models
 from app.connectors.workspace_sync import recompute_inventory_item
-from app.cross_channel import reconcile_sale_state
+from app.cross_channel import auto_link_unlinked_sales, reconcile_sale_state
 from app.constants import (
     Channel,
     ChannelAccountStatus,
@@ -298,6 +298,8 @@ def record_workspace_snapshot(
                 external_item_id=item_external_id,
             )
 
+        auto_link_result = auto_link_unlinked_sales(session, workspace.id)
+
         run_exists = session.execute(
             select(models.ConnectorSyncRun.id).where(
                 models.ConnectorSyncRun.workspace_id == workspace.id,
@@ -329,6 +331,9 @@ def record_workspace_snapshot(
         "listings": len(seen),
         "favorites_added": favorites,
         "orders_added": sales,
+        "sales_auto_linked": auto_link_result["linked"],
+        "sales_remaining_unlinked": auto_link_result["remaining"],
+        "cross_channel_actions_created": auto_link_result["actions_created"],
     }
 
 

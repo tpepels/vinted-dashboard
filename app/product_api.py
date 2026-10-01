@@ -56,6 +56,7 @@ from app.cross_channel import (
     reconcile_sale_state,
     retry_action,
     serialize_actions,
+    unlinked_sale_reconciliation,
     unlinked_sell_count,
 )
 from app.crypto import decrypt_json, encrypt_json, using_derived_key
@@ -1015,33 +1016,15 @@ def today(context: RequestContext = Depends(require_context)):
 def cross_channel_actions(context: RequestContext = Depends(require_context)):
     with db.session_scope() as session:
         rows = serialize_actions(session, context.workspace.id)
-        unlinked = session.execute(
-            select(models.Sale)
-            .where(
-                models.Sale.workspace_id == context.workspace.id,
-                models.Sale.direction == "sell",
-                models.Sale.inventory_item_id.is_(None),
-            )
-            .order_by(models.Sale.occurred_at.desc(), models.Sale.last_seen_at.desc())
-            .limit(500)
-        ).scalars().all()
-        unlinked_rows = [
-            {
-                "id": str(row.id),
-                "channel": row.channel,
-                "external_order_id": row.external_order_id,
-                "title": row.title,
-                "status": row.status,
-                "lifecycle_status": row.lifecycle_status,
-                "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
-            }
-            for row in unlinked
-            if sale_counts_as_sold(row)
-        ]
+        sale_reconciliation = unlinked_sale_reconciliation(
+            session,
+            context.workspace.id,
+        )
     return {
         "actions": rows,
-        "unlinked_sales": unlinked_rows,
-        "unlinked_sell_count": len(unlinked_rows),
+        "unlinked_sales": sale_reconciliation["review"],
+        "unlinked_sell_count": sale_reconciliation["review_count"],
+        "historical_unmatched_sell_count": sale_reconciliation["historical_unmatched_count"],
     }
 
 
