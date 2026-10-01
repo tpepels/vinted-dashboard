@@ -348,3 +348,75 @@ def test_vinted_analytics_endpoint_is_workspace_scoped(monkeypatch):
     assert body["days"] == 30
     assert body["summary"]["active_listings"] == 0
     assert "strategy" in body
+
+
+
+def test_existing_analytics_history_uses_downsampled_snapshot_points(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    from fastapi.testclient import TestClient
+    from app import entry
+
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "history-downsample@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "History",
+        },
+    )
+    assert registered.status_code == 200
+
+    with db.session_scope() as session:
+        workspace = session.execute(select(models.Workspace)).scalars().one()
+        item = _item(session, workspace.id, "HIST", "History listing")
+        listing = models.ChannelListing(
+            workspace_id=workspace.id,
+            inventory_item_id=item.id,
+            channel="vinted",
+            external_id="HIST",
+            title=item.title,
+            price_cents=1000,
+            currency="EUR",
+            status="active",
+            quantity=1,
+            first_seen_at=datetime.now(timezone.utc) - timedelta(days=20),
+            last_seen_at=datetime.now(timezone.utc),
+            extra={},
+        )
+        session.add(listing)
+        session.flush()
+
+        today = datetime.now(timezone.utc)
+        _snap(
+            session,
+            listing,
+            today - timedelta(days=8),
+            views=10,
+            favourites=1,
+            price=1000,
+        )
+        _snap(
+            session,
+            listing,
+            today - timedelta(days=1, hours=8),
+            views=20,
+            favourites=2,
+            price=1000,
+        )
+        _snap(
+            session,
+            listing,
+            today - timedelta(days=1, hours=1),
+            views=25,
+            favourites=3,
+            price=1000,
+        )
+
+    response = client.get("/api/app/analytics/history?days=30")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["top_listings"][0]["views"] == 25
+    assert body["top_listings"][0]["favourites"] == 3
+    assert sum(row["views_gained"] for row in body["daily"]) == 15
+    assert sum(row["favourites_gained"] for row in body["daily"]) == 2
