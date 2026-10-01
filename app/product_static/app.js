@@ -570,10 +570,14 @@ async function connections() {
     api("/api/app/extension/devices"),
   ]);
   $("#connector-grid").innerHTML = data.connectors.map((connector) => {
-    const statusClass = connector.operational ? "status-ok" : (connector.configured ? "status-warn" : "");
+    const connected = connector.status === "connected";
+    const statusClass = connected ? "status-ok" : (connector.configured ? "status-warn" : "");
+    const statusText = connected
+      ? "Connected"
+      : (connector.configured ? "Configured - not synced yet" : "Not configured");
     return '<div class="connector"><h2>' + esc(connector.display_name) + "</h2><p>"
       + esc(connector.description) + '</p><div class="meta ' + statusClass + '">'
-      + (connector.operational ? "Ready" : (connector.configured ? "Configured" : "Not configured"))
+      + statusText
       + (connector.last_synced_at ? " · " + esc(when(connector.last_synced_at)) : "")
       + '</div><div class="actions">'
       + (connector.channel === "vinted"
@@ -641,7 +645,7 @@ function openConnectorConfig(channel, connector) {
   $("#biblio-tools").classList.toggle("hidden", channel !== "biblio");
   $("#remove-connector").classList.toggle("hidden", !connector?.configured);
   $("#connector-config-status").textContent = connector?.configured
-    ? "Credentials are stored. Leave a secret field blank only if you are replacing the entire credential set with the visible fields."
+    ? "Credentials are stored. Leave an existing secret field blank to keep its current value."
     : "";
   $("#connector-config").classList.remove("hidden");
   $("#connector-config").scrollIntoView({ behavior: "smooth", block: "start" });
