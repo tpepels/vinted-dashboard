@@ -15,6 +15,10 @@ const state = {
   unlinkedSales: [],
   salesRows: [],
   editItemId: null,
+  quickAssistant: null,
+  quickAnalysisUsed: false,
+  quickPhotoUrls: [],
+  quickRequiredValues: {},
   connectorChannel: null,
 };
 
@@ -445,6 +449,262 @@ $("#bulk-form").onsubmit = async (event) => {
 
 $("#inventory-q").oninput = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-status").onchange = () => inventory().catch((error) => flash(error.message, true));
+function clearQuickPhotoUrls() {
+  state.quickPhotoUrls.forEach((url) => URL.revokeObjectURL(url));
+  state.quickPhotoUrls = [];
+}
+
+function renderQuickPhotos() {
+  clearQuickPhotoUrls();
+  const files = Array.from($("#quick-photos").files || []);
+  $("#quick-photo-preview").innerHTML = files.map((file) => {
+    const url = URL.createObjectURL(file);
+    state.quickPhotoUrls.push(url);
+    return '<figure><img src="' + esc(url) + '" alt=""><figcaption>'
+      + esc(file.name) + "</figcaption></figure>";
+  }).join("");
+}
+
+function quickType() {
+  return String($("#quick-item-type").value || "").trim().toLowerCase();
+}
+
+function captureQuickRequiredValues() {
+  $("#quick-required input, #quick-required textarea").forEach((field) => {
+    state.quickRequiredValues[field.name] = field.value;
+  });
+}
+
+function quickRequirements() {
+  const form = $("#quick-listing-form");
+  const category = $("#quick-category").value;
+  const itemType = quickType();
+  const result = [];
+
+  if (category === "book" && !String(form.elements.namedItem("isbn")?.value || "").trim()) {
+    result.push(["isbn", "ISBN", "text", "Required for the book listing"]);
+  }
+  if (category === "clothing") {
+    const shoeTypes = new Set(["shoes", "boots", "trainers", "sneakers"]);
+    if (shoeTypes.has(itemType) && !String(form.elements.namedItem("size")?.value || "").trim()) {
+      result.push(["size", "Size", "text", "Enter the marked size"]);
+    }
+    if (new Set(["jeans", "trousers", "pants", "shorts"]).has(itemType)) {
+      result.push(["waist_cm", "Waist (cm)", "number", "Measure flat/according to your normal workflow"]);
+      result.push(["inside_leg_cm", "Inside leg (cm)", "number", "Crotch seam to hem"]);
+    } else if (new Set([
+      "shirt", "blouse", "top", "t-shirt", "tee", "sweater", "jumper",
+      "jacket", "coat", "dress",
+    ]).has(itemType)) {
+      result.push(["pit_to_pit_cm", "Pit to pit (cm)", "number", "Flat across the chest"]);
+      result.push(["length_cm", "Length (cm)", "number", "Top shoulder to hem"]);
+    } else if (!shoeTypes.has(itemType)) {
+      result.push(["measurements", "Measurements", "text", "Only the useful measurements for this item"]);
+    }
+  }
+  result.push(["price", "Asking price", "number", "Required before creating master stock"]);
+  return result;
+}
+
+function renderQuickRequired() {
+  captureQuickRequiredValues();
+  const form = $("#quick-listing-form");
+  const existing = (name) => {
+    const main = form.elements.namedItem(name);
+    if (main && String(main.value || "").trim()) return main.value;
+    return state.quickRequiredValues[name] || "";
+  };
+  $("#quick-required").innerHTML = quickRequirements().map(([name, label, type, help]) => {
+    const step = type === "number" ? ' step="0.01" min="0"' : "";
+    return '<label>' + esc(label)
+      + '<input name="' + esc(name) + '" type="' + esc(type) + '"' + step
+      + ' value="' + esc(existing(name)) + '"><span class="field-help">'
+      + esc(help) + "</span></label>";
+  }).join("");
+  $("#quick-required input").forEach((field) => {
+    field.oninput = () => {
+      state.quickRequiredValues[field.name] = field.value;
+      const main = form.elements.namedItem(field.name);
+      if (main && main !== field) main.value = field.value;
+    };
+  });
+}
+
+function applyQuickAnalysis(data) {
+  const result = data.analysis || {};
+  const form = $("#quick-listing-form");
+  const mapping = {
+    category: "quick_category",
+    item_type: "item_type",
+    brand: "brand",
+    size: "size",
+    colour: "colour",
+    material: "material",
+    condition: "condition",
+    author: "author",
+    isbn: "isbn",
+    publisher: "publisher",
+    edition: "edition",
+    suggested_title: "title",
+    suggested_description: "description",
+  };
+  Object.entries(mapping).forEach(([source, target]) => {
+    if (result[source]) setFormValue(form, target, result[source]);
+  });
+  state.quickAnalysisUsed = true;
+  state.quickRequiredValues = {};
+  const notes = result.confidence_notes || [];
+  $("#quick-confidence").innerHTML = notes.length
+    ? "<strong>Check:</strong> " + notes.map(esc).join(" · ")
+    : "Photo analysis returned no uncertainty notes.";
+  renderQuickRequired();
+}
+
+async function openQuickListing() {
+  const form = $("#quick-listing-form");
+  form.reset();
+  setFormValue(form, "currency", "EUR");
+  setFormValue(form, "quick_category", $("#quick-category-hint").value || "general");
+  state.quickAnalysisUsed = false;
+  state.quickRequiredValues = {};
+  clearQuickPhotoUrls();
+  $("#quick-photo-preview").innerHTML = "";
+  $("#quick-confidence").textContent = "";
+  $("#quick-listing-result").classList.add("hidden");
+  form.classList.remove("hidden");
+  try {
+    state.quickAssistant = await api("/api/app/listing-assistant/status");
+    const configured = Boolean(state.quickAssistant.configured);
+    $("#quick-analyze").disabled = !configured;
+    $("#quick-ai-status").textContent = configured
+      ? "Photo analysis available · photos are not stored"
+      : "Photo analysis is not configured · manual quick listing still works";
+  } catch (error) {
+    state.quickAssistant = null;
+    $("#quick-analyze").disabled = true;
+    $("#quick-ai-status").textContent = error.message;
+  }
+  renderQuickRequired();
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeQuickListing() {
+  $("#quick-listing-form").classList.add("hidden");
+  clearQuickPhotoUrls();
+}
+
+$("#quick-listing").onclick = openQuickListing;
+$("#cancel-quick-listing").onclick = closeQuickListing;
+$("#quick-photos").onchange = renderQuickPhotos;
+$("#quick-category").onchange = renderQuickRequired;
+$("#quick-item-type").oninput = renderQuickRequired;
+
+$("#quick-analyze").onclick = async () => {
+  const files = Array.from($("#quick-photos").files || []);
+  if (!files.length) return flash("Choose at least one photo.", true);
+  const button = $("#quick-analyze");
+  button.disabled = true;
+  $("#quick-ai-status").textContent = "Analyzing selected photos…";
+  const body = new FormData();
+  files.forEach((file) => body.append("photos", file));
+  body.append("hints_json", JSON.stringify({
+    category: $("#quick-category-hint").value || "",
+  }));
+  try {
+    const result = await api("/api/app/listing-assistant/analyze", {
+      method: "POST",
+      body,
+    });
+    applyQuickAnalysis(result);
+    $("#quick-ai-status").textContent = "Analysis applied · review every detected field";
+  } catch (error) {
+    $("#quick-ai-status").textContent = error.message;
+    flash(error.message, true);
+  } finally {
+    button.disabled = !state.quickAssistant?.configured;
+  }
+};
+
+$("#quick-listing-form").onsubmit = async (event) => {
+  event.preventDefault();
+  captureQuickRequiredValues();
+  const form = event.currentTarget;
+  const raw = Object.fromEntries(new FormData(form));
+  const price = Number(raw.price || 0);
+  if (!(price > 0)) return flash("Enter an asking price.", true);
+
+  const payload = {
+    sku: String(raw.sku || "").trim() || null,
+    title: String(raw.title || "").trim(),
+    description: String(raw.description || "").trim(),
+    category: String(raw.quick_category || "general"),
+    item_type: String(raw.item_type || "").trim() || null,
+    brand: String(raw.brand || "").trim() || null,
+    size: String(raw.size || "").trim() || null,
+    colour: String(raw.colour || "").trim() || null,
+    material: String(raw.material || "").trim() || null,
+    condition: String(raw.condition || "").trim() || null,
+    author: String(raw.author || "").trim() || null,
+    isbn: String(raw.isbn || "").trim() || null,
+    publisher: String(raw.publisher || "").trim() || null,
+    edition: String(raw.edition || "").trim() || null,
+    measurements: String(raw.measurements || "").trim() || null,
+    waist_cm: String(raw.waist_cm || "").trim() || null,
+    inside_leg_cm: String(raw.inside_leg_cm || "").trim() || null,
+    pit_to_pit_cm: String(raw.pit_to_pit_cm || "").trim() || null,
+    length_cm: String(raw.length_cm || "").trim() || null,
+    price_cents: Math.round(price * 100),
+    cost_cents: raw.cost ? Math.round(Number(raw.cost) * 100) : null,
+    currency: String(raw.currency || "EUR").trim().toUpperCase(),
+    location: String(raw.location || "").trim() || null,
+    notes: String(raw.notes || "").trim() || null,
+    photo_count: Array.from($("#quick-photos").files || []).length,
+    analysis_used: state.quickAnalysisUsed,
+  };
+  if (!payload.title) return flash("Review or enter a title.", true);
+
+  const button = $("#quick-create");
+  button.disabled = true;
+  try {
+    const result = await api("/api/app/listing-assistant/create", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const listing = result.listing_package;
+    $("#quick-result-sku").value = listing.sku || "";
+    $("#quick-result-price").value = money(listing.price_cents, listing.currency);
+    $("#quick-result-title").value = listing.title || "";
+    $("#quick-result-description").value = listing.description || "";
+    closeQuickListing();
+    $("#quick-listing-result").classList.remove("hidden");
+    $("#quick-listing-result").scrollIntoView({ behavior: "smooth", block: "start" });
+    await inventory();
+    flash("Master item created. Listing package is ready for manual upload.");
+  } catch (error) {
+    flash(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+async function copyQuickField(selector, label) {
+  const value = $(selector).value || "";
+  try {
+    await navigator.clipboard.writeText(value);
+    flash(label + " copied.");
+  } catch {
+    flash("Could not copy automatically. Select the text and copy it manually.", true);
+  }
+}
+
+$("#copy-quick-title").onclick = () => copyQuickField("#quick-result-title", "Title");
+$("#copy-quick-description").onclick = () => copyQuickField("#quick-result-description", "Description");
+$("#close-quick-result").onclick = () => $("#quick-listing-result").classList.add("hidden");
+$("#quick-open-inventory").onclick = () => {
+  $("#quick-listing-result").classList.add("hidden");
+  $("#inventory-table").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
 $("#add-item").onclick = () => openItemForm(null);
 $("#cancel-item").onclick = closeItemForm;
 
