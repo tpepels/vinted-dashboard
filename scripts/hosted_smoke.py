@@ -112,6 +112,16 @@ def run(origin: str) -> dict[str, object]:
             raise RuntimeError(
                 f"/api/runtime {key}={runtime.get(key)!r}, expected {expected!r}"
             )
+    worker = runtime.get("worker") or {}
+    if worker.get("healthy") is not True:
+        raise RuntimeError(
+            "Hosted worker heartbeat is missing or stale"
+            + (
+                f" (last seen {worker.get('last_seen_at')})"
+                if worker.get("last_seen_at")
+                else ""
+            )
+        )
 
     privacy_headers, privacy_body = require_status(origin, "/privacy")
     validate_security_headers(privacy_headers)
