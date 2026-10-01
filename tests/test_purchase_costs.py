@@ -274,3 +274,33 @@ def test_purchase_cost_api_applies_cost(monkeypatch):
     row = inventory.json()["items"][0]
     assert row["cost_cents"] == 900
     assert row["attributes"]["cost_source"] == "vinted_purchase"
+
+
+
+def test_cancelled_or_refunded_purchases_are_not_cost_suggestions():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        _item(session, workspace_id, sku="CANCELLED", title="Cancelled book")
+        cancelled = _purchase(
+            session,
+            workspace_id,
+            order_id="BUY-CANCELLED",
+            title="Cancelled book",
+        )
+        cancelled.status = "cancelled"
+        cancelled.lifecycle_status = "cancelled"
+
+        _item(session, workspace_id, sku="REFUNDED", title="Refunded book")
+        refunded = _purchase(
+            session,
+            workspace_id,
+            order_id="BUY-REFUNDED",
+            title="Refunded book",
+        )
+        refunded.status = "completed"
+        refunded.lifecycle_status = "refunded"
+
+        result = purchase_cost_suggestions(session, workspace_id)
+        assert result["count"] == 0
+        assert result["ambiguous_count"] == 0
+        assert result["unmatched_count"] == 0
