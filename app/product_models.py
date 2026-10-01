@@ -16,6 +16,7 @@ from typing import Any, Optional
 from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app import models as _core_models  # noqa: F401 - registers FK target tables
 from app.db import Base, JSONVariant, UTCDateTime
 
 

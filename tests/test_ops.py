@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -87,6 +90,46 @@ def test_worker_probe_detects_running_worker():
         jobs.enqueue = original_enqueue
 
     assert result["ok"] is True
+
+
+
+def test_worker_style_process_can_claim_queue_job(tmp_path):
+    database_path = tmp_path / "worker.sqlite3"
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite:///{database_path}"
+
+    setup = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from app import db; db.create_all()",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert setup.returncode == 0, setup.stderr
+
+    worker_style = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from app import jobs; "
+                "job_id = jobs.enqueue('noop', {'probe': True}); "
+                "job = jobs.claim_one(); "
+                "assert job is not None; "
+                "assert job['id'] == str(job_id); "
+                "jobs.complete(job['id'])"
+            ),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert worker_style.returncode == 0, worker_style.stderr
 
 
 def test_sqlite_backup_and_restore_roundtrip(tmp_path, monkeypatch):
