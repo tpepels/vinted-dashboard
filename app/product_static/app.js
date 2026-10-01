@@ -1522,8 +1522,12 @@ function renderVintedBehavior(data) {
           : esc(row.title);
         return '<tr><td><div class="title">' + title + '</div></td>'
           + '<td>' + esc(row.category) + '</td>'
-          + '<td data-sort-value="' + esc(new Date(row.listed_at).getTime()) + '">' + esc(when(row.listed_at)) + '</td>'
-          + '<td data-sort-value="' + esc(new Date(row.sold_at).getTime()) + '">' + esc(when(row.sold_at)) + '</td>'
+          + '<td data-sort-value="' + esc(new Date(row.listed_at).getTime()) + '">' + esc(when(row.listed_at))
+          + (row.listed_at_source === "first_seen" ? '<div class="sub">first observed</div>' : "")
+          + '</td>'
+          + '<td data-sort-value="' + esc(new Date(row.sold_at).getTime()) + '">' + esc(when(row.sold_at))
+          + (row.sold_at_source === "first_seen" ? '<div class="sub">first observed</div>' : "")
+          + '</td>'
           + '<td data-sort-value="' + esc(row.days_online) + '">' + esc(row.days_online) + ' d</td>'
           + '<td data-sort-value="' + esc(row.sale_total_cents == null ? "" : row.sale_total_cents) + '">'
           + money(row.sale_total_cents, row.currency) + '</td>'
