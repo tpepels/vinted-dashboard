@@ -415,7 +415,6 @@ def build_vinted_analytics(
             models.Sale.workspace_id == workspace_id,
             models.Sale.channel == Channel.VINTED,
             models.Sale.direction == "sell",
-            models.Sale.occurred_at >= window_start,
         )
     ).scalars().all()
     valid_sales = [row for row in vinted_sales if sale_counts_as_sold(row)]
@@ -431,7 +430,7 @@ def build_vinted_analytics(
         if not sale.inventory_item_id:
             continue
         sold_at, sold_at_source = sale_time(sale)
-        if sold_at is None:
+        if sold_at is None or sold_at < window_start:
             continue
         candidates = []
         for listing in listings_by_item.get(sale.inventory_item_id, []):
