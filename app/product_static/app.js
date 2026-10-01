@@ -318,7 +318,7 @@ function crossChannelActionControls(row) {
 }
 
 function bindCrossChannelButtons(after) {
-  $(".stock-ack").forEach((button) => {
+  $$(".stock-ack").forEach((button) => {
     button.onclick = async () => {
       try {
         await api("/api/app/cross-channel-actions/" + button.dataset.id + "/acknowledge", { method: "POST" });
@@ -327,7 +327,7 @@ function bindCrossChannelButtons(after) {
       } catch (error) { flash(error.message, true); }
     };
   });
-  $(".stock-retry").forEach((button) => {
+  $$(".stock-retry").forEach((button) => {
     button.onclick = async () => {
       try {
         await api("/api/app/cross-channel-actions/" + button.dataset.id + "/retry", { method: "POST" });
@@ -397,14 +397,14 @@ async function inventory() {
       + "</tbody></table>"
     : '<div class="empty">No inventory yet. Add an item or import a file.</div>';
 
-  $(".edit-item").forEach((button) => {
+  $$(".edit-item").forEach((button) => {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
   });
-  $(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
+  $$(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
   const selectAll = $("#inventory-select-all");
   if (selectAll) {
     selectAll.onchange = () => {
-      $(".inventory-select").forEach((box) => { box.checked = selectAll.checked; });
+      $$(".inventory-select").forEach((box) => { box.checked = selectAll.checked; });
       updateInventorySelection();
     };
   }
@@ -511,10 +511,10 @@ function quickRequirements() {
 
 function updateQuickCategoryFields() {
   const category = $("#quick-category").value;
-  $(".quick-clothing-field").forEach((field) => {
+  $$(".quick-clothing-field").forEach((field) => {
     field.classList.toggle("hidden", category !== "clothing");
   });
-  $(".quick-book-field").forEach((field) => {
+  $$(".quick-book-field").forEach((field) => {
     field.classList.toggle("hidden", category !== "book");
   });
 }
@@ -942,7 +942,7 @@ $("#reconcile-select-high").onclick = () => {
   const high = new Set(
     state.reconciliation.filter((row) => row.confidence === "high").map((row) => row.id),
   );
-  $(".reconcile-check").forEach((box) => { box.checked = high.has(box.dataset.id); });
+  $$(".reconcile-check").forEach((box) => { box.checked = high.has(box.dataset.id); });
 };
 
 $("#reconcile-apply").onclick = async () => {
