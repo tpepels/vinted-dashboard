@@ -470,7 +470,7 @@ function quickType() {
 }
 
 function captureQuickRequiredValues() {
-  $("#quick-required input, #quick-required textarea").forEach((field) => {
+  $$("#quick-required input, #quick-required textarea").forEach((field) => {
     const targetName = field.dataset.target || field.name;
     state.quickRequiredValues[targetName] = field.value;
     const main = $("#quick-listing-form").elements.namedItem(targetName);
@@ -526,7 +526,7 @@ function renderQuickRequired() {
       + ' value="' + esc(existing(targetName)) + '"><span class="field-help">'
       + esc(help) + "</span></label>";
   }).join("");
-  $("#quick-required input").forEach((field) => {
+  $$("#quick-required input").forEach((field) => {
     field.oninput = () => {
       const targetName = field.dataset.target || field.name;
       state.quickRequiredValues[targetName] = field.value;
@@ -1527,7 +1527,7 @@ function renderMapping(data) {
       + (field || "Ignore") + "</option>"
     ).join("") + "</select></div>"
   ).join("");
-  $("#mapping-grid select").forEach((select) => {
+  $$("#mapping-grid select").forEach((select) => {
     select.onchange = () => {
       if (select.value) state.mapping[select.dataset.h] = select.value;
       else delete state.mapping[select.dataset.h];
