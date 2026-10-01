@@ -103,12 +103,10 @@ def init_engine(url: str) -> Engine:
 
 
 def create_all() -> None:
-    """Create all tables directly from the ORM metadata.
-
-    Real deployments use Alembic migrations (``alembic upgrade head``); this
-    is a convenience for tests and ad-hoc scripts that want a fresh schema
-    without running the full migration chain.
-    """
+    """Create all ORM tables directly from metadata for tests/ad-hoc use."""
+    # Import side effects register every model on Base.metadata.
+    from app import models as _models  # noqa: F401
+    from app import product_models as _product_models  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
