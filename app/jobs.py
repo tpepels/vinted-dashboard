@@ -8,7 +8,7 @@ self-hosted deployment simple.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -77,3 +77,35 @@ def fail(job_id: str, error: str) -> None:
         job.status = "error"
         job.completed_at = utcnow()
         job.last_error = error[:2000]
+
+
+def retry(
+    job_id: str,
+    error: str,
+    *,
+    max_attempts: int = 3,
+    base_delay_seconds: int = 30,
+) -> dict[str, Any]:
+    """Requeue a claimed job with bounded exponential backoff.
+
+    The same job row is reused, so retries cannot multiply queue entries.
+    """
+    with db.session_scope() as session:
+        job = session.get(BackgroundJob, uuid.UUID(job_id))
+        if job is None:
+            return {"will_retry": False, "attempts": 0}
+        job.last_error = str(error)[:2000]
+        if int(job.attempts or 0) >= max(1, max_attempts):
+            job.status = "error"
+            job.completed_at = utcnow()
+            return {"will_retry": False, "attempts": int(job.attempts or 0)}
+        delay = max(0, int(base_delay_seconds)) * (2 ** max(0, int(job.attempts or 1) - 1))
+        job.status = "queued"
+        job.available_at = utcnow() + timedelta(seconds=delay)
+        job.locked_at = None
+        job.completed_at = None
+        return {
+            "will_retry": True,
+            "attempts": int(job.attempts or 0),
+            "delay_seconds": delay,
+        }
