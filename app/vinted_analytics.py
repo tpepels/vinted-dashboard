@@ -153,6 +153,23 @@ def listing_started_at(listing: models.ChannelListing) -> datetime:
     return _parse_datetime(raw) or listing.first_seen_at
 
 
+def listing_started_source(listing: models.ChannelListing) -> str:
+    raw = (listing.extra or {}).get("listed_at")
+    return "vinted" if _parse_datetime(raw) is not None else "first_seen"
+
+
+def sale_time(sale: models.Sale) -> tuple[datetime | None, str | None]:
+    candidates = [
+        ("order", sale.occurred_at),
+        ("first_seen", sale.first_seen_at),
+    ]
+    present = [(source, value) for source, value in candidates if value is not None]
+    if not present:
+        return None, None
+    source, value = min(present, key=lambda pair: pair[1])
+    return value, source
+
+
 def _window_baseline(
     series: list[SnapshotPoint],
     cutoff: datetime,
@@ -398,7 +415,6 @@ def build_vinted_analytics(
             models.Sale.workspace_id == workspace_id,
             models.Sale.channel == Channel.VINTED,
             models.Sale.direction == "sell",
-            models.Sale.occurred_at >= window_start,
         )
     ).scalars().all()
     valid_sales = [row for row in vinted_sales if sale_counts_as_sold(row)]
@@ -408,26 +424,49 @@ def build_vinted_analytics(
             listings_by_item.setdefault(listing.inventory_item_id, []).append(listing)
 
     time_to_sale: list[float] = []
+    sold_stock: list[dict[str, Any]] = []
     linked_sales = 0
     for sale in valid_sales:
-        if not sale.inventory_item_id or not sale.occurred_at:
+        if not sale.inventory_item_id:
+            continue
+        sold_at, sold_at_source = sale_time(sale)
+        if sold_at is None or sold_at < window_start:
             continue
         candidates = []
         for listing in listings_by_item.get(sale.inventory_item_id, []):
             started = listing_started_at(listing)
-            if started <= sale.occurred_at:
+            if started <= sold_at:
                 candidates.append((started, listing))
         if not candidates:
             continue
         started, _listing = max(candidates, key=lambda pair: pair[0])
         days_to_sale = max(
             0.0,
-            (sale.occurred_at - started).total_seconds() / 86400,
+            (sold_at - started).total_seconds() / 86400,
         )
         time_to_sale.append(days_to_sale)
         linked_sales += 1
         item = items.get(sale.inventory_item_id)
         category = item.category if item else "general"
+        sold_stock.append(
+            {
+                "sale_id": str(sale.id),
+                "listing_id": str(_listing.id),
+                "item_id": str(sale.inventory_item_id),
+                "title": sale.title or _listing.title,
+                "category": category,
+                "url": _listing.url,
+                "listed_at": started.isoformat(),
+                "listed_at_source": listing_started_source(_listing),
+                "sold_at": sold_at.isoformat(),
+                "sold_at_source": sold_at_source,
+                "days_online": round(days_to_sale, 1),
+                "sale_total_cents": sale.total_cents,
+                "listing_price_cents": _listing.price_cents,
+                "currency": sale.currency or _listing.currency or "EUR",
+                "external_order_id": sale.external_order_id,
+            }
+        )
         category_row = category_rows.setdefault(
             category,
             {
@@ -507,5 +546,10 @@ def build_vinted_analytics(
             for segment, count in segments.items()
         ],
         "categories": category_result,
+        "sold_stock": sorted(
+            sold_stock,
+            key=lambda row: row["sold_at"],
+            reverse=True,
+        )[:500],
         "listings": rows[:200],
     }
