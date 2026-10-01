@@ -1128,8 +1128,8 @@ function renderVintedBehavior(data) {
         return '<tr class="analytics-listing" data-id="' + esc(row.listing_id) + '"><td><div class="title">'
           + title + '</div><div class="sub">' + esc(row.category) + " · "
           + money(row.price_cents, row.currency) + "</div></td><td>" + esc(row.age_days) + " d</td><td>"
-          + esc(row.views) + "</td><td class="gain">+" + esc(row.views_gain_7d)
-          + "</td><td>" + esc(row.favourites) + "</td><td class="gain">+" + esc(row.favourites_gain_7d)
+          + esc(row.views) + '</td><td class="gain">+' + esc(row.views_gain_7d)
+          + "</td><td>" + esc(row.favourites) + '</td><td class="gain">+' + esc(row.favourites_gain_7d)
           + "</td><td>" + esc(row.favourites_per_100_views == null ? "—" : row.favourites_per_100_views)
           + "</td><td>" + esc(row.views_per_day) + "</td><td>" + esc(row.price_changes_30d)
           + '</td><td><span class="signal ' + esc(row.segment) + '">'
