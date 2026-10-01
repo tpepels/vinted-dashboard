@@ -79,6 +79,7 @@ from app.product_models import (
     MappingPreset,
 )
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
+from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
@@ -726,7 +727,7 @@ def cross_channel_actions(context: RequestContext = Depends(require_context)):
                 "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
             }
             for row in unlinked
-            if row.direction == "sell"
+            if sale_counts_as_sold(row)
         ]
     return {
         "actions": rows,
