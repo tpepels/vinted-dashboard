@@ -13,8 +13,6 @@ services:
         value: Reseller Dashboard
       - key: APP_ENV
         value: production
-      - key: APP_SECRET_KEY
-        sync: false
       - key: APP_ENCRYPTION_KEY
         sync: false
       - key: PUBLIC_APP_URL
@@ -31,6 +29,8 @@ services:
         value: "false"
       - key: BILLING_ENABLED
         value: "false"
+      - key: BILLING_TRIAL_DAYS
+        value: "14"
 
   - type: worker
     name: reseller-dashboard-worker
@@ -44,8 +44,6 @@ services:
         fromDatabase:
           name: reseller-dashboard-db
           property: connectionString
-      - key: APP_SECRET_KEY
-        sync: false
       - key: APP_ENCRYPTION_KEY
         sync: false
       - key: PUBLIC_APP_URL
@@ -60,6 +58,8 @@ services:
         value: "false"
       - key: BILLING_ENABLED
         value: "false"
+      - key: BILLING_TRIAL_DAYS
+        value: "14"
       - key: RUN_MIGRATIONS
         value: "false"
       - key: RUN_LEGACY_BACKFILL
