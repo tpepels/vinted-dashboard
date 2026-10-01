@@ -320,6 +320,57 @@ def record_channel_snapshot(
         logger.exception("workspace_sync: failed to record %s channel snapshot", channel)
 
 
+def record_workspace_channel_snapshot(
+    workspace_id,
+    channel: str,
+    items: list[dict[str, Any]],
+    *,
+    synced_at: datetime,
+    full_snapshot: bool,
+    note: Optional[str] = None,
+) -> dict[str, int]:
+    """Strict workspace-scoped snapshot writer for hosted connector adapters.
+
+    Unlike :func:`record_channel_snapshot`, this does not fall back to the
+    bootstrap workspace and does not swallow errors. Hosted jobs need failures
+    to propagate so the background queue and connector status can report them.
+    """
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        if workspace is None:
+            raise ValueError("Workspace does not exist")
+        account, _created = get_or_create_channel_account(session, workspace, channel, {})
+        account.status = "connected"
+
+        seen_external_ids: set[str] = set()
+        active_count = 0
+        for item in items:
+            external_id = str(item.get("source_id") or item.get("id") or "").strip()
+            if not external_id:
+                continue
+            seen_external_ids.add(external_id)
+            if str(item.get("status") or ListingStatus.ACTIVE).lower() == ListingStatus.ACTIVE:
+                active_count += 1
+            _apply_item(session, workspace, account, channel, external_id, item, seen_at=synced_at)
+
+        if full_snapshot:
+            _deactivate_missing_listings(session, workspace, channel, seen_external_ids, synced_at)
+
+        _upsert_connector_sync_run(
+            session,
+            workspace,
+            account,
+            channel=channel,
+            run_type="snapshot",
+            status=SyncRunStatus.SUCCESS,
+            started_at=synced_at,
+            item_count=len(seen_external_ids),
+            active_count=active_count,
+            detail={"note": note} if note else {},
+        )
+    return {"items": len(seen_external_ids), "active": active_count}
+
+
 def record_biblio_ftp_run(
     action: str,
     status: str,

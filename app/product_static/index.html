@@ -56,10 +56,12 @@
       <section id="inventory" class="view">
         <div class="toolbar"><input id="inventory-q" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><button id="add-item" class="btn primary">Add item</button></div>
         <form id="item-form" class="card form hidden">
-          <div class="form-grid"><label>SKU<input name="sku" required></label><label>Title<input name="title" required></label><label>Category<select name="category" id="item-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="1"></label><label>Condition<input name="condition"></label><label>Location<input name="location"></label></div>
+          <div class="card-head inline-head"><div><p class="eyebrow">MASTER INVENTORY</p><h2 id="item-form-title">Add item</h2></div><span id="item-form-channels" class="muted"></span></div>
+          <div class="form-grid"><label>SKU<input name="sku" required></label><label>Title<input name="title" required></label><label>Category<select name="category" id="item-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="1"></label><label>Condition<input name="condition"></label><label>Location<input name="location"></label><label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Default selling price<input name="price" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Currency<input name="currency" maxlength="3" value="EUR"></label></div>
           <div id="book-fields" class="form-grid category-fields hidden"><label>Author<input name="author"></label><label>ISBN<input name="isbn"></label><label>Publisher<input name="publisher"></label><label>Edition<input name="edition"></label><label>Binding<input name="binding"></label><label>Publication year<input name="publication_year"></label></div>
           <div id="clothing-fields" class="form-grid category-fields hidden"><label>Brand<input name="brand"></label><label>Size<input name="size"></label><label>Colour<input name="colour"></label><label>Material<input name="material"></label><label>Measurements<input name="measurements"></label></div>
-          <div class="actions"><button class="btn primary">Save</button><button class="btn" type="button" id="cancel-item">Cancel</button></div>
+          <label>Notes<textarea name="notes" rows="3"></textarea></label>
+          <div class="actions"><button id="save-item" class="btn primary">Save</button><button class="btn" type="button" id="cancel-item">Cancel</button></div>
         </form>
         <div id="inventory-table" class="card table-wrap"></div>
       </section>
@@ -67,14 +69,22 @@
       <section id="sales" class="view"><div id="sales-table" class="card table-wrap"></div></section>
 
       <section id="analytics" class="view">
+        <div class="toolbar analytics-toolbar"><select id="analytics-days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">1 year</option></select></div>
         <div id="analytics-metrics" class="metrics"></div>
-        <div class="card copy">Workspace-native totals are shown here. Your detailed Vinted views, favourites, followers and listing-history charts remain available in <a href="/classic">Classic dashboard</a> while the final analytics UI is consolidated.</div>
+        <div class="two analytics-grid">
+          <div class="card chart-card"><div class="card-head"><h2>Vinted views gained</h2></div><div id="views-chart" class="chart"></div></div>
+          <div class="card chart-card"><div class="card-head"><h2>Vinted favourites gained</h2></div><div id="favourites-chart" class="chart"></div></div>
+          <div class="card chart-card"><div class="card-head"><h2>Followers</h2></div><div id="followers-chart" class="chart"></div></div>
+          <div class="card chart-card"><div class="card-head"><h2>Sales revenue</h2></div><div id="sales-chart" class="chart"></div></div>
+        </div>
+        <div class="card table-wrap"><div class="card-head"><h2>Listings gaining attention</h2></div><div id="analytics-listings"></div></div>
+        <div id="listing-history-card" class="card chart-card hidden"><div class="card-head inline-head"><div><p class="eyebrow">LISTING HISTORY</p><h2 id="listing-history-title"></h2></div><a id="listing-history-link" class="btn hidden" target="_blank" rel="noreferrer">Open listing</a></div><div class="two"><div><h3>Views</h3><div id="listing-views-chart" class="chart"></div></div><div><h3>Favourites</h3><div id="listing-favourites-chart" class="chart"></div></div></div></div>
       </section>
 
       <section id="imports" class="view">
         <div class="two">
-          <div class="card form"><h2>Import inventory</h2><p class="muted">CSV, TSV and XLSX. Preview first; nothing is written until you apply it.</p><input id="import-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><label class="check"><input id="full-snapshot" type="checkbox"> Archive active items missing from this file</label><button id="preview-import" class="btn primary" type="button">Preview</button><p id="import-status" class="muted"></p></div>
-          <div class="card form"><h2>Export inventory</h2><p class="muted">Your data stays portable.</p><div class="actions"><a class="btn" href="/api/app/export?format=csv">CSV</a><a class="btn" href="/api/app/export?format=xlsx">Excel</a></div></div>
+          <div class="card form"><h2>Import inventory</h2><p class="muted">CSV, TSV and XLSX. Preview first; nothing is written until you apply it.</p><label>Saved mapping<select id="mapping-preset"><option value="">Automatic mapping</option></select></label><input id="import-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><label class="check"><input id="full-snapshot" type="checkbox"> Archive active items missing from this file</label><button id="preview-import" class="btn primary" type="button">Preview</button><p id="import-status" class="muted"></p></div>
+          <div class="card form"><h2>Export inventory</h2><p class="muted">Export master inventory or one marketplace view without losing ownership of your data.</p><label>Status<select id="export-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select></label><label>Marketplace<select id="export-channel"><option value="">Master inventory</option><option value="vinted">Vinted</option><option value="ebay">eBay</option><option value="biblio">BIBLIO</option></select></label><div class="actions"><button id="export-csv" class="btn" type="button">CSV</button><button id="export-xlsx" class="btn" type="button">Excel</button></div></div>
         </div>
         <div id="mapping" class="card form hidden"><h2>Column mapping</h2><div id="mapping-grid"></div><label>Save mapping as<input id="preset-name" placeholder="Optional"></label><button id="apply-import" class="btn primary" type="button">Apply import</button></div>
         <div id="preview" class="card hidden"></div>
@@ -83,6 +93,18 @@
       <section id="connections" class="view">
         <div class="card"><div class="card-head"><h2>Connections</h2></div><div id="connector-grid" class="connector-grid"></div></div>
         <div id="pairing" class="card form hidden"><h2>Pair Chrome</h2><p>Enter this one-time code in the Chrome companion. It expires in 10 minutes.</p><div id="pair-code" class="pair-code"></div></div>
+        <form id="connector-config" class="card form hidden">
+          <div class="card-head inline-head"><div><p class="eyebrow">CONNECTION</p><h2 id="connector-config-title"></h2></div><button type="button" id="close-connector-config" class="btn">Close</button></div>
+          <p id="connector-config-help" class="muted"></p>
+          <div id="connector-fields" class="form-grid"></div>
+          <div id="biblio-tools" class="hidden">
+            <div class="actions"><button id="test-biblio" class="btn" type="button">Test FTP</button></div>
+            <label>Initial BIBLIO inventory<input id="biblio-import-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv"></label>
+            <button id="import-biblio" class="btn" type="button">Import BIBLIO inventory</button>
+          </div>
+          <div class="actions"><button class="btn primary">Save connection</button><button id="remove-connector" class="btn danger hidden" type="button">Remove credentials</button></div>
+          <p id="connector-config-status" class="muted"></p>
+        </form>
         <div class="card"><div class="card-head"><h2>Paired Chrome browsers</h2></div><div id="devices"></div></div>
       </section>
 
@@ -91,7 +113,8 @@
           <form id="settings-form" class="card form"><h2>Workspace</h2><label>Name<input id="settings-name"></label><button class="btn primary">Save</button></form>
           <div class="card form"><h2>Billing</h2><div id="billing"></div></div>
         </div>
-        <div class="card form"><h2>Your data</h2><a class="btn" href="/api/app/account/export">Download account data</a><p class="muted">Export before deleting a workspace. Destructive deletion requires explicit slug confirmation through the API.</p></div>
+        <div class="card form"><h2>Your data</h2><a class="btn" href="/api/app/account/export">Download account data</a><p class="muted">Your inventory, listings and sales remain exportable.</p></div>
+        <div class="card form"><h2>Delete workspace</h2><p class="muted">This permanently deletes this workspace and its marketplace data. Download an export first.</p><label>Type <code id="delete-workspace-slug"></code> to confirm<input id="delete-workspace-confirm" autocomplete="off"></label><button id="delete-workspace" class="btn danger" type="button">Delete workspace permanently</button></div>
       </section>
     </main>
   </div>

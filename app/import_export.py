@@ -477,21 +477,28 @@ def inventory_export_rows(items: Iterable[models.InventoryItem]) -> list[dict[st
     return rows
 
 
-def render_csv(rows: list[dict[str, Any]]) -> bytes:
+def render_csv(
+    rows: list[dict[str, Any]],
+    headers: list[str] | None = None,
+) -> bytes:
     output = io.StringIO(newline="")
-    writer = csv.DictWriter(output, fieldnames=EXPORT_HEADERS, lineterminator="\n")
+    writer = csv.DictWriter(output, fieldnames=headers or EXPORT_HEADERS, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue().encode("utf-8-sig")
 
 
-def render_xlsx(rows: list[dict[str, Any]]) -> bytes:
+def render_xlsx(
+    rows: list[dict[str, Any]],
+    headers: list[str] | None = None,
+) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Inventory"
-    sheet.append(EXPORT_HEADERS)
+    selected_headers = headers or EXPORT_HEADERS
+    sheet.append(selected_headers)
     for row in rows:
-        sheet.append([row.get(header, "") for header in EXPORT_HEADERS])
+        sheet.append([row.get(header, "") for header in selected_headers])
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
