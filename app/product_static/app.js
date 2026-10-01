@@ -75,6 +75,125 @@ function when(value) {
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
 }
 
+const tableNumberFormat = new Intl.NumberFormat();
+const tableNumberParts = tableNumberFormat.formatToParts(12345.6);
+const tableGroup = tableNumberParts.find((part) => part.type === "group")?.value || ",";
+const tableDecimal = tableNumberParts.find((part) => part.type === "decimal")?.value || ".";
+
+function parseSortableNumber(text) {
+  let candidate = String(text || "").trim();
+  if (!candidate || candidate === "—") return null;
+  candidate = candidate
+    .replace(/[\p{Sc}%]/gu, "")
+    .replace(/\b(?:days?|day|d)\b/gi, "")
+    .replace(/\s+/g, "");
+  if (!/^[+\-]?\d[\d.,]*$/.test(candidate)) return null;
+  if (tableGroup) candidate = candidate.split(tableGroup).join("");
+  if (tableDecimal && tableDecimal !== ".") {
+    candidate = candidate.replace(tableDecimal, ".");
+  }
+  const value = Number(candidate);
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseSortableDate(text) {
+  const raw = String(text || "").trim();
+  if (!raw || raw === "—") return null;
+  const direct = Date.parse(raw);
+  if (Number.isFinite(direct)) return direct;
+
+  const numeric = raw.match(/^(\d{1,4})\D(\d{1,2})\D(\d{1,4})(?:\D+(\d{1,2})[:.](\d{2})(?::(\d{2}))?)?/);
+  if (!numeric) return null;
+  const order = new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(2001, 10, 22))
+    .filter((part) => ["year", "month", "day"].includes(part.type))
+    .map((part) => part.type);
+  if (order.length !== 3) return null;
+  const pieces = {
+    [order[0]]: Number(numeric[1]),
+    [order[1]]: Number(numeric[2]),
+    [order[2]]: Number(numeric[3]),
+  };
+  if (pieces.year < 100) pieces.year += 2000;
+  const date = new Date(
+    pieces.year,
+    pieces.month - 1,
+    pieces.day,
+    Number(numeric[4] || 0),
+    Number(numeric[5] || 0),
+    Number(numeric[6] || 0),
+  );
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function sortableCellValue(cell) {
+  const explicit = cell?.dataset?.sortValue;
+  if (explicit != null && explicit !== "") {
+    const numeric = Number(explicit);
+    return Number.isFinite(numeric)
+      ? { kind: "number", value: numeric }
+      : { kind: "text", value: explicit };
+  }
+  const text = cell?.innerText?.replace(/\s+/g, " ").trim() || "";
+  if (!text || text === "—") return { kind: "empty", value: "" };
+  const number = parseSortableNumber(text);
+  if (number != null) return { kind: "number", value: number };
+  const date = parseSortableDate(text);
+  if (date != null) return { kind: "number", value: date };
+  return { kind: "text", value: text.toLocaleLowerCase() };
+}
+
+function compareSortableValues(left, right, direction) {
+  if (left.kind === "empty" && right.kind === "empty") return 0;
+  if (left.kind === "empty") return 1;
+  if (right.kind === "empty") return -1;
+  let result;
+  if (left.kind === "number" && right.kind === "number") {
+    result = left.value - right.value;
+  } else {
+    result = String(left.value).localeCompare(String(right.value), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+  return direction === "asc" ? result : -result;
+}
+
+function sortTableByHeader(header) {
+  const table = header.closest("table");
+  const body = table?.tBodies?.[0];
+  const headerRow = header.parentElement;
+  if (!table || !body || !headerRow) return;
+  const column = Array.from(headerRow.children).indexOf(header);
+  if (column < 0) return;
+
+  const direction = header.dataset.sortDirection === "asc" ? "desc" : "asc";
+  Array.from(table.querySelectorAll("thead th")).forEach((cell) => {
+    delete cell.dataset.sortDirection;
+    cell.removeAttribute("aria-sort");
+  });
+  header.dataset.sortDirection = direction;
+  header.setAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
+
+  const rows = Array.from(body.rows);
+  rows.sort((leftRow, rightRow) => compareSortableValues(
+    sortableCellValue(leftRow.cells[column]),
+    sortableCellValue(rightRow.cells[column]),
+    direction,
+  ));
+  rows.forEach((row) => body.appendChild(row));
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("a,button,input,select,textarea")) return;
+  const header = event.target.closest("table thead th");
+  if (!header || !header.textContent.trim()) return;
+  sortTableByHeader(header);
+});
+
 function csrf() {
   if (state.me?.csrf_token) return state.me.csrf_token;
   const hit = document.cookie.split("; ").find((value) => value.startsWith("reseller_csrf="));
@@ -1393,6 +1512,25 @@ function renderVintedBehavior(data) {
       ).join("")
       + "</tbody></table>"
     : '<div class="empty">No Vinted category history yet.</div>';
+
+  const soldRows = data.sold_stock || [];
+  $("#vinted-sold-stock").innerHTML = soldRows.length
+    ? '<table><thead><tr><th>Item</th><th>Category</th><th>Listed</th><th>Sold</th><th>Days online</th><th>Sale price</th><th>Order</th></tr></thead><tbody>'
+      + soldRows.map((row) => {
+        const title = row.url
+          ? '<a href="' + esc(row.url) + '" target="_blank" rel="noreferrer">' + esc(row.title) + "</a>"
+          : esc(row.title);
+        return '<tr><td><div class="title">' + title + '</div></td>'
+          + '<td>' + esc(row.category) + '</td>'
+          + '<td data-sort-value="' + esc(new Date(row.listed_at).getTime()) + '">' + esc(when(row.listed_at)) + '</td>'
+          + '<td data-sort-value="' + esc(new Date(row.sold_at).getTime()) + '">' + esc(when(row.sold_at)) + '</td>'
+          + '<td data-sort-value="' + esc(row.days_online) + '">' + esc(row.days_online) + ' d</td>'
+          + '<td data-sort-value="' + esc(row.sale_total_cents == null ? "" : row.sale_total_cents) + '">'
+          + money(row.sale_total_cents, row.currency) + '</td>'
+          + '<td>' + esc(row.external_order_id || "—") + '</td></tr>';
+      }).join("")
+      + "</tbody></table>"
+    : '<div class="empty">No linked Vinted sales in this period.</div>';
 
   const rows = data.listings || [];
   const segmentLabel = {
