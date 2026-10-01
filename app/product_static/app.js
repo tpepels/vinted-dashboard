@@ -8,6 +8,7 @@ const state = {
   mapping: {},
   mappings: [],
   inventoryItems: [],
+  listings: [],
   editItemId: null,
   connectorChannel: null,
 };
@@ -183,6 +184,7 @@ async function load(view) {
   try {
     if (view === "today") await today();
     else if (view === "inventory") await inventory();
+    else if (view === "listings") await listings();
     else if (view === "sales") await sales();
     else if (view === "analytics") await analytics();
     else if (view === "imports") await imports();
@@ -348,6 +350,228 @@ $("#item-form").onsubmit = async (event) => {
   } catch (error) {
     flash(error.message, true);
   }
+};
+
+function dateOnly(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+}
+
+function age(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  const timestamp = date.getTime();
+  if (Number.isNaN(timestamp)) return "—";
+  const days = Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
+  if (days === 0) return "Today";
+  if (days === 1) return "1 day";
+  if (days < 30) return days + " days";
+  if (days < 365) {
+    const months = Math.max(1, Math.floor(days / 30.44));
+    return months + " month" + (months === 1 ? "" : "s");
+  }
+  const years = Math.max(1, Math.floor(days / 365.25));
+  return years + " year" + (years === 1 ? "" : "s");
+}
+
+function timeValue(value) {
+  const number = new Date(value || 0).getTime();
+  return Number.isNaN(number) ? 0 : number;
+}
+
+function median(values) {
+  const numbers = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!numbers.length) return null;
+  const middle = Math.floor(numbers.length / 2);
+  return numbers.length % 2
+    ? numbers[middle]
+    : Math.round((numbers[middle - 1] + numbers[middle]) / 2);
+}
+
+function listingFingerprint(title) {
+  return String(title || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function duplicateInfo(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const fingerprint = listingFingerprint(row.title);
+    if (!fingerprint) continue;
+    const key = row.channel + "::" + fingerprint;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const duplicateGroups = Array.from(groups.values()).filter((group) => group.length > 1);
+  const counts = new Map();
+  for (const group of duplicateGroups) {
+    for (const row of group) counts.set(row._index, group.length);
+  }
+  return { duplicateGroups, counts };
+}
+
+function listingComparator(sort) {
+  const number = (value, fallback = -1) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  if (sort === "oldest") {
+    return (a, b) => {
+      const ad = timeValue(a.listed_at);
+      const bd = timeValue(b.listed_at);
+      if (ad && bd) return ad - bd;
+      if (ad) return -1;
+      if (bd) return 1;
+      return b._index - a._index;
+    };
+  }
+  if (sort === "price-asc") return (a, b) => number(a.price_cents, Infinity) - number(b.price_cents, Infinity);
+  if (sort === "price-desc") return (a, b) => number(b.price_cents, -1) - number(a.price_cents, -1);
+  if (sort === "likes-desc") return (a, b) => number(b.favourites, 0) - number(a.favourites, 0) || a._index - b._index;
+  if (sort === "views-desc") return (a, b) => number(b.views, 0) - number(a.views, 0) || a._index - b._index;
+  if (sort === "title-asc") {
+    return (a, b) => String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base" });
+  }
+  return (a, b) => {
+    const ad = timeValue(a.listed_at);
+    const bd = timeValue(b.listed_at);
+    if (ad && bd) return bd - ad;
+    if (ad) return -1;
+    if (bd) return 1;
+    return a._index - b._index;
+  };
+}
+
+async function listings() {
+  const data = await api("/api/app/listings");
+  state.listings = data.listings || [];
+  renderListings();
+}
+
+function renderListingStats(rows, duplicates) {
+  const prices = rows.map((row) => Number(row.price_cents)).filter(Number.isFinite);
+  const total = prices.reduce((sum, value) => sum + value, 0);
+  const average = prices.length ? Math.round(total / prices.length) : null;
+  const middle = median(prices);
+  const currency = rows.find((row) => row.currency)?.currency || "EUR";
+  const favourites = rows.reduce((sum, row) => sum + (Number(row.favourites) || 0), 0);
+  const zeroFavourites = rows.filter((row) => Number(row.favourites || 0) === 0).length;
+
+  $("#listing-stat-count").textContent = String(rows.length);
+  $("#listing-stat-value").textContent = money(total, currency);
+  $("#listing-stat-average").textContent = money(average, currency);
+  $("#listing-stat-median").textContent = money(middle, currency);
+  $("#listing-stat-favourites").textContent = String(favourites);
+  $("#listing-stat-zero-favourites").textContent = String(zeroFavourites);
+  $("#listing-stat-duplicate-groups").textContent = String(duplicates.duplicateGroups.length);
+  $("#listing-stat-duplicates").classList.toggle("has-duplicates", duplicates.duplicateGroups.length > 0);
+}
+
+function renderListings() {
+  const rows = (state.listings || []).map((row, _index) => ({ ...row, _index }));
+  const query = $("#listing-search").value.trim().toLowerCase();
+  const channel = $("#listing-channel").value;
+  const status = $("#listing-status").value;
+  const interest = $("#listing-interest").value;
+  const duplicateMode = $("#listing-duplicate").value;
+  const minimum = parseFloat($("#listing-price-min").value);
+  const maximum = parseFloat($("#listing-price-max").value);
+  const minCents = Number.isFinite(minimum) ? Math.round(minimum * 100) : null;
+  const maxCents = Number.isFinite(maximum) ? Math.round(maximum * 100) : null;
+  const sort = $("#listing-sort").value;
+
+  const baseFiltered = rows
+    .filter((row) => !channel || row.channel === channel)
+    .filter((row) => !status || String(row.status || "").toLowerCase() === status)
+    .filter((row) => !query || (
+      String(row.title || "").toLowerCase().includes(query)
+      || String(row.external_sku || "").toLowerCase().includes(query)
+      || String(row.external_id || "").toLowerCase().includes(query)
+    ))
+    .filter((row) => interest !== "liked" || Number(row.favourites || 0) > 0)
+    .filter((row) => interest !== "unliked" || Number(row.favourites || 0) === 0)
+    .filter((row) => minCents === null || row.price_cents == null || Number(row.price_cents) >= minCents)
+    .filter((row) => maxCents === null || row.price_cents == null || Number(row.price_cents) <= maxCents);
+
+  const duplicates = duplicateInfo(baseFiltered);
+  const filtered = baseFiltered
+    .filter((row) => duplicateMode !== "duplicates" || duplicates.counts.has(row._index))
+    .filter((row) => duplicateMode !== "unique" || !duplicates.counts.has(row._index))
+    .sort(listingComparator(sort));
+
+  const statsDuplicates = duplicateInfo(filtered);
+  renderListingStats(filtered, duplicateMode === "unique" ? statsDuplicates : duplicates);
+  $("#listing-count").textContent = filtered.length + " of " + rows.length;
+
+  const showFavourites = filtered.some((row) => row.favourites != null);
+  const showViews = filtered.some((row) => row.views != null);
+  const showDate = filtered.some((row) => timeValue(row.listed_at) > 0);
+
+  $("#listings-table").innerHTML = filtered.length
+    ? '<table><thead><tr><th>Listing</th><th>Marketplace</th><th>Status</th>'
+      + (showDate ? "<th>Listed</th><th>Age</th>" : "")
+      + (showFavourites ? "<th>Favourites</th>" : "")
+      + (showViews ? "<th>Views</th>" : "")
+      + '<th>Price</th></tr></thead><tbody>'
+      + filtered.map((row) => {
+        const duplicateCount = duplicates.counts.get(row._index);
+        const title = row.url
+          ? '<a href="' + esc(row.url) + '" target="_blank" rel="noreferrer">' + esc(row.title) + "</a>"
+          : esc(row.title);
+        return '<tr class="' + (duplicateCount ? "duplicate-row" : "") + '">'
+          + '<td><div class="title">' + title
+          + (duplicateCount ? '<span class="duplicate-pill">' + duplicateCount + " copies</span>" : "")
+          + '</div><div class="sub">' + esc(row.external_sku || row.external_id || "") + "</div></td>"
+          + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + "</span></td>"
+          + "<td>" + esc(row.status) + "</td>"
+          + (showDate ? "<td>" + dateOnly(row.listed_at) + "</td><td>" + age(row.listed_at) + "</td>" : "")
+          + (showFavourites ? "<td>" + esc(row.favourites == null ? "—" : row.favourites) + "</td>" : "")
+          + (showViews ? "<td>" + esc(row.views == null ? "—" : row.views) + "</td>" : "")
+          + "<td>" + money(row.price_cents, row.currency) + "</td></tr>";
+      }).join("")
+      + "</tbody></table>"
+    : '<div class="empty">No matching listings.</div>';
+}
+
+[
+  "#listing-search",
+  "#listing-price-min",
+  "#listing-price-max",
+].forEach((selector) => {
+  $(selector).addEventListener("input", renderListings);
+});
+[
+  "#listing-channel",
+  "#listing-status",
+  "#listing-interest",
+  "#listing-duplicate",
+  "#listing-sort",
+].forEach((selector) => {
+  $(selector).addEventListener("change", renderListings);
+});
+
+$("#listing-stat-duplicates").onclick = () => {
+  $("#listing-duplicate").value = "duplicates";
+  renderListings();
+};
+
+$("#listing-reset").onclick = () => {
+  $("#listing-search").value = "";
+  $("#listing-channel").value = "";
+  $("#listing-status").value = "active";
+  $("#listing-interest").value = "";
+  $("#listing-duplicate").value = "";
+  $("#listing-price-min").value = "";
+  $("#listing-price-max").value = "";
+  $("#listing-sort").value = "newest";
+  renderListings();
 };
 
 async function sales() {
