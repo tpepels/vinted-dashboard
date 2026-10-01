@@ -51,5 +51,7 @@ def test_inventory_cost_filter_supports_missing_and_recorded_values():
 
 def test_purchase_cost_apply_uses_multi_element_selector():
     lines = [line.strip() for line in APP_JS.splitlines()]
-    assert '$(".purchase-cost-apply").forEach((button) => {' in lines
-    assert '$(".purchase-cost-apply").forEach((button) => {' not in lines
+    multi = "$" + "$" + '(".purchase-cost-apply").forEach((button) => {'
+    single = "$" + '(".purchase-cost-apply").forEach((button) => {'
+    assert multi in lines
+    assert single not in lines
