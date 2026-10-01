@@ -153,6 +153,23 @@ def listing_started_at(listing: models.ChannelListing) -> datetime:
     return _parse_datetime(raw) or listing.first_seen_at
 
 
+def listing_started_source(listing: models.ChannelListing) -> str:
+    raw = (listing.extra or {}).get("listed_at")
+    return "vinted" if _parse_datetime(raw) is not None else "first_seen"
+
+
+def sale_time(sale: models.Sale) -> tuple[datetime | None, str | None]:
+    candidates = [
+        ("order", sale.occurred_at),
+        ("first_seen", sale.first_seen_at),
+    ]
+    present = [(source, value) for source, value in candidates if value is not None]
+    if not present:
+        return None, None
+    source, value = min(present, key=lambda pair: pair[1])
+    return value, source
+
+
 def _window_baseline(
     series: list[SnapshotPoint],
     cutoff: datetime,
@@ -411,19 +428,22 @@ def build_vinted_analytics(
     sold_stock: list[dict[str, Any]] = []
     linked_sales = 0
     for sale in valid_sales:
-        if not sale.inventory_item_id or not sale.occurred_at:
+        if not sale.inventory_item_id:
+            continue
+        sold_at, sold_at_source = sale_time(sale)
+        if sold_at is None:
             continue
         candidates = []
         for listing in listings_by_item.get(sale.inventory_item_id, []):
             started = listing_started_at(listing)
-            if started <= sale.occurred_at:
+            if started <= sold_at:
                 candidates.append((started, listing))
         if not candidates:
             continue
         started, _listing = max(candidates, key=lambda pair: pair[0])
         days_to_sale = max(
             0.0,
-            (sale.occurred_at - started).total_seconds() / 86400,
+            (sold_at - started).total_seconds() / 86400,
         )
         time_to_sale.append(days_to_sale)
         linked_sales += 1
@@ -438,7 +458,9 @@ def build_vinted_analytics(
                 "category": category,
                 "url": _listing.url,
                 "listed_at": started.isoformat(),
-                "sold_at": sale.occurred_at.isoformat(),
+                "listed_at_source": listing_started_source(_listing),
+                "sold_at": sold_at.isoformat(),
+                "sold_at_source": sold_at_source,
                 "days_online": round(days_to_sale, 1),
                 "sale_total_cents": sale.total_cents,
                 "listing_price_cents": _listing.price_cents,
