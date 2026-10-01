@@ -16,6 +16,7 @@ from app.runtime_config import (
     expected_database_revision,
     validate_configuration,
 )
+from app.service_status import status as service_status, touch as service_touch
 
 
 def production_env():
@@ -214,3 +215,35 @@ def test_billing_lock_blocks_existing_extension_sync(monkeypatch):
         },
     )
     assert response.status_code == 402
+
+
+def test_billing_trial_has_expiry_and_expires_write_access(monkeypatch):
+    monkeypatch.setattr(billing, "BILLING_ENABLED", True)
+    monkeypatch.setattr(billing, "BILLING_TRIAL_DAYS", 14)
+    status_value, trial_end = billing.new_workspace_billing()
+    assert status_value == BillingStatus.TRIALING
+    assert trial_end is not None
+
+    workspace = models.Workspace(
+        name="Trial",
+        slug="trial",
+        billing_status=BillingStatus.TRIALING,
+        trial_ends_at=trial_end,
+        settings={},
+    )
+    assert billing.workspace_can_write(workspace) is True
+
+    from datetime import timedelta
+    assert billing.workspace_can_write(
+        workspace,
+        now=trial_end + timedelta(seconds=1),
+    ) is False
+
+
+def test_worker_heartbeat_is_database_visible(monkeypatch):
+    monkeypatch.setenv("HOSTNAME", "worker-test")
+    service_touch("worker", detail={"poll_seconds": 5})
+    current = service_status("worker", max_age_seconds=90)
+    assert current["healthy"] is True
+    assert current["last_seen_at"]
+    assert current["age_seconds"] is not None
