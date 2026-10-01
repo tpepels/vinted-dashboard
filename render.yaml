@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: reseller-dashboard-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/ready
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: reseller-dashboard-db
+          property: connectionString
+      - key: APP_NAME
+        value: Reseller Dashboard
+      - key: APP_SECRET_KEY
+        sync: false
+      - key: APP_ENCRYPTION_KEY
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: LEGACY_UI_ENABLED
+        value: "false"
+      - key: LEGACY_API_ENABLED
+        value: "false"
+      - key: LEGACY_COMPAT_SYNC
+        value: "false"
+      - key: BILLING_ENABLED
+        value: "false"
+
+  - type: worker
+    name: reseller-dashboard-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m app.worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: reseller-dashboard-db
+          property: connectionString
+      - key: APP_SECRET_KEY
+        sync: false
+      - key: APP_ENCRYPTION_KEY
+        sync: false
+      - key: LEGACY_COMPAT_SYNC
+        value: "false"
+
+databases:
+  - name: reseller-dashboard-db
+    databaseName: reseller_dashboard
+    user: reseller_dashboard
