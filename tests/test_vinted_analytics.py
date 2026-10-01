@@ -287,6 +287,8 @@ def test_vinted_behavior_segments_rates_price_changes_and_time_to_sale():
     assert sold_row["title"] == "Sold coat"
     assert sold_row["category"] == "clothing"
     assert sold_row["days_online"] == 5.0
+    assert sold_row["listed_at_source"] == "vinted"
+    assert sold_row["sold_at_source"] == "order"
     assert sold_row["sale_total_cents"] == 2000
     assert sold_row["external_order_id"] == "SALE-1"
 
