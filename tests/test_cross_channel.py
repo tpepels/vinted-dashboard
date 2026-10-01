@@ -103,7 +103,7 @@ def test_sale_queues_other_remote_channels_once_and_marks_physical_stock_sold():
             title="One physical copy",
             category="book",
             quantity=1,
-            status="sold",
+            status="active",
             attributes={},
         )
         session.add(item)
@@ -626,3 +626,32 @@ def test_reconciliation_ui_classification_only_requires_ambiguous_sales():
             str(first.id),
             str(second.id),
         }
+
+
+
+def test_auto_link_does_not_reuse_item_already_consumed_by_another_sale():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="ONE-COPY",
+            title="One retained copy",
+            category="book",
+            quantity=0,
+            status="sold",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        _listing(session, workspace_id, item, "vinted", "ONE-COPY", status="sold")
+        existing = _sale(session, workspace_id, item)
+        existing.title = "One retained copy"
+
+        second = _sale(session, workspace_id, None)
+        second.title = "One retained copy"
+        second_id = second.id
+
+        result = auto_link_unlinked_sales(session, workspace_id)
+        assert result["linked"] == 0
+        assert result["unmatched"] == 1
+        assert session.get(models.Sale, second_id).inventory_item_id is None
