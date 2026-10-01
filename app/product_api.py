@@ -81,6 +81,7 @@ from app.product_models import (
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
 from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
+from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
     get_or_create_channel_account,
@@ -1116,17 +1117,12 @@ def analytics_history(
             )
         ).scalars().all()
         listing_ids = [row.id for row in listings]
-        snapshots = (
-            session.execute(
-                select(models.ListingSnapshot)
-                .where(models.ListingSnapshot.channel_listing_id.in_(listing_ids))
-                .order_by(
-                    models.ListingSnapshot.channel_listing_id,
-                    models.ListingSnapshot.captured_at,
-                )
-            ).scalars().all()
-            if listing_ids else []
-        )
+        downsampled = daily_snapshot_series(session, listing_ids, since)
+        snapshots = [
+            point
+            for series in downsampled.values()
+            for point in series
+        ]
         accounts = session.execute(
             select(models.ChannelAccount.id).where(
                 models.ChannelAccount.workspace_id == context.workspace.id,
@@ -1152,10 +1148,10 @@ def analytics_history(
             )
         ).scalars().all()
 
-    by_listing: dict[Any, list[models.ListingSnapshot]] = {}
+    by_listing: dict[Any, list[Any]] = {}
     daily: dict[str, dict[str, int]] = {}
     for snap in snapshots:
-        by_listing.setdefault(snap.channel_listing_id, []).append(snap)
+        by_listing.setdefault(snap.listing_id, []).append(snap)
 
     for series in by_listing.values():
         previous = None
@@ -1250,6 +1246,21 @@ def analytics_history(
         "followers": [profile_by_day[key] for key in sorted(profile_by_day)],
         "top_listings": top[:25],
     }
+
+
+@router.get("/api/app/analytics/vinted")
+def vinted_behavior_analytics(
+    days: int = 90,
+    context: RequestContext = Depends(require_context),
+):
+    days = max(7, min(int(days or 90), 365))
+    with db.session_scope() as session:
+        return build_vinted_analytics(
+            session,
+            context.workspace.id,
+            days=days,
+            strategy=strategy_settings(context.workspace.settings),
+        )
 
 
 @router.get("/api/app/listings/{listing_id}/history")
