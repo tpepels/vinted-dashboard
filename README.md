@@ -155,8 +155,8 @@ Settings.
 
 The product Analytics page reads Vinted listing snapshots directly from the
 workspace schema, including view/favourite gains, follower history, sales
-revenue and per-listing history. The Classic dashboard remains available for
-backwards compatibility rather than being required for normal analytics.
+revenue and per-listing history. Listings, purchases/sales, inventory,
+connections and normal analytics all use the workspace schema directly.
 
 ## Connections
 
@@ -264,6 +264,53 @@ A Render reference deployment is provided in \`render.yaml\`. Nothing in the
 application depends on Render; any container host with PostgreSQL works.
 
 See \`docs/deployment.md\` for local, Postgres and hosted instructions.
+
+## Self-hosted operations
+
+For the central `~/media-stack` layout, add the worker service once as
+documented in `docs/media-stack.md`.
+
+After that, normal upgrades are one command:
+
+```bash
+cd ~/media-stack/vinted-dashboard
+bash scripts/upgrade.sh --compose-dir ~/media-stack
+```
+
+The upgrade command:
+
+1. pulls with `--ff-only`;
+2. validates that web and worker services exist;
+3. builds the new images;
+4. creates a consistent pre-migration SQLite backup;
+5. starts the upgraded web + worker;
+6. waits for readiness;
+7. re-runs the legacy backfill idempotently and proves the worker consumes a
+   queued probe job.
+
+To include safe live connector checks:
+
+```bash
+bash scripts/upgrade.sh --compose-dir ~/media-stack --live-connectors
+```
+
+This tests BIBLIO with an FTP login/PWD only and reads eBay active inventory;
+it does not upload to BIBLIO or mutate an eBay listing.
+
+Useful operations:
+
+```bash
+python -m app.ops status
+python -m app.ops smoke --backfill
+python -m app.ops smoke --backfill --live-connectors
+python -m app.ops backup
+```
+
+See:
+
+- `docs/media-stack.md` for the central Compose worker;
+- `docs/backup-restore.md` for backup/restore procedures;
+- `docs/deployment.md` for local and hosted deployment.
 
 ## Development and tests
 

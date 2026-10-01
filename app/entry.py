@@ -143,7 +143,7 @@ main_module.dashboard_data = _dashboard_data
 app = main_module.app
 app.include_router(product_router)
 
-LEGACY_API_ENABLED = os.getenv("LEGACY_API_ENABLED", "true").strip().lower() in {
+LEGACY_API_ENABLED = os.getenv("LEGACY_API_ENABLED", "false").strip().lower() in {
     "1", "true", "yes", "on"
 }
 LEGACY_PREFIXES = (

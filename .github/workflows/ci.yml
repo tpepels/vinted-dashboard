@@ -14,6 +14,8 @@ jobs:
           python-version: "3.13"
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app
+      - run: bash -n scripts/upgrade.sh
+      - run: python -m app.ops --help
       - run: python -m pytest -q
       - run: node --check app/static/app.js
       - run: node --check app/product_static/app.js

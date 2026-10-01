@@ -44,7 +44,7 @@
         <button class="nav" data-view="connections">Connections</button>
         <button class="nav" data-view="settings">Settings</button>
       </nav>
-      <footer><a href="/classic">Classic dashboard</a><a href="/privacy">Privacy</a><button id="logout" class="link">Sign out</button></footer>
+      <footer><a href="/privacy">Privacy</a><button id="logout" class="link">Sign out</button></footer>
     </aside>
     <main>
       <header><div><p class="eyebrow">WORKSPACE</p><h1 id="page-title">Today</h1></div><div id="flash"></div></header>
@@ -126,7 +126,29 @@
         <div id="listings-table" class="card table-wrap"></div>
       </section>
 
-      <section id="sales" class="view"><div id="sales-table" class="card table-wrap"></div></section>
+      <section id="sales" class="view">
+        <div class="toolbar">
+          <select id="sales-direction" aria-label="Order direction">
+            <option value="sell" selected>Sales</option>
+            <option value="buy">Purchases</option>
+            <option value="">Sales + purchases</option>
+          </select>
+          <select id="sales-state" aria-label="Order state">
+            <option value="">All states</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select>
+          <select id="sales-channel" aria-label="Marketplace">
+            <option value="">All marketplaces</option>
+            <option value="vinted">Vinted</option>
+            <option value="ebay">eBay</option>
+            <option value="biblio">BIBLIO</option>
+          </select>
+          <input id="sales-search" placeholder="Search order or person">
+          <span id="sales-count" class="toolbar-count"></span>
+        </div>
+        <div id="sales-table" class="card table-wrap"></div>
+      </section>
 
       <section id="analytics" class="view">
         <div class="toolbar analytics-toolbar"><select id="analytics-days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">1 year</option></select></div>

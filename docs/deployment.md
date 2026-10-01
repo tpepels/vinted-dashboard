@@ -30,12 +30,32 @@ strong \`POSTGRES_PASSWORD\`, point \`DATABASE_URL\` at \`db\`, then:
 docker compose --profile postgres up -d --build
 \`\`\`
 
+## Existing central media-stack deployment
+
+When this repository is nested under a larger `~/media-stack` Compose
+project, the central Compose file must contain both the web service and a
+worker. See `docs/media-stack.md` for the exact worker block used with the
+current `/srv/vinted-dashboard/data:/app/data` layout.
+
+Once that one-time Compose edit is present, use:
+
+```bash
+cd ~/media-stack/vinted-dashboard
+bash scripts/upgrade.sh --compose-dir ~/media-stack
+```
+
+The script takes a pre-migration SQLite backup automatically and runs
+post-upgrade migration/backfill/worker checks. Add `--live-connectors` to
+also test BIBLIO FTP login and read current eBay seller inventory.
+
+Backup/restore procedures are in `docs/backup-restore.md`.
+
 ## Hosted beta
 
 The application is provider-neutral: one web container, one worker process and
 PostgreSQL. The reference \`render.yaml\` shows a Render deployment.
 
-Before a public deployment set at least:
+Fresh installs already default legacy compatibility surfaces off. Before a public deployment set at least:
 
 - \`DATABASE_URL\` to managed PostgreSQL
 - \`APP_SECRET_KEY\` to a long random value
