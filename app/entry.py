@@ -305,6 +305,11 @@ def _legacy_extension_zip(dashboard_url: str) -> bytes:
     )
 
 
+# Backwards-compatible helper used by the existing personal-dashboard tests
+# and any local tooling that imported it directly.
+_extension_zip = _legacy_extension_zip
+
+
 def _paired_extension_zip(dashboard_url: str) -> bytes:
     from urllib.parse import urlparse
 
