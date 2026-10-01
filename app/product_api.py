@@ -610,25 +610,32 @@ async def import_preview(
     try:
         table = parse_table(file.filename or "inventory.csv", content)
         supplied = json.loads(mapping_json or "{}")
-        mapping = supplied if supplied else suggest_mapping(table.headers)
-        if not isinstance(mapping, dict):
+        if not isinstance(supplied, dict):
             raise ValueError("Mapping must be an object")
+        mapping = supplied if supplied else suggest_mapping(table.headers)
+        mapped_fields = set(mapping.values())
+        mapping_ready = "sku" in mapped_fields and "title" in mapped_fields
         with db.session_scope() as session:
-            preview = preview_inventory_import(
-                session,
-                context.workspace.id,
-                table.rows,
-                {str(k): str(v) for k, v in mapping.items()},
-                full_snapshot=full_snapshot,
-            ) if table.headers else {
-                "rows": 0,
-                "counts": {"new": 0, "update": 0, "unchanged": 0, "conflict": 0},
-                "preview": [],
-                "missing_existing": [],
-                "missing_existing_count": 0,
-                "can_apply": False,
-                "full_snapshot": full_snapshot,
-            }
+            preview = (
+                preview_inventory_import(
+                    session,
+                    context.workspace.id,
+                    table.rows,
+                    {str(k): str(v) for k, v in mapping.items()},
+                    full_snapshot=full_snapshot,
+                )
+                if table.headers and mapping_ready
+                else {
+                    "rows": len(table.rows),
+                    "counts": {"new": 0, "update": 0, "unchanged": 0, "conflict": 0},
+                    "preview": [],
+                    "missing_existing": [],
+                    "missing_existing_count": 0,
+                    "can_apply": False,
+                    "full_snapshot": full_snapshot,
+                    "mapping_required": True,
+                }
+            )
             job = ImportJob(
                 workspace_id=context.workspace.id,
                 user_id=context.user.id,
@@ -806,13 +813,15 @@ def export_inventory(
 
 @router.get("/api/app/connectors")
 def connectors(context: RequestContext = Depends(require_context)):
+    bootstrap_slug = os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
+    is_bootstrap = context.workspace.slug == bootstrap_slug
     with db.session_scope() as session:
         accounts = session.execute(
             select(models.ChannelAccount).where(
                 models.ChannelAccount.workspace_id == context.workspace.id
             )
         ).scalars().all()
-        credentials = {
+        stored_credentials = {
             row.channel
             for row in session.execute(
                 select(ConnectorCredential).where(
@@ -826,27 +835,64 @@ def connectors(context: RequestContext = Depends(require_context)):
                 ExtensionCredential.revoked_at.is_(None),
             )
         ).scalar_one()
+
     account_by_channel = {row.channel: row for row in accounts}
     result = []
     for info in connector_catalog():
-        account = account_by_channel.get(info["channel"])
-        configured = info["channel"] in credentials
-        if info["channel"] == Channel.VINTED:
-            configured = bool(extension_count)
-        if context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal"):
-            if info["channel"] == Channel.BIBLIO:
-                configured = configured or bool(os.getenv("BIBLIO_FTP_USERNAME") and os.getenv("BIBLIO_FTP_PASSWORD"))
-            if info["channel"] == Channel.EBAY:
-                configured = configured or bool(
-                    os.getenv("EBAY_OAUTH_TOKEN")
-                    or (os.getenv("EBAY_CLIENT_ID") and os.getenv("EBAY_CLIENT_SECRET") and os.getenv("EBAY_REFRESH_TOKEN"))
+        channel = info["channel"]
+        account = account_by_channel.get(channel)
+        configured = False
+        operational = False
+
+        if channel == Channel.VINTED:
+            configured = operational = bool(extension_count)
+        elif channel in {Channel.CSV, Channel.EXCEL}:
+            configured = operational = True
+        elif channel == Channel.BIBLIO:
+            env_ready = bool(
+                os.getenv("BIBLIO_FTP_USERNAME", "").strip()
+                and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
+            )
+            configured = channel in stored_credentials or (is_bootstrap and env_ready)
+            operational = bool(is_bootstrap and env_ready)
+        elif channel == Channel.EBAY:
+            env_ready = bool(
+                os.getenv("EBAY_OAUTH_TOKEN", "").strip()
+                or (
+                    os.getenv("EBAY_CLIENT_ID", "").strip()
+                    and os.getenv("EBAY_CLIENT_SECRET", "").strip()
+                    and os.getenv("EBAY_REFRESH_TOKEN", "").strip()
                 )
-        result.append({
-            **info,
-            "configured": configured,
-            "status": account.status if account else ("connected" if configured else "disconnected"),
-            "last_synced_at": account.last_synced_at.isoformat() if account and account.last_synced_at else None,
-        })
+            )
+            configured = channel in stored_credentials or (is_bootstrap and env_ready)
+            operational = bool(is_bootstrap and env_ready)
+
+        result.append(
+            {
+                **info,
+                "configured": configured,
+                "operational": operational,
+                "sync_available": operational and channel in {Channel.BIBLIO, Channel.EBAY},
+                "status": (
+                    account.status
+                    if account and operational
+                    else ("connected" if operational else "disconnected")
+                ),
+                "last_synced_at": (
+                    account.last_synced_at.isoformat()
+                    if account and account.last_synced_at
+                    else None
+                ),
+                "note": (
+                    None
+                    if operational or channel in {Channel.VINTED, Channel.CSV, Channel.EXCEL}
+                    else (
+                        "Credentials can be stored, but hosted per-workspace synchronization "
+                        "is not enabled for this connector yet."
+                    )
+                ),
+            }
+        )
     return {"connectors": result}
 
 
@@ -879,8 +925,18 @@ def save_connector_credentials(
         else:
             row.encrypted_payload = encrypt_json(cleaned)
         account, _ = get_or_create_channel_account(session, context.workspace, channel, {})
-        account.status = ChannelAccountStatus.CONNECTED
-    return {"ok": True, "stored_keys": sorted(cleaned), "encrypted": True}
+        account.status = ChannelAccountStatus.DISCONNECTED
+        account.config = {
+            **dict(account.config or {}),
+            "credentials_stored": True,
+            "integration_state": "adapter_not_enabled",
+        }
+    return {
+        "ok": True,
+        "stored_keys": sorted(cleaned),
+        "encrypted": True,
+        "operational": False,
+    }
 
 
 @router.delete("/api/app/connectors/{channel}/credentials")
@@ -915,6 +971,25 @@ def enqueue_connector_sync(
 ):
     if channel not in {Channel.BIBLIO, Channel.EBAY}:
         raise HTTPException(status_code=400, detail="This connector has no server-side sync job")
+    if context.workspace.slug != os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal"):
+        raise HTTPException(
+            status_code=501,
+            detail="Hosted per-workspace sync is not enabled for this connector yet",
+        )
+    if channel == Channel.BIBLIO and not (
+        os.getenv("BIBLIO_FTP_USERNAME", "").strip()
+        and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
+    ):
+        raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
+    if channel == Channel.EBAY and not (
+        os.getenv("EBAY_OAUTH_TOKEN", "").strip()
+        or (
+            os.getenv("EBAY_CLIENT_ID", "").strip()
+            and os.getenv("EBAY_CLIENT_SECRET", "").strip()
+            and os.getenv("EBAY_REFRESH_TOKEN", "").strip()
+        )
+    ):
+        raise HTTPException(status_code=400, detail="eBay OAuth is not configured")
     job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
     return {"ok": True, "job_id": str(job_id), "queued": True}
 
