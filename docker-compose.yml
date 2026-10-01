@@ -19,6 +19,26 @@ services:
       db:
         condition: service_healthy
         required: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/app.sqlite3}
+    volumes:
+      - ./data:/app/data
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
 
   # Optional: only starts with `docker compose --profile postgres up`.
   # Set DATABASE_URL in .env to this service's connection string to use it
