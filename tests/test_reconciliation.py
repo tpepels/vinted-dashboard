@@ -330,7 +330,11 @@ def test_connector_sync_preserves_manual_reconciliation():
         ).scalar_one_or_none() is None
 
 
-def test_reconciliation_api_requires_explicit_apply():
+def test_reconciliation_api_requires_explicit_apply(monkeypatch):
+    # Registration rate limiting is process-global and unrelated to this API
+    # contract; other TestClient tests may already have consumed the shared
+    # test IP budget.
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
     client = TestClient(entry.app)
     registered = client.post(
         "/api/auth/register",
