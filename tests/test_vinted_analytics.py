@@ -434,3 +434,98 @@ def test_existing_analytics_history_uses_downsampled_snapshot_points(monkeypatch
     assert body["top_listings"][0]["favourites"] == 3
     assert sum(row["views_gained"] for row in body["daily"]) == 15
     assert sum(row["favourites_gained"] for row in body["daily"]) == 2
+
+
+
+def test_sold_stock_uses_first_observed_fallback_and_selected_window():
+    workspace_id = _workspace("vinted-sold-window")
+    with db.session_scope() as session:
+        recent_item = _item(session, workspace_id, "RECENT", "Recent sold item")
+        recent_listing = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=recent_item.id,
+            channel="vinted",
+            external_id="RECENT",
+            title=recent_item.title,
+            price_cents=1800,
+            currency="EUR",
+            status="sold",
+            quantity=0,
+            first_seen_at=NOW - timedelta(days=12),
+            last_seen_at=NOW,
+            extra={},
+        )
+        session.add(recent_listing)
+        session.flush()
+        session.add(
+            models.Sale(
+                workspace_id=workspace_id,
+                inventory_item_id=recent_item.id,
+                channel="vinted",
+                external_order_id="RECENT-SALE",
+                direction="sell",
+                title=recent_item.title,
+                total_cents=1700,
+                currency="EUR",
+                status="completed",
+                lifecycle_status="completed",
+                is_closed=True,
+                occurred_at=NOW - timedelta(days=3),
+                first_seen_at=NOW - timedelta(days=4),
+                last_seen_at=NOW - timedelta(days=3),
+                extra={},
+            )
+        )
+
+        old_item = _item(session, workspace_id, "OLD", "Old sold item")
+        old_listing = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=old_item.id,
+            channel="vinted",
+            external_id="OLD",
+            title=old_item.title,
+            price_cents=1000,
+            currency="EUR",
+            status="sold",
+            quantity=0,
+            first_seen_at=NOW - timedelta(days=80),
+            last_seen_at=NOW - timedelta(days=50),
+            extra={},
+        )
+        session.add(old_listing)
+        session.flush()
+        session.add(
+            models.Sale(
+                workspace_id=workspace_id,
+                inventory_item_id=old_item.id,
+                channel="vinted",
+                external_order_id="OLD-SALE",
+                direction="sell",
+                title=old_item.title,
+                total_cents=900,
+                currency="EUR",
+                status="completed",
+                lifecycle_status="completed",
+                is_closed=True,
+                occurred_at=NOW - timedelta(days=50),
+                first_seen_at=NOW - timedelta(days=51),
+                last_seen_at=NOW - timedelta(days=50),
+                extra={},
+            )
+        )
+        session.flush()
+
+        data = build_vinted_analytics(
+            session,
+            workspace_id,
+            days=30,
+            strategy=dict(DEFAULT_STRATEGY),
+            now=NOW,
+        )
+
+    assert len(data["sold_stock"]) == 1
+    row = data["sold_stock"][0]
+    assert row["external_order_id"] == "RECENT-SALE"
+    assert row["listed_at_source"] == "first_seen"
+    assert row["sold_at_source"] == "first_seen"
+    assert row["days_online"] == 8.0
