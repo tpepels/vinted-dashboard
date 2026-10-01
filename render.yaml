@@ -27,6 +27,8 @@ services:
         value: "false"
       - key: RUN_LEGACY_BACKFILL
         value: "false"
+      - key: LISTING_ASSISTANT_ENABLED
+        value: "false"
       - key: BILLING_ENABLED
         value: "false"
       - key: BILLING_TRIAL_DAYS
@@ -55,6 +57,8 @@ services:
       - key: LEGACY_API_ENABLED
         value: "false"
       - key: LEGACY_COMPAT_SYNC
+        value: "false"
+      - key: LISTING_ASSISTANT_ENABLED
         value: "false"
       - key: BILLING_ENABLED
         value: "false"
