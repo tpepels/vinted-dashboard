@@ -10,11 +10,14 @@ import re
 import sqlite3
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from curl_cffi import requests
 
+from app.connectors import workspace_sync
+from app.workspace_bootstrap import clean_isbn
 
 DB_PATH = Path(os.getenv("VINTED_HISTORY_DB", "/app/data/vinted-history.sqlite3"))
 
@@ -109,11 +112,6 @@ def _money(value: Any) -> int | None:
         return None
 
 
-def _clean_isbn(value: Any) -> str | None:
-    text = re.sub(r"[^0-9Xx]", "", str(value or ""))
-    return text.upper() if len(text) in {10, 13} else None
-
-
 def upsert_channel_snapshot(
     source: str,
     items: list[dict[str, Any]],
@@ -162,7 +160,7 @@ def upsert_channel_snapshot(
                     source,
                     source_id,
                     str(item.get("sku") or "").strip() or None,
-                    _clean_isbn(item.get("isbn")),
+                    clean_isbn(item.get("isbn")),
                     str(item.get("title") or "Untitled").strip(),
                     str(item.get("author") or "").strip() or None,
                     str(item.get("description") or "").strip() or None,
@@ -210,6 +208,14 @@ def upsert_channel_snapshot(
         "items": len(seen),
         "active": active_count,
     }
+    workspace_sync.record_channel_snapshot(
+        source,
+        items,
+        synced_at=datetime.fromtimestamp(synced_at, tz=timezone.utc),
+        full_snapshot=full_snapshot,
+        active_count=active_count,
+        note=note,
+    )
     if source == "biblio":
         auto = maybe_auto_sync_biblio()
         if auto:
@@ -410,6 +416,7 @@ def _record_biblio_ftp_run(
     delete_count: int = 0,
     detail: str | None = None,
 ) -> None:
+    attempted_at = time.time()
     with _connect() as conn:
         conn.execute(
             """
@@ -419,10 +426,20 @@ def _record_biblio_ftp_run(
             ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                time.time(), action, status, inventory_filename, deletes_filename,
+                attempted_at, action, status, inventory_filename, deletes_filename,
                 int(active_count), int(delete_count), detail,
             ),
         )
+    workspace_sync.record_biblio_ftp_run(
+        action,
+        status,
+        attempted_at=datetime.fromtimestamp(attempted_at, tz=timezone.utc),
+        inventory_filename=inventory_filename,
+        deletes_filename=deletes_filename,
+        active_count=active_count,
+        delete_count=delete_count,
+        detail=detail,
+    )
 
 
 def _biblio_export_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

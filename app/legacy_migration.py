@@ -39,18 +39,24 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import db, models
-from app.channels import _clean_isbn
 from app.constants import (
-    BillingStatus,
     Channel,
-    ChannelAccountStatus,
     ItemCategory,
     ItemStatus,
     ListingStatus,
-    MembershipRole,
     SyncRunStatus,
 )
 from app.intelligence import _parse_time
+from app.workspace_bootstrap import (
+    BOOTSTRAP_OWNER_EMAIL,
+    BOOTSTRAP_WORKSPACE_NAME,
+    BOOTSTRAP_WORKSPACE_SLUG,
+    clean_isbn,
+    get_or_create_channel_account,
+    get_or_create_owner,
+    get_or_create_workspace,
+    normalize_sku,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +66,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_LEGACY_SQLITE_PATH = Path(
     os.getenv("LEGACY_SQLITE_PATH", os.getenv("VINTED_HISTORY_DB", "/app/data/vinted-history.sqlite3"))
 )
-
-BOOTSTRAP_WORKSPACE_NAME = os.getenv("BOOTSTRAP_WORKSPACE_NAME", "Personal Workspace")
-BOOTSTRAP_WORKSPACE_SLUG = os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
-BOOTSTRAP_OWNER_EMAIL = os.getenv("BOOTSTRAP_OWNER_EMAIL", "owner@example.com")
-
-_CHANNEL_DISPLAY_NAMES = {
-    Channel.VINTED: "Vinted",
-    Channel.EBAY: "eBay",
-    Channel.BIBLIO: "BIBLIO",
-}
 
 
 @dataclass
@@ -116,11 +112,6 @@ def _text_to_dt(value: Any) -> Optional[datetime]:
     return _epoch_to_dt(_parse_time(value))
 
 
-def _normalize_sku(value: Any) -> Optional[str]:
-    text = str(value or "").strip()
-    return text or None
-
-
 def _file_signature(path: Path) -> str:
     stat = path.stat()
     return f"{stat.st_size}:{int(stat.st_mtime)}"
@@ -137,75 +128,6 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
     ).fetchone()
     return row is not None
-
-
-# --------------------------------------------------------------------------
-# Bootstrap workspace / owner / channel accounts
-# --------------------------------------------------------------------------
-
-
-def _get_or_create_workspace(session: Session, name: str, slug: str) -> models.Workspace:
-    workspace = session.execute(
-        select(models.Workspace).where(models.Workspace.slug == slug)
-    ).scalar_one_or_none()
-    if workspace is not None:
-        return workspace
-    workspace = models.Workspace(
-        name=name, slug=slug, is_personal=True, billing_status=BillingStatus.DEV
-    )
-    session.add(workspace)
-    session.flush()
-    return workspace
-
-
-def _get_or_create_owner(session: Session, workspace: models.Workspace, email: str) -> models.User:
-    user = session.execute(select(models.User).where(models.User.email == email)).scalar_one_or_none()
-    if user is None:
-        user = models.User(email=email, display_name="Owner", is_active=True)
-        session.add(user)
-        session.flush()
-    membership = session.execute(
-        select(models.Membership).where(
-            models.Membership.user_id == user.id,
-            models.Membership.workspace_id == workspace.id,
-        )
-    ).scalar_one_or_none()
-    if membership is None:
-        session.add(
-            models.Membership(user_id=user.id, workspace_id=workspace.id, role=MembershipRole.OWNER)
-        )
-        session.flush()
-    return user
-
-
-def _get_or_create_channel_account(
-    session: Session,
-    workspace: models.Workspace,
-    channel: str,
-    cache: dict[str, models.ChannelAccount],
-    summary: BackfillSummary,
-) -> models.ChannelAccount:
-    cached = cache.get(channel)
-    if cached is not None:
-        return cached
-    account = session.execute(
-        select(models.ChannelAccount).where(
-            models.ChannelAccount.workspace_id == workspace.id,
-            models.ChannelAccount.channel == channel,
-        )
-    ).scalar_one_or_none()
-    if account is None:
-        account = models.ChannelAccount(
-            workspace_id=workspace.id,
-            channel=channel,
-            display_name=_CHANNEL_DISPLAY_NAMES.get(channel, channel.title()),
-            status=ChannelAccountStatus.CONNECTED,
-        )
-        session.add(account)
-        session.flush()
-        summary.channel_accounts += 1
-    cache[channel] = account
-    return account
 
 
 # --------------------------------------------------------------------------
@@ -240,10 +162,10 @@ class _UnionFind:
 
 def _row_keys(row: sqlite3.Row) -> list[tuple[str, str]]:
     keys = []
-    sku = _normalize_sku(row["sku"])
+    sku = normalize_sku(row["sku"])
     if sku:
         keys.append(("sku", sku.upper()))
-    isbn = _clean_isbn(row["isbn"])
+    isbn = clean_isbn(row["isbn"])
     if isbn:
         keys.append(("isbn", isbn))
     return keys
@@ -284,7 +206,7 @@ def _summarize_group(rows: list[sqlite3.Row]) -> tuple[str, str, dict[str, Any]]
     for row in rows:
         if row["author"] and "author" not in attributes:
             attributes["author"] = row["author"]
-        isbn = _clean_isbn(row["isbn"])
+        isbn = clean_isbn(row["isbn"])
         if isbn and "isbn" not in attributes:
             attributes["isbn"] = isbn
     return category, title, attributes
@@ -373,7 +295,9 @@ def _backfill_channel_items(
     def _apply_listing(row: sqlite3.Row, item: models.InventoryItem) -> None:
         channel = row["source"]
         external_id = row["source_id"]
-        account = _get_or_create_channel_account(session, workspace, channel, account_cache, summary)
+        account, created = get_or_create_channel_account(session, workspace, channel, account_cache)
+        if created:
+            summary.channel_accounts += 1
         first_seen = _epoch_to_dt(row["first_seen_at"]) or _utcnow()
         last_seen = _epoch_to_dt(row["last_seen_at"]) or _utcnow()
         extra: dict[str, Any] = {}
@@ -381,7 +305,7 @@ def _backfill_channel_items(
             extra["author"] = row["author"]
         if row["description"]:
             extra["description"] = row["description"]
-        isbn = _clean_isbn(row["isbn"])
+        isbn = clean_isbn(row["isbn"])
         if isbn:
             extra["isbn"] = isbn
 
@@ -389,7 +313,7 @@ def _backfill_channel_items(
         if existing is not None:
             existing.inventory_item_id = item.id
             existing.channel_account_id = account.id
-            existing.external_sku = _normalize_sku(row["sku"])
+            existing.external_sku = normalize_sku(row["sku"])
             existing.title = row["title"] or existing.title
             existing.price_cents = row["price_cents"]
             existing.currency = row["currency"]
@@ -408,7 +332,7 @@ def _backfill_channel_items(
             channel_account_id=account.id,
             channel=channel,
             external_id=external_id,
-            external_sku=_normalize_sku(row["sku"]),
+            external_sku=normalize_sku(row["sku"]),
             title=row["title"] or "Untitled",
             price_cents=row["price_cents"],
             currency=row["currency"],
@@ -430,11 +354,11 @@ def _backfill_channel_items(
         # canonical identifier; fall back to a synthesized ISBN-based SKU
         # when the group was only linked via ISBN (no row has a real SKU).
         sku = next(
-            (_normalize_sku(row["sku"]) for row in group_rows if _normalize_sku(row["sku"])), None
+            (normalize_sku(row["sku"]) for row in group_rows if normalize_sku(row["sku"])), None
         )
         if sku is None:
             isbn = next(
-                (_clean_isbn(row["isbn"]) for row in group_rows if _clean_isbn(row["isbn"])), None
+                (clean_isbn(row["isbn"]) for row in group_rows if clean_isbn(row["isbn"])), None
             )
             sku = f"ISBN-{isbn}" if isbn else f"{group_rows[0]['source'].upper()}-{group_rows[0]['source_id']}"
         item = _resolve_item(sku, group_rows)
@@ -487,7 +411,9 @@ def _backfill_channel_sync_runs(
         key = (channel, "snapshot", started_at)
         if key in existing_keys:
             continue
-        account = _get_or_create_channel_account(session, workspace, channel, account_cache, summary)
+        account, created = get_or_create_channel_account(session, workspace, channel, account_cache)
+        if created:
+            summary.channel_accounts += 1
         session.add(
             models.ConnectorSyncRun(
                 workspace_id=workspace.id,
@@ -526,7 +452,9 @@ def _backfill_biblio_ftp_runs(
     ).fetchall()
     if not rows:
         return
-    account = _get_or_create_channel_account(session, workspace, Channel.BIBLIO, account_cache, summary)
+    account, created = get_or_create_channel_account(session, workspace, Channel.BIBLIO, account_cache)
+    if created:
+        summary.channel_accounts += 1
     for row in rows:
         run_type = f"ftp_{row['action']}"
         started_at = _epoch_to_dt(row["attempted_at"])
@@ -578,7 +506,9 @@ def _backfill_vinted_observations(
     sync_rows = legacy_conn.execute("SELECT id, collected_at FROM sync_runs ORDER BY collected_at").fetchall()
     if not sync_rows:
         return
-    account = _get_or_create_channel_account(session, workspace, Channel.VINTED, account_cache, summary)
+    account, created = get_or_create_channel_account(session, workspace, Channel.VINTED, account_cache)
+    if created:
+        summary.channel_accounts += 1
 
     existing_snapshots = set(
         session.execute(
@@ -742,7 +672,9 @@ def _backfill_orders_history(
     ).fetchall()
     if not rows:
         return
-    account = _get_or_create_channel_account(session, workspace, Channel.VINTED, account_cache, summary)
+    account, created = get_or_create_channel_account(session, workspace, Channel.VINTED, account_cache)
+    if created:
+        summary.channel_accounts += 1
     existing = {
         (sale.channel, sale.direction, sale.external_order_id): sale
         for sale in session.execute(
@@ -893,8 +825,8 @@ def run_legacy_backfill(
         logger.info("legacy_migration: no legacy database found at %s, skipping", path)
         return None
 
-    workspace = _get_or_create_workspace(session, workspace_name, workspace_slug)
-    _get_or_create_owner(session, workspace, owner_email)
+    workspace = get_or_create_workspace(session, workspace_name, workspace_slug)
+    get_or_create_owner(session, workspace, owner_email)
     session.flush()
 
     account_cache: dict[str, models.ChannelAccount] = {}
