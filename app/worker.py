@@ -13,6 +13,7 @@ from app import jobs
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("reseller-worker")
 POLL_SECONDS = max(1, int(os.getenv("WORKER_POLL_SECONDS", "5")))
+HEARTBEAT_SECONDS = max(10, int(os.getenv("WORKER_HEARTBEAT_SECONDS", "30")))
 
 
 def handle(job: dict) -> None:
@@ -51,7 +52,16 @@ def handle(job: dict) -> None:
 
 def run_forever() -> None:
     logger.info("worker started")
+    last_heartbeat = 0.0
     while True:
+        now = time.monotonic()
+        if now - last_heartbeat >= HEARTBEAT_SECONDS:
+            try:
+                from app.service_status import touch
+                touch("worker", detail={"poll_seconds": POLL_SECONDS})
+                last_heartbeat = now
+            except Exception:
+                logger.exception("worker heartbeat is not ready yet")
         try:
             job = jobs.claim_one()
         except Exception:
