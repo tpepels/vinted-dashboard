@@ -14,6 +14,7 @@ class Channel:
     VINTED = "vinted"
     EBAY = "ebay"
     BIBLIO = "biblio"
+    ABEBOOKS = "abebooks"
     CSV = "csv"
     EXCEL = "excel"
     MANUAL = "manual"
@@ -26,6 +27,7 @@ KNOWN_CHANNELS = (
     Channel.VINTED,
     Channel.EBAY,
     Channel.BIBLIO,
+    Channel.ABEBOOKS,
     Channel.CSV,
     Channel.EXCEL,
     Channel.MANUAL,
