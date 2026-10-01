@@ -223,6 +223,7 @@ def _serialize_workspace(workspace: models.Workspace) -> dict[str, Any]:
         "name": workspace.name,
         "slug": workspace.slug,
         "billing_status": workspace.billing_status,
+        "trial_ends_at": workspace.trial_ends_at.isoformat() if workspace.trial_ends_at else None,
         "settings": dict(workspace.settings or {}),
     }
 
@@ -324,11 +325,13 @@ def register(payload: RegisterRequest, request: Request, response: Response):
         ).scalars().first()
         if membership is None:
             name = (payload.workspace_name or f"{user.display_name}'s workspace").strip()
+            billing_status, trial_ends_at = billing.new_workspace_billing()
             workspace = models.Workspace(
                 name=name,
                 slug=_unique_slug(session, name),
                 is_personal=True,
-                billing_status=BillingStatus.TRIALING if billing.BILLING_ENABLED else BillingStatus.DEV,
+                billing_status=billing_status,
+                trial_ends_at=trial_ends_at,
                 settings={
                     "onboarding": {
                         "completed": False,
