@@ -104,21 +104,21 @@ def test_daily_snapshot_series_keeps_pre_window_baseline_and_last_point_per_day(
         _snap(
             session,
             listing,
-            since + timedelta(days=1, hours=8),
+            since + timedelta(days=1, hours=2),
             views=10,
             favourites=1,
         )
         _snap(
             session,
             listing,
-            since + timedelta(days=1, hours=20),
+            since + timedelta(days=1, hours=8),
             views=15,
             favourites=2,
         )
         _snap(
             session,
             listing,
-            since + timedelta(days=2, hours=12),
+            since + timedelta(days=2, hours=2),
             views=20,
             favourites=3,
         )
