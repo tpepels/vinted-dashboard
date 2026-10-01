@@ -167,6 +167,47 @@ def plan_sale_reconciliation(
     return created
 
 
+def reconcile_sale_state(
+    session: Session,
+    sale: models.Sale,
+    *,
+    external_item_id: str | None = None,
+) -> list[CrossChannelAction]:
+    """Apply the current sale lifecycle to stock and action planning.
+
+    A later cancellation/refund cancels still-pending close actions and lets
+    master stock be recomputed from marketplace listings. Jobs already in the
+    queue are harmless because the worker treats a cancelled action as
+    terminal.
+    """
+    if sale.direction != "sell":
+        return []
+    if sale_counts_as_sold(sale):
+        return plan_sale_reconciliation(
+            session,
+            sale,
+            external_item_id=external_item_id,
+        )
+
+    pending = session.execute(
+        select(CrossChannelAction).where(
+            CrossChannelAction.trigger_sale_id == sale.id,
+            CrossChannelAction.status.in_(["queued", "running", "attention", "error"]),
+        )
+    ).scalars().all()
+    for action in pending:
+        action.status = "cancelled"
+        action.completed_at = utcnow()
+        action.last_error = None
+
+    item = resolve_sale_item(session, sale, external_item_id=external_item_id)
+    if item is not None:
+        from app.connectors.workspace_sync import recompute_inventory_item
+
+        recompute_inventory_item(session, item)
+    return []
+
+
 def _get_action(session: Session, action_id: uuid.UUID) -> CrossChannelAction:
     action = session.get(CrossChannelAction, action_id)
     if action is None:
@@ -177,7 +218,7 @@ def _get_action(session: Session, action_id: uuid.UUID) -> CrossChannelAction:
 def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
     with db.session_scope() as session:
         action = _get_action(session, action_id)
-        if action.status in {"success", "acknowledged"}:
+        if action.status in {"success", "acknowledged", "cancelled"}:
             return {"ok": True, "already_complete": True}
         if action.mode != "remote":
             raise RuntimeError("Manual action cannot be executed by the worker")
