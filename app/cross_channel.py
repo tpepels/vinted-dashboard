@@ -105,6 +105,9 @@ def _enqueue_action_job(session: Session, action: CrossChannelAction) -> None:
             available_at=utcnow(),
         )
     )
+    # SessionLocal has autoflush disabled; make every planned action/job pair
+    # immediately visible to subsequent queries in the same transaction.
+    session.flush()
 
 
 def plan_sale_reconciliation(
