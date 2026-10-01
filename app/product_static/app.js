@@ -1470,7 +1470,7 @@ function renderPurchaseCostSuggestions() {
       + "</tbody></table>"
     : '<div class="empty">No unambiguous purchase-to-stock cost matches need review.</div>';
 
-  $(".purchase-cost-apply").forEach((button) => {
+  $$(".purchase-cost-apply").forEach((button) => {
     button.onclick = async () => {
       const row = button.closest("tr");
       const input = row?.querySelector(".purchase-cost-input");
