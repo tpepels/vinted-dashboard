@@ -239,6 +239,7 @@ def build_vinted_analytics(
     days: int,
     strategy: dict[str, int],
     now: datetime | None = None,
+    listing_limit: int | None = 200,
 ) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     days = max(7, min(int(days or 90), 365))
@@ -551,5 +552,5 @@ def build_vinted_analytics(
             key=lambda row: row["sold_at"],
             reverse=True,
         )[:500],
-        "listings": rows[:200],
+        "listings": rows if listing_limit is None else rows[:max(0, int(listing_limit))],
     }
