@@ -77,6 +77,13 @@ Generate an encryption key:
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 \`\`\`
 
+The quick-listing workflow works manually without an AI provider. To enable
+photo analysis, set \`LISTING_ASSISTANT_ENABLED=true\`, provide
+\`OPENAI_API_KEY\`, and optionally change \`OPENAI_VISION_MODEL\` (the default is
+\`gpt-6-luna\`). The dashboard sends selected JPEG/PNG/WebP photo bytes only
+after the user clicks Analyze, uses the Responses API with storage disabled,
+and does not persist the photos. Publishing remains a manual Vinted handoff.
+
 Billing can stay disabled for a private beta. If enabled, new workspaces get a
 finite \`BILLING_TRIAL_DAYS\` trial (14 by default). Active/trialing workspaces
 can mutate data; past-due, canceled or expired-trial workspaces remain readable
