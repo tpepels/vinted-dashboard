@@ -1,1 +1,46 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Privacy</title><link rel="stylesheet" href="/app-static/styles.css"></head><body><main style="max-width:800px;margin:auto"><article class="card copy"><p class="eyebrow">PRIVACY</p><h1>Privacy policy draft</h1><p>This beta stores account, inventory, marketplace listing, order and analytics data needed to provide the reseller dashboard.</p><p>The Chrome companion sends the listing, order and analytics data required by the product from the user's signed-in Vinted tab. It does not send Vinted passwords or raw cookie values to the dashboard.</p><p>Extension credentials are revocable. Connector secrets stored by the hosted application are encrypted at rest. Workspace data can be exported from Settings.</p><p>Before a public launch this draft must be replaced with the final controller identity, retention periods, subprocessors, contact details and jurisdiction-specific disclosures.</p><p><a href="/">Back to dashboard</a></p></article></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Privacy - Reseller Dashboard</title>
+  <link rel="stylesheet" href="/app-static/styles.css">
+</head>
+<body>
+  <main style="max-width:800px;margin:auto">
+    <article class="card copy">
+      <p class="eyebrow">PRIVACY</p>
+      <h1>Privacy policy</h1>
+
+      <h2>Scope</h2>
+      <p>This policy covers the Reseller Dashboard web application and its Chrome companion. The Chrome companion has one purpose: synchronize the reseller data needed by a paired workspace from the user's signed-in Vinted account.</p>
+
+      <h2>Data processed</h2>
+      <p>The dashboard may store account details, master inventory, marketplace listings, orders and purchases, listing views and favourites, follower/following counts, and favourite-event metadata. The Chrome companion also stores a revocable dashboard bridge token, pairing information and last-sync status in Chrome local storage.</p>
+      <p>The Chrome companion does not read or transmit Vinted passwords or raw authentication cookies. It does not collect general browsing history. Its site access is limited to the explicitly listed Vinted origins and the paired dashboard origin.</p>
+
+      <h2>How data is used</h2>
+      <p>Data is used only to provide and improve the disclosed reseller-workspace functions: inventory synchronization, order tracking, analytics, physical-stock reconciliation and related reliability/security operations. User data is not sold, used for personalized advertising, or transferred to advertising or data-broker services.</p>
+
+      <h2>Data sharing and human access</h2>
+      <p>The Chrome companion sends synchronized data only to the dashboard origin with which the user explicitly pairs it. A self-hosted installation is controlled by that installation's operator. For a hosted installation, infrastructure providers may process data only as required to operate the service.</p>
+      <p>Human access to user data is not allowed except when the user explicitly requests support involving specific data, when required for security or abuse investigation, when required by law, or for aggregated/anonymized operational analysis.</p>
+
+      <h2>Security and retention</h2>
+      <p>Production Store builds require HTTPS. Dashboard sessions and Chrome bridge credentials are revocable. Connector credentials stored by the dashboard are encrypted at rest when the production encryption key is configured.</p>
+      <p>Persistent workspace data remains until it is deleted by the user or workspace administrator. Infrastructure logs and backups, if enabled by the deployment operator, follow that deployment's retention configuration.</p>
+
+      <h2>User controls</h2>
+      <p>Users can disconnect a paired Chrome browser at any time, export workspace data from Settings, and delete a workspace from Settings. Disconnecting removes the bridge token from the extension; deleting a workspace removes its application data from the active database.</p>
+
+      <h2>Chrome Web Store Limited Use</h2>
+      <p>Use of information received through the Chrome companion adheres to the Chrome Web Store User Data Policy, including the Limited Use requirements. Access and transmission are limited to data necessary for the extension's disclosed single purpose.</p>
+
+      <h2>Contact</h2>
+      <p>For a hosted installation, use the privacy/support contact published with that service and its Chrome Web Store listing. For a self-hosted installation, contact the administrator of that deployment.</p>
+
+      <p><a href="/">Back to dashboard</a></p>
+    </article>
+  </main>
+</body>
+</html>
