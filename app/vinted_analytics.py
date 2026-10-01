@@ -408,6 +408,7 @@ def build_vinted_analytics(
             listings_by_item.setdefault(listing.inventory_item_id, []).append(listing)
 
     time_to_sale: list[float] = []
+    sold_stock: list[dict[str, Any]] = []
     linked_sales = 0
     for sale in valid_sales:
         if not sale.inventory_item_id or not sale.occurred_at:
@@ -428,6 +429,23 @@ def build_vinted_analytics(
         linked_sales += 1
         item = items.get(sale.inventory_item_id)
         category = item.category if item else "general"
+        sold_stock.append(
+            {
+                "sale_id": str(sale.id),
+                "listing_id": str(_listing.id),
+                "item_id": str(sale.inventory_item_id),
+                "title": sale.title or _listing.title,
+                "category": category,
+                "url": _listing.url,
+                "listed_at": started.isoformat(),
+                "sold_at": sale.occurred_at.isoformat(),
+                "days_online": round(days_to_sale, 1),
+                "sale_total_cents": sale.total_cents,
+                "listing_price_cents": _listing.price_cents,
+                "currency": sale.currency or _listing.currency or "EUR",
+                "external_order_id": sale.external_order_id,
+            }
+        )
         category_row = category_rows.setdefault(
             category,
             {
@@ -507,5 +525,10 @@ def build_vinted_analytics(
             for segment, count in segments.items()
         ],
         "categories": category_result,
+        "sold_stock": sorted(
+            sold_stock,
+            key=lambda row: row["sold_at"],
+            reverse=True,
+        )[:500],
         "listings": rows[:200],
     }
