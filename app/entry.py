@@ -383,4 +383,21 @@ def download_paired_extension(request: Request):
 @app.get("/api/runtime")
 def runtime_summary():
     """Public, secret-free deployment posture for smoke checks."""
-    return safe_runtime_summary()
+    result = safe_runtime_summary()
+    try:
+        from app.service_status import status as service_status
+        result["worker"] = service_status(
+            "worker",
+            max_age_seconds=max(
+                30,
+                int(os.getenv("WORKER_HEARTBEAT_MAX_AGE_SECONDS", "90")),
+            ),
+        )
+    except Exception:
+        result["worker"] = {
+            "service": "worker",
+            "healthy": False,
+            "last_seen_at": None,
+            "age_seconds": None,
+        }
+    return result
