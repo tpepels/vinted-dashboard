@@ -45,6 +45,13 @@ from app.constants import (
     MembershipRole,
 )
 from app.connectors.base import connector_catalog
+from app.connectors.abebooks import (
+    credential_status as abebooks_credential_status,
+    enroll_items as enroll_abebooks_items,
+    export_workspace as export_abebooks_workspace,
+    preview_workspace as preview_abebooks_workspace,
+    test_workspace as test_abebooks_workspace,
+)
 from app.connectors.hosted import (
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
@@ -205,6 +212,10 @@ class PairingCompleteRequest(BaseModel):
     code: str
     extension_version: str | None = None
     device_name: str = "Chrome"
+
+
+class ConnectorEnrollmentRequest(BaseModel):
+    item_ids: list[uuid.UUID]
 
 
 class ConnectorCredentialsRequest(BaseModel):
@@ -1725,6 +1736,8 @@ def connectors(context: RequestContext = Depends(require_context)):
         account = account_by_channel.get(channel)
         configured = False
         operational = False
+        sync_ready = False
+        note = None
 
         if channel == Channel.VINTED:
             configured = operational = bool(extension_count)
@@ -1737,6 +1750,29 @@ def connectors(context: RequestContext = Depends(require_context)):
             )
             configured = channel in stored_credentials or (is_bootstrap and env_ready)
             operational = configured
+        elif channel == Channel.ABEBOOKS:
+            configured = channel in stored_credentials
+            operational = configured
+            if configured:
+                try:
+                    preview = preview_abebooks_workspace(context.workspace.id)
+                    sync_ready = bool(preview["ready"])
+                    if preview["incomplete_count"]:
+                        note = (
+                            f"{preview['incomplete_count']} enrolled book(s) need "
+                            "required AbeBooks fields before sync."
+                        )
+                    elif not preview["format_confirmed"]:
+                        note = "Confirm AbeBooks Support has approved the file format."
+                    elif not preview["sync_confirmed"]:
+                        note = "Confirm the dashboard may manage the enrolled AbeBooks IDs."
+                    else:
+                        note = (
+                            f"{preview['active_count']} active / "
+                            f"{preview['delete_count']} pending removal."
+                        )
+                except Exception:
+                    note = "AbeBooks preview is unavailable until credentials are valid."
         elif channel == Channel.EBAY:
             env_ready = bool(
                 os.getenv("EBAY_OAUTH_TOKEN", "").strip()
@@ -1754,7 +1790,11 @@ def connectors(context: RequestContext = Depends(require_context)):
                 **info,
                 "configured": configured,
                 "operational": operational,
-                "sync_available": operational and channel in {Channel.BIBLIO, Channel.EBAY},
+                "sync_available": (
+                    sync_ready
+                    if channel == Channel.ABEBOOKS
+                    else operational and channel in {Channel.BIBLIO, Channel.EBAY}
+                ),
                 "status": (
                     account.status
                     if account and operational
@@ -1765,7 +1805,7 @@ def connectors(context: RequestContext = Depends(require_context)):
                     if account and account.last_synced_at
                     else None
                 ),
-                "note": None,
+                "note": note,
             }
         )
     return {"connectors": result}
@@ -1798,6 +1838,22 @@ def save_connector_credentials(
         if channel == Channel.BIBLIO:
             if not str(merged.get("username") or "").strip() or not str(merged.get("password") or "").strip():
                 raise HTTPException(status_code=400, detail="BIBLIO needs username and password")
+        elif channel == Channel.ABEBOOKS:
+            username = re.sub(r"\s+", "", str(merged.get("username") or "")).upper()
+            api_key = str(merged.get("api_key") or "").strip()
+            if not username or not api_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="AbeBooks needs seller User ID and API Key",
+                )
+            currency = str(merged.get("currency") or "EUR").strip().upper()
+            if len(currency) != 3 or not currency.isalpha():
+                raise HTTPException(
+                    status_code=400,
+                    detail="AbeBooks currency must be a 3-letter code",
+                )
+            merged["username"] = username
+            merged["currency"] = currency
         elif channel == Channel.EBAY:
             direct = bool(str(merged.get("oauth_token") or "").strip())
             refreshable = all(
@@ -1865,7 +1921,7 @@ def enqueue_connector_sync(
     channel: str,
     context: RequestContext = Depends(require_write_context),
 ):
-    if channel not in {Channel.BIBLIO, Channel.EBAY}:
+    if channel not in {Channel.BIBLIO, Channel.EBAY, Channel.ABEBOOKS}:
         raise HTTPException(status_code=400, detail="This connector has no server-side sync job")
     bootstrap = context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
     stored = has_workspace_connector_credentials(context.workspace.id, channel)
@@ -1876,6 +1932,8 @@ def enqueue_connector_sync(
         )
         if not stored and not (bootstrap and env_ready):
             raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
+    if channel == Channel.ABEBOOKS and not stored:
+        raise HTTPException(status_code=400, detail="AbeBooks FTPS is not configured")
     if channel == Channel.EBAY:
         env_ready = bool(
             os.getenv("EBAY_OAUTH_TOKEN", "").strip()
@@ -1889,6 +1947,63 @@ def enqueue_connector_sync(
             raise HTTPException(status_code=400, detail="eBay OAuth is not configured")
     job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
     return {"ok": True, "job_id": str(job_id), "queued": True}
+
+
+@router.get("/api/app/connectors/abebooks/preview")
+def abebooks_workspace_preview(
+    context: RequestContext = Depends(require_context),
+):
+    try:
+        return preview_abebooks_workspace(context.workspace.id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/app/connectors/abebooks/enroll")
+def abebooks_workspace_enroll(
+    payload: ConnectorEnrollmentRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    try:
+        result = enroll_abebooks_items(
+            context.workspace.id,
+            payload.item_ids,
+        )
+        preview = preview_abebooks_workspace(context.workspace.id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result, "preview": preview}
+
+
+@router.get("/api/app/connectors/abebooks/export")
+def abebooks_workspace_export(
+    context: RequestContext = Depends(require_context),
+):
+    try:
+        content, preview = export_abebooks_workspace(context.workspace.id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=content,
+        media_type="text/tab-separated-values; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="abebooks-inventory-{stamp}.tab"'
+            ),
+            "X-AbeBooks-Active-Count": str(preview["active_count"]),
+        },
+    )
+
+
+@router.post("/api/app/connectors/abebooks/test")
+def abebooks_workspace_test(
+    context: RequestContext = Depends(require_write_context),
+):
+    try:
+        return test_abebooks_workspace(context.workspace.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/app/connectors/biblio/import")
