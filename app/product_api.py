@@ -82,6 +82,8 @@ from app.reconciliation import apply_reconciliation_merges, reconciliation_sugge
 from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
 from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
+from pathlib import Path
+import json
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
     get_or_create_channel_account,
@@ -2029,9 +2031,19 @@ def complete_pairing(payload: PairingCompleteRequest, request: Request):
     }
 
 
+def extension_source_version() -> str:
+    manifest_path = Path(__file__).resolve().parent / "extension" / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        version = str(manifest.get("version") or "").strip()
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        version = ""
+    return version or "0.0.0"
+
+
 @router.get("/api/extension/status")
 def extension_status(context: RequestContext = Depends(extension_context)):
-    latest = os.getenv("EXTENSION_LATEST_VERSION", "2.0.0")
+    latest = os.getenv("EXTENSION_LATEST_VERSION", "").strip() or extension_source_version()
     return {
         "ok": True,
         "workspace": _serialize_workspace(context.workspace),
