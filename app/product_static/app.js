@@ -357,24 +357,45 @@ async function today() {
   ]);
   state.onboarding = onboardingData;
   renderOnboarding(onboardingData);
-  $("#today-metrics").innerHTML =
-    metric("Active inventory", analyticsData.active_inventory)
-    + metric("Active listings", analyticsData.active_listings)
-    + metric("Sales YTD", analyticsData.sales_ytd_count, money(analyticsData.sales_ytd_cents, analyticsData.currency))
-    + metric("Potential margin", money(analyticsData.inventory_potential_margin_cents, analyticsData.currency),
-      analyticsData.priced_inventory_count + " priced item" + (analyticsData.priced_inventory_count === 1 ? "" : "s"));
 
-  $("#today-actions").innerHTML = todayData.actions.length
-    ? todayData.actions.map((row) =>
+  const activeInventory = Number(analyticsData.active_inventory || 0);
+  const pricedCount = Number(analyticsData.priced_inventory_count || 0);
+  const marginCount = Number(analyticsData.margin_inventory_count || 0);
+  $("#today-metrics").innerHTML =
+    metric("Active inventory", activeInventory)
+    + metric(
+      "Current asking value",
+      pricedCount ? money(analyticsData.inventory_ask_cents, analyticsData.currency) : "—",
+      pricedCount + " of " + activeInventory + " priced"
+    )
+    + metric(
+      "Sales YTD",
+      analyticsData.sales_ytd_count,
+      money(analyticsData.sales_ytd_cents, analyticsData.currency)
+    )
+    + metric(
+      "Potential margin",
+      marginCount ? money(analyticsData.inventory_potential_margin_cents, analyticsData.currency) : "—",
+      marginCount
+        ? marginCount + " item" + (marginCount === 1 ? "" : "s") + " with cost + ask"
+        : "Add acquisition costs to calculate margin"
+    );
+
+  const todayActions = Array.isArray(todayData.actions) ? todayData.actions : [];
+  $("#today-actions").innerHTML = todayActions.length
+    ? todayActions.map((row) =>
       '<div class="action-row"><div><strong>' + esc(row.title) + "</strong><p>"
       + esc(row.channel) + " · " + row.age_days + " days old"
       + (row.favourites == null ? "" : " · " + row.favourites + " favourites")
-      + (row.favourites_gain == null ? "" : " · +" + row.favourites_gain + " this week")
+      + (row.favourites_gain == null ? "" : " · +" + row.favourites_gain + " favourites in 7d")
+      + (row.views_gain == null ? "" : " · +" + row.views_gain + " views in 7d")
       + '</p></div><div class="action-tag">' + esc(row.action) + "</div></div>"
     ).join("")
-    : '<div class="empty">Nothing needs attention right now.</div>';
+    : '<div class="empty">No listing crosses your action thresholds today.</div>';
 
-  renderStockActions(todayData.cross_channel_actions || [], todayData.unlinked_sell_count || 0);
+  renderStockActions(
+    Array.isArray(todayData.cross_channel_actions) ? todayData.cross_channel_actions : []
+  );
 }
 
 function onboardingStep(label, done, detail) {
@@ -464,25 +485,28 @@ function bindCrossChannelButtons(after) {
   });
 }
 
-function renderStockActions(rows, unlinkedCount) {
-  $("#stock-alert-count").textContent = rows.length
-    ? rows.length + " active action" + (rows.length === 1 ? "" : "s")
-    : (unlinkedCount ? unlinkedCount + " unlinked sale" + (unlinkedCount === 1 ? "" : "s") : "Clear");
-  $("#stock-actions").innerHTML = rows.length
-    ? rows.map((row) =>
-      '<div class="action-row"><div><strong>' + esc(row.item?.title || row.listing?.title || "Sold item")
-      + '</strong><p>' + esc(row.channel) + " · " + esc(row.status)
-      + (row.last_error ? " · " + esc(row.last_error) : "")
-      + '</p></div><div class="actions compact">' + crossChannelActionControls(row) + "</div></div>"
-    ).join("")
-    : (unlinkedCount
-      ? '<div class="empty">' + unlinkedCount + ' sold order(s) still need a master-stock link. Use Reconcile.</div>'
-      : '<div class="empty">No cross-channel sold-stock actions need attention.</div>');
+function renderStockActions(rows) {
+  const actionRows = Array.isArray(rows) ? rows : [];
+  const card = $("#stock-actions").closest(".stock-alerts");
+  card.classList.toggle("hidden", actionRows.length === 0);
+  if (!actionRows.length) {
+    $("#stock-alert-count").textContent = "";
+    $("#stock-actions").innerHTML = "";
+    return;
+  }
+  $("#stock-alert-count").textContent =
+    actionRows.length + " active action" + (actionRows.length === 1 ? "" : "s");
+  $("#stock-actions").innerHTML = actionRows.map((row) =>
+    '<div class="action-row"><div><strong>' + esc(row.item?.title || row.listing?.title || "Sold item")
+    + '</strong><p>' + esc(row.channel) + " · " + esc(row.status)
+    + (row.last_error ? " · " + esc(row.last_error) : "")
+    + '</p></div><div class="actions compact">' + crossChannelActionControls(row) + "</div></div>"
+  ).join("");
   bindCrossChannelButtons(today);
 }
 
 function selectedInventoryIds() {
-  return $(".inventory-select:checked").map((box) => box.dataset.id);
+  return $$(".inventory-select:checked").map((box) => box.dataset.id);
 }
 
 function updateInventorySelection() {
@@ -491,7 +515,7 @@ function updateInventorySelection() {
   $("#bulk-edit").disabled = ids.length === 0;
   const all = $("#inventory-select-all");
   if (all) {
-    const boxes = $(".inventory-select");
+    const boxes = $$(".inventory-select");
     all.checked = boxes.length > 0 && ids.length === boxes.length;
     all.indeterminate = ids.length > 0 && ids.length < boxes.length;
   }
@@ -511,7 +535,8 @@ async function inventory() {
         + '<td>' + esc(item.sku) + "</td><td>" + esc(item.category)
         + "</td><td>" + item.quantity + "</td><td>" + esc(item.location || "—")
         + "</td><td>" + money(item.cost_cents, item.currency)
-        + "</td><td>" + money(item.default_price_cents, item.currency)
+        + "</td><td>" + money(item.effective_ask_cents, item.currency)
+        + (item.effective_ask_source === "marketplace" ? '<div class="sub">marketplace</div>' : "")
         + "</td><td>" + money(item.potential_margin_cents, item.currency)
         + "</td><td>"
         + ((item.listings || []).map((listing) =>
@@ -1072,7 +1097,7 @@ $("#reconcile-select-high").onclick = () => {
 };
 
 $("#reconcile-apply").onclick = async () => {
-  const selected = $(".reconcile-check").filter((box) => box.checked);
+  const selected = $$(".reconcile-check").filter((box) => box.checked);
   if (!selected.length) return flash("Select at least one reconciliation.", true);
 
   const merges = selected.map((box) => {
@@ -1577,14 +1602,35 @@ async function analytics() {
     api("/api/app/analytics/history?days=" + days),
     api("/api/app/analytics/vinted?days=" + days),
   ]);
+  const activeInventory = Number(summary.active_inventory || 0);
+  const pricedInventory = Number(summary.priced_inventory_count || 0);
+  const costedInventory = Number(summary.costed_inventory_count || 0);
+  const marginInventory = Number(summary.margin_inventory_count || 0);
   $("#analytics-metrics").innerHTML =
-    metric("Active inventory", summary.active_inventory)
-    + metric("Inventory cost", money(summary.inventory_cost_cents, summary.currency), summary.priced_inventory_count + " priced")
-    + metric("Inventory ask", money(summary.inventory_ask_cents, summary.currency))
-    + metric("Potential margin", money(summary.inventory_potential_margin_cents, summary.currency))
+    metric("Active inventory", activeInventory)
+    + metric(
+      "Inventory cost",
+      costedInventory ? money(summary.inventory_cost_cents, summary.currency) : "—",
+      costedInventory + " of " + activeInventory + " costs recorded"
+    )
+    + metric(
+      "Inventory ask",
+      pricedInventory ? money(summary.inventory_ask_cents, summary.currency) : "—",
+      pricedInventory + " of " + activeInventory + " priced"
+    )
+    + metric(
+      "Potential margin",
+      marginInventory ? money(summary.inventory_potential_margin_cents, summary.currency) : "—",
+      marginInventory + " of " + activeInventory + " have cost + ask"
+    )
     + metric("Sales YTD", summary.sales_ytd_count, money(summary.sales_ytd_cents, summary.currency))
-    + metric("Gross profit YTD", money(summary.sales_ytd_gross_profit_cents, summary.currency),
-      summary.sales_ytd_costed_count + " costed sale" + (summary.sales_ytd_costed_count === 1 ? "" : "s"))
+    + metric(
+      "Gross profit YTD",
+      summary.sales_ytd_costed_count
+        ? money(summary.sales_ytd_gross_profit_cents, summary.currency)
+        : "—",
+      summary.sales_ytd_costed_count + " costed sale" + (summary.sales_ytd_costed_count === 1 ? "" : "s")
+    )
     + metric("Followers", summary.followers == null ? "—" : summary.followers, summary.following == null ? "" : summary.following + " following");
 
   renderVintedBehavior(vinted);
