@@ -120,9 +120,11 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
     listing.url = row.get("vinted_url") or row.get("url")
     listing.quantity = quantity
     listing.last_seen_at = captured_at
+    existing_extra = dict(listing.extra or {})
+    listed_at = row.get("listed_at") or existing_extra.get("listed_at")
     listing.extra = {
-        **(listing.extra or {}),
-        "listed_at": row.get("listed_at"),
+        **existing_extra,
+        "listed_at": listed_at,
     }
     session.flush()
 
