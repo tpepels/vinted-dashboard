@@ -6,7 +6,6 @@
   "permissions": [
     "storage",
     "alarms",
-    "tabs",
     "scripting"
   ],
   "host_permissions": [
@@ -60,5 +59,6 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "homepage_url": "__API_ORIGIN__"
 }
