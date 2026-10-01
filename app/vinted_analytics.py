@@ -153,11 +153,22 @@ def listing_started_at(listing: models.ChannelListing) -> datetime:
     return _parse_datetime(raw) or listing.first_seen_at
 
 
-def _baseline(series: list[SnapshotPoint], cutoff: datetime) -> SnapshotPoint | None:
-    before = [point for point in series if point.captured_at <= cutoff]
-    if before:
-        return before[-1]
-    return series[0] if series else None
+def _window_baseline(
+    series: list[SnapshotPoint],
+    cutoff: datetime,
+) -> SnapshotPoint | None:
+    """Use the first observation inside the requested window.
+
+    Daily downsampling means the nearest point before a cutoff can belong to
+    the previous calendar day and materially overstate a 7-day/30-day gain.
+    Prefer the first point on or after the cutoff. If the listing has no
+    observation inside the window, fall back to the latest pre-window point.
+    """
+    after = [point for point in series if point.captured_at >= cutoff]
+    if after:
+        return after[0]
+    before = [point for point in series if point.captured_at < cutoff]
+    return before[-1] if before else None
 
 
 def _nonnegative_gain(
@@ -292,9 +303,9 @@ def build_vinted_analytics(
 
         series = series_by_listing.get(listing.id, [])
         latest = series[-1] if series else None
-        week = _baseline(series, week_start)
-        window = _baseline(series, window_start)
-        month = _baseline(series, month_start)
+        week = _window_baseline(series, week_start)
+        window = _window_baseline(series, window_start)
+        month = _window_baseline(series, month_start)
         views = int(latest.views or 0) if latest else 0
         favourites = int(latest.favourites or 0) if latest else 0
         views_gain_7d = _nonnegative_gain(
