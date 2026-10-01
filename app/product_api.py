@@ -130,6 +130,22 @@ class InventoryPatchRequest(BaseModel):
     attributes: dict[str, Any] | None = None
 
 
+class InventoryBulkRequest(BaseModel):
+    item_ids: list[uuid.UUID]
+    category: str | None = None
+    condition: str | None = None
+    cost_cents: int | None = None
+    default_price_cents: int | None = None
+    currency: str | None = None
+    location: str | None = None
+    status: str | None = None
+
+
+class OnboardingRequest(BaseModel):
+    primary_category: str | None = None
+    completed: bool | None = None
+
+
 class ListingLinkRequest(BaseModel):
     listing_id: str
 
@@ -212,6 +228,13 @@ def _serialize_workspace(workspace: models.Workspace) -> dict[str, Any]:
 
 
 def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelListing] | None = None) -> dict[str, Any]:
+    attributes = dict(item.attributes or {})
+    default_price = attributes.get("default_price_cents")
+    potential_margin = (
+        int(default_price) - int(item.cost_cents)
+        if default_price is not None and item.cost_cents is not None
+        else None
+    )
     return {
         "id": str(item.id),
         "sku": item.sku,
@@ -220,11 +243,13 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
         "quantity": item.quantity,
         "condition": item.condition,
         "cost_cents": item.cost_cents,
+        "default_price_cents": default_price,
+        "potential_margin_cents": potential_margin,
         "currency": item.currency,
         "location": item.location,
         "notes": item.notes,
         "status": item.status,
-        "attributes": dict(item.attributes or {}),
+        "attributes": attributes,
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "listings": [
@@ -304,7 +329,12 @@ def register(payload: RegisterRequest, request: Request, response: Response):
                 slug=_unique_slug(session, name),
                 is_personal=True,
                 billing_status=BillingStatus.TRIALING if billing.BILLING_ENABLED else BillingStatus.DEV,
-                settings={},
+                settings={
+                    "onboarding": {
+                        "completed": False,
+                        "primary_category": ItemCategory.GENERAL,
+                    }
+                },
             )
             session.add(workspace)
             session.flush()
@@ -375,6 +405,85 @@ def me(request: Request, context: RequestContext = Depends(require_context)):
         "csrf_token": _csrf_from_request(request),
         "app_name": APP_NAME,
     }
+
+
+@router.get("/api/app/onboarding")
+def onboarding(context: RequestContext = Depends(require_context)):
+    with db.session_scope() as session:
+        inventory_count = session.execute(
+            select(func.count(models.InventoryItem.id)).where(
+                models.InventoryItem.workspace_id == context.workspace.id
+            )
+        ).scalar_one()
+        active_devices = session.execute(
+            select(func.count(ExtensionCredential.id)).where(
+                ExtensionCredential.workspace_id == context.workspace.id,
+                ExtensionCredential.revoked_at.is_(None),
+            )
+        ).scalar_one()
+        accounts = session.execute(
+            select(models.ChannelAccount).where(
+                models.ChannelAccount.workspace_id == context.workspace.id
+            )
+        ).scalars().all()
+        connected_channels = sorted({
+            account.channel
+            for account in accounts
+            if account.status == ChannelAccountStatus.CONNECTED
+        })
+        suggestions = reconciliation_suggestions(session, context.workspace.id)
+
+    workspace_settings = dict(context.workspace.settings or {})
+    saved = dict(workspace_settings.get("onboarding") or {})
+    explicit = bool(saved)
+    completed = bool(saved.get("completed")) if explicit else bool(inventory_count)
+    primary_category = str(saved.get("primary_category") or ItemCategory.GENERAL)
+    if primary_category not in {
+        ItemCategory.BOOK,
+        ItemCategory.CLOTHING,
+        ItemCategory.GENERAL,
+        "mixed",
+    }:
+        primary_category = ItemCategory.GENERAL
+
+    return {
+        "completed": completed,
+        "primary_category": primary_category,
+        "existing_workspace": not explicit and bool(inventory_count),
+        "inventory_count": int(inventory_count or 0),
+        "connected_channels": connected_channels,
+        "vinted_bridge_paired": bool(active_devices),
+        "reconciliation_count": len(suggestions),
+        "steps": {
+            "choose_category": bool(primary_category),
+            "stock_loaded": bool(inventory_count),
+            "marketplace_connected": bool(active_devices or connected_channels),
+            "matches_reviewed": not bool(suggestions),
+        },
+    }
+
+
+@router.put("/api/app/onboarding")
+def update_onboarding(
+    payload: OnboardingRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    allowed = {ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL, "mixed"}
+    if payload.primary_category is not None and payload.primary_category not in allowed:
+        raise HTTPException(status_code=400, detail="Unknown primary inventory category")
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, context.workspace.id)
+        settings = dict(workspace.settings or {})
+        onboarding = dict(settings.get("onboarding") or {})
+        if payload.primary_category is not None:
+            onboarding["primary_category"] = payload.primary_category
+        if payload.completed is not None:
+            onboarding["completed"] = bool(payload.completed)
+        settings["onboarding"] = onboarding
+        workspace.settings = settings
+        session.flush()
+        result = dict(onboarding)
+    return {"ok": True, "onboarding": result}
 
 
 @router.get("/api/app/inventory")
@@ -531,6 +640,49 @@ def create_inventory_item(
         session.flush()
         result = _serialize_item(item, [])
     return {"ok": True, "item": result}
+
+
+@router.post("/api/app/inventory/bulk")
+def bulk_update_inventory(
+    payload: InventoryBulkRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    item_ids = list(dict.fromkeys(payload.item_ids))
+    if not item_ids:
+        raise HTTPException(status_code=400, detail="Select at least one inventory item")
+    if len(item_ids) > 1000:
+        raise HTTPException(status_code=400, detail="Bulk edit is limited to 1000 items")
+    values = payload.model_dump(exclude_unset=True)
+    values.pop("item_ids", None)
+    if not values:
+        raise HTTPException(status_code=400, detail="Choose at least one field to update")
+    if values.get("category") not in (None, ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL):
+        raise HTTPException(status_code=400, detail="Unknown item category")
+    if values.get("status") not in (None, ItemStatus.ACTIVE, ItemStatus.SOLD, ItemStatus.ARCHIVED):
+        raise HTTPException(status_code=400, detail="Unknown item status")
+    for money_field in ("cost_cents", "default_price_cents"):
+        if values.get(money_field) is not None and int(values[money_field]) < 0:
+            raise HTTPException(status_code=400, detail=f"{money_field} cannot be negative")
+
+    with db.session_scope() as session:
+        items = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == context.workspace.id,
+                models.InventoryItem.id.in_(item_ids),
+            )
+        ).scalars().all()
+        if len(items) != len(item_ids):
+            raise HTTPException(status_code=404, detail="One or more inventory items were not found")
+        for item in items:
+            for field in ("category", "condition", "cost_cents", "currency", "location", "status"):
+                if field in values:
+                    setattr(item, field, values[field])
+            if "default_price_cents" in values:
+                attributes = dict(item.attributes or {})
+                attributes["default_price_cents"] = values["default_price_cents"]
+                item.attributes = attributes
+        session.flush()
+    return {"ok": True, "updated": len(items)}
 
 
 @router.patch("/api/app/inventory/{item_id}")
@@ -851,9 +1003,33 @@ def analytics(context: RequestContext = Depends(require_context)):
             .order_by(models.ProfileObservation.captured_at.desc())
             .limit(1)
         ).scalar_one_or_none()
+    with db.session_scope() as session:
+        active_items = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == context.workspace.id,
+                models.InventoryItem.status == ItemStatus.ACTIVE,
+            )
+        ).scalars().all()
+    priced = [
+        item for item in active_items
+        if (item.attributes or {}).get("default_price_cents") is not None
+    ]
+    inventory_cost_cents = sum(
+        int(item.cost_cents or 0) * max(0, int(item.quantity or 0))
+        for item in priced
+    )
+    inventory_ask_cents = sum(
+        int((item.attributes or {}).get("default_price_cents") or 0)
+        * max(0, int(item.quantity or 0))
+        for item in priced
+    )
     return {
         "active_inventory": int(inventory_count or 0),
         "active_listings": int(listings_count or 0),
+        "priced_inventory_count": len(priced),
+        "inventory_cost_cents": inventory_cost_cents,
+        "inventory_ask_cents": inventory_ask_cents,
+        "inventory_potential_margin_cents": inventory_ask_cents - inventory_cost_cents,
         "sales_ytd_count": len(sold_rows),
         "sales_ytd_cents": sum(int(row.total_cents or 0) for row in sold_rows),
         "currency": next((row.currency for row in sold_rows if row.currency), "EUR"),
@@ -1060,6 +1236,7 @@ async def import_preview(
     file: UploadFile = File(...),
     mapping_json: str = Form("{}"),
     full_snapshot: bool = Form(False),
+    default_category: str = Form(ItemCategory.GENERAL),
     context: RequestContext = Depends(require_write_context),
 ):
     content = await file.read()
@@ -1079,6 +1256,7 @@ async def import_preview(
                     table.rows,
                     {str(k): str(v) for k, v in mapping.items()},
                     full_snapshot=full_snapshot,
+                    default_category=default_category,
                 )
                 if table.headers and mapping_ready
                 else {
@@ -1099,7 +1277,10 @@ async def import_preview(
                 file_type=table.file_type,
                 status="previewed",
                 mapping=mapping,
-                options={"full_snapshot": full_snapshot},
+                options={
+                    "full_snapshot": full_snapshot,
+                    "default_category": default_category,
+                },
                 summary=preview,
             )
             session.add(job)
@@ -1121,6 +1302,7 @@ async def import_apply(
     file: UploadFile = File(...),
     mapping_json: str = Form(...),
     full_snapshot: bool = Form(False),
+    default_category: str = Form(ItemCategory.GENERAL),
     preset_name: str = Form(""),
     context: RequestContext = Depends(require_write_context),
 ):
@@ -1137,6 +1319,7 @@ async def import_apply(
                 table.rows,
                 {str(k): str(v) for k, v in mapping.items()},
                 full_snapshot=full_snapshot,
+                default_category=default_category,
             )
             job = ImportJob(
                 workspace_id=context.workspace.id,
@@ -1145,7 +1328,10 @@ async def import_apply(
                 file_type=table.file_type,
                 status="applied",
                 mapping=mapping,
-                options={"full_snapshot": full_snapshot},
+                options={
+                    "full_snapshot": full_snapshot,
+                    "default_category": default_category,
+                },
                 summary=result,
                 applied_at=utcnow(),
             )
@@ -1167,7 +1353,10 @@ async def import_apply(
                     )
                     session.add(existing)
                 existing.mapping = mapping
-                existing.options = {"full_snapshot": full_snapshot}
+                existing.options = {
+                    "full_snapshot": full_snapshot,
+                    "default_category": default_category,
+                }
                 existing.file_type = table.file_type
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
