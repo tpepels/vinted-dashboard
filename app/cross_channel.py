@@ -24,7 +24,7 @@ from app.stock_policy import sale_counts_as_sold
 
 
 ACTION_TYPE = "close_listing"
-REMOTE_CHANNELS = {Channel.EBAY, Channel.BIBLIO}
+REMOTE_CHANNELS = {Channel.EBAY, Channel.BIBLIO, Channel.ABEBOOKS}
 OPEN_LISTING_STATUSES = {
     ListingStatus.ACTIVE,
     getattr(ListingStatus, "RESERVED", "reserved"),
@@ -246,6 +246,11 @@ def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
         from app.connectors.hosted import close_biblio_workspace_listing
 
         detail = close_biblio_workspace_listing(workspace_id, action.channel_listing_id)
+        terminal_status = ListingStatus.SOLD
+    elif channel == Channel.ABEBOOKS:
+        from app.connectors.abebooks import close_workspace_listing
+
+        detail = close_workspace_listing(workspace_id, action.channel_listing_id)
         terminal_status = ListingStatus.SOLD
     else:
         raise RuntimeError(f"Unsupported remote close channel: {channel}")
