@@ -99,6 +99,16 @@ def validate_configuration(
     if _truthy(values.get("EXTENSION_MARKET_RESEARCH_ENABLED")):
         errors.append("EXTENSION_MARKET_RESEARCH_ENABLED must be false")
 
+    if _truthy(values.get("LISTING_ASSISTANT_ENABLED")):
+        if not str(values.get("OPENAI_API_KEY", "")).strip():
+            errors.append(
+                "OPENAI_API_KEY must be configured when LISTING_ASSISTANT_ENABLED is true"
+            )
+        if not str(values.get("OPENAI_VISION_MODEL", "gpt-6-luna")).strip():
+            errors.append(
+                "OPENAI_VISION_MODEL must be configured when LISTING_ASSISTANT_ENABLED is true"
+            )
+
     try:
         iterations = int(str(values.get("PASSWORD_HASH_ITERATIONS", "310000")))
     except ValueError:
@@ -188,6 +198,9 @@ def safe_runtime_summary() -> dict[str, object]:
         "database_backend": db.engine.url.get_backend_name(),
         "cookie_secure": _truthy(os.getenv("COOKIE_SECURE")),
         "billing_enabled": _truthy(os.getenv("BILLING_ENABLED")),
+        "listing_assistant_enabled": _truthy(
+            os.getenv("LISTING_ASSISTANT_ENABLED")
+        ),
         "legacy_enabled": any(
             _truthy(os.getenv(name))
             for name in (
