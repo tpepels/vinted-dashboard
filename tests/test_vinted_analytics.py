@@ -242,6 +242,10 @@ def test_vinted_behavior_segments_rates_price_changes_and_time_to_sale():
                 )
             )
 
+        # SessionLocal intentionally uses autoflush=False. Flush the fixture
+        # rows before querying them through the analytics function.
+        session.flush()
+
         data = build_vinted_analytics(
             session,
             workspace_id,
