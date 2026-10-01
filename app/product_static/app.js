@@ -123,6 +123,23 @@ function appScreen() {
   $("#shell").classList.remove("hidden");
 }
 
+function renderBillingLock(info) {
+  const banner = $("#billing-lock");
+  const billing = info || {};
+  if (!billing.enabled || !billing.read_only) {
+    banner.classList.add("hidden");
+    banner.innerHTML = "";
+    return;
+  }
+  banner.innerHTML =
+    '<div><strong>Workspace is read-only.</strong><span>'
+    + esc(billing.reason || "Subscription action is required.")
+    + " Status: " + esc(billing.status || "unknown") + '.</span></div>'
+    + '<button id="billing-lock-settings" class="btn" type="button">Billing settings</button>';
+  banner.classList.remove("hidden");
+  $("#billing-lock-settings").onclick = () => selectView("settings");
+}
+
 async function init() {
   try {
     state.me = await api("/api/auth/me");
@@ -130,6 +147,7 @@ async function init() {
     $("#app-name").textContent = state.me.app_name;
     $("#auth-name").textContent = state.me.app_name;
     $("#workspace-name").textContent = state.me.workspace.name;
+    renderBillingLock(state.me.billing);
     await load("today");
   } catch {
     authScreen("login");
@@ -1386,6 +1404,7 @@ async function pair() {
 async function settings() {
   const data = await api("/api/app/settings");
   $("#settings-name").value = data.workspace.name;
+  renderBillingLock(data.billing);
   $("#delete-workspace-slug").textContent = data.workspace.slug;
   $("#delete-workspace-confirm").value = "";
   $("#billing").innerHTML = data.billing.enabled
