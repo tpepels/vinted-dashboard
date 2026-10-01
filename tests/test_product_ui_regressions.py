@@ -46,3 +46,9 @@ def test_inventory_cost_filter_supports_missing_and_recorded_values():
     assert '<option value="recorded">Cost recorded</option>' in html
     assert 'item.cost_cents == null' in APP_JS
     assert 'item.cost_cents != null' in APP_JS
+
+
+
+def test_purchase_cost_apply_uses_multi_element_selector():
+    assert '$$(".purchase-cost-apply").forEach' in APP_JS
+    assert '$(".purchase-cost-apply").forEach' not in APP_JS
