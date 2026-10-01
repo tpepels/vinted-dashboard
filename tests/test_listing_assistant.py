@@ -175,6 +175,7 @@ def test_quick_listing_creates_master_item_but_no_marketplace_listing(monkeypatc
             "size": "32",
             "colour": "blue",
             "material": "denim",
+            "isbn": "stale-wrong-category-value",
             "condition": "good visible condition",
             "waist_cm": "42",
             "inside_leg_cm": "78",
@@ -208,6 +209,7 @@ def test_quick_listing_creates_master_item_but_no_marketplace_listing(monkeypatc
         assert stored.attributes["listing_creation_source"] == "photo_ai"
         assert stored.attributes["listing_description"].startswith("Blue denim jeans")
         assert stored.attributes["waist_cm"] == "42"
+        assert "isbn" not in stored.attributes
         listing_count = session.execute(
             select(func.count(models.ChannelListing.id))
         ).scalar_one()
