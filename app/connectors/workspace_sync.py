@@ -86,6 +86,8 @@ def _apply_item(
         extra["author"] = item["author"]
     if item.get("description"):
         extra["description"] = item["description"]
+    if item.get("listed_at"):
+        extra["listed_at"] = item["listed_at"]
     isbn = clean_isbn(item.get("isbn"))
     if isbn:
         extra["isbn"] = isbn
