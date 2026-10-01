@@ -509,8 +509,19 @@ function quickRequirements() {
   return result;
 }
 
+function updateQuickCategoryFields() {
+  const category = $("#quick-category").value;
+  $(".quick-clothing-field").forEach((field) => {
+    field.classList.toggle("hidden", category !== "clothing");
+  });
+  $(".quick-book-field").forEach((field) => {
+    field.classList.toggle("hidden", category !== "book");
+  });
+}
+
 function renderQuickRequired() {
   captureQuickRequiredValues();
+  updateQuickCategoryFields();
   const form = $("#quick-listing-form");
   const existing = (name) => {
     const main = form.elements.namedItem(name);
@@ -603,6 +614,11 @@ $("#quick-listing").onclick = openQuickListing;
 $("#cancel-quick-listing").onclick = closeQuickListing;
 $("#quick-photos").onchange = renderQuickPhotos;
 $("#quick-category").onchange = renderQuickRequired;
+$("#quick-category-hint").onchange = () => {
+  const hint = $("#quick-category-hint").value;
+  if (hint) $("#quick-category").value = hint;
+  renderQuickRequired();
+};
 $("#quick-item-type").oninput = renderQuickRequired;
 
 $("#quick-analyze").onclick = async () => {
