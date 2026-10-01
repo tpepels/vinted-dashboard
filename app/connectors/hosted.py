@@ -24,7 +24,7 @@ from curl_cffi import requests
 from sqlalchemy import select
 
 from app import db, models
-from app.constants import Channel, ListingStatus, SyncRunStatus
+from app.constants import Channel, ChannelAccountStatus, ListingStatus, SyncRunStatus
 from app.crypto import decrypt_json
 from app.product_models import ConnectorCredential
 from app.workspace_bootstrap import get_or_create_channel_account
@@ -317,6 +317,11 @@ def _record_biblio_run(
             raise RuntimeError("Workspace does not exist")
         account, _ = get_or_create_channel_account(session, workspace, Channel.BIBLIO, {})
         account.last_synced_at = started_at
+        account.status = (
+            ChannelAccountStatus.CONNECTED
+            if status == SyncRunStatus.SUCCESS
+            else ChannelAccountStatus.ERROR
+        )
         session.add(
             models.ConnectorSyncRun(
                 workspace_id=workspace_id,
