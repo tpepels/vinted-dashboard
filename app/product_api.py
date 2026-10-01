@@ -260,12 +260,35 @@ def _serialize_workspace(workspace: models.Workspace) -> dict[str, Any]:
     }
 
 
+def _effective_item_ask(
+    item: models.InventoryItem,
+    listings: list[models.ChannelListing] | None = None,
+) -> tuple[int | None, str | None]:
+    attributes = dict(item.attributes or {})
+    default_price = attributes.get("default_price_cents")
+    if default_price is not None:
+        return int(default_price), "default"
+
+    active_prices = [
+        int(row.price_cents)
+        for row in (listings or [])
+        if row.status == ListingStatus.ACTIVE and row.price_cents is not None
+    ]
+    if not active_prices:
+        return None, None
+    # One physical item can be listed on several channels.  Use the lowest
+    # live asking price as the conservative single-stock valuation rather than
+    # double-counting the same physical item.
+    return min(active_prices), "marketplace"
+
+
 def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelListing] | None = None) -> dict[str, Any]:
     attributes = dict(item.attributes or {})
     default_price = attributes.get("default_price_cents")
+    effective_ask, effective_ask_source = _effective_item_ask(item, listings)
     potential_margin = (
-        int(default_price) - int(item.cost_cents)
-        if default_price is not None and item.cost_cents is not None
+        int(effective_ask) - int(item.cost_cents)
+        if effective_ask is not None and item.cost_cents is not None
         else None
     )
     return {
@@ -277,6 +300,8 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
         "condition": item.condition,
         "cost_cents": item.cost_cents,
         "default_price_cents": default_price,
+        "effective_ask_cents": effective_ask,
+        "effective_ask_source": effective_ask_source,
         "potential_margin_cents": potential_margin,
         "currency": item.currency,
         "location": item.location,
@@ -933,58 +958,48 @@ def today(context: RequestContext = Depends(require_context)):
     settings = strategy_settings(context.workspace.settings)
     now = datetime.now(timezone.utc)
     with db.session_scope() as session:
-        listings = session.execute(
-            select(models.ChannelListing).where(
-                models.ChannelListing.workspace_id == context.workspace.id,
-                models.ChannelListing.status == ListingStatus.ACTIVE,
-            )
-        ).scalars().all()
+        behavior = build_vinted_analytics(
+            session,
+            context.workspace.id,
+            days=30,
+            strategy=settings,
+            now=now,
+        )
+        segment_actions = {
+            "low_interest_stale": ("Refresh listing", 100),
+            "high_interest_stale": ("Review price", 90),
+            "momentum": ("Leave alone", 40),
+        }
         actions: list[dict[str, Any]] = []
-        for listing in listings:
-            age = max(0, (now - listing.first_seen_at).days)
-            snaps = session.execute(
-                select(models.ListingSnapshot)
-                .where(models.ListingSnapshot.channel_listing_id == listing.id)
-                .order_by(models.ListingSnapshot.captured_at.desc())
-                .limit(8)
-            ).scalars().all()
-            latest_fav = snaps[0].favourites if snaps else None
-            week_old = snaps[-1].favourites if len(snaps) > 1 else None
-            fav_gain = (
-                latest_fav - week_old
-                if latest_fav is not None and week_old is not None and latest_fav >= week_old
-                else None
-            )
-            suggestion = None
-            priority = 0
-            if age >= settings["very_stale_days"] and int(latest_fav or 0) <= settings["low_favourites"]:
-                suggestion = "Refresh listing"
-                priority = 100
-            elif age >= settings["stale_days"] and int(latest_fav or 0) >= settings["high_favourites"]:
-                suggestion = "Review price"
-                priority = 90
-            elif fav_gain is not None and fav_gain >= settings["momentum_favourites_7d"]:
-                suggestion = "Leave alone"
-                priority = 40
-            if suggestion:
-                actions.append({
-                    "listing_id": str(listing.id),
-                    "item_id": str(listing.inventory_item_id) if listing.inventory_item_id else None,
-                    "title": listing.title,
-                    "channel": listing.channel,
-                    "action": suggestion,
+        for row in behavior.get("listings") or []:
+            suggestion = segment_actions.get(row.get("segment"))
+            if suggestion is None:
+                continue
+            label, priority = suggestion
+            actions.append(
+                {
+                    "listing_id": row["listing_id"],
+                    "item_id": row.get("item_id"),
+                    "title": row["title"],
+                    "channel": Channel.VINTED,
+                    "action": label,
                     "priority": priority,
-                    "age_days": age,
-                    "favourites": latest_fav,
-                    "favourites_gain": fav_gain,
-                    "url": listing.url,
-                })
+                    "age_days": row["age_days"],
+                    "favourites": row["favourites"],
+                    "favourites_gain": row["favourites_gain_7d"],
+                    "views_gain": row["views_gain_7d"],
+                    "url": row.get("url"),
+                }
+            )
         actions.sort(key=lambda row: (-row["priority"], -row["age_days"]))
         cross_channel_actions = serialize_actions(session, context.workspace.id, limit=50)
         stock_attention = [
             row for row in cross_channel_actions
             if row["status"] in {"queued", "running", "attention", "error"}
         ]
+        # Historical unlinked sales still belong on Reconcile. They are not
+        # themselves a cross-channel action, and surfacing hundreds of them on
+        # Today obscures genuinely actionable close/retry work.
         unlinked_sales = unlinked_sell_count(session, context.workspace.id)
     return {
         "actions": actions[:50],
@@ -1150,6 +1165,18 @@ def analytics(context: RequestContext = Depends(require_context)):
                 models.InventoryItem.status == ItemStatus.ACTIVE,
             )
         ).scalars().all()
+        active_item_ids = [item.id for item in active_items]
+        active_item_listings = (
+            session.execute(
+                select(models.ChannelListing).where(
+                    models.ChannelListing.workspace_id == context.workspace.id,
+                    models.ChannelListing.inventory_item_id.in_(active_item_ids),
+                    models.ChannelListing.status == ListingStatus.ACTIVE,
+                )
+            ).scalars().all()
+            if active_item_ids
+            else []
+        )
         sold_item_ids = {
             row.inventory_item_id
             for row in sold_rows
@@ -1168,18 +1195,37 @@ def analytics(context: RequestContext = Depends(require_context)):
             if sold_item_ids
             else {}
         )
-    priced = [
-        item for item in active_items
-        if (item.attributes or {}).get("default_price_cents") is not None
-    ]
+    listings_by_item: dict[uuid.UUID, list[models.ChannelListing]] = {}
+    for listing in active_item_listings:
+        if listing.inventory_item_id is not None:
+            listings_by_item.setdefault(listing.inventory_item_id, []).append(listing)
+
+    ask_rows: list[tuple[models.InventoryItem, int, str]] = []
+    costed_items: list[models.InventoryItem] = []
+    margin_rows: list[tuple[models.InventoryItem, int]] = []
+    for item in active_items:
+        effective_ask, source = _effective_item_ask(
+            item,
+            listings_by_item.get(item.id, []),
+        )
+        if effective_ask is not None and source is not None:
+            ask_rows.append((item, effective_ask, source))
+        if item.cost_cents is not None:
+            costed_items.append(item)
+        if effective_ask is not None and item.cost_cents is not None:
+            margin_rows.append((item, effective_ask))
+
     inventory_cost_cents = sum(
         int(item.cost_cents or 0) * max(0, int(item.quantity or 0))
-        for item in priced
+        for item in costed_items
     )
     inventory_ask_cents = sum(
-        int((item.attributes or {}).get("default_price_cents") or 0)
-        * max(0, int(item.quantity or 0))
-        for item in priced
+        int(ask) * max(0, int(item.quantity or 0))
+        for item, ask, _source in ask_rows
+    )
+    inventory_potential_margin_cents = sum(
+        (int(ask) - int(item.cost_cents or 0)) * max(0, int(item.quantity or 0))
+        for item, ask in margin_rows
     )
     costed_sales = [
         row for row in sold_rows
@@ -1197,17 +1243,24 @@ def analytics(context: RequestContext = Depends(require_context)):
     return {
         "active_inventory": int(inventory_count or 0),
         "active_listings": int(listings_count or 0),
-        "priced_inventory_count": len(priced),
+        "priced_inventory_count": len(ask_rows),
+        "manual_priced_inventory_count": sum(1 for _item, _ask, source in ask_rows if source == "default"),
+        "market_priced_inventory_count": sum(1 for _item, _ask, source in ask_rows if source == "marketplace"),
+        "costed_inventory_count": len(costed_items),
+        "margin_inventory_count": len(margin_rows),
         "inventory_cost_cents": inventory_cost_cents,
         "inventory_ask_cents": inventory_ask_cents,
-        "inventory_potential_margin_cents": inventory_ask_cents - inventory_cost_cents,
+        "inventory_potential_margin_cents": inventory_potential_margin_cents,
         "sales_ytd_count": len(sold_rows),
         "sales_ytd_cents": sum(int(row.total_cents or 0) for row in sold_rows),
         "sales_ytd_costed_count": len(costed_sales),
         "sales_ytd_cost_cents": sales_ytd_cost_cents,
         "sales_ytd_costed_revenue_cents": sales_ytd_costed_revenue_cents,
         "sales_ytd_gross_profit_cents": sales_ytd_costed_revenue_cents - sales_ytd_cost_cents,
-        "currency": next((row.currency for row in sold_rows if row.currency), "EUR"),
+        "currency": next(
+            (item.currency for item in active_items if item.currency),
+            next((row.currency for row in sold_rows if row.currency), "EUR"),
+        ),
         "followers": followers.followers if followers else None,
         "following": followers.following if followers else None,
     }
