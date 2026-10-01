@@ -32,10 +32,14 @@ services:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/app.sqlite3}
+      RUN_MIGRATIONS: "false"
+      RUN_LEGACY_BACKFILL: "false"
     volumes:
       - ./data:/app/data
     command: ["python", "-m", "app.worker"]
     depends_on:
+      vinted-dashboard:
+        condition: service_healthy
       db:
         condition: service_healthy
         required: false
