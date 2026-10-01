@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Reseller Dashboard</title>
+  <link rel="stylesheet" href="/app-static/styles.css">
+</head>
+<body>
+  <section id="auth" class="auth">
+    <form id="login" class="card auth-card">
+      <p class="eyebrow">RESELLER WORKSPACE</p>
+      <h1 id="auth-name">Reseller Dashboard</h1>
+      <p class="muted">Inventory, marketplace connections and reseller analytics.</p>
+      <label>Email<input name="email" type="email" autocomplete="email" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="btn primary">Sign in</button>
+      <button type="button" class="link" id="show-register">Create account</button>
+      <p id="auth-error" class="error"></p>
+    </form>
+    <form id="register" class="card auth-card hidden">
+      <p class="eyebrow">CREATE ACCOUNT</p>
+      <h1>Start a workspace</h1>
+      <label>Email<input name="email" type="email" required></label>
+      <label>Display name<input name="display_name"></label>
+      <label>Password<input name="password" type="password" minlength="10" required></label>
+      <label>Workspace name<input name="workspace_name" placeholder="My resale business"></label>
+      <button class="btn primary">Create account</button>
+      <button type="button" class="link" id="show-login">Back to sign in</button>
+      <p id="register-error" class="error"></p>
+    </form>
+  </section>
+
+  <div id="shell" class="shell hidden">
+    <aside>
+      <div class="brand"><strong id="app-name">Reseller Dashboard</strong><small id="workspace-name"></small></div>
+      <nav>
+        <button class="nav active" data-view="today">Today</button>
+        <button class="nav" data-view="inventory">Inventory</button>
+        <button class="nav" data-view="sales">Sales</button>
+        <button class="nav" data-view="analytics">Analytics</button>
+        <button class="nav" data-view="imports">Import / Export</button>
+        <button class="nav" data-view="connections">Connections</button>
+        <button class="nav" data-view="settings">Settings</button>
+      </nav>
+      <footer><a href="/classic">Classic dashboard</a><a href="/privacy">Privacy</a><button id="logout" class="link">Sign out</button></footer>
+    </aside>
+    <main>
+      <header><div><p class="eyebrow">WORKSPACE</p><h1 id="page-title">Today</h1></div><div id="flash"></div></header>
+
+      <section id="today" class="view active">
+        <div id="today-metrics" class="metrics"></div>
+        <div class="card"><div class="card-head"><h2>What should I do today?</h2></div><div id="today-actions"></div></div>
+      </section>
+
+      <section id="inventory" class="view">
+        <div class="toolbar"><input id="inventory-q" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><button id="add-item" class="btn primary">Add item</button></div>
+        <form id="item-form" class="card form hidden">
+          <div class="form-grid"><label>SKU<input name="sku" required></label><label>Title<input name="title" required></label><label>Category<select name="category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="1"></label><label>Condition<input name="condition"></label><label>Location<input name="location"></label></div>
+          <div class="actions"><button class="btn primary">Save</button><button class="btn" type="button" id="cancel-item">Cancel</button></div>
+        </form>
+        <div id="inventory-table" class="card table-wrap"></div>
+      </section>
+
+      <section id="sales" class="view"><div id="sales-table" class="card table-wrap"></div></section>
+
+      <section id="analytics" class="view">
+        <div id="analytics-metrics" class="metrics"></div>
+        <div class="card copy">Workspace-native totals are shown here. Your detailed Vinted views, favourites, followers and listing-history charts remain available in <a href="/classic">Classic dashboard</a> while the final analytics UI is consolidated.</div>
+      </section>
+
+      <section id="imports" class="view">
+        <div class="two">
+          <div class="card form"><h2>Import inventory</h2><p class="muted">CSV, TSV and XLSX. Preview first; nothing is written until you apply it.</p><input id="import-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><label class="check"><input id="full-snapshot" type="checkbox"> Archive active items missing from this file</label><button id="preview-import" class="btn primary" type="button">Preview</button><p id="import-status" class="muted"></p></div>
+          <div class="card form"><h2>Export inventory</h2><p class="muted">Your data stays portable.</p><div class="actions"><a class="btn" href="/api/app/export?format=csv">CSV</a><a class="btn" href="/api/app/export?format=xlsx">Excel</a></div></div>
+        </div>
+        <div id="mapping" class="card form hidden"><h2>Column mapping</h2><div id="mapping-grid"></div><label>Save mapping as<input id="preset-name" placeholder="Optional"></label><button id="apply-import" class="btn primary" type="button">Apply import</button></div>
+        <div id="preview" class="card hidden"></div>
+      </section>
+
+      <section id="connections" class="view">
+        <div class="card"><div class="card-head"><h2>Connections</h2></div><div id="connector-grid" class="connector-grid"></div></div>
+        <div id="pairing" class="card form hidden"><h2>Pair Chrome</h2><p>Enter this one-time code in the Chrome companion. It expires in 10 minutes.</p><div id="pair-code" class="pair-code"></div></div>
+        <div class="card"><div class="card-head"><h2>Paired Chrome browsers</h2></div><div id="devices"></div></div>
+      </section>
+
+      <section id="settings" class="view">
+        <div class="two">
+          <form id="settings-form" class="card form"><h2>Workspace</h2><label>Name<input id="settings-name"></label><button class="btn primary">Save</button></form>
+          <div class="card form"><h2>Billing</h2><div id="billing"></div></div>
+        </div>
+        <div class="card form"><h2>Your data</h2><a class="btn" href="/api/app/account/export">Download account data</a><p class="muted">Export before deleting a workspace. Destructive deletion requires explicit slug confirmation through the API.</p></div>
+      </section>
+    </main>
+  </div>
+  <script src="/app-static/app.js"></script>
+</body>
+</html>
