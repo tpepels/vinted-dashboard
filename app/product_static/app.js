@@ -1045,7 +1045,7 @@ function renderReconciliation(data, crossData) {
     : '<option value="">No inventory</option>';
 
   $("#unlinked-sale-count").textContent = state.unlinkedSales.length
-    ? state.unlinkedSales.length + " needs review"
+    ? state.unlinkedSales.length + " ambiguous/unmatched"
     : "None";
   $("#reconcile-sale").innerHTML = state.unlinkedSales.length
     ? state.unlinkedSales.map((sale) =>
