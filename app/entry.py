@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app import main as main_module
+from app.product_api import router as product_router
 from app.intelligence import (
     intelligence_payload,
     queued_market_jobs,
@@ -139,6 +140,7 @@ def _dashboard_data(force: bool = False) -> dict[str, Any]:
 
 main_module.dashboard_data = _dashboard_data
 app = main_module.app
+app.include_router(product_router)
 
 
 @app.post("/api/browser-sync")
