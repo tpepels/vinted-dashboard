@@ -80,6 +80,7 @@ from app.product_models import (
     MappingPreset,
 )
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
+from app.purchase_costs import apply_purchase_cost, purchase_cost_suggestions
 from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
 from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
@@ -194,6 +195,11 @@ class ReconciliationApplyRequest(BaseModel):
 
 class SaleLinkRequest(BaseModel):
     inventory_item_id: uuid.UUID
+
+
+class PurchaseCostApplyRequest(BaseModel):
+    inventory_item_id: uuid.UUID
+    cost_cents: int = Field(ge=0)
 
 
 class MappingPresetRequest(BaseModel):
@@ -1080,6 +1086,34 @@ def link_sale_to_inventory(
             "inventory_item_id": str(item.id),
             "actions_created": len(created),
         }
+    return {"ok": True, **result}
+
+
+@router.get("/api/app/purchase-cost-suggestions")
+def purchase_cost_suggestion_rows(
+    context: RequestContext = Depends(require_context),
+):
+    with db.session_scope() as session:
+        return purchase_cost_suggestions(session, context.workspace.id)
+
+
+@router.post("/api/app/purchases/{purchase_id}/apply-cost")
+def apply_purchase_cost_to_inventory(
+    purchase_id: uuid.UUID,
+    payload: PurchaseCostApplyRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    try:
+        with db.session_scope() as session:
+            result = apply_purchase_cost(
+                session,
+                context.workspace.id,
+                purchase_id=purchase_id,
+                inventory_item_id=payload.inventory_item_id,
+                cost_cents=payload.cost_cents,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, **result}
 
 

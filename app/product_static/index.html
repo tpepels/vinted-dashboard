@@ -82,7 +82,7 @@
       </section>
 
       <section id="inventory" class="view">
-        <div class="toolbar"><input id="inventory-q" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="quick-listing" class="btn primary" type="button">Quick listing</button><button id="add-item" class="btn" type="button">Add item</button></div>
+        <div class="toolbar"><input id="inventory-q" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><select id="inventory-cost" aria-label="Acquisition cost"><option value="">All costs</option><option value="missing">Missing cost</option><option value="recorded">Cost recorded</option></select><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="quick-listing" class="btn primary" type="button">Quick listing</button><button id="add-item" class="btn" type="button">Add item</button></div>
         <form id="bulk-form" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">BULK EDIT</p><h2>Edit selected inventory</h2></div><button id="cancel-bulk" class="btn" type="button">Cancel</button></div>
           <p class="muted">Only non-empty fields below are changed. Existing values in blank fields are left alone.</p>
@@ -273,6 +273,14 @@
       </section>
 
       <section id="sales" class="view">
+        <div id="purchase-cost-card" class="card form hidden">
+          <div class="card-head inline-head">
+            <div><p class="eyebrow">PURCHASE COSTS</p><h2>Fill acquisition costs from Vinted purchases</h2></div>
+            <span id="purchase-cost-summary" class="muted"></span>
+          </div>
+          <p class="muted">Unique exact-title purchase matches are suggested only. The order amount is prefilled as a cost candidate, but edit it before applying if Vinted's amount includes shipping, buyer protection or anything else you do not want in stock cost.</p>
+          <div id="purchase-cost-suggestions"></div>
+        </div>
         <div class="toolbar">
           <select id="sales-direction" aria-label="Order direction">
             <option value="sell" selected>Sales</option>
