@@ -37,11 +37,20 @@ def _eligible_items(
     ).scalars().all()
 
 
+def _purchase_is_usable(row: models.Sale) -> bool:
+    state = " ".join(
+        str(value or "").strip().casefold()
+        for value in (row.status, row.lifecycle_status)
+    )
+    blocked = ("cancelled", "canceled", "refunded", "failed")
+    return not any(token in state for token in blocked)
+
+
 def _purchase_rows(
     session: Session,
     workspace_id: uuid.UUID,
 ) -> list[models.Sale]:
-    return session.execute(
+    rows = session.execute(
         select(models.Sale)
         .where(
             models.Sale.workspace_id == workspace_id,
@@ -50,6 +59,7 @@ def _purchase_rows(
         )
         .order_by(models.Sale.occurred_at.desc(), models.Sale.last_seen_at.desc())
     ).scalars().all()
+    return [row for row in rows if _purchase_is_usable(row)]
 
 
 def purchase_cost_suggestions(
