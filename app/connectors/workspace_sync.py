@@ -100,12 +100,20 @@ def _apply_item(
         )
     ).scalar_one_or_none()
 
-    inventory_item = session.execute(
-        select(models.InventoryItem).where(
-            models.InventoryItem.workspace_id == workspace.id,
-            models.InventoryItem.sku == sku,
-        )
-    ).scalar_one_or_none()
+    # Preserve an explicit reconciliation. Once a marketplace listing has
+    # been linked to a master item, later connector snapshots must update that
+    # listing in place instead of silently moving it back to a SKU-derived
+    # item.
+    inventory_item = None
+    if listing is not None and listing.inventory_item_id is not None:
+        inventory_item = session.get(models.InventoryItem, listing.inventory_item_id)
+    if inventory_item is None:
+        inventory_item = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == workspace.id,
+                models.InventoryItem.sku == sku,
+            )
+        ).scalar_one_or_none()
     if inventory_item is None:
         inventory_item = models.InventoryItem(
             workspace_id=workspace.id,
@@ -144,10 +152,10 @@ def _apply_item(
     listing.extra = {**(listing.extra or {}), **extra}
     session.flush()
 
-    _recompute_inventory_item(session, inventory_item)
+    recompute_inventory_item(session, inventory_item)
 
 
-def _recompute_inventory_item(session: Session, item: models.InventoryItem) -> None:
+def recompute_inventory_item(session: Session, item: models.InventoryItem) -> None:
     """Re-derives an ``InventoryItem``'s aggregate quantity/status/category
     from *all* of its current listings (not just the one just touched),
     since items with a real SKU can be shared across channels. Mirrors
@@ -226,7 +234,7 @@ def _deactivate_missing_listings(
             if item is not None:
                 touched_items[listing.inventory_item_id] = item
     for item in touched_items.values():
-        _recompute_inventory_item(session, item)
+        recompute_inventory_item(session, item)
 
 
 def _upsert_connector_sync_run(

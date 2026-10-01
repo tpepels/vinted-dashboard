@@ -9,6 +9,7 @@ const state = {
   mappings: [],
   inventoryItems: [],
   listings: [],
+  reconciliation: [],
   salesRows: [],
   editItemId: null,
   connectorChannel: null,
@@ -185,6 +186,7 @@ async function load(view) {
   try {
     if (view === "today") await today();
     else if (view === "inventory") await inventory();
+    else if (view === "reconcile") await reconcile();
     else if (view === "listings") await listings();
     else if (view === "sales") await sales();
     else if (view === "analytics") await analytics();
@@ -348,6 +350,143 @@ $("#item-form").onsubmit = async (event) => {
     }
     closeItemForm();
     await inventory();
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
+
+function reconciliationItemLabel(item) {
+  const channels = (item.channels || []).join(", ") || "master only";
+  return item.sku + " · " + item.title + " · " + channels;
+}
+
+function renderReconciliation(data) {
+  const suggestions = data.suggestions || [];
+  state.reconciliation = suggestions;
+  $("#reconcile-summary").textContent = suggestions.length
+    ? suggestions.length + " suggestion" + (suggestions.length === 1 ? "" : "s")
+      + " · " + (data.high_confidence || 0) + " high confidence"
+    : "No candidate matches";
+
+  $("#reconcile-suggestions").innerHTML = suggestions.length
+    ? '<table><thead><tr><th></th><th>Candidate A</th><th>Candidate B</th><th>Evidence</th><th>Confidence</th><th>Keep as master</th></tr></thead><tbody>'
+      + suggestions.map((row) => {
+        const a = row.item_a;
+        const b = row.item_b;
+        const optionA = '<option value="' + esc(a.id) + '"'
+          + (row.recommended_target_id === a.id ? " selected" : "") + ">"
+          + esc(a.sku + " · " + a.title) + "</option>";
+        const optionB = '<option value="' + esc(b.id) + '"'
+          + (row.recommended_target_id === b.id ? " selected" : "") + ">"
+          + esc(b.sku + " · " + b.title) + "</option>";
+        const itemCell = (item) =>
+          '<div class="title">' + esc(item.title) + '</div><div class="sub">'
+          + esc(item.sku) + " · "
+          + esc((item.channels || []).join(", ") || "master only")
+          + (item.synthetic_sku ? " · generated SKU" : "") + "</div>";
+        return '<tr data-reconcile-id="' + esc(row.id) + '">'
+          + '<td><input type="checkbox" class="reconcile-check" data-id="' + esc(row.id) + '"></td>'
+          + "<td>" + itemCell(a) + "</td>"
+          + "<td>" + itemCell(b) + "</td>"
+          + "<td>" + row.reasons.map(esc).join("<br>") + "</td>"
+          + '<td><span class="confidence ' + esc(row.confidence) + '">' + esc(row.confidence) + "</span></td>"
+          + '<td><select class="reconcile-target" data-id="' + esc(row.id) + '">' + optionA + optionB + "</select></td>"
+          + "</tr>";
+      }).join("")
+      + "</tbody></table>"
+    : '<div class="empty">No safe cross-channel matches found. You can still reconcile a listing manually below.</div>';
+
+  $("#reconcile-listing").innerHTML = state.listings.length
+    ? state.listings.map((listing) =>
+      '<option value="' + esc(listing.id) + '">' + esc(
+        listing.channel + " · " + listing.title + " · " + (listing.external_sku || listing.external_id)
+      ) + "</option>"
+    ).join("")
+    : '<option value="">No listings</option>';
+
+  $("#reconcile-item").innerHTML = state.inventoryItems.length
+    ? state.inventoryItems.map((item) =>
+      '<option value="' + esc(item.id) + '">' + esc(
+        item.sku + " · " + item.title + " · "
+        + ((item.listings || []).map((row) => row.channel).join(", ") || "master only")
+      ) + "</option>"
+    ).join("")
+    : '<option value="">No inventory</option>';
+}
+
+async function reconcile() {
+  const [data, inventoryData, listingData] = await Promise.all([
+    api("/api/app/reconciliation"),
+    api("/api/app/inventory"),
+    api("/api/app/listings"),
+  ]);
+  state.inventoryItems = inventoryData.items || [];
+  state.listings = listingData.listings || [];
+  renderReconciliation(data);
+}
+
+$("#reconcile-refresh").onclick = () => reconcile().catch((error) => flash(error.message, true));
+
+$("#reconcile-select-high").onclick = () => {
+  const high = new Set(
+    state.reconciliation.filter((row) => row.confidence === "high").map((row) => row.id),
+  );
+  $(".reconcile-check").forEach((box) => { box.checked = high.has(box.dataset.id); });
+};
+
+$("#reconcile-apply").onclick = async () => {
+  const selected = $(".reconcile-check").filter((box) => box.checked);
+  if (!selected.length) return flash("Select at least one reconciliation.", true);
+
+  const merges = selected.map((box) => {
+    const suggestion = state.reconciliation.find((row) => row.id === box.dataset.id);
+    const target = $('.reconcile-target[data-id="' + box.dataset.id + '"]').value;
+    const source = suggestion.item_a.id === target ? suggestion.item_b.id : suggestion.item_a.id;
+    return { target_item_id: target, source_item_id: source };
+  });
+
+  try {
+    const result = await api("/api/app/reconciliation/apply", {
+      method: "POST",
+      body: JSON.stringify({ merges }),
+    });
+    flash("Merged " + result.count + " stock record" + (result.count === 1 ? "." : "s."));
+    await reconcile();
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
+
+$("#reconcile-manual").onclick = async () => {
+  const listingId = $("#reconcile-listing").value;
+  const targetItemId = $("#reconcile-item").value;
+  if (!listingId || !targetItemId) return flash("Choose a listing and master item.", true);
+
+  const listing = state.listings.find((row) => row.id === listingId);
+  if (!listing) return flash("Listing is no longer available.", true);
+  if (listing.inventory_item_id === targetItemId) {
+    return flash("That listing is already linked to this master item.", true);
+  }
+
+  try {
+    if (listing.inventory_item_id) {
+      await api("/api/app/reconciliation/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          merges: [{
+            target_item_id: targetItemId,
+            source_item_id: listing.inventory_item_id,
+          }],
+        }),
+      });
+    } else {
+      await api("/api/app/inventory/" + targetItemId + "/link", {
+        method: "POST",
+        body: JSON.stringify({ listing_id: listingId }),
+      });
+    }
+    flash("Listing linked to master inventory.");
+    await reconcile();
   } catch (error) {
     flash(error.message, true);
   }

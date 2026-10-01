@@ -37,6 +37,7 @@
       <nav>
         <button class="nav active" data-view="today">Today</button>
         <button class="nav" data-view="inventory">Inventory</button>
+        <button class="nav" data-view="reconcile">Reconcile</button>
         <button class="nav" data-view="listings">Listings</button>
         <button class="nav" data-view="sales">Sales</button>
         <button class="nav" data-view="analytics">Analytics</button>
@@ -65,6 +66,31 @@
           <div class="actions"><button id="save-item" class="btn primary">Save</button><button class="btn" type="button" id="cancel-item">Cancel</button></div>
         </form>
         <div id="inventory-table" class="card table-wrap"></div>
+      </section>
+
+      <section id="reconcile" class="view">
+        <div class="card form">
+          <div class="card-head inline-head">
+            <div><p class="eyebrow">PHYSICAL STOCK</p><h2>Reconcile marketplace records</h2></div>
+            <span id="reconcile-summary" class="muted"></span>
+          </div>
+          <p class="muted">Suggestions use exact SKU, ISBN or exact normalized metadata only. Nothing is merged automatically.</p>
+          <div class="actions reconcile-actions">
+            <button id="reconcile-refresh" class="btn" type="button">Refresh suggestions</button>
+            <button id="reconcile-select-high" class="btn" type="button">Select high confidence</button>
+            <button id="reconcile-apply" class="btn primary" type="button">Merge selected</button>
+          </div>
+        </div>
+        <div id="reconcile-suggestions" class="card table-wrap"></div>
+        <div class="card form">
+          <div class="card-head inline-head"><div><p class="eyebrow">MANUAL</p><h2>Link a listing to master stock</h2></div></div>
+          <p class="muted">Choose a marketplace listing and the physical inventory item it belongs to. If the listing already has its own generated stock record, that record is explicitly merged into the selected master item.</p>
+          <div class="form-grid">
+            <label>Marketplace listing<select id="reconcile-listing"></select></label>
+            <label>Master inventory item<select id="reconcile-item"></select></label>
+          </div>
+          <div class="actions"><button id="reconcile-manual" class="btn primary" type="button">Link to master item</button></div>
+        </div>
       </section>
 
       <section id="listings" class="view">
