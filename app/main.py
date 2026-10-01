@@ -25,7 +25,7 @@ from app.vinted import (
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_NAME = os.getenv("APP_NAME", "Reseller Dashboard").strip() or "Reseller Dashboard"
-LEGACY_UI_ENABLED = os.getenv("LEGACY_UI_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+LEGACY_UI_ENABLED = os.getenv("LEGACY_UI_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
