@@ -7,5 +7,45 @@ services:
       - "5050:8000"
     env_file:
       - .env
+    environment:
+      # Zero-config default: a local sqlite file under the bind-mounted
+      # ./data directory, same as every other piece of local state. Set
+      # DATABASE_URL in .env (and run with --profile postgres) to use the
+      # bundled Postgres service instead.
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/app.sqlite3}
     volumes:
       - ./data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+
+  # Optional: only starts with `docker compose --profile postgres up`.
+  # Set DATABASE_URL in .env to this service's connection string to use it
+  # (see the postgresql+psycopg2://... example in .env.example).
+  db:
+    image: postgres:16-alpine
+    container_name: vinted-dashboard-db
+    restart: unless-stopped
+    profiles:
+      - postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vinted_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-vinted_dashboard}
+      # Deliberately not required at parse time: Compose interpolates every
+      # service's environment up front regardless of active profile, so a
+      # `:?` here would break the default (sqlite, no profile) `up` too. The
+      # official postgres image itself refuses to start without a password,
+      # which is the right time for this to surface - only when --profile
+      # postgres is actually used.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - vinted-dashboard-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vinted_dashboard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  vinted-dashboard-db-data:

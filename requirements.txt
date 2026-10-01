@@ -3,3 +3,6 @@ uvicorn[standard]==0.35.0
 pydantic==2.11.7
 curl-cffi==0.16.3
 pytest==8.4.2
+SQLAlchemy==2.1.1
+alembic==1.20.0
+psycopg2-binary==2.9.13

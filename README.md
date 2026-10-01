@@ -97,6 +97,25 @@ The app deliberately refreshes slowly and caches Vinted responses for 60 seconds
 
 Running it from your home server is preferable to a datacenter/VPS IP.
 
+## Data layer (SQLAlchemy + Alembic)
+
+Alongside the original hand-rolled sqlite3 tables (`app/channels.py`, `app/intelligence.py`), the app now also has an ORM-backed schema (`app/models.py`) built around a `Workspace` and a channel-agnostic `InventoryItem`/`ChannelListing` - the foundation for multi-channel/multi-tenant features in later phases. The legacy tables are untouched and still power the current UI; nothing here changes existing behavior.
+
+- **Default (zero-config):** a local sqlite file at `./data/app.sqlite3`, alongside the existing `./data/vinted-history.sqlite3`. No extra services required.
+- **Optional Postgres:** run `docker compose --profile postgres up -d --build` to also start a bundled `db` service, and set `DATABASE_URL` in `.env` to point at it (see `.env.example`).
+
+Migrations run automatically on container start (the entrypoint runs `alembic upgrade head`, retrying while a freshly-started Postgres is still coming up). To run them manually, e.g. outside Docker:
+
+```bash
+alembic upgrade head
+```
+
+### Backfilling existing data
+
+The first time the app starts against an empty new-schema database, it also runs a one-time, best-effort, idempotent backfill (`python -m app.legacy_migration`) that copies everything from the existing `vinted-history.sqlite3` (Vinted/BIBLIO/eBay inventory, sync history, favourites, orders, market research) into the new schema under a single bootstrap workspace. It is safe to re-run on every start: already-migrated rows are matched by their original natural key and only updated in place, never duplicated. A fresh install with no legacy database simply skips it.
+
+The bootstrap workspace/owner can be customized via `.env` (see `BOOTSTRAP_WORKSPACE_NAME`/`BOOTSTRAP_WORKSPACE_SLUG`/`BOOTSTRAP_OWNER_EMAIL`); the legacy file location defaults to `VINTED_HISTORY_DB` and can be overridden separately via `LEGACY_SQLITE_PATH` if needed.
+
 ## Configuration
 
 ```env
