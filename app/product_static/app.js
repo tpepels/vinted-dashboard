@@ -9,6 +9,7 @@ const state = {
   mappings: [],
   inventoryItems: [],
   listings: [],
+  salesRows: [],
   editItemId: null,
   connectorChannel: null,
 };
@@ -576,17 +577,48 @@ $("#listing-reset").onclick = () => {
 
 async function sales() {
   const data = await api("/api/app/sales");
-  $("#sales-table").innerHTML = data.sales.length
-    ? '<table><thead><tr><th>Date</th><th>Channel</th><th>Item</th><th>Direction</th><th>Status</th><th>Amount</th></tr></thead><tbody>'
-      + data.sales.map((sale) =>
+  state.salesRows = data.sales || [];
+  renderSales();
+}
+
+function renderSales() {
+  const direction = $("#sales-direction").value;
+  const stateFilter = $("#sales-state").value;
+  const channel = $("#sales-channel").value;
+  const query = $("#sales-search").value.trim().toLowerCase();
+
+  const rows = (state.salesRows || []).filter((sale) => {
+    if (direction && sale.direction !== direction) return false;
+    if (stateFilter === "open" && sale.is_closed) return false;
+    if (stateFilter === "closed" && !sale.is_closed) return false;
+    if (channel && sale.channel !== channel) return false;
+    if (query) {
+      const haystack = [sale.title, sale.counterparty, sale.external_order_id, sale.status]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" ");
+      if (!haystack.includes(query)) return false;
+    }
+    return true;
+  });
+
+  $("#sales-count").textContent = rows.length + " of " + state.salesRows.length;
+  $("#sales-table").innerHTML = rows.length
+    ? '<table><thead><tr><th>Date</th><th>Channel</th><th>Item</th><th>Person</th><th>Direction</th><th>Status</th><th>Amount</th></tr></thead><tbody>'
+      + rows.map((sale) =>
         "<tr><td>" + esc(when(sale.occurred_at)) + '</td><td><span class="pill '
         + esc(sale.channel) + '">' + esc(sale.channel) + "</span></td><td>"
-        + esc(sale.title || "—") + "</td><td>" + esc(sale.direction) + "</td><td>"
+        + esc(sale.title || "—") + "</td><td>" + esc(sale.counterparty || "—")
+        + "</td><td>" + esc(sale.direction) + "</td><td>"
         + esc(sale.status || "—") + "</td><td>" + money(sale.total_cents, sale.currency) + "</td></tr>"
       ).join("")
       + "</tbody></table>"
-    : '<div class="empty">No sales recorded yet.</div>';
+    : '<div class="empty">No matching orders.</div>';
 }
+
+["#sales-direction", "#sales-state", "#sales-channel"].forEach((selector) => {
+  $(selector).addEventListener("change", renderSales);
+});
+$("#sales-search").addEventListener("input", renderSales);
 
 function seriesChart(target, points, valueKey, { moneyValues = false } = {}) {
   const element = $(target);
