@@ -1,9 +1,15 @@
 Reseller Dashboard Chrome Bridge
 
-This is the Chrome Web Store source variant. Build it with scripts/build_extension.py.
-It pairs with a reseller workspace using a short-lived code and stores only the
-revocable dashboard bridge token in chrome.storage.local. It does not export
-Vinted password or cookie values.
+This is the Chrome Web Store source variant. Build it with
+scripts/build_extension.py.
+
+Single purpose: synchronize the reseller data needed by a paired workspace
+from the user's signed-in Vinted account.
+
+The extension stores only the revocable dashboard bridge token, pairing/sync
+metadata and remembered Vinted origin in chrome.storage.local. It does not
+export Vinted passwords or raw cookie values. Unrelated Vinted notification
+text is discarded before upload.
 
 The separate app/legacy_extension directory preserves the self-hosted personal
 variant, including the older opt-in market-research workflow.
