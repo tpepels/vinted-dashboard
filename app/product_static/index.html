@@ -273,6 +273,14 @@
       </section>
 
       <section id="sales" class="view">
+        <div id="purchase-cost-card" class="card form hidden">
+          <div class="card-head inline-head">
+            <div><p class="eyebrow">PURCHASE COSTS</p><h2>Fill acquisition costs from Vinted purchases</h2></div>
+            <span id="purchase-cost-summary" class="muted"></span>
+          </div>
+          <p class="muted">Unique exact-title purchase matches are suggested only. The order amount is prefilled as a cost candidate, but edit it before applying if Vinted's amount includes shipping, buyer protection or anything else you do not want in stock cost.</p>
+          <div id="purchase-cost-suggestions"></div>
+        </div>
         <div class="toolbar">
           <select id="sales-direction" aria-label="Order direction">
             <option value="sell" selected>Sales</option>
