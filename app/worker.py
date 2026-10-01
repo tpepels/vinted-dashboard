@@ -20,6 +20,17 @@ def handle(job: dict) -> None:
     job_type = job["job_type"]
     payload = job.get("payload") or {}
     workspace_id = uuid.UUID(job["workspace_id"]) if job.get("workspace_id") else None
+    if workspace_id is not None and job_type != "noop":
+        from app import billing, db, models
+        if billing.BILLING_ENABLED:
+            with db.session_scope() as session:
+                workspace = session.get(models.Workspace, workspace_id)
+                if workspace is None:
+                    raise RuntimeError("Workspace no longer exists")
+                if not billing.workspace_can_write(workspace):
+                    raise RuntimeError(
+                        "Workspace is read-only until the subscription is active or trialing"
+                    )
     if job_type == "biblio_sync":
         if workspace_id is not None:
             from app.connectors.hosted import has_credentials, sync_biblio_workspace
