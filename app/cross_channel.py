@@ -39,6 +39,30 @@ def _normalized_title(value: Any) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _without_other_consuming_sales(
+    session: Session,
+    sale: models.Sale,
+    items: list[models.InventoryItem],
+) -> list[models.InventoryItem]:
+    if not items:
+        return []
+    item_ids = [item.id for item in items]
+    linked_sales = session.execute(
+        select(models.Sale).where(
+            models.Sale.workspace_id == sale.workspace_id,
+            models.Sale.direction == "sell",
+            models.Sale.inventory_item_id.in_(item_ids),
+            models.Sale.id != sale.id,
+        )
+    ).scalars().all()
+    consumed_ids = {
+        row.inventory_item_id
+        for row in linked_sales
+        if row.inventory_item_id is not None and sale_counts_as_sold(row)
+    }
+    return [item for item in items if item.id not in consumed_ids]
+
+
 def _sale_title_candidates(
     session: Session,
     sale: models.Sale,
@@ -65,11 +89,12 @@ def _sale_title_candidates(
         )
     }
     if listing_item_ids:
-        return [
+        candidates = [
             item
             for item_id in sorted(listing_item_ids, key=str)
             if (item := session.get(models.InventoryItem, item_id)) is not None
         ]
+        return _without_other_consuming_sales(session, sale, candidates)
 
     # A legacy sale may outlive the marketplace listing record. In that case
     # only consider a non-active historical master item with the exact title.
@@ -81,10 +106,11 @@ def _sale_title_candidates(
             models.InventoryItem.status != ItemStatus.ACTIVE,
         )
     ).scalars().all()
-    return [
+    candidates = [
         item for item in items
         if _normalized_title(item.title) == normalized
     ]
+    return _without_other_consuming_sales(session, sale, candidates)
 
 
 def _sale_match_kind(
