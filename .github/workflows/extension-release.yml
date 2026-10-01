@@ -1,0 +1,67 @@
+name: Extension release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Manifest version (for example 2.0.0)"
+        required: true
+      publish:
+        description: "Publish to Chrome Web Store after upload"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+      - run: |
+          python scripts/build_extension.py \
+            --mode store \
+            --api-origin "${{ vars.PUBLIC_APP_URL }}" \
+            --version "${{ steps.version.outputs.value }}" \
+            --output dist/reseller-chrome-bridge.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reseller-chrome-bridge-${{ steps.version.outputs.value }}
+          path: dist/reseller-chrome-bridge.zip
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: reseller-chrome-bridge-${{ needs.package.outputs.version }}
+          path: dist
+      - env:
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: python scripts/publish_chrome_webstore.py dist/reseller-chrome-bridge.zip --publish
