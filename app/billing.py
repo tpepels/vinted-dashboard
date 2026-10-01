@@ -38,6 +38,30 @@ class BillingSummary:
     customer_id: str | None
 
 
+def workspace_can_write(workspace: models.Workspace) -> bool:
+    """Whether normal product mutations are allowed for this workspace."""
+    if not BILLING_ENABLED:
+        return True
+    return workspace.billing_status in {
+        BillingStatus.TRIALING,
+        BillingStatus.ACTIVE,
+    }
+
+
+def write_access(workspace: models.Workspace) -> dict[str, Any]:
+    allowed = workspace_can_write(workspace)
+    return {
+        "allowed": allowed,
+        "read_only": not allowed,
+        "status": workspace.billing_status,
+        "reason": (
+            None
+            if allowed
+            else "Subscription action is required before marketplace or inventory changes can be made."
+        ),
+    }
+
+
 def summary(workspace: models.Workspace) -> BillingSummary:
     return BillingSummary(
         enabled=BILLING_ENABLED,
