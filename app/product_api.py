@@ -964,6 +964,7 @@ def today(context: RequestContext = Depends(require_context)):
             days=30,
             strategy=settings,
             now=now,
+            listing_limit=None,
         )
         segment_actions = {
             "low_interest_stale": ("Refresh listing", 100),
