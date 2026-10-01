@@ -51,6 +51,13 @@ from app.connectors.hosted import (
     test_biblio_workspace,
 )
 from app.connectors.workspace_sync import recompute_inventory_item
+from app.cross_channel import (
+    acknowledge_manual_action,
+    reconcile_sale_state,
+    retry_action,
+    serialize_actions,
+    unlinked_sell_count,
+)
 from app.crypto import decrypt_json, encrypt_json, using_derived_key
 from app.import_export import (
     apply_inventory_import,
@@ -72,6 +79,7 @@ from app.product_models import (
     MappingPreset,
 )
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
+from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
@@ -133,6 +141,10 @@ class ReconciliationMergeInstruction(BaseModel):
 
 class ReconciliationApplyRequest(BaseModel):
     merges: list[ReconciliationMergeInstruction]
+
+
+class SaleLinkRequest(BaseModel):
+    inventory_item_id: uuid.UUID
 
 
 class MappingPresetRequest(BaseModel):
@@ -675,7 +687,108 @@ def today(context: RequestContext = Depends(require_context)):
                     "url": listing.url,
                 })
         actions.sort(key=lambda row: (-row["priority"], -row["age_days"]))
-    return {"actions": actions[:50], "count": len(actions), "strategy": settings}
+        cross_channel_actions = serialize_actions(session, context.workspace.id, limit=50)
+        stock_attention = [
+            row for row in cross_channel_actions
+            if row["status"] in {"queued", "running", "attention", "error"}
+        ]
+        unlinked_sales = unlinked_sell_count(session, context.workspace.id)
+    return {
+        "actions": actions[:50],
+        "count": len(actions),
+        "strategy": settings,
+        "cross_channel_actions": stock_attention,
+        "unlinked_sell_count": unlinked_sales,
+    }
+
+
+@router.get("/api/app/cross-channel-actions")
+def cross_channel_actions(context: RequestContext = Depends(require_context)):
+    with db.session_scope() as session:
+        rows = serialize_actions(session, context.workspace.id)
+        unlinked = session.execute(
+            select(models.Sale)
+            .where(
+                models.Sale.workspace_id == context.workspace.id,
+                models.Sale.direction == "sell",
+                models.Sale.inventory_item_id.is_(None),
+            )
+            .order_by(models.Sale.occurred_at.desc(), models.Sale.last_seen_at.desc())
+            .limit(500)
+        ).scalars().all()
+        unlinked_rows = [
+            {
+                "id": str(row.id),
+                "channel": row.channel,
+                "external_order_id": row.external_order_id,
+                "title": row.title,
+                "status": row.status,
+                "lifecycle_status": row.lifecycle_status,
+                "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
+            }
+            for row in unlinked
+            if sale_counts_as_sold(row)
+        ]
+    return {
+        "actions": rows,
+        "unlinked_sales": unlinked_rows,
+        "unlinked_sell_count": len(unlinked_rows),
+    }
+
+
+@router.post("/api/app/cross-channel-actions/{action_id}/acknowledge")
+def acknowledge_cross_channel_action(
+    action_id: uuid.UUID,
+    context: RequestContext = Depends(require_write_context),
+):
+    try:
+        with db.session_scope() as session:
+            action = acknowledge_manual_action(session, context.workspace.id, action_id)
+            result = {"id": str(action.id), "status": action.status}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "action": result}
+
+
+@router.post("/api/app/cross-channel-actions/{action_id}/retry")
+def retry_cross_channel_action(
+    action_id: uuid.UUID,
+    context: RequestContext = Depends(require_write_context),
+):
+    try:
+        with db.session_scope() as session:
+            action = retry_action(session, context.workspace.id, action_id)
+            result = {"id": str(action.id), "status": action.status}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "action": result}
+
+
+@router.post("/api/app/sales/{sale_id}/link")
+def link_sale_to_inventory(
+    sale_id: uuid.UUID,
+    payload: SaleLinkRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    with db.session_scope() as session:
+        sale = session.get(models.Sale, sale_id)
+        item = session.get(models.InventoryItem, payload.inventory_item_id)
+        if (
+            sale is None
+            or item is None
+            or sale.workspace_id != context.workspace.id
+            or item.workspace_id != context.workspace.id
+        ):
+            raise HTTPException(status_code=404, detail="Sale or inventory item not found")
+        sale.inventory_item_id = item.id
+        session.flush()
+        created = reconcile_sale_state(session, sale)
+        result = {
+            "sale_id": str(sale.id),
+            "inventory_item_id": str(item.id),
+            "actions_created": len(created),
+        }
+    return {"ok": True, **result}
 
 
 @router.get("/api/app/sales")
@@ -693,6 +806,7 @@ def sales(context: RequestContext = Depends(require_context)):
                 "id": str(row.id),
                 "channel": row.channel,
                 "external_order_id": row.external_order_id,
+                "inventory_item_id": str(row.inventory_item_id) if row.inventory_item_id else None,
                 "direction": row.direction,
                 "title": row.title,
                 "counterparty": row.counterparty,

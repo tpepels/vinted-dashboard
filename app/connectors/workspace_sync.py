@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 
 from app import db, models
 from app.constants import Channel, ItemCategory, ItemStatus, ListingStatus, SyncRunStatus
+from app.stock_policy import sale_counts_as_sold
 from app.workspace_bootstrap import (
     clean_isbn,
     get_or_create_bootstrap_workspace,
@@ -173,18 +174,31 @@ def recompute_inventory_item(session: Session, item: models.InventoryItem) -> No
     if not listings:
         return
 
-    statuses = {listing.status for listing in listings}
-    if ListingStatus.ACTIVE in statuses:
-        item.status = ItemStatus.ACTIVE
-        item.quantity = max(
-            (listing.quantity or 0) for listing in listings if listing.status == ListingStatus.ACTIVE
+    consuming_sales = session.execute(
+        select(models.Sale).where(
+            models.Sale.workspace_id == item.workspace_id,
+            models.Sale.inventory_item_id == item.id,
+            models.Sale.direction == "sell",
         )
-    elif statuses and statuses <= {ListingStatus.SOLD}:
+    ).scalars().all()
+    if any(sale_counts_as_sold(sale) for sale in consuming_sales):
         item.status = ItemStatus.SOLD
         item.quantity = 0
     else:
-        item.status = ItemStatus.ARCHIVED
-        item.quantity = 0
+        statuses = {listing.status for listing in listings}
+        if ListingStatus.ACTIVE in statuses:
+            item.status = ItemStatus.ACTIVE
+            item.quantity = max(
+                (listing.quantity or 0)
+                for listing in listings
+                if listing.status == ListingStatus.ACTIVE
+            )
+        elif statuses and statuses <= {ListingStatus.SOLD}:
+            item.status = ItemStatus.SOLD
+            item.quantity = 0
+        else:
+            item.status = ItemStatus.ARCHIVED
+            item.quantity = 0
 
     attributes = dict(item.attributes)
     for listing in listings:

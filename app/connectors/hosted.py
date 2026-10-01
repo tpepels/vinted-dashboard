@@ -17,6 +17,7 @@ import re
 import time
 import uuid
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 from datetime import datetime, timezone
 from typing import Any
 
@@ -448,4 +449,174 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
         "deletes": len(deletes),
         "inventory_filename": inventory_filename,
         "deletes_filename": deletes_filename,
+    }
+
+
+def _workspace_or_env_ebay_values(workspace_id: uuid.UUID) -> dict[str, str]:
+    if has_credentials(workspace_id, Channel.EBAY):
+        return _credentials(workspace_id, Channel.EBAY)
+    values = {
+        "oauth_token": os.getenv("EBAY_OAUTH_TOKEN", "").strip(),
+        "client_id": os.getenv("EBAY_CLIENT_ID", "").strip(),
+        "client_secret": os.getenv("EBAY_CLIENT_SECRET", "").strip(),
+        "refresh_token": os.getenv("EBAY_REFRESH_TOKEN", "").strip(),
+        "site_id": os.getenv("EBAY_SITE_ID", "0").strip() or "0",
+        "compatibility_level": os.getenv("EBAY_COMPATIBILITY_LEVEL", "1477").strip() or "1477",
+    }
+    if not values["oauth_token"] and not (
+        values["client_id"] and values["client_secret"] and values["refresh_token"]
+    ):
+        raise RuntimeError("eBay credentials are not configured")
+    return values
+
+
+def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
+    if has_credentials(workspace_id, Channel.BIBLIO):
+        return _credentials(workspace_id, Channel.BIBLIO)
+    username = os.getenv("BIBLIO_FTP_USERNAME", "").strip()
+    password = os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
+    if not username or not password:
+        raise RuntimeError("BIBLIO credentials are not configured")
+    return {
+        "host": os.getenv("BIBLIO_FTP_HOST", "ftp.biblio.com").strip() or "ftp.biblio.com",
+        "username": username,
+        "password": password,
+        "directory": os.getenv("BIBLIO_FTP_DIRECTORY", "").strip(),
+        "timeout_seconds": os.getenv("BIBLIO_FTP_TIMEOUT_SECONDS", "20").strip() or "20",
+        "filename_prefix": os.getenv("BIBLIO_FTP_FILENAME_PREFIX", "reseller-dashboard").strip()
+        or "reseller-dashboard",
+    }
+
+
+def close_ebay_workspace_listing(workspace_id: uuid.UUID, external_id: str) -> dict[str, Any]:
+    """End one eBay listing, idempotently.
+
+    We first read active inventory. If the listing is already absent, the close
+    is complete and no destructive API call is repeated.
+    """
+    values = _workspace_or_env_ebay_values(workspace_id)
+    active = _fetch_ebay_active(values)
+    if not any(str(row.get("source_id")) == str(external_id) for row in active):
+        return {"remote": "already_ended", "external_id": str(external_id)}
+
+    token = _ebay_access_token(values)
+    site_id = values.get("site_id", "0").strip() or "0"
+    compatibility = values.get("compatibility_level", "1477").strip() or "1477"
+    item_id = escape(str(external_id))
+    body = f"""<?xml version="1.0" encoding="utf-8"?>
+<EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>{item_id}</ItemID>
+  <EndingReason>NotAvailable</EndingReason>
+</EndItemRequest>"""
+    response = requests.post(
+        "https://api.ebay.com/ws/api.dll",
+        headers={
+            "Content-Type": "text/xml",
+            "X-EBAY-API-CALL-NAME": "EndItem",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": compatibility,
+            "X-EBAY-API-SITEID": site_id,
+            "X-EBAY-API-IAF-TOKEN": token,
+        },
+        data=body.encode("utf-8"),
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"eBay EndItem request failed ({response.status_code})")
+    root = ET.fromstring(response.content)
+    ns = {"e": "urn:ebay:apis:eBLBaseComponents"}
+    ack = root.findtext("e:Ack", namespaces=ns)
+    if ack not in {"Success", "Warning"}:
+        message = root.findtext(".//e:LongMessage", namespaces=ns) or "Unknown eBay EndItem error"
+        raise RuntimeError(message)
+    return {"remote": "ended", "external_id": str(external_id)}
+
+
+def _biblio_listing_row(workspace_id: uuid.UUID, listing_id: uuid.UUID) -> dict[str, Any]:
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, listing_id)
+        if (
+            listing is None
+            or listing.workspace_id != workspace_id
+            or listing.channel != Channel.BIBLIO
+        ):
+            raise RuntimeError("BIBLIO listing no longer exists")
+        item = session.get(models.InventoryItem, listing.inventory_item_id)
+        if item is None:
+            raise RuntimeError("BIBLIO master inventory item no longer exists")
+        attrs = dict(item.attributes or {})
+        extra = dict(listing.extra or {})
+        return {
+            "source_id": listing.external_id,
+            "sku": listing.external_sku or item.sku,
+            "title": listing.title or item.title,
+            "author": extra.get("author") or attrs.get("author"),
+            "description": extra.get("description") or attrs.get("description") or item.notes,
+            "isbn": extra.get("isbn") or attrs.get("isbn"),
+            "price_cents": listing.price_cents,
+            "currency": listing.currency or item.currency or "EUR",
+            "quantity": 0,
+            "status": ListingStatus.SOLD,
+        }
+
+
+def close_biblio_workspace_listing(
+    workspace_id: uuid.UUID,
+    listing_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Upload one explicit BIBLIO delete record.
+
+    This does not run a full inventory sync, so a sold-reconciliation action
+    cannot accidentally publish unrelated inventory changes.
+    """
+    row = _biblio_listing_row(workspace_id, listing_id)
+    values = _workspace_or_env_biblio_values(workspace_id)
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    prefix = re.sub(
+        r"[^A-Za-z0-9_-]+",
+        "-",
+        values.get("filename_prefix", "reseller-dashboard").strip() or "reseller-dashboard",
+    ).strip("-")
+    filename = f"{prefix}-{stamp}-deletes.txt"
+    started = datetime.now(timezone.utc)
+
+    try:
+        ftp = ftplib.FTP()
+        ftp.connect(
+            values.get("host", "ftp.biblio.com").strip() or "ftp.biblio.com",
+            timeout=_int(values.get("timeout_seconds"), 20) or 20,
+        )
+        ftp.login(values.get("username", ""), values.get("password", ""))
+        ftp.set_pasv(True)
+        directory = values.get("directory", "").strip()
+        if directory and directory not in {".", "./"}:
+            ftp.cwd(directory)
+        ftp.storbinary(f"STOR {filename}", io.BytesIO(_biblio_tsv([row], sold=True)))
+        try:
+            ftp.quit()
+        except Exception:
+            ftp.close()
+    except Exception as exc:
+        _record_biblio_run(
+            workspace_id,
+            status=SyncRunStatus.ERROR,
+            started_at=started,
+            active_count=0,
+            delete_count=1,
+            detail={"deletes_filename": filename, "cross_channel": True},
+            error=str(exc),
+        )
+        raise RuntimeError("BIBLIO delete upload failed") from exc
+
+    _record_biblio_run(
+        workspace_id,
+        status=SyncRunStatus.SUCCESS,
+        started_at=started,
+        active_count=0,
+        delete_count=1,
+        detail={"deletes_filename": filename, "cross_channel": True},
+    )
+    return {
+        "remote": "delete_uploaded",
+        "external_id": str(row.get("source_id") or ""),
+        "deletes_filename": filename,
     }

@@ -10,6 +10,8 @@ const state = {
   inventoryItems: [],
   listings: [],
   reconciliation: [],
+  crossChannelActions: [],
+  unlinkedSales: [],
   salesRows: [],
   editItemId: null,
   connectorChannel: null,
@@ -218,6 +220,59 @@ async function today() {
       + '</p></div><div class="action-tag">' + esc(row.action) + "</div></div>"
     ).join("")
     : '<div class="empty">Nothing needs attention right now.</div>';
+
+  renderStockActions(todayData.cross_channel_actions || [], todayData.unlinked_sell_count || 0);
+}
+
+function crossChannelActionControls(row) {
+  const open = row.listing?.url
+    ? '<a class="btn" target="_blank" rel="noreferrer" href="' + esc(row.listing.url) + '">Open listing</a>'
+    : "";
+  if (row.status === "attention") {
+    return open + '<button class="btn stock-ack" data-id="' + esc(row.id) + '">Mark handled</button>';
+  }
+  if (row.status === "error") {
+    return open + '<button class="btn stock-retry" data-id="' + esc(row.id) + '">Retry</button>';
+  }
+  return open;
+}
+
+function bindCrossChannelButtons(after) {
+  $(".stock-ack").forEach((button) => {
+    button.onclick = async () => {
+      try {
+        await api("/api/app/cross-channel-actions/" + button.dataset.id + "/acknowledge", { method: "POST" });
+        flash("Manual close marked handled.");
+        await after();
+      } catch (error) { flash(error.message, true); }
+    };
+  });
+  $(".stock-retry").forEach((button) => {
+    button.onclick = async () => {
+      try {
+        await api("/api/app/cross-channel-actions/" + button.dataset.id + "/retry", { method: "POST" });
+        flash("Remote close queued again.");
+        await after();
+      } catch (error) { flash(error.message, true); }
+    };
+  });
+}
+
+function renderStockActions(rows, unlinkedCount) {
+  $("#stock-alert-count").textContent = rows.length
+    ? rows.length + " active action" + (rows.length === 1 ? "" : "s")
+    : (unlinkedCount ? unlinkedCount + " unlinked sale" + (unlinkedCount === 1 ? "" : "s") : "Clear");
+  $("#stock-actions").innerHTML = rows.length
+    ? rows.map((row) =>
+      '<div class="action-row"><div><strong>' + esc(row.item?.title || row.listing?.title || "Sold item")
+      + '</strong><p>' + esc(row.channel) + " · " + esc(row.status)
+      + (row.last_error ? " · " + esc(row.last_error) : "")
+      + '</p></div><div class="actions compact">' + crossChannelActionControls(row) + "</div></div>"
+    ).join("")
+    : (unlinkedCount
+      ? '<div class="empty">' + unlinkedCount + ' sold order(s) still need a master-stock link. Use Reconcile.</div>'
+      : '<div class="empty">No cross-channel sold-stock actions need attention.</div>');
+  bindCrossChannelButtons(today);
 }
 
 async function inventory() {
@@ -360,8 +415,10 @@ function reconciliationItemLabel(item) {
   return item.sku + " · " + item.title + " · " + channels;
 }
 
-function renderReconciliation(data) {
+function renderReconciliation(data, crossData) {
   const suggestions = data.suggestions || [];
+  state.crossChannelActions = crossData.actions || [];
+  state.unlinkedSales = crossData.unlinked_sales || [];
   state.reconciliation = suggestions;
   $("#reconcile-summary").textContent = suggestions.length
     ? suggestions.length + " suggestion" + (suggestions.length === 1 ? "" : "s")
@@ -412,17 +469,48 @@ function renderReconciliation(data) {
       ) + "</option>"
     ).join("")
     : '<option value="">No inventory</option>';
+
+  $("#unlinked-sale-count").textContent = state.unlinkedSales.length
+    ? state.unlinkedSales.length + " needs review"
+    : "None";
+  $("#reconcile-sale").innerHTML = state.unlinkedSales.length
+    ? state.unlinkedSales.map((sale) =>
+      '<option value="' + esc(sale.id) + '">' + esc(
+        sale.channel + " · " + (sale.title || sale.external_order_id) + " · " + dateOnly(sale.occurred_at)
+      ) + "</option>"
+    ).join("")
+    : '<option value="">No unlinked sold orders</option>';
+  $("#reconcile-sale-item").innerHTML = state.inventoryItems.length
+    ? state.inventoryItems.map((item) =>
+      '<option value="' + esc(item.id) + '">' + esc(item.sku + " · " + item.title) + "</option>"
+    ).join("")
+    : '<option value="">No inventory</option>';
+
+  $("#cross-channel-log").innerHTML = state.crossChannelActions.length
+    ? '<table><thead><tr><th>Item</th><th>Triggered by</th><th>Target</th><th>Status</th><th>Attempts</th><th></th></tr></thead><tbody>'
+      + state.crossChannelActions.map((row) =>
+        '<tr><td><div class="title">' + esc(row.item?.title || row.listing?.title || "Sold item")
+        + '</div><div class="sub">' + esc(row.item?.sku || "") + '</div></td>'
+        + '<td>' + esc(row.sale?.channel || "") + '<div class="sub">' + esc(row.sale?.external_order_id || "") + '</div></td>'
+        + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + '</span><div class="sub">' + esc(row.listing?.title || "") + '</div></td>'
+        + '<td>' + esc(row.status) + (row.last_error ? '<div class="sub error">' + esc(row.last_error) + '</div>' : "") + '</td>'
+        + '<td>' + esc(row.attempts) + '</td><td class="row-actions">' + crossChannelActionControls(row) + '</td></tr>'
+      ).join("")
+      + "</tbody></table>"
+    : '<div class="empty">No cross-channel sold-stock actions yet.</div>';
+  bindCrossChannelButtons(reconcile);
 }
 
 async function reconcile() {
-  const [data, inventoryData, listingData] = await Promise.all([
+  const [data, inventoryData, listingData, crossData] = await Promise.all([
     api("/api/app/reconciliation"),
     api("/api/app/inventory"),
     api("/api/app/listings"),
+    api("/api/app/cross-channel-actions"),
   ]);
   state.inventoryItems = inventoryData.items || [];
   state.listings = listingData.listings || [];
-  renderReconciliation(data);
+  renderReconciliation(data, crossData);
 }
 
 $("#reconcile-refresh").onclick = () => reconcile().catch((error) => flash(error.message, true));
@@ -451,6 +539,25 @@ $("#reconcile-apply").onclick = async () => {
       body: JSON.stringify({ merges }),
     });
     flash("Merged " + result.count + " stock record" + (result.count === 1 ? "." : "s."));
+    await reconcile();
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
+
+$("#reconcile-sale-link").onclick = async () => {
+  const saleId = $("#reconcile-sale").value;
+  const itemId = $("#reconcile-sale-item").value;
+  if (!saleId || !itemId) return flash("Choose a sold order and master item.", true);
+  try {
+    const result = await api("/api/app/sales/" + saleId + "/link", {
+      method: "POST",
+      body: JSON.stringify({ inventory_item_id: itemId }),
+    });
+    flash(
+      "Sale linked. " + result.actions_created + " cross-channel close action"
+      + (result.actions_created === 1 ? " created." : "s created.")
+    );
     await reconcile();
   } catch (error) {
     flash(error.message, true);

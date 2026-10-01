@@ -53,6 +53,7 @@
       <section id="today" class="view active">
         <div id="today-metrics" class="metrics"></div>
         <div class="card"><div class="card-head"><h2>What should I do today?</h2></div><div id="today-actions"></div></div>
+        <div class="card stock-alerts"><div class="card-head inline-head"><div><h2>Sold stock across marketplaces</h2></div><span id="stock-alert-count" class="muted"></span></div><div id="stock-actions"></div></div>
       </section>
 
       <section id="inventory" class="view">
@@ -90,6 +91,19 @@
             <label>Master inventory item<select id="reconcile-item"></select></label>
           </div>
           <div class="actions"><button id="reconcile-manual" class="btn primary" type="button">Link to master item</button></div>
+        </div>
+        <div class="card form">
+          <div class="card-head inline-head"><div><p class="eyebrow">SOLD STOCK</p><h2>Link an unrecognized sale</h2></div><span id="unlinked-sale-count" class="muted"></span></div>
+          <p class="muted">Historical sales without an exact marketplace item ID are never guessed. Link one here only when you know which physical item was sold.</p>
+          <div class="form-grid">
+            <label>Sold order<select id="reconcile-sale"></select></label>
+            <label>Master inventory item<select id="reconcile-sale-item"></select></label>
+          </div>
+          <div class="actions"><button id="reconcile-sale-link" class="btn primary" type="button">Link sale and reconcile channels</button></div>
+        </div>
+        <div class="card table-wrap">
+          <div class="card-head"><h2>Cross-channel action log</h2></div>
+          <div id="cross-channel-log"></div>
         </div>
       </section>
 
