@@ -1,202 +1,281 @@
-# Vinted Dashboard
+# Reseller Dashboard
 
-A local Docker dashboard that reads directly from Vinted.
+A self-hostable reseller inventory and analytics platform with a Vinted-first
+Chrome bridge, generic master inventory, CSV/TSV/XLSX import/export and
+optional marketplace connectors.
 
-Configured for:
+The commercial architecture is category-neutral. Clothing is a normal/default
+reseller use case, while book metadata and the existing BIBLIO workflow remain
+fully supported for book sellers.
 
-- Vinted profile: https://www.vinted.pt/member/58344842
-- User ID: `58344842`
+## Quick start
 
-There is no Gmail/IMAP integration, CSV import, or locally reconstructed order history. Listings, notifications and transaction/order state come from Vinted.
-
-## Data sources
-
-The dashboard uses the same Vinted web endpoints that the Vinted site uses:
-
-- public profile + listings: `/api/v2/users/{id}` and `/api/v2/wardrobe/{id}/items`
-- authenticated account: `/api/v2/users/current`
-- notifications: `/api/v2/notifications` (with a web-notifications fallback)
-- buy/sell orders: `/api/v2/my_orders?type=sold|purchased&status=all`
-- conversation/inbox data is used only as a compatibility fallback if `my_orders` is unavailable
-
-Vinted does not document these web endpoints as a stable public API, so they can change. All endpoint-specific code is isolated in `app/vinted.py`.
-
-## Run
-
-```bash
+\`\`\`bash
 git clone https://github.com/tpepels/vinted-dashboard.git
 cd vinted-dashboard
 cp .env.example .env
-mkdir -p data
 docker compose up -d --build
-```
+\`\`\`
 
-Open:
+Open \`http://localhost:5050\` or your server's LAN address.
 
-```
-http://SERVER_IP:5050
-```
+The container automatically runs Alembic migrations. The default database is
+SQLite, so a fresh local install needs no separate database service. A small
+worker starts after the web health check and processes queued connector jobs.
 
-The public Listings view can work without an authenticated session. Notifications and buy/sell orders are read directly from Vinted's authenticated web API and require your Vinted web session.
+Useful checks:
 
-## Chrome session sync (recommended)
+\`\`\`bash
+curl http://localhost:5050/api/health
+curl http://localhost:5050/api/ready
+docker compose ps
+docker compose logs -f vinted-dashboard worker
+\`\`\`
 
-The easiest setup is the bundled Chrome extension. Open the dashboard, click **Chrome sync / session**, then **Download Chrome extension ZIP**.
+## Product model
 
-Install it once:
+The core object is a physical inventory item, not a marketplace listing:
 
-1. Extract the ZIP somewhere permanent.
-2. Open `chrome://extensions`.
-3. Enable **Developer mode**.
-4. Click **Load unpacked** and select the extracted folder.
-5. Click the **Vinted Dashboard Sync** extension and choose **Sync now**.
+\`\`\`text
+Inventory item / physical copy
+  SKU
+  title
+  quantity
+  condition
+  cost/location
+  category-specific metadata
 
-The extension is deliberately narrow: it runs only on `www.vinted.pt` and can talk only to `http://media-server:5050`. It does **not** export Vinted cookie values. Instead it reads the same Vinted JSON data that the signed-in page can access and sends the resulting listings, orders and notifications to the local dashboard.
+  Channel listings
+    Vinted
+    eBay
+    BIBLIO
+    future connectors
+\`\`\`
 
-It syncs every 10 minutes. If no Vinted tab is open, it briefly opens an inactive Vinted tab, collects the data, and closes it again. The server uses a fresh Chrome snapshot in preference to its own Vinted session and falls back to the server-side session when Chrome sync is stale or unavailable.
+Books can carry ISBN, author, publisher, edition, binding and publication year.
+Clothing can carry brand, size, colour, material and measurements. Marketplace
+records are linked underneath the same physical item.
 
-Direct download from the running dashboard:
+All commercial data is workspace-scoped. Users may belong to multiple
+workspaces; API access checks membership before exposing or mutating inventory.
 
-```
-http://media-server:5050/downloads/vinted-session-sync.zip
-```
+## Existing installations and migration
 
-## Manual Vinted session fallback
+The legacy Vinted/BIBLIO/eBay SQLite data is not discarded.
 
-This dashboard is read-only. It does not need your Vinted password.
+At startup, \`python -m app.legacy_migration\` performs an additive,
+idempotent backfill into the workspace/master-inventory schema. Existing
+legacy files remain untouched.
 
-From a browser where you are already signed in to `vinted.pt`:
+On an upgraded personal installation, the first real account registration
+claims the unclaimed bootstrap owner, so migrated history stays attached to
+that account.
 
-1. Open DevTools -> Network.
-2. Reload Vinted.
-3. Select a request to `www.vinted.pt`.
-4. Copy the request's complete `Cookie` header.
-5. Open the dashboard and click **Vinted session**.
-6. Paste the Cookie header and save it.
+The original personal UI remains available at:
 
-The cookie is stored only in `./data/vinted-session.cookie` on your server. That file is ignored by git and the container sets restrictive permissions.
+\`\`\`text
+/classic
+\`\`\`
 
-Alternatively set the complete cookie header in `.env`:
+Public hosted deployments should disable the classic UI/API with:
 
-```env
-VINTED_COOKIE=access_token_web=...; refresh_token_web=...; ...
-```
+\`\`\`env
+LEGACY_UI_ENABLED=false
+LEGACY_API_ENABLED=false
+LEGACY_COMPAT_SYNC=false
+\`\`\`
 
-You can also configure the two main token cookies separately:
+## Chrome bridge
 
-```env
-VINTED_ACCESS_TOKEN_WEB=
-VINTED_REFRESH_TOKEN_WEB=
-```
+There are deliberately two extension variants.
 
-Do not commit any of these values.
+### Commercial / paired bridge
 
-## Vinted / Cloudflare blocking
+\`app/extension\` is the thin Manifest V3 companion intended for Chrome Web
+Store distribution. It:
 
-The app deliberately refreshes slowly and caches Vinted responses for 60 seconds. If Vinted returns 403 or 429, the dashboard reports that state instead of retrying aggressively.
+- pairs with a workspace using a short-lived one-time code;
+- stores only a revocable dashboard bridge token;
+- reads the inventory/order/analytics data needed by the product from the
+  user's signed-in Vinted tab;
+- sends that snapshot to the paired workspace;
+- supports manual and periodic sync;
+- does not export the user's Vinted password or raw cookie values;
+- contains no dashboard business logic;
+- contains no rendered-market-research module or unattended destructive Vinted
+  actions.
 
-Running it from your home server is preferable to a datacenter/VPS IP.
+For local beta testing, download the development build directly from the
+running dashboard:
 
-## Configuration
+\`\`\`text
+/downloads/reseller-chrome-bridge.zip
+\`\`\`
 
-```env
-VINTED_BASE_URL=https://www.vinted.pt
-VINTED_USER_ID=58344842
-VINTED_PROFILE_URL=https://www.vinted.pt/member/58344842
-VINTED_USERNAME=tom_waits
-VINTED_CACHE_SECONDS=60
-VINTED_TIMEOUT_SECONDS=20
-```
+Extract it, open \`chrome://extensions\`, enable Developer mode, choose **Load
+unpacked**, then use **Connections -> Vinted -> Pair Chrome** in the web app.
 
-Optional:
+The bridge supports explicit Vinted web origins for the principal European
+markets rather than being tied to the original Portuguese account. On its
+first sync it uses an already-open signed-in Vinted tab and remembers that
+origin for later periodic syncs.
 
-```env
-VINTED_COOKIE=
-VINTED_ACCESS_TOKEN_WEB=
-VINTED_REFRESH_TOKEN_WEB=
-VINTED_ANON_ID=
-VINTED_CSRF_TOKEN=
-VINTED_USER_AGENT=
-```
+### Personal legacy extension
 
-## Multi-channel stock
+\`app/legacy_extension\` preserves the previous self-hosted extension,
+including the opt-in rendered market-research workflow used by the classic
+dashboard.
 
-The **Stock** view tracks active inventory across Vinted, BIBLIO and eBay.
+The classic download remains:
 
-### Vinted
+\`\`\`text
+/downloads/vinted-session-sync.zip
+\`\`\`
 
-Vinted stock is written automatically whenever the Chrome sync extension sends a fresh snapshot.
+## Import / export
 
-### BIBLIO
+The product UI supports CSV, TSV and XLSX inventory imports.
 
-BIBLIO is integrated through its official FTP inventory workflow.
+Flow:
 
-Configure the FTP account only in the server-side `.env`:
+1. upload a file;
+2. detect headers/delimiter/sheet;
+3. map incoming columns;
+4. preview new/updated/unchanged/conflicting records;
+5. optionally preview items that would be archived by a full snapshot;
+6. confirm and apply transactionally.
 
-```env
+Mappings can be saved as reusable presets. Malformed or duplicate-SKU imports
+are blocked instead of partially applied.
+
+Inventory exports are available as CSV or XLSX. Workspace account-data export
+is also available under Settings.
+
+## Connections
+
+Connector behavior is capability-driven rather than inferred from marketplace
+names.
+
+Current scope:
+
+- **Vinted** - paired Chrome bridge, listings/orders/history/analytics.
+- **CSV / TSV** - generic import/export.
+- **Excel** - generic import/export.
+- **BIBLIO** - existing import and FTP inventory/delete workflow for the
+  bootstrap/self-hosted workspace.
+- **eBay** - existing official seller inventory connector for the
+  bootstrap/self-hosted workspace.
+
+BIBLIO and eBay remain fully usable for the existing personal deployment, but
+are not falsely advertised as hosted multi-tenant integrations. Hosted
+workspace credential records can be stored encrypted, while their
+per-workspace sync adapters remain marked non-operational until implemented.
+
+### BIBLIO personal setup
+
+\`\`\`env
 BIBLIO_CURRENCY=EUR
 BIBLIO_FTP_HOST=ftp.biblio.com
 BIBLIO_FTP_USERNAME=
 BIBLIO_FTP_PASSWORD=
 BIBLIO_FTP_DIRECTORY=
-BIBLIO_FTP_TIMEOUT_SECONDS=20
-BIBLIO_FTP_FILENAME_PREFIX=vinted-dashboard
 BIBLIO_FTP_AUTO_SYNC=false
-```
+\`\`\`
 
-Recommended first setup:
+Keep the first upload manual and verify it in BIBLIOdirect before enabling
+automatic FTP sync.
 
-1. In BIBLIOdirect, request a complete active inventory download.
-2. Import that tab-delimited file once in **Stock -> BIBLIO -> Initial import / reconciliation**. BIBLIO's own download includes Book ID/SKU, author, title, description, price, status, ISBN and quantity, so it gives the local database enough data to safely reproduce inventory files.
-3. Click **Test FTP**.
-4. Click **Upload now** once and verify the upload in BIBLIOdirect's Upload History.
-5. After the format has been accepted by BIBLIO, set `BIBLIO_FTP_AUTO_SYNC=true` and rebuild/restart the container.
+### eBay personal setup
 
-The generated active inventory file is tab-delimited and contains the required Book ID, Author, Title, Description and Price fields, plus Status, ISBN and Quantity.
+Either set \`EBAY_OAUTH_TOKEN\`, or configure refreshable OAuth with
+\`EBAY_CLIENT_ID\`, \`EBAY_CLIENT_SECRET\` and \`EBAY_REFRESH_TOKEN\`.
 
-Inactive/sold records are sent separately in a filename containing `deletes`, which is BIBLIO's documented FTP convention for delete-only uploads. Successfully sent deletes are not resent forever.
+## Authentication, security and billing
 
-The connector deliberately refuses to upload active listings that are missing BIBLIO's required fields. If automatic sync is enabled and only deletes are pending, those deletes can still be sent safely while the active upload waits for a complete initial import.
+The hosted app uses:
 
-The old file import remains available as a reconciliation/restore path.
+- PBKDF2-SHA256 password hashes;
+- opaque revocable server-side web sessions;
+- CSRF protection for mutating browser requests;
+- workspace membership checks;
+- separate revocable Chrome bridge credentials;
+- encrypted connector credential payloads;
+- rate limiting on login/registration/pairing;
+- secure-cookie mode for production;
+- account/workspace data export and deletion endpoints.
 
-### eBay
+Local/beta billing is disabled by default:
 
-eBay stock uses the official Trading API `GetMyeBaySelling` call and retrieves the authenticated seller's active listings.
+\`\`\`env
+BILLING_ENABLED=false
+\`\`\`
 
-For a short-lived setup, provide a current user OAuth access token:
+Stripe checkout, webhooks and customer-portal plumbing can be enabled later
+without changing the product domain model. Chrome Web Store is distribution,
+not the payment processor.
 
-```env
-EBAY_OAUTH_TOKEN=
-```
+See \`docs/security.md\` before public launch.
 
-For automatic access-token renewal, configure:
+## Chrome Web Store build
 
-```env
-EBAY_CLIENT_ID=
-EBAY_CLIENT_SECRET=
-EBAY_REFRESH_TOKEN=
-EBAY_SITE_ID=0
-EBAY_COMPATIBILITY_LEVEL=1477
-```
+Development package:
 
-Keep eBay client secrets and tokens only in the server-side `.env`; never commit them.
+\`\`\`bash
+python scripts/build_extension.py \
+  --mode dev \
+  --api-origin http://localhost:5050 \
+  --output dist/reseller-chrome-bridge-dev.zip
+\`\`\`
 
-## Health and diagnostics
+Store package:
 
-```bash
-curl http://localhost:5050/api/health
-curl http://localhost:5050/api/diagnostics
-```
+\`\`\`bash
+python scripts/build_extension.py \
+  --mode store \
+  --api-origin https://YOUR-DOMAIN \
+  --version 2.0.0 \
+  --output dist/reseller-chrome-bridge.zip
+\`\`\`
 
-Diagnostics reports which Vinted endpoints respond, without returning your authentication cookie.
+Store builds require HTTPS, forbid \`<all_urls>\`, reject unresolved build
+placeholders and exclude development secrets/source maps.
 
-## Tests
+Tag builds create a Store-ready GitHub Actions artifact. Publishing is a
+separate manual workflow action. See \`docs/chrome-web-store.md\`.
 
-```bash
+## Hosted deployment
+
+The production shape is intentionally small:
+
+\`\`\`text
+HTTPS web container
+PostgreSQL
+small worker
+Chrome companion
+\`\`\`
+
+A Render reference deployment is provided in \`render.yaml\`. Nothing in the
+application depends on Render; any container host with PostgreSQL works.
+
+See \`docs/deployment.md\` for local, Postgres and hosted instructions.
+
+## Development and tests
+
+\`\`\`bash
 python -m pytest -q
-```
+node --check app/product_static/app.js
+python scripts/build_extension.py \
+  --mode store \
+  --api-origin https://example.invalid \
+  --output /tmp/chrome-bridge.zip
+\`\`\`
 
-## Security
+CI additionally runs Alembic to head and builds the Docker image.
 
-This is intended to run on your LAN. Your Vinted session cookie grants access to your account. Do not expose this dashboard directly to the public internet.
+## Vinted platform boundary
+
+The commercial extension is intentionally not designed as an automation or
+anti-bot product. Do not add bot-evasion, automated likes/messages, mass
+relisting or unattended destructive Vinted actions. Browser-side Vinted logic
+is isolated behind the connector/bridge so it can be changed or disabled
+without affecting master inventory, import/export, eBay/BIBLIO or account data.

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Vinted Dashboard Sync",
-  "version": "1.2.1",
-  "description": "Syncs Vinted inventory and analytics, with market research from real rendered Vinted catalog pages.",
+  "name": "Reseller Dashboard Chrome Bridge",
+  "version": "2.0.0",
+  "description": "Connects your signed-in Vinted tab to your reseller workspace for inventory and analytics sync.",
   "permissions": [
     "storage",
     "alarms",
@@ -11,7 +11,16 @@
   ],
   "host_permissions": [
     "https://www.vinted.pt/*",
-    "http://media-server/*"
+    "https://www.vinted.fr/*",
+    "https://www.vinted.nl/*",
+    "https://www.vinted.be/*",
+    "https://www.vinted.it/*",
+    "https://www.vinted.es/*",
+    "https://www.vinted.lu/*",
+    "https://www.vinted.co.uk/*",
+    "https://www.vinted.de/*",
+    "https://www.vinted.pl/*",
+    "__API_HOST_PERMISSION__"
   ],
   "background": {
     "service_worker": "background.js"
@@ -19,7 +28,16 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.vinted.pt/*"
+        "https://www.vinted.pt/*",
+        "https://www.vinted.fr/*",
+        "https://www.vinted.nl/*",
+        "https://www.vinted.be/*",
+        "https://www.vinted.it/*",
+        "https://www.vinted.es/*",
+        "https://www.vinted.lu/*",
+        "https://www.vinted.co.uk/*",
+        "https://www.vinted.de/*",
+        "https://www.vinted.pl/*"
       ],
       "js": [
         "content.js"
@@ -28,7 +46,7 @@
     }
   ],
   "action": {
-    "default_title": "Vinted Dashboard Sync",
+    "default_title": "Reseller Dashboard Chrome Bridge",
     "default_popup": "popup.html"
   }
 }

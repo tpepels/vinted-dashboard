@@ -16,4 +16,11 @@ jobs:
       - run: python -m compileall -q app
       - run: python -m pytest -q
       - run: node --check app/static/app.js
+      - run: node --check app/product_static/app.js
+      - run: node --check app/extension/background.js
+      - run: node --check app/extension/content.js
+      - run: alembic upgrade head
+        env:
+          DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
+      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --output /tmp/chrome-bridge.zip
       - run: docker build -t vinted-dashboard:test .

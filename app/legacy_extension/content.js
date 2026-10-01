@@ -53,10 +53,96 @@ async function collectVintedData(researchJobs=[]){
   return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[]};
 }
 
+function parseCatalogPrice(text){
+  const source=String(text||"").replace(/\u00a0/g," ");
+  const patterns=[
+    /€\s*([0-9]+(?:[.,][0-9]{1,2})?)/,
+    /([0-9]+(?:[.,][0-9]{1,2})?)\s*€/,
+    /EUR\s*([0-9]+(?:[.,][0-9]{1,2})?)/i,
+    /([0-9]+(?:[.,][0-9]{1,2})?)\s*EUR/i
+  ];
+  for(const pattern of patterns){
+    const match=source.match(pattern);
+    if(!match)continue;
+    const value=Number.parseFloat(match[1].replace(",","."));
+    if(Number.isFinite(value)&&value>0)return Math.round(value*100);
+  }
+  return null;
+}
+
+function catalogCardFor(anchor){
+  let node=anchor;
+  for(let depth=0;depth<7&&node;depth++,node=node.parentElement){
+    const text=String(node.innerText||node.textContent||"");
+    if(parseCatalogPrice(text)!==null&&text.length<1800)return node;
+  }
+  return anchor.parentElement||anchor;
+}
+
+function titleFromCatalogCard(anchor,card,id){
+  const candidates=[
+    anchor.getAttribute("title"),
+    anchor.getAttribute("aria-label"),
+    anchor.querySelector("img")?.getAttribute("alt"),
+    card?.querySelector("img")?.getAttribute("alt")
+  ].filter(Boolean);
+  for(const candidate of candidates){
+    const text=String(candidate).trim();
+    if(text&&text.length>2&&!/^imagem|^image$/i.test(text))return text;
+  }
+  try{
+    const url=new URL(anchor.href,location.origin);
+    const match=url.pathname.match(new RegExp("/items/"+id+"-([^/?#]+)"));
+    if(match)return decodeURIComponent(match[1]).replaceAll("-"," ").trim();
+  }catch{}
+  const text=String(anchor.textContent||"").trim().replace(/\s+/g," ");
+  return text||"Vinted listing";
+}
+
+async function scrapeMarketPage(){
+  window.scrollTo(0,Math.min(document.body.scrollHeight,1800));
+  await new Promise(resolve=>setTimeout(resolve,700));
+
+  const results=[];
+  const seen=new Set();
+  const anchors=[...document.querySelectorAll('a[href*="/items/"]')];
+  for(const anchor of anchors){
+    let url;
+    try{url=new URL(anchor.href,location.origin)}catch{continue}
+    const match=url.pathname.match(/\/items\/(\d+)/);
+    if(!match)continue;
+    const id=match[1];
+    if(seen.has(id))continue;
+    const card=catalogCardFor(anchor);
+    const price=parseCatalogPrice(card?.innerText||card?.textContent||"");
+    if(price===null)continue;
+    const title=titleFromCatalogCard(anchor,card,id);
+    seen.add(id);
+    results.push({
+      id,
+      title,
+      price_cents:price,
+      currency:"EUR",
+      url:url.href.split("?")[0]
+    });
+    if(results.length>=60)break;
+  }
+  return{
+    results,
+    anchors_seen:anchors.length,
+    cards_with_price:results.length,
+    page_title:document.title,
+    page_url:location.href
+  };
+}
 
 chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
   if(message?.type==="collect-vinted-data"){
     collectVintedData().then(snapshot=>sendResponse({ok:true,snapshot})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
+    return true;
+  }
+  if(message?.type==="scrape-market-page"){
+    scrapeMarketPage().then(result=>sendResponse({ok:true,...result})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
     return true;
   }
 });

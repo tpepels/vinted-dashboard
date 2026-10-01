@@ -9,8 +9,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-RUN mkdir -p /app/data && chmod 700 /app/data
+COPY migrations ./migrations
+COPY alembic.ini .
+COPY docker-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh && mkdir -p /app/data && chmod 700 /app/data
 
 EXPOSE 8000
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["uvicorn", "app.entry:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from sqlalchemy import text
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -23,9 +24,12 @@ from app.vinted import (
 
 
 BASE_DIR = Path(__file__).resolve().parent
+APP_NAME = os.getenv("APP_NAME", "Reseller Dashboard").strip() or "Reseller Dashboard"
+LEGACY_UI_ENABLED = os.getenv("LEGACY_UI_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
-app = FastAPI(title="Vinted Dashboard", version="0.2.0")
+app = FastAPI(title=APP_NAME, version="1.0.0")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.mount("/app-static", StaticFiles(directory=BASE_DIR / "product_static"), name="app-static")
 
 client = VintedClient()
 CACHE_SECONDS = int(os.getenv("VINTED_CACHE_SECONDS", "60"))
@@ -232,12 +236,35 @@ def clear_cache() -> None:
 
 @app.get("/")
 def index():
+    return FileResponse(BASE_DIR / "product_static" / "index.html")
+
+
+@app.get("/privacy")
+def privacy():
+    return FileResponse(BASE_DIR / "product_static" / "privacy.html")
+
+
+@app.get("/classic")
+def classic():
+    if not LEGACY_UI_ENABLED:
+        raise HTTPException(status_code=404, detail="Classic dashboard is disabled")
     return FileResponse(BASE_DIR / "static" / "index.html")
 
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "source": "vinted"}
+    return {"ok": True, "app": APP_NAME}
+
+
+@app.get("/api/ready")
+def ready():
+    try:
+        from app import db
+        with db.session_scope() as session:
+            session.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database is not ready") from exc
+    return {"ok": True}
 
 
 @app.get("/api/dashboard")

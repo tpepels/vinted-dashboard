@@ -1,21 +1,9 @@
-Vinted Dashboard Chrome Sync
+Reseller Dashboard Chrome Bridge
 
-Installation:
-1. Extract this ZIP somewhere permanent.
-2. Open chrome://extensions
-3. Enable Developer mode.
-4. Click "Load unpacked".
-5. Select the extracted folder.
-6. Pin "Vinted Dashboard Sync" if you want easy access.
-7. Click the extension icon and press "Sync now".
+This is the Chrome Web Store source variant. Build it with scripts/build_extension.py.
+It pairs with a reseller workspace using a short-lived code and stores only the
+revocable dashboard bridge token in chrome.storage.local. It does not export
+Vinted password or cookie values.
 
-Configured for:
-- Vinted: https://www.vinted.pt
-- Dashboard: http://media-server:5050
-
-The extension automatically syncs every 10 minutes. If no Vinted tab is open,
-it briefly opens an inactive Vinted tab, reads the account data through Vinted's
-own web API, syncs the resulting dashboard data to your local server, and closes
-the temporary tab again.
-
-It does not export Vinted cookie values.
+The separate app/legacy_extension directory preserves the self-hosted personal
+variant, including the older opt-in market-research workflow.
