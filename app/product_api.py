@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 
 from app import billing, db, jobs, models
 from app.channels import parse_biblio_inventory
@@ -390,6 +390,84 @@ def inventory(
             "items": [_serialize_item(item, by_item.get(item.id, [])) for item in items],
             "count": len(items),
         }
+
+
+@router.get("/api/app/listings")
+def listings(
+    channel: str = "",
+    context: RequestContext = Depends(require_context),
+):
+    """Workspace listing feed with the latest analytics snapshot.
+
+    Filtering/sorting is intentionally done in the product UI so the old
+    Vinted-style controls remain instant while the same view can include
+    multiple marketplaces.
+    """
+    with db.session_scope() as session:
+        latest_snapshot = (
+            select(
+                models.ListingSnapshot.channel_listing_id.label("listing_id"),
+                func.max(models.ListingSnapshot.captured_at).label("captured_at"),
+            )
+            .group_by(models.ListingSnapshot.channel_listing_id)
+            .subquery()
+        )
+        query = (
+            select(models.ChannelListing, models.ListingSnapshot)
+            .outerjoin(
+                latest_snapshot,
+                latest_snapshot.c.listing_id == models.ChannelListing.id,
+            )
+            .outerjoin(
+                models.ListingSnapshot,
+                and_(
+                    models.ListingSnapshot.channel_listing_id == models.ChannelListing.id,
+                    models.ListingSnapshot.captured_at == latest_snapshot.c.captured_at,
+                ),
+            )
+            .where(models.ChannelListing.workspace_id == context.workspace.id)
+        )
+        if channel.strip():
+            query = query.where(models.ChannelListing.channel == channel.strip().lower())
+        rows = session.execute(
+            query.order_by(models.ChannelListing.first_seen_at.desc()).limit(5000)
+        ).all()
+
+    result = []
+    for listing, snapshot in rows:
+        listed_at = (listing.extra or {}).get("listed_at")
+        if not listed_at:
+            listed_at = listing.first_seen_at.isoformat() if listing.first_seen_at else None
+        result.append(
+            {
+                "id": str(listing.id),
+                "inventory_item_id": (
+                    str(listing.inventory_item_id) if listing.inventory_item_id else None
+                ),
+                "channel": listing.channel,
+                "external_id": listing.external_id,
+                "external_sku": listing.external_sku,
+                "title": listing.title,
+                "status": listing.status,
+                "price_cents": listing.price_cents,
+                "currency": listing.currency,
+                "quantity": listing.quantity,
+                "url": listing.url,
+                "listed_at": listed_at,
+                "first_seen_at": (
+                    listing.first_seen_at.isoformat() if listing.first_seen_at else None
+                ),
+                "last_seen_at": (
+                    listing.last_seen_at.isoformat() if listing.last_seen_at else None
+                ),
+                "views": snapshot.views if snapshot else None,
+                "favourites": snapshot.favourites if snapshot else None,
+                "snapshot_at": (
+                    snapshot.captured_at.isoformat() if snapshot else None
+                ),
+            }
+        )
+    return {"listings": result, "count": len(result)}
 
 
 @router.post("/api/app/inventory")
