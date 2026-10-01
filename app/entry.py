@@ -34,6 +34,7 @@ from app.channels import (
 
 BROWSER_SYNC_FILE = Path("/app/data/vinted-browser-sync.json")
 EXTENSION_DIR = Path(__file__).resolve().parent / "extension"
+LEGACY_EXTENSION_DIR = Path(__file__).resolve().parent / "legacy_extension"
 MAX_AGE_SECONDS = int(os.getenv("VINTED_BROWSER_SYNC_MAX_AGE_SECONDS", "1200"))
 
 
@@ -240,42 +241,81 @@ def browser_sync_status():
     }
 
 
-def _extension_zip(dashboard_url: str) -> bytes:
-    if not EXTENSION_DIR.exists():
+def _zip_directory(
+    directory: Path,
+    replacements: dict[str, str] | None = None,
+) -> bytes:
+    if not directory.exists():
         raise HTTPException(status_code=404, detail="Extension files are not installed")
+    replacements = replacements or {}
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(directory.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(directory)
+            if path.suffix.lower() in {".js", ".json", ".html", ".txt", ".css"}:
+                text = path.read_text(encoding="utf-8")
+                for old, new in replacements.items():
+                    text = text.replace(old, new)
+                archive.writestr(str(relative), text)
+            else:
+                archive.write(path, relative)
+    return buffer.getvalue()
 
+
+def _legacy_extension_zip(dashboard_url: str) -> bytes:
     from urllib.parse import urlparse
 
     origin = dashboard_url.rstrip("/")
     parsed = urlparse(origin)
     host = parsed.hostname or "media-server"
     dashboard_pattern = f"{parsed.scheme or 'http'}://{host}/*"
+    return _zip_directory(
+        LEGACY_EXTENSION_DIR,
+        {
+            "http://media-server:5050": origin,
+            "http://media-server/*": dashboard_pattern,
+        },
+    )
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(EXTENSION_DIR.rglob("*")):
-            if not path.is_file():
-                continue
 
-            relative = path.relative_to(EXTENSION_DIR)
-            if path.suffix.lower() in {".js", ".json", ".html", ".txt"}:
-                text = path.read_text(encoding="utf-8")
-                text = text.replace("http://media-server:5050", origin)
-                text = text.replace("http://media-server/*", dashboard_pattern)
-                archive.writestr(str(relative), text)
-            else:
-                archive.write(path, relative)
+def _paired_extension_zip(dashboard_url: str) -> bytes:
+    from urllib.parse import urlparse
 
-    return buffer.getvalue()
+    origin = dashboard_url.rstrip("/")
+    parsed = urlparse(origin)
+    scheme = parsed.scheme or "http"
+    host = parsed.hostname or "localhost"
+    host_permission = f"{scheme}://{host}/*"
+    return _zip_directory(
+        EXTENSION_DIR,
+        {
+            "__API_ORIGIN__": origin,
+            "__API_HOST_PERMISSION__": host_permission,
+        },
+    )
 
 
 @app.get("/downloads/vinted-session-sync.zip")
-def download_extension(request: Request):
+def download_legacy_extension(request: Request):
     dashboard_url = str(request.base_url).rstrip("/")
     return Response(
-        content=_extension_zip(dashboard_url),
+        content=_legacy_extension_zip(dashboard_url),
         media_type="application/zip",
         headers={
             "Content-Disposition": 'attachment; filename="vinted-dashboard-session-sync.zip"'
+        },
+    )
+
+
+@app.get("/downloads/reseller-chrome-bridge.zip")
+def download_paired_extension(request: Request):
+    dashboard_url = str(request.base_url).rstrip("/")
+    return Response(
+        content=_paired_extension_zip(dashboard_url),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="reseller-dashboard-chrome-bridge.zip"'
         },
     )
