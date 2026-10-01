@@ -33,6 +33,7 @@ CHANNEL_DISPLAY_NAMES = {
     Channel.VINTED: "Vinted",
     Channel.EBAY: "eBay",
     Channel.BIBLIO: "BIBLIO",
+    Channel.ABEBOOKS: "AbeBooks",
 }
 
 
