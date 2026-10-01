@@ -2,6 +2,9 @@
 set -euo pipefail
 cd /app
 
+echo "entrypoint: validating runtime configuration..."
+python -m app.runtime_config
+
 if [[ "${RUN_MIGRATIONS:-true}" == "true" ]]; then
   echo "entrypoint: applying database migrations..."
   attempt=0

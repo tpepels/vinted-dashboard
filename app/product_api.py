@@ -223,6 +223,7 @@ def _serialize_workspace(workspace: models.Workspace) -> dict[str, Any]:
         "name": workspace.name,
         "slug": workspace.slug,
         "billing_status": workspace.billing_status,
+        "trial_ends_at": workspace.trial_ends_at.isoformat() if workspace.trial_ends_at else None,
         "settings": dict(workspace.settings or {}),
     }
 
@@ -324,11 +325,13 @@ def register(payload: RegisterRequest, request: Request, response: Response):
         ).scalars().first()
         if membership is None:
             name = (payload.workspace_name or f"{user.display_name}'s workspace").strip()
+            billing_status, trial_ends_at = billing.new_workspace_billing()
             workspace = models.Workspace(
                 name=name,
                 slug=_unique_slug(session, name),
                 is_personal=True,
-                billing_status=BillingStatus.TRIALING if billing.BILLING_ENABLED else BillingStatus.DEV,
+                billing_status=billing_status,
+                trial_ends_at=trial_ends_at,
                 settings={
                     "onboarding": {
                         "completed": False,
@@ -404,6 +407,10 @@ def me(request: Request, context: RequestContext = Depends(require_context)):
         ],
         "csrf_token": _csrf_from_request(request),
         "app_name": APP_NAME,
+        "billing": {
+            "enabled": billing.BILLING_ENABLED,
+            **billing.write_access(context.workspace),
+        },
     }
 
 
@@ -1873,6 +1880,12 @@ def complete_pairing(payload: PairingCompleteRequest, request: Request):
         ).scalar_one_or_none()
         if pairing is None:
             raise HTTPException(status_code=400, detail="Pairing code is invalid or expired")
+        workspace = session.get(models.Workspace, pairing.workspace_id)
+        if workspace is None or not billing.workspace_can_write(workspace):
+            raise HTTPException(
+                status_code=402,
+                detail="Workspace is read-only until the subscription is active or trialing",
+            )
         raw_token = secrets.token_urlsafe(42)
         credential = ExtensionCredential(
             workspace_id=pairing.workspace_id,
@@ -1912,6 +1925,11 @@ def extension_browser_sync(
     payload: WorkspaceBrowserSyncPayload,
     context: RequestContext = Depends(extension_context),
 ):
+    if not billing.workspace_can_write(context.workspace):
+        raise HTTPException(
+            status_code=402,
+            detail="Workspace is read-only until the subscription is active or trialing",
+        )
     data = payload.model_dump()
     version = payload.extension_version or (
         context.extension.extension_version if context.extension else None
@@ -1948,6 +1966,7 @@ def get_settings(context: RequestContext = Depends(require_context)):
             "provider": info.provider,
             "status": info.status,
             "customer_configured": bool(info.customer_id),
+            **billing.write_access(context.workspace),
         },
         "security": {
             "derived_encryption_key": using_derived_key(),

@@ -219,3 +219,19 @@ class CrossChannelAction(Base):
         UTCDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class ServiceHeartbeat(Base):
+    """Latest liveness observation for a separate service process."""
+
+    __tablename__ = "service_heartbeats"
+
+    service: Mapped[str] = mapped_column(String(50), primary_key=True)
+    instance_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        UTCDateTime,
+        nullable=False,
+        default=_utcnow,
+        index=True,
+    )
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)

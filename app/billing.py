@@ -16,6 +16,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -28,6 +29,7 @@ BILLING_ENABLED = os.getenv("BILLING_ENABLED", "false").strip().lower() in {
     "1", "true", "yes", "on"
 }
 BILLING_PROVIDER = os.getenv("BILLING_PROVIDER", "stripe").strip().lower() or "stripe"
+BILLING_TRIAL_DAYS = max(1, int(os.getenv("BILLING_TRIAL_DAYS", "14")))
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,61 @@ class BillingSummary:
     provider: str | None
     status: str
     customer_id: str | None
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def new_workspace_billing() -> tuple[str, datetime | None]:
+    if not BILLING_ENABLED:
+        return BillingStatus.DEV, None
+    return BillingStatus.TRIALING, utcnow() + timedelta(days=BILLING_TRIAL_DAYS)
+
+
+def workspace_can_write(workspace: models.Workspace, *, now: datetime | None = None) -> bool:
+    """Whether normal product mutations are allowed for this workspace."""
+    if not BILLING_ENABLED:
+        return True
+    if workspace.billing_status == BillingStatus.ACTIVE:
+        return True
+    if workspace.billing_status != BillingStatus.TRIALING:
+        return False
+    if workspace.trial_ends_at is None:
+        return False
+    current = now or utcnow()
+    return workspace.trial_ends_at > current
+
+
+def write_access(workspace: models.Workspace) -> dict[str, Any]:
+    allowed = workspace_can_write(workspace)
+    trial_expired = (
+        BILLING_ENABLED
+        and workspace.billing_status == BillingStatus.TRIALING
+        and (
+            workspace.trial_ends_at is None
+            or workspace.trial_ends_at <= utcnow()
+        )
+    )
+    return {
+        "allowed": allowed,
+        "read_only": not allowed,
+        "status": workspace.billing_status,
+        "trial_ends_at": (
+            workspace.trial_ends_at.isoformat()
+            if workspace.trial_ends_at
+            else None
+        ),
+        "reason": (
+            None
+            if allowed
+            else (
+                "Trial has expired. Choose or restore a subscription to make changes."
+                if trial_expired
+                else "Subscription action is required before marketplace or inventory changes can be made."
+            )
+        ),
+    }
 
 
 def summary(workspace: models.Workspace) -> BillingSummary:
@@ -185,6 +242,7 @@ def apply_stripe_event(event: dict[str, Any]) -> None:
 
         if event_type == "checkout.session.completed":
             workspace.billing_status = BillingStatus.ACTIVE
+            workspace.trial_ends_at = None
             return
         if event_type.startswith("customer.subscription."):
             status = str(obj.get("status") or "")
@@ -198,5 +256,17 @@ def apply_stripe_event(event: dict[str, Any]) -> None:
             }
             if event_type == "customer.subscription.deleted":
                 workspace.billing_status = BillingStatus.CANCELED
+                workspace.trial_ends_at = None
             elif status in mapping:
                 workspace.billing_status = mapping[status]
+                if status == "trialing":
+                    trial_end = obj.get("trial_end")
+                    try:
+                        workspace.trial_ends_at = datetime.fromtimestamp(
+                            int(trial_end),
+                            tz=timezone.utc,
+                        ) if trial_end else None
+                    except (TypeError, ValueError, OSError):
+                        workspace.trial_ends_at = None
+                else:
+                    workspace.trial_ends_at = None

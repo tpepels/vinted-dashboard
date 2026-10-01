@@ -2,9 +2,10 @@
 
 Before giving the hosted beta to external users:
 
+- set \`APP_ENV=production\` so insecure fallback configuration fails startup;
 - use HTTPS and \`COOKIE_SECURE=true\`;
 - use managed PostgreSQL rather than the local SQLite file;
-- set unique strong \`APP_SECRET_KEY\` and Fernet \`APP_ENCRYPTION_KEY\`;
+- set a dedicated Fernet \`APP_ENCRYPTION_KEY\`; do not use derived-key mode;
 - disable \`LEGACY_UI_ENABLED\`, \`LEGACY_API_ENABLED\` and
   \`LEGACY_COMPAT_SYNC\`;
 - publish the final privacy policy and company/controller contact details;
@@ -14,6 +15,7 @@ Before giving the hosted beta to external users:
 - configure billing only when plan IDs/prices have actually been chosen;
 - keep marketplace, Stripe and Chrome publishing credentials in deployment/CI
   secrets, never in the repository;
+- run \`python scripts/hosted_smoke.py https://your-domain\` and verify the worker heartbeat;
 - test account data export and workspace deletion in staging;
 - review Vinted/platform terms before expanding browser-side actions.
 

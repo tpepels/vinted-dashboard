@@ -55,16 +55,21 @@ Backup/restore procedures are in `docs/backup-restore.md`.
 The application is provider-neutral: one web container, one worker process and
 PostgreSQL. The reference \`render.yaml\` shows a Render deployment.
 
-Fresh installs already default legacy compatibility surfaces off. Before a public deployment set at least:
+Set \`APP_ENV=production\` on every hosted container. Production startup
+validates configuration before migrations or application startup and refuses
+development fallbacks. It requires:
 
-- \`DATABASE_URL\` to managed PostgreSQL
-- \`APP_SECRET_KEY\` to a long random value
-- \`APP_ENCRYPTION_KEY\` to a Fernet key
-- \`PUBLIC_APP_URL=https://your-domain\`
-- \`COOKIE_SECURE=true\`
-- \`LEGACY_UI_ENABLED=false\`
-- \`LEGACY_API_ENABLED=false\`
-- \`LEGACY_COMPAT_SYNC=false\`
+- managed PostgreSQL in \`DATABASE_URL\`;
+- a valid Fernet \`APP_ENCRYPTION_KEY\` (derived-key mode is rejected);
+- a bare non-local \`PUBLIC_APP_URL=https://your-domain\`;
+- \`COOKIE_SECURE=true\`;
+- legacy UI/API/compatibility sync disabled;
+- extension market-research disabled;
+- password hashing/session lifetime within production bounds;
+- complete Stripe credentials if billing is enabled.
+
+\`APP_SECRET_KEY\` is only the local fallback used to derive an encryption key
+when \`APP_ENCRYPTION_KEY\` is absent. Production does not use that fallback.
 
 Generate an encryption key:
 
@@ -72,25 +77,39 @@ Generate an encryption key:
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 \`\`\`
 
-Billing can stay disabled for a private beta. Later enable Stripe with
-\`BILLING_ENABLED=true\`, \`STRIPE_SECRET_KEY\`, \`STRIPE_PRICE_ID\` and
-\`STRIPE_WEBHOOK_SECRET\`.
+Billing can stay disabled for a private beta. If enabled, new workspaces get a
+finite \`BILLING_TRIAL_DAYS\` trial (14 by default). Active/trialing workspaces
+can mutate data; past-due, canceled or expired-trial workspaces remain readable
+but normal product mutations and Chrome sync are blocked. Billing checkout,
+portal access, credential/device revocation, data export and workspace deletion
+remain available.
+
+Enable Stripe with \`BILLING_ENABLED=true\`, \`STRIPE_SECRET_KEY\`,
+\`STRIPE_PRICE_ID\` and \`STRIPE_WEBHOOK_SECRET\`.
 
 ### Render reference
 
 1. Create a new Blueprint from this repository using \`render.yaml\`.
 2. Set the secret environment variables marked \`sync: false\`.
 3. Deploy the web and worker services.
-4. Point a custom domain at the web service in Render and update
-   \`PUBLIC_APP_URL\` to that HTTPS origin.
+4. Point a custom domain at the web service and set \`PUBLIC_APP_URL\` to that
+   HTTPS origin on both hosted services.
 5. Set the same origin as GitHub repository variable \`PUBLIC_APP_URL\` for
    Chrome extension release builds.
 6. Leave legacy APIs disabled on a public instance.
+7. After both services are healthy, run:
+
+\`\`\`bash
+python scripts/hosted_smoke.py https://your-domain
+\`\`\`
+
+The hosted smoke check is non-destructive. It verifies HTTPS security headers,
+database/Alembic readiness, production runtime posture, a fresh worker
+heartbeat and the published privacy/Limited Use page.
 
 The first registration creates a new workspace. On an upgraded personal
 installation, the first real registration claims the placeholder bootstrap
-owner and therefore keeps the migrated historical inventory instead of
-starting from an empty workspace.
+owner and keeps the migrated historical inventory instead of starting empty.
 
 ## Current connector scope
 
