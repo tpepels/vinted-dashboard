@@ -50,6 +50,7 @@ from app.connectors.hosted import (
     import_biblio_workspace,
     test_biblio_workspace,
 )
+from app.connectors.workspace_sync import recompute_inventory_item
 from app.crypto import decrypt_json, encrypt_json, using_derived_key
 from app.import_export import (
     apply_inventory_import,
@@ -70,6 +71,7 @@ from app.product_models import (
     ImportJob,
     MappingPreset,
 )
+from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
 from app.strategy import strategy_settings
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
@@ -122,6 +124,15 @@ class InventoryPatchRequest(BaseModel):
 
 class ListingLinkRequest(BaseModel):
     listing_id: str
+
+
+class ReconciliationMergeInstruction(BaseModel):
+    target_item_id: uuid.UUID
+    source_item_id: uuid.UUID
+
+
+class ReconciliationApplyRequest(BaseModel):
+    merges: list[ReconciliationMergeInstruction]
 
 
 class MappingPresetRequest(BaseModel):
@@ -557,8 +568,59 @@ def link_listing(
             or listing.workspace_id != context.workspace.id
         ):
             raise HTTPException(status_code=404, detail="Item or listing not found")
+        previous_item_id = listing.inventory_item_id
         listing.inventory_item_id = item.id
+        session.flush()
+        recompute_inventory_item(session, item)
+        if previous_item_id and previous_item_id != item.id:
+            previous = session.get(models.InventoryItem, previous_item_id)
+            if previous is not None and previous.workspace_id == context.workspace.id:
+                recompute_inventory_item(session, previous)
     return {"ok": True}
+
+
+@router.get("/api/app/reconciliation")
+def reconciliation(context: RequestContext = Depends(require_context)):
+    with db.session_scope() as session:
+        suggestions = reconciliation_suggestions(session, context.workspace.id)
+    return {
+        "suggestions": suggestions,
+        "count": len(suggestions),
+        "high_confidence": sum(1 for row in suggestions if row["confidence"] == "high"),
+        "policy": {
+            "automatic_merges": False,
+            "fuzzy_matching": False,
+            "signals": [
+                "exact SKU",
+                "exact ISBN",
+                "exact title + author",
+                "exact title + publisher + publication year",
+                "exact title + brand + size",
+            ],
+        },
+    }
+
+
+@router.post("/api/app/reconciliation/apply")
+def apply_reconciliation(
+    payload: ReconciliationApplyRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    merge_pairs = [(row.target_item_id, row.source_item_id) for row in payload.merges]
+    try:
+        with db.session_scope() as session:
+            results = apply_reconciliation_merges(
+                session,
+                context.workspace.id,
+                merge_pairs,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "merged": results,
+        "count": sum(len(row["merged_source_item_ids"]) for row in results),
+    }
 
 
 @router.get("/api/app/today")
