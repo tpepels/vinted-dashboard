@@ -1410,9 +1410,75 @@ $("#listing-reset").onclick = () => {
 };
 
 async function sales() {
-  const data = await api("/api/app/sales");
+  const [data, purchaseCosts] = await Promise.all([
+    api("/api/app/sales"),
+    api("/api/app/purchase-cost-suggestions"),
+  ]);
   state.salesRows = data.sales || [];
+  state.purchaseCostSuggestions = purchaseCosts || {
+    suggestions: [],
+    count: 0,
+    ambiguous_count: 0,
+    unmatched_count: 0,
+  };
   renderSales();
+}
+
+function renderPurchaseCostSuggestions() {
+  const data = state.purchaseCostSuggestions || {};
+  const rows = data.suggestions || [];
+  const card = $("#purchase-cost-card");
+  const visible = $("#sales-direction").value === "buy" || $("#sales-direction").value === "";
+  card.classList.toggle("hidden", !visible);
+
+  const parts = [];
+  if (rows.length) parts.push(rows.length + " suggestion" + (rows.length === 1 ? "" : "s"));
+  if (data.ambiguous_count) parts.push(data.ambiguous_count + " ambiguous");
+  if (data.unmatched_count) parts.push(data.unmatched_count + " unmatched history");
+  $("#purchase-cost-summary").textContent = parts.join(" · ") || "No cost suggestions";
+
+  $("#purchase-cost-suggestions").innerHTML = rows.length
+    ? '<table><thead><tr><th>Purchase</th><th>Matched stock</th><th>Match</th><th>Order amount</th><th>Cost to record</th><th></th></tr></thead><tbody>'
+      + rows.map((row) => {
+        const purchase = row.purchase;
+        const item = row.item;
+        const euros = purchase.total_cents == null ? "" : (Number(purchase.total_cents) / 100).toFixed(2);
+        return '<tr data-purchase-cost-id="' + esc(row.id) + '">'
+          + '<td><div class="title">' + esc(purchase.title) + '</div><div class="sub">'
+          + esc(dateOnly(purchase.occurred_at)) + " · " + esc(purchase.external_order_id || "") + "</div></td>"
+          + '<td><div class="title">' + esc(item.title) + '</div><div class="sub">' + esc(item.sku) + " · " + esc(item.status) + "</div></td>"
+          + '<td>' + esc(row.match_reason) + '</td>'
+          + '<td>' + money(purchase.total_cents, purchase.currency) + '</td>'
+          + '<td><input class="purchase-cost-input" type="number" min="0" step="0.01" inputmode="decimal" value="' + esc(euros) + '" aria-label="Acquisition cost"></td>'
+          + '<td><button class="btn primary purchase-cost-apply" type="button" data-purchase-id="' + esc(purchase.id)
+          + '" data-item-id="' + esc(item.id) + '">Apply cost</button></td></tr>';
+      }).join("")
+      + "</tbody></table>"
+    : '<div class="empty">No unambiguous purchase-to-stock cost matches need review.</div>';
+
+  $(".purchase-cost-apply").forEach((button) => {
+    button.onclick = async () => {
+      const row = button.closest("tr");
+      const input = row?.querySelector(".purchase-cost-input");
+      const value = Number(input?.value);
+      if (!Number.isFinite(value) || value < 0) {
+        return flash("Enter a valid acquisition cost.", true);
+      }
+      try {
+        await api("/api/app/purchases/" + button.dataset.purchaseId + "/apply-cost", {
+          method: "POST",
+          body: JSON.stringify({
+            inventory_item_id: button.dataset.itemId,
+            cost_cents: Math.round(value * 100),
+          }),
+        });
+        flash("Acquisition cost recorded.");
+        await sales();
+      } catch (error) {
+        flash(error.message, true);
+      }
+    };
+  });
 }
 
 function renderSales() {
@@ -1436,6 +1502,7 @@ function renderSales() {
   });
 
   $("#sales-count").textContent = rows.length + " of " + state.salesRows.length;
+  renderPurchaseCostSuggestions();
   $("#sales-table").innerHTML = rows.length
     ? '<table><thead><tr><th>Date</th><th>Channel</th><th>Item</th><th>Person</th><th>Direction</th><th>Status</th><th>Amount</th></tr></thead><tbody>'
       + rows.map((sale) =>
