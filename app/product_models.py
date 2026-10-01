@@ -177,3 +177,45 @@ class BackgroundJob(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_utcnow)
+
+
+class CrossChannelAction(Base):
+    """Audited action created when one physical item sells on one channel
+    while linked listings remain live elsewhere."""
+
+    __tablename__ = "cross_channel_actions"
+    __table_args__ = (
+        UniqueConstraint(
+            "trigger_sale_id",
+            "channel_listing_id",
+            "action_type",
+            name="uq_cross_channel_action_sale_listing_type",
+        ),
+        Index("ix_cross_channel_actions_workspace_status", "workspace_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    inventory_item_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("inventory_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    trigger_sale_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sales.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    channel_listing_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("channel_listings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(50), nullable=False, default="close_listing")
+    mode: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime, nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
