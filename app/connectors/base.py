@@ -92,6 +92,17 @@ CONNECTORS: dict[str, ConnectorInfo] = {
             Capability.SYNC_INVENTORY,
         }),
     ),
+    Channel.ABEBOOKS: ConnectorInfo(
+        channel=Channel.ABEBOOKS,
+        display_name=CHANNEL_DISPLAY_NAMES[Channel.ABEBOOKS],
+        group="books",
+        description="AbeBooks book inventory export and explicit FTPS synchronization.",
+        capabilities=frozenset({
+            Capability.EXPORT_INVENTORY,
+            Capability.SYNC_INVENTORY,
+            Capability.CLOSE_LISTING,
+        }),
+    ),
     Channel.CSV: ConnectorInfo(
         channel=Channel.CSV,
         display_name="CSV / TSV",
