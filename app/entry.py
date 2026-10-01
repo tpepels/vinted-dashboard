@@ -143,6 +143,31 @@ main_module.dashboard_data = _dashboard_data
 app = main_module.app
 app.include_router(product_router)
 
+LEGACY_API_ENABLED = os.getenv("LEGACY_API_ENABLED", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+LEGACY_PREFIXES = (
+    "/api/dashboard",
+    "/api/refresh",
+    "/api/diagnostics",
+    "/api/session",
+    "/api/browser-sync",
+    "/api/intelligence",
+    "/api/market-research",
+    "/api/channels",
+    "/downloads/vinted-session-sync.zip",
+)
+
+
+@app.middleware("http")
+async def legacy_api_gate(request: Request, call_next):
+    if not LEGACY_API_ENABLED and any(
+        request.url.path == prefix or request.url.path.startswith(prefix + "/")
+        for prefix in LEGACY_PREFIXES
+    ):
+        return Response(status_code=404)
+    return await call_next(request)
+
 
 @app.post("/api/browser-sync")
 def browser_sync(payload: BrowserSyncPayload):
