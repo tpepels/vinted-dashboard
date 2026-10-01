@@ -22,7 +22,7 @@ from typing import Optional
 from fastapi import HTTPException, Request, Response
 from sqlalchemy import select
 
-from app import db, models
+from app import billing, db, models
 from app.product_models import AuthSession, ExtensionCredential
 
 
@@ -187,6 +187,23 @@ def require_context(request: Request) -> RequestContext:
         return RequestContext(user=user, workspace=workspace, membership=membership, session=auth_session)
 
 
+def _billing_write_exempt(request: Request) -> bool:
+    path = request.url.path
+    if path in {"/api/app/billing/checkout", "/api/app/billing/portal"}:
+        return True
+    if request.method == "DELETE" and path == "/api/app/account":
+        return True
+    if request.method == "DELETE" and path.startswith("/api/app/extension/devices/"):
+        return True
+    if (
+        request.method == "DELETE"
+        and path.startswith("/api/app/connectors/")
+        and path.endswith("/credentials")
+    ):
+        return True
+    return False
+
+
 def require_write_context(request: Request) -> RequestContext:
     context = require_context(request)
     csrf_cookie = request.cookies.get(CSRF_COOKIE) or ""
@@ -197,6 +214,11 @@ def require_write_context(request: Request) -> RequestContext:
         context.session.csrf_hash, token_hash(csrf_header)
     ):
         raise HTTPException(status_code=403, detail="CSRF validation failed")
+    if not _billing_write_exempt(request) and not billing.workspace_can_write(context.workspace):
+        raise HTTPException(
+            status_code=402,
+            detail="Workspace is read-only until the subscription is active or trialing",
+        )
     return context
 
 
