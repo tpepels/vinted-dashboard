@@ -99,34 +99,41 @@ function parseSortableNumber(text) {
 function parseSortableDate(text) {
   const raw = String(text || "").trim();
   if (!raw || raw === "—") return null;
-  const direct = Date.parse(raw);
-  if (Number.isFinite(direct)) return direct;
 
-  const numeric = raw.match(/^(\d{1,4})\D(\d{1,2})\D(\d{1,4})(?:\D+(\d{1,2})[:.](\d{2})(?::(\d{2}))?)?/);
-  if (!numeric) return null;
-  const order = new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(2001, 10, 22))
-    .filter((part) => ["year", "month", "day"].includes(part.type))
-    .map((part) => part.type);
-  if (order.length !== 3) return null;
-  const pieces = {
-    [order[0]]: Number(numeric[1]),
-    [order[1]]: Number(numeric[2]),
-    [order[2]]: Number(numeric[3]),
-  };
-  if (pieces.year < 100) pieces.year += 2000;
-  const date = new Date(
-    pieces.year,
-    pieces.month - 1,
-    pieces.day,
-    Number(numeric[4] || 0),
-    Number(numeric[5] || 0),
-    Number(numeric[6] || 0),
-  );
-  return Number.isNaN(date.getTime()) ? null : date.getTime();
+  const numeric = raw.match(/^(\d{1,4})\D(\d{1,2})\D(\d{1,4})(?:\D+(\d{1,2})[:.](\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if (numeric) {
+    const order = new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(2001, 10, 22))
+      .filter((part) => ["year", "month", "day"].includes(part.type))
+      .map((part) => part.type);
+    if (order.length === 3) {
+      const pieces = {
+        [order[0]]: Number(numeric[1]),
+        [order[1]]: Number(numeric[2]),
+        [order[2]]: Number(numeric[3]),
+      };
+      if (pieces.year < 100) pieces.year += 2000;
+      let hour = Number(numeric[4] || 0);
+      const marker = String(numeric[7] || "").toUpperCase();
+      if (marker === "PM" && hour < 12) hour += 12;
+      if (marker === "AM" && hour === 12) hour = 0;
+      const date = new Date(
+        pieces.year,
+        pieces.month - 1,
+        pieces.day,
+        hour,
+        Number(numeric[5] || 0),
+        Number(numeric[6] || 0),
+      );
+      if (!Number.isNaN(date.getTime())) return date.getTime();
+    }
+  }
+
+  const direct = Date.parse(raw);
+  return Number.isFinite(direct) ? direct : null;
 }
 
 function sortableCellValue(cell) {
