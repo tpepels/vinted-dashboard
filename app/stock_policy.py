@@ -24,5 +24,10 @@ def sale_counts_as_sold(sale_or_status: Any, lifecycle_status: str | None = None
     else:
         status = str(sale_or_status or "")
         lifecycle = str(lifecycle_status or "")
-    state = f"{status} {lifecycle}".casefold()
+    state = f"{status} {lifecycle}".strip().casefold()
+    if not state:
+        # A legacy/order row with no lifecycle evidence is not enough to
+        # consume physical stock. New marketplace orders always carry a
+        # concrete status/lifecycle state.
+        return False
     return not any(token in state for token in _NON_SALE_TOKENS)
