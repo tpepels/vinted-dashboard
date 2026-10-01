@@ -728,6 +728,8 @@ async function pair() {
 async function settings() {
   const data = await api("/api/app/settings");
   $("#settings-name").value = data.workspace.name;
+  $("#delete-workspace-slug").textContent = data.workspace.slug;
+  $("#delete-workspace-confirm").value = "";
   $("#billing").innerHTML = data.billing.enabled
     ? '<p>Status: <strong>' + esc(data.billing.status) + '</strong></p><button id="billing-action" class="btn primary">'
       + (data.billing.customer_configured ? "Manage subscription" : "Choose plan") + "</button>"
@@ -750,6 +752,26 @@ async function settings() {
     };
   }
 }
+
+$("#delete-workspace").onclick = async () => {
+  const expected = state.me?.workspace?.slug || "";
+  const confirm = $("#delete-workspace-confirm").value.trim();
+  if (!expected || confirm !== expected) {
+    return flash("Type the workspace slug exactly before deleting it.", true);
+  }
+  if (!window.confirm("Permanently delete this workspace and all of its marketplace data?")) return;
+  try {
+    await api("/api/app/account", {
+      method: "DELETE",
+      body: JSON.stringify({ confirm }),
+    });
+    state.me = null;
+    authScreen("login");
+    flash("");
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
 
 $("#settings-form").onsubmit = async (event) => {
   event.preventDefault();
