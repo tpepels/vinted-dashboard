@@ -332,7 +332,7 @@ def register(payload: RegisterRequest, request: Request, response: Response):
                 settings={
                     "onboarding": {
                         "completed": False,
-                        "primary_category": ItemCategory.GENERAL,
+                        "primary_category": None,
                     }
                 },
             )
@@ -437,7 +437,8 @@ def onboarding(context: RequestContext = Depends(require_context)):
     saved = dict(workspace_settings.get("onboarding") or {})
     explicit = bool(saved)
     completed = bool(saved.get("completed")) if explicit else bool(inventory_count)
-    primary_category = str(saved.get("primary_category") or ItemCategory.GENERAL)
+    saved_category = saved.get("primary_category")
+    primary_category = str(saved_category or ItemCategory.GENERAL)
     if primary_category not in {
         ItemCategory.BOOK,
         ItemCategory.CLOTHING,
@@ -455,7 +456,12 @@ def onboarding(context: RequestContext = Depends(require_context)):
         "vinted_bridge_paired": bool(active_devices),
         "reconciliation_count": len(suggestions),
         "steps": {
-            "choose_category": bool(primary_category),
+            "choose_category": saved_category in {
+                ItemCategory.BOOK,
+                ItemCategory.CLOTHING,
+                ItemCategory.GENERAL,
+                "mixed",
+            },
             "stock_loaded": bool(inventory_count),
             "marketplace_connected": bool(active_devices or connected_channels),
             "matches_reviewed": not bool(suggestions),
@@ -656,10 +662,25 @@ def bulk_update_inventory(
     values.pop("item_ids", None)
     if not values:
         raise HTTPException(status_code=400, detail="Choose at least one field to update")
-    if values.get("category") not in (None, ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL):
-        raise HTTPException(status_code=400, detail="Unknown item category")
-    if values.get("status") not in (None, ItemStatus.ACTIVE, ItemStatus.SOLD, ItemStatus.ARCHIVED):
-        raise HTTPException(status_code=400, detail="Unknown item status")
+    if "category" in values:
+        if values["category"] not in {
+            ItemCategory.BOOK,
+            ItemCategory.CLOTHING,
+            ItemCategory.GENERAL,
+        }:
+            raise HTTPException(status_code=400, detail="Unknown item category")
+    if "status" in values:
+        if values["status"] not in {
+            ItemStatus.ACTIVE,
+            ItemStatus.SOLD,
+            ItemStatus.ARCHIVED,
+        }:
+            raise HTTPException(status_code=400, detail="Unknown item status")
+    if "currency" in values:
+        currency = str(values["currency"] or "").strip().upper()
+        if len(currency) != 3 or not currency.isalpha():
+            raise HTTPException(status_code=400, detail="Currency must be a 3-letter code")
+        values["currency"] = currency
     for money_field in ("cost_cents", "default_price_cents"):
         if values.get(money_field) is not None and int(values[money_field]) < 0:
             raise HTTPException(status_code=400, detail=f"{money_field} cannot be negative")
@@ -1003,13 +1024,30 @@ def analytics(context: RequestContext = Depends(require_context)):
             .order_by(models.ProfileObservation.captured_at.desc())
             .limit(1)
         ).scalar_one_or_none()
-    with db.session_scope() as session:
         active_items = session.execute(
             select(models.InventoryItem).where(
                 models.InventoryItem.workspace_id == context.workspace.id,
                 models.InventoryItem.status == ItemStatus.ACTIVE,
             )
         ).scalars().all()
+        sold_item_ids = {
+            row.inventory_item_id
+            for row in sold_rows
+            if row.inventory_item_id is not None
+        }
+        sold_items = (
+            {
+                row.id: row
+                for row in session.execute(
+                    select(models.InventoryItem).where(
+                        models.InventoryItem.workspace_id == context.workspace.id,
+                        models.InventoryItem.id.in_(sold_item_ids),
+                    )
+                ).scalars().all()
+            }
+            if sold_item_ids
+            else {}
+        )
     priced = [
         item for item in active_items
         if (item.attributes or {}).get("default_price_cents") is not None
@@ -1023,6 +1061,19 @@ def analytics(context: RequestContext = Depends(require_context)):
         * max(0, int(item.quantity or 0))
         for item in priced
     )
+    costed_sales = [
+        row for row in sold_rows
+        if row.inventory_item_id in sold_items
+        and sold_items[row.inventory_item_id].cost_cents is not None
+    ]
+    sales_ytd_cost_cents = sum(
+        int(sold_items[row.inventory_item_id].cost_cents or 0)
+        for row in costed_sales
+    )
+    sales_ytd_costed_revenue_cents = sum(
+        int(row.total_cents or 0)
+        for row in costed_sales
+    )
     return {
         "active_inventory": int(inventory_count or 0),
         "active_listings": int(listings_count or 0),
@@ -1032,6 +1083,10 @@ def analytics(context: RequestContext = Depends(require_context)):
         "inventory_potential_margin_cents": inventory_ask_cents - inventory_cost_cents,
         "sales_ytd_count": len(sold_rows),
         "sales_ytd_cents": sum(int(row.total_cents or 0) for row in sold_rows),
+        "sales_ytd_costed_count": len(costed_sales),
+        "sales_ytd_cost_cents": sales_ytd_cost_cents,
+        "sales_ytd_costed_revenue_cents": sales_ytd_costed_revenue_cents,
+        "sales_ytd_gross_profit_cents": sales_ytd_costed_revenue_cents - sales_ytd_cost_cents,
         "currency": next((row.currency for row in sold_rows if row.currency), "EUR"),
         "followers": followers.followers if followers else None,
         "following": followers.following if followers else None,
