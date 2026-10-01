@@ -27,7 +27,7 @@ def _truthy(value: str | None) -> bool:
 
 
 def app_environment(env: Mapping[str, str] | None = None) -> str:
-    values = env or os.environ
+    values = env if env is not None else os.environ
     return str(values.get("APP_ENV", "development")).strip().lower() or "development"
 
 
@@ -58,7 +58,7 @@ def _public_origin(value: str) -> str | None:
 
 
 def public_app_origin(env: Mapping[str, str] | None = None) -> str | None:
-    values = env or os.environ
+    values = env if env is not None else os.environ
     return _public_origin(str(values.get("PUBLIC_APP_URL", "")))
 
 
@@ -67,7 +67,7 @@ def validate_configuration(
     *,
     database_url: str | None = None,
 ) -> list[str]:
-    values = env or os.environ
+    values = env if env is not None else os.environ
     if not is_production(values):
         return []
 
@@ -114,6 +114,12 @@ def validate_configuration(
         errors.append("AUTH_SESSION_DAYS must be between 1 and 90")
 
     if _truthy(values.get("BILLING_ENABLED")):
+        try:
+            trial_days = int(str(values.get("BILLING_TRIAL_DAYS", "14")))
+        except ValueError:
+            trial_days = 0
+        if not 1 <= trial_days <= 90:
+            errors.append("BILLING_TRIAL_DAYS must be between 1 and 90")
         if str(values.get("BILLING_PROVIDER", "stripe")).strip().lower() != "stripe":
             errors.append("BILLING_PROVIDER must be stripe when billing is enabled")
         for name in ("STRIPE_SECRET_KEY", "STRIPE_PRICE_ID", "STRIPE_WEBHOOK_SECRET"):
