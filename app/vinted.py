@@ -243,11 +243,12 @@ def _notification_details(body: str, link: str | None) -> dict[str, str | None]:
 class VintedClient:
     def __init__(self) -> None:
         self.base_url = os.getenv("VINTED_BASE_URL", "https://www.vinted.pt").rstrip("/")
-        self.user_id = str(os.getenv("VINTED_USER_ID", "58344842"))
+        self.user_id = os.getenv("VINTED_USER_ID", "").strip()
         self.profile_url = os.getenv(
-            "VINTED_PROFILE_URL", f"{self.base_url}/member/{self.user_id}"
+            "VINTED_PROFILE_URL",
+            f"{self.base_url}/member/{self.user_id}" if self.user_id else self.base_url,
         )
-        self.username = os.getenv("VINTED_USERNAME", "tom_waits")
+        self.username = os.getenv("VINTED_USERNAME", "").strip()
         self.timeout = int(os.getenv("VINTED_TIMEOUT_SECONDS", "20"))
         self.max_pages = int(os.getenv("VINTED_MAX_PAGES", "10"))
         self.session_file = Path("/app/data/vinted-session.cookie")
