@@ -37,6 +37,13 @@ def handle(job: dict) -> None:
         from app.channels import sync_ebay_inventory
         sync_ebay_inventory()
         return
+    if job_type == "cross_channel_close":
+        action_id = payload.get("action_id")
+        if not action_id:
+            raise RuntimeError("cross_channel_close job is missing action_id")
+        from app.cross_channel import execute_action
+        execute_action(uuid.UUID(str(action_id)))
+        return
     if job_type == "noop":
         return
     raise RuntimeError(f"Unknown background job type: {job_type}")
@@ -58,7 +65,21 @@ def run_forever() -> None:
             handle(job)
         except Exception as exc:
             logger.exception("job %s failed", job["id"])
-            jobs.fail(job["id"], str(exc))
+            if job.get("job_type") == "cross_channel_close":
+                result = jobs.retry(job["id"], str(exc))
+                action_id = (job.get("payload") or {}).get("action_id")
+                if action_id:
+                    try:
+                        from app.cross_channel import record_action_failure
+                        record_action_failure(
+                            uuid.UUID(str(action_id)),
+                            str(exc),
+                            will_retry=bool(result.get("will_retry")),
+                        )
+                    except Exception:
+                        logger.exception("could not record cross-channel action failure")
+            else:
+                jobs.fail(job["id"], str(exc))
         else:
             jobs.complete(job["id"])
 
