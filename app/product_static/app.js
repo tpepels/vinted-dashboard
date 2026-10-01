@@ -41,6 +41,18 @@ const connectorSchemas = {
       ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
     ],
   },
+  abebooks: {
+    title: "AbeBooks",
+    help: "Official Inventory FTP connector. Enroll books locally, preview the exact file, then explicitly sync over FTPS.",
+    fields: [
+      ["username", "Seller User ID", "", "text"],
+      ["api_key", "API Key", "", "password"],
+      ["currency", "Seller account currency", "EUR", "text"],
+      ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
+      ["format_confirmed", "I confirmed this tab-file format with AbeBooks Support", "", "checkbox"],
+      ["sync_confirmed", "I confirm the dashboard may manage the enrolled AbeBooks listing IDs", "", "checkbox"],
+    ],
+  },
   ebay: {
     title: "eBay",
     help: "Use either a current OAuth token, or refreshable OAuth credentials. Secrets are encrypted server-side.",
@@ -1695,16 +1707,23 @@ function openConnectorConfig(channel, connector) {
   $("#connector-config-title").textContent = schema.title;
   $("#connector-config-help").textContent = schema.help;
   $("#connector-fields").innerHTML = schema.fields.map(([name, label, placeholder, type]) =>
-    '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
-    + '" placeholder="' + esc(placeholder) + '"></label>'
+    type === "checkbox"
+      ? '<label class="check connector-confirm"><input name="' + esc(name)
+        + '" type="checkbox"> ' + esc(label) + '</label>'
+      : '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
+        + '" placeholder="' + esc(placeholder) + '"></label>'
   ).join("");
   $("#biblio-tools").classList.toggle("hidden", channel !== "biblio");
+  $("#abebooks-tools").classList.toggle("hidden", channel !== "abebooks");
   $("#remove-connector").classList.toggle("hidden", !connector?.configured);
   $("#connector-config-status").textContent = connector?.configured
     ? "Credentials are stored. Leave an existing secret field blank to keep its current value."
     : "";
   $("#connector-config").classList.remove("hidden");
   $("#connector-config").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (channel === "abebooks" && connector?.configured) {
+    loadAbebooksPreview();
+  }
 }
 
 $("#close-connector-config").onclick = () => {
@@ -1728,6 +1747,7 @@ $("#connector-config").onsubmit = async (event) => {
     $("#connector-config-status").textContent = "Connection settings saved.";
     flash(connectorSchemas[channel].title + " configured.");
     await connections();
+    if (channel === "abebooks") await loadAbebooksPreview();
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
   }
@@ -1768,6 +1788,126 @@ $("#import-biblio").onclick = async () => {
     flash("BIBLIO inventory imported.");
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
+  }
+};
+
+function renderAbebooksPreview(data) {
+  const preview = $("#abebooks-preview");
+  preview.innerHTML =
+    '<strong>' + esc(data.active_count) + ' active enrolled</strong> · '
+    + esc(data.delete_count) + ' pending removal · '
+    + esc(data.incomplete_count) + ' blocked · '
+    + esc(data.candidate_total) + ' available to enroll'
+    + '<br>Format approved: ' + (data.format_confirmed ? "yes" : "no")
+    + ' · sync authority: ' + (data.sync_confirmed ? "yes" : "no")
+    + ' · account currency: ' + esc(data.currency);
+
+  $("#abebooks-incomplete").innerHTML = (data.incomplete || []).length
+    ? '<div class="import-warning"><strong>Blocked enrolled books</strong><ul>'
+      + data.incomplete.map((row) =>
+        '<li>' + esc(row.sku) + ' · ' + esc(row.title) + ': '
+        + esc((row.missing || []).join(", ")) + '</li>'
+      ).join("")
+      + '</ul></div>'
+    : "";
+
+  const candidates = data.candidates || [];
+  $("#abebooks-candidates").innerHTML = candidates.length
+    ? '<div class="card-head"><h3>Books not yet enrolled</h3></div>'
+      + '<div class="abebooks-candidate-list">'
+      + candidates.map((row) =>
+        '<label class="abebooks-candidate"><input class="abebooks-enroll-check" type="checkbox" data-id="'
+        + esc(row.item_id) + '"><span><strong>' + esc(row.title) + '</strong><small>'
+        + esc(row.sku) + ' · ' + money(row.price_cents, row.currency)
+        + (row.binding ? ' · ' + esc(row.binding) : '')
+        + (row.condition ? ' · ' + esc(row.condition) : '')
+        + '</small></span></label>'
+      ).join("")
+      + '</div>'
+    : '<p class="muted">No additional active book items are available to enroll.</p>';
+
+  const update = () => {
+    $("#enroll-abebooks").disabled = $(".abebooks-enroll-check:checked").length === 0;
+  };
+  $(".abebooks-enroll-check").forEach((box) => { box.onchange = update; });
+  update();
+}
+
+async function loadAbebooksPreview() {
+  if (state.connectorChannel !== "abebooks") return;
+  try {
+    const data = await api("/api/app/connectors/abebooks/preview");
+    renderAbebooksPreview(data);
+  } catch (error) {
+    $("#abebooks-preview").textContent = error.message;
+    $("#abebooks-incomplete").innerHTML = "";
+    $("#abebooks-candidates").innerHTML = "";
+    $("#enroll-abebooks").disabled = true;
+  }
+}
+
+async function downloadAuthenticated(path, fallbackName) {
+  const headers = {};
+  if (state.me?.workspace?.id) headers["X-Workspace-ID"] = state.me.workspace.id;
+  const response = await fetch(path, { credentials: "same-origin", headers });
+  if (!response.ok) {
+    let message = "Download failed";
+    try {
+      const body = await response.json();
+      message = body.detail || message;
+    } catch {}
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/i);
+  const filename = match ? match[1] : fallbackName;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+$("#test-abebooks").onclick = async () => {
+  $("#connector-config-status").textContent = "Testing AbeBooks FTPS…";
+  try {
+    const result = await api("/api/app/connectors/abebooks/test", { method: "POST" });
+    $("#connector-config-status").textContent = result.detail || "AbeBooks FTPS connection succeeded.";
+    await loadAbebooksPreview();
+  } catch (error) {
+    $("#connector-config-status").textContent = error.message;
+  }
+};
+
+$("#download-abebooks").onclick = async () => {
+  try {
+    await downloadAuthenticated(
+      "/api/app/connectors/abebooks/export",
+      "abebooks-inventory.tab",
+    );
+    flash("AbeBooks tab file downloaded. No remote upload was performed.");
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
+
+$("#enroll-abebooks").onclick = async () => {
+  const itemIds = $(".abebooks-enroll-check:checked").map((box) => box.dataset.id);
+  if (!itemIds.length) return;
+  try {
+    const result = await api("/api/app/connectors/abebooks/enroll", {
+      method: "POST",
+      body: JSON.stringify({ item_ids: itemIds }),
+    });
+    flash("Enrolled " + result.created + " book" + (result.created === 1 ? "." : "s."));
+    renderAbebooksPreview(result.preview);
+    await connections();
+  } catch (error) {
+    flash(error.message, true);
   }
 };
 
