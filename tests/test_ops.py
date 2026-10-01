@@ -9,12 +9,12 @@ from sqlalchemy import select
 from app import db, jobs, models, ops
 
 
-def _workspace(slug: str = "personal") -> str:
+def _workspace(slug: str = "personal"):
     with db.session_scope() as session:
         row = models.Workspace(name="Personal", slug=slug, settings={})
         session.add(row)
         session.flush()
-        return str(row.id)
+        return row.id
 
 
 def test_collect_status_reports_workspace_and_channels(monkeypatch):
