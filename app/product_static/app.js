@@ -506,7 +506,7 @@ function renderStockActions(rows) {
 }
 
 function selectedInventoryIds() {
-  return $(".inventory-select:checked").map((box) => box.dataset.id);
+  return $$(".inventory-select:checked").map((box) => box.dataset.id);
 }
 
 function updateInventorySelection() {
@@ -515,7 +515,7 @@ function updateInventorySelection() {
   $("#bulk-edit").disabled = ids.length === 0;
   const all = $("#inventory-select-all");
   if (all) {
-    const boxes = $(".inventory-select");
+    const boxes = $$(".inventory-select");
     all.checked = boxes.length > 0 && ids.length === boxes.length;
     all.indeterminate = ids.length > 0 && ids.length < boxes.length;
   }
@@ -1097,7 +1097,7 @@ $("#reconcile-select-high").onclick = () => {
 };
 
 $("#reconcile-apply").onclick = async () => {
-  const selected = $(".reconcile-check").filter((box) => box.checked);
+  const selected = $$(".reconcile-check").filter((box) => box.checked);
   if (!selected.length) return flash("Select at least one reconciliation.", true);
 
   const merges = selected.map((box) => {
