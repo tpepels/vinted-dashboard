@@ -376,22 +376,30 @@ def create_master_item(
     if exists:
         raise ValueError("SKU already exists")
 
-    attribute_keys = (
-        "item_type",
-        "brand",
-        "size",
-        "colour",
-        "material",
-        "author",
-        "isbn",
-        "publisher",
-        "edition",
-        "measurements",
-        "waist_cm",
-        "inside_leg_cm",
-        "pit_to_pit_cm",
-        "length_cm",
-    )
+    attribute_keys = ["item_type"]
+    if category == ItemCategory.CLOTHING:
+        attribute_keys.extend(
+            [
+                "brand",
+                "size",
+                "colour",
+                "material",
+                "measurements",
+                "waist_cm",
+                "inside_leg_cm",
+                "pit_to_pit_cm",
+                "length_cm",
+            ]
+        )
+    elif category == ItemCategory.BOOK:
+        attribute_keys.extend(
+            [
+                "author",
+                "isbn",
+                "publisher",
+                "edition",
+            ]
+        )
     attributes = {
         key: values[key]
         for key in attribute_keys
