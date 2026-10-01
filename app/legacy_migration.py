@@ -47,6 +47,7 @@ from app.constants import (
     SyncRunStatus,
 )
 from app.intelligence import _parse_time
+from app.cross_channel import auto_link_unlinked_sales
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
     BOOTSTRAP_WORKSPACE_NAME,
@@ -844,6 +845,8 @@ def run_legacy_backfill(
         )
         _backfill_favorite_events(session, legacy_conn, workspace, listing_index, summary)
         _backfill_orders_history(session, legacy_conn, workspace, account_cache, summary)
+        session.flush()
+        auto_link_unlinked_sales(session, workspace.id)
         _backfill_market_research(session, legacy_conn, workspace, listing_index, summary)
     finally:
         legacy_conn.close()
