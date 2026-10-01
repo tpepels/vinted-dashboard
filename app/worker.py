@@ -33,7 +33,12 @@ def handle(job: dict) -> None:
 def run_forever() -> None:
     logger.info("worker started")
     while True:
-        job = jobs.claim_one()
+        try:
+            job = jobs.claim_one()
+        except Exception:
+            logger.exception("job queue is not ready yet")
+            time.sleep(POLL_SECONDS)
+            continue
         if job is None:
             time.sleep(POLL_SECONDS)
             continue
