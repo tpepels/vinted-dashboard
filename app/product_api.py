@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app import billing, db, jobs, models
+from app.channels import parse_biblio_inventory
 from app.auth import (
     RequestContext,
     clear_session_cookies,
@@ -44,6 +45,11 @@ from app.constants import (
     MembershipRole,
 )
 from app.connectors.base import connector_catalog
+from app.connectors.hosted import (
+    has_credentials as has_workspace_connector_credentials,
+    import_biblio_workspace,
+    test_biblio_workspace,
+)
 from app.crypto import decrypt_json, encrypt_json, using_derived_key
 from app.import_export import (
     apply_inventory_import,
@@ -599,6 +605,199 @@ def analytics(context: RequestContext = Depends(require_context)):
     }
 
 
+@router.get("/api/app/analytics/history")
+def analytics_history(
+    days: int = 90,
+    context: RequestContext = Depends(require_context),
+):
+    days = max(7, min(int(days or 90), 365))
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    with db.session_scope() as session:
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.channel == Channel.VINTED,
+            )
+        ).scalars().all()
+        listing_ids = [row.id for row in listings]
+        snapshots = (
+            session.execute(
+                select(models.ListingSnapshot)
+                .where(models.ListingSnapshot.channel_listing_id.in_(listing_ids))
+                .order_by(
+                    models.ListingSnapshot.channel_listing_id,
+                    models.ListingSnapshot.captured_at,
+                )
+            ).scalars().all()
+            if listing_ids else []
+        )
+        accounts = session.execute(
+            select(models.ChannelAccount.id).where(
+                models.ChannelAccount.workspace_id == context.workspace.id,
+                models.ChannelAccount.channel == Channel.VINTED,
+            )
+        ).scalars().all()
+        profiles = (
+            session.execute(
+                select(models.ProfileObservation)
+                .where(
+                    models.ProfileObservation.channel_account_id.in_(accounts),
+                    models.ProfileObservation.captured_at >= since,
+                )
+                .order_by(models.ProfileObservation.captured_at)
+            ).scalars().all()
+            if accounts else []
+        )
+        sales_rows = session.execute(
+            select(models.Sale).where(
+                models.Sale.workspace_id == context.workspace.id,
+                models.Sale.direction == "sell",
+                models.Sale.occurred_at >= since,
+            )
+        ).scalars().all()
+
+    by_listing: dict[Any, list[models.ListingSnapshot]] = {}
+    daily: dict[str, dict[str, int]] = {}
+    for snap in snapshots:
+        by_listing.setdefault(snap.channel_listing_id, []).append(snap)
+
+    for series in by_listing.values():
+        previous = None
+        for snap in series:
+            if previous is not None and snap.captured_at >= since:
+                key = snap.captured_at.date().isoformat()
+                row = daily.setdefault(
+                    key,
+                    {"views_gained": 0, "favourites_gained": 0, "sales": 0, "revenue_cents": 0},
+                )
+                if (
+                    snap.views is not None
+                    and previous.views is not None
+                    and snap.views >= previous.views
+                ):
+                    row["views_gained"] += snap.views - previous.views
+                if (
+                    snap.favourites is not None
+                    and previous.favourites is not None
+                    and snap.favourites >= previous.favourites
+                ):
+                    row["favourites_gained"] += snap.favourites - previous.favourites
+            previous = snap
+
+    for sale in sales_rows:
+        if not sale.occurred_at:
+            continue
+        key = sale.occurred_at.date().isoformat()
+        row = daily.setdefault(
+            key,
+            {"views_gained": 0, "favourites_gained": 0, "sales": 0, "revenue_cents": 0},
+        )
+        row["sales"] += 1
+        row["revenue_cents"] += int(sale.total_cents or 0)
+
+    profile_by_day: dict[str, dict[str, Any]] = {}
+    for row in profiles:
+        profile_by_day[row.captured_at.date().isoformat()] = {
+            "date": row.captured_at.date().isoformat(),
+            "followers": row.followers,
+            "following": row.following,
+        }
+
+    listing_by_id = {row.id: row for row in listings}
+    top = []
+    week_cutoff = now - timedelta(days=7)
+    for listing_id, series in by_listing.items():
+        if not series:
+            continue
+        latest = series[-1]
+        baseline = next((row for row in reversed(series) if row.captured_at <= week_cutoff), series[0])
+        views_gain = (
+            latest.views - baseline.views
+            if latest.views is not None and baseline.views is not None and latest.views >= baseline.views
+            else 0
+        )
+        fav_gain = (
+            latest.favourites - baseline.favourites
+            if latest.favourites is not None
+            and baseline.favourites is not None
+            and latest.favourites >= baseline.favourites
+            else 0
+        )
+        listing = listing_by_id.get(listing_id)
+        if listing is None:
+            continue
+        top.append(
+            {
+                "listing_id": str(listing.id),
+                "item_id": str(listing.inventory_item_id) if listing.inventory_item_id else None,
+                "title": listing.title,
+                "url": listing.url,
+                "status": listing.status,
+                "views": latest.views,
+                "favourites": latest.favourites,
+                "views_gain_7d": views_gain,
+                "favourites_gain_7d": fav_gain,
+            }
+        )
+    top.sort(
+        key=lambda row: (
+            int(row["views_gain_7d"] or 0),
+            int(row["favourites_gain_7d"] or 0),
+            int(row["views"] or 0),
+        ),
+        reverse=True,
+    )
+
+    return {
+        "days": days,
+        "daily": [{"date": key, **daily[key]} for key in sorted(daily)],
+        "followers": [profile_by_day[key] for key in sorted(profile_by_day)],
+        "top_listings": top[:25],
+    }
+
+
+@router.get("/api/app/listings/{listing_id}/history")
+def listing_history(
+    listing_id: uuid.UUID,
+    days: int = 180,
+    context: RequestContext = Depends(require_context),
+):
+    days = max(7, min(int(days or 180), 730))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, listing_id)
+        if listing is None or listing.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Listing not found")
+        rows = session.execute(
+            select(models.ListingSnapshot)
+            .where(
+                models.ListingSnapshot.channel_listing_id == listing.id,
+                models.ListingSnapshot.captured_at >= since,
+            )
+            .order_by(models.ListingSnapshot.captured_at)
+        ).scalars().all()
+    return {
+        "listing": {
+            "id": str(listing.id),
+            "title": listing.title,
+            "channel": listing.channel,
+            "url": listing.url,
+            "status": listing.status,
+        },
+        "history": [
+            {
+                "captured_at": row.captured_at.isoformat(),
+                "views": row.views,
+                "favourites": row.favourites,
+                "price_cents": row.price_cents,
+                "status": row.status,
+            }
+            for row in rows
+        ],
+    }
+
+
 @router.post("/api/app/import/preview")
 async def import_preview(
     file: UploadFile = File(...),
@@ -854,7 +1053,7 @@ def connectors(context: RequestContext = Depends(require_context)):
                 and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
             )
             configured = channel in stored_credentials or (is_bootstrap and env_ready)
-            operational = bool(is_bootstrap and env_ready)
+            operational = configured
         elif channel == Channel.EBAY:
             env_ready = bool(
                 os.getenv("EBAY_OAUTH_TOKEN", "").strip()
@@ -865,7 +1064,7 @@ def connectors(context: RequestContext = Depends(require_context)):
                 )
             )
             configured = channel in stored_credentials or (is_bootstrap and env_ready)
-            operational = bool(is_bootstrap and env_ready)
+            operational = configured
 
         result.append(
             {
@@ -883,14 +1082,7 @@ def connectors(context: RequestContext = Depends(require_context)):
                     if account and account.last_synced_at
                     else None
                 ),
-                "note": (
-                    None
-                    if operational or channel in {Channel.VINTED, Channel.CSV, Channel.EXCEL}
-                    else (
-                        "Credentials can be stored, but hosted per-workspace synchronization "
-                        "is not enabled for this connector yet."
-                    )
-                ),
+                "note": None,
             }
         )
     return {"connectors": result}
@@ -929,13 +1121,13 @@ def save_connector_credentials(
         account.config = {
             **dict(account.config or {}),
             "credentials_stored": True,
-            "integration_state": "adapter_not_enabled",
+            "integration_state": "configured",
         }
     return {
         "ok": True,
         "stored_keys": sorted(cleaned),
         "encrypted": True,
-        "operational": False,
+        "operational": True,
     }
 
 
@@ -971,27 +1163,71 @@ def enqueue_connector_sync(
 ):
     if channel not in {Channel.BIBLIO, Channel.EBAY}:
         raise HTTPException(status_code=400, detail="This connector has no server-side sync job")
-    if context.workspace.slug != os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal"):
-        raise HTTPException(
-            status_code=501,
-            detail="Hosted per-workspace sync is not enabled for this connector yet",
+    bootstrap = context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
+    stored = has_workspace_connector_credentials(context.workspace.id, channel)
+    if channel == Channel.BIBLIO:
+        env_ready = bool(
+            os.getenv("BIBLIO_FTP_USERNAME", "").strip()
+            and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
         )
-    if channel == Channel.BIBLIO and not (
-        os.getenv("BIBLIO_FTP_USERNAME", "").strip()
-        and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
-    ):
-        raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
-    if channel == Channel.EBAY and not (
-        os.getenv("EBAY_OAUTH_TOKEN", "").strip()
-        or (
-            os.getenv("EBAY_CLIENT_ID", "").strip()
-            and os.getenv("EBAY_CLIENT_SECRET", "").strip()
-            and os.getenv("EBAY_REFRESH_TOKEN", "").strip()
+        if not stored and not (bootstrap and env_ready):
+            raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
+    if channel == Channel.EBAY:
+        env_ready = bool(
+            os.getenv("EBAY_OAUTH_TOKEN", "").strip()
+            or (
+                os.getenv("EBAY_CLIENT_ID", "").strip()
+                and os.getenv("EBAY_CLIENT_SECRET", "").strip()
+                and os.getenv("EBAY_REFRESH_TOKEN", "").strip()
+            )
         )
-    ):
-        raise HTTPException(status_code=400, detail="eBay OAuth is not configured")
+        if not stored and not (bootstrap and env_ready):
+            raise HTTPException(status_code=400, detail="eBay OAuth is not configured")
     job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
     return {"ok": True, "job_id": str(job_id), "queued": True}
+
+
+@router.post("/api/app/connectors/biblio/import")
+async def biblio_workspace_import(
+    file: UploadFile = File(...),
+    context: RequestContext = Depends(require_write_context),
+):
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = content.decode("latin-1")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Could not decode BIBLIO inventory file") from exc
+    try:
+        rows = parse_biblio_inventory(text, currency="EUR")
+        result = import_biblio_workspace(
+            context.workspace.id,
+            rows,
+            filename=file.filename or "BIBLIO inventory",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
+@router.post("/api/app/connectors/biblio/test")
+def biblio_workspace_test(
+    context: RequestContext = Depends(require_write_context),
+):
+    if has_workspace_connector_credentials(context.workspace.id, Channel.BIBLIO):
+        try:
+            return test_biblio_workspace(context.workspace.id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal"):
+        from app.channels import test_biblio_ftp
+        try:
+            return test_biblio_ftp()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
 
 
 @router.post("/api/app/extension/pairings")
