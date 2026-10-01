@@ -282,6 +282,14 @@ def test_vinted_behavior_segments_rates_price_changes_and_time_to_sale():
     assert summary["median_days_to_sale"] == 5.0
     assert summary["price_changes_30d"] == 2
 
+    assert len(data["sold_stock"]) == 1
+    sold_row = data["sold_stock"][0]
+    assert sold_row["title"] == "Sold coat"
+    assert sold_row["category"] == "clothing"
+    assert sold_row["days_online"] == 5.0
+    assert sold_row["sale_total_cents"] == 2000
+    assert sold_row["external_order_id"] == "SALE-1"
+
     categories = {row["category"]: row for row in data["categories"]}
     assert categories["book"]["active_listings"] == 3
     assert categories["clothing"]["active_listings"] == 0
