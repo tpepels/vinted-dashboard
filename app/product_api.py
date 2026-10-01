@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
-from app import billing, db, jobs, models
+from app import billing, db, jobs, listing_assistant, models
 from app.channels import parse_biblio_inventory
 from app.auth import (
     RequestContext,
@@ -140,6 +140,35 @@ class InventoryBulkRequest(BaseModel):
     currency: str | None = None
     location: str | None = None
     status: str | None = None
+
+
+class QuickListingCreateRequest(BaseModel):
+    sku: str | None = None
+    title: str
+    description: str = ""
+    category: str = ItemCategory.GENERAL
+    item_type: str | None = None
+    brand: str | None = None
+    size: str | None = None
+    colour: str | None = None
+    material: str | None = None
+    condition: str | None = None
+    author: str | None = None
+    isbn: str | None = None
+    publisher: str | None = None
+    edition: str | None = None
+    measurements: str | None = None
+    waist_cm: str | None = None
+    inside_leg_cm: str | None = None
+    pit_to_pit_cm: str | None = None
+    length_cm: str | None = None
+    price_cents: int
+    cost_cents: int | None = None
+    currency: str = "EUR"
+    location: str | None = None
+    notes: str | None = None
+    photo_count: int = 0
+    analysis_used: bool = False
 
 
 class OnboardingRequest(BaseModel):
@@ -614,6 +643,87 @@ def listings(
             }
         )
     return {"listings": result, "count": len(result)}
+
+
+@router.get("/api/app/listing-assistant/status")
+def listing_assistant_status(
+    context: RequestContext = Depends(require_context),
+):
+    return {
+        **listing_assistant.provider_status(),
+        "manual_workflow_available": True,
+    }
+
+
+@router.post("/api/app/listing-assistant/analyze")
+async def listing_assistant_analyze(
+    request: Request,
+    photos: list[UploadFile] = File(...),
+    hints_json: str = Form("{}"),
+    context: RequestContext = Depends(require_write_context),
+):
+    rate_limiter.check(
+        f"listing-analysis:{context.user.id}",
+        limit=30,
+        window_seconds=900,
+    )
+    try:
+        hints = json.loads(hints_json or "{}")
+        if not isinstance(hints, dict):
+            raise ValueError("Listing hints must be an object")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Listing hints are invalid JSON") from exc
+
+    selected: list[tuple[str, bytes]] = []
+    try:
+        if len(photos) > listing_assistant.MAX_PHOTOS:
+            raise ValueError(
+                f"Use at most {listing_assistant.MAX_PHOTOS} photos"
+            )
+        for photo in photos:
+            body = await photo.read(listing_assistant.MAX_PHOTO_BYTES + 1)
+            if len(body) > listing_assistant.MAX_PHOTO_BYTES:
+                raise ValueError("Each photo must be 8 MB or smaller")
+            selected.append((str(photo.content_type or ""), body))
+        result = listing_assistant.analyze_photos(selected, hints=hints)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "analysis": result,
+        "photo_count": len(selected),
+        "photos_stored": False,
+    }
+
+
+@router.post("/api/app/listing-assistant/create")
+def listing_assistant_create(
+    payload: QuickListingCreateRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    values = payload.model_dump()
+    values["listing_creation_source"] = (
+        "photo_ai" if payload.analysis_used else "quick_listing"
+    )
+    try:
+        with db.session_scope() as session:
+            item = listing_assistant.create_master_item(
+                session,
+                context.workspace.id,
+                values,
+            )
+            result = _serialize_item(item, [])
+            package = listing_assistant.listing_package(item)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "item": result,
+        "listing_package": package,
+    }
 
 
 @router.post("/api/app/inventory")

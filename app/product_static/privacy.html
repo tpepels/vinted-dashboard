@@ -16,11 +16,12 @@
       <p>This policy covers the Reseller Dashboard web application and its Chrome companion. The Chrome companion has one purpose: synchronize the reseller data needed by a paired workspace from the user's signed-in Vinted account.</p>
 
       <h2>Data processed</h2>
-      <p>The dashboard may store account details, master inventory, marketplace listings, orders and purchases, listing views and favourites, follower/following counts, and favourite-event metadata. The Chrome companion also stores a revocable dashboard bridge token, pairing information and last-sync status in Chrome local storage.</p>
+      <p>The dashboard may store account details, master inventory, marketplace listings, orders and purchases, listing views and favourites, follower/following counts, favourite-event metadata, and listing text saved into master inventory. The Chrome companion also stores a revocable dashboard bridge token, pairing information and last-sync status in Chrome local storage.</p>
+      <p>If the optional photo listing assistant is enabled, product photos are sent to the configured AI analysis provider only after the user explicitly clicks Analyze. Those uploaded photo bytes are used for that analysis request and are not persisted by the dashboard. The resulting detected fields and user-edited listing text are stored only when the user creates the master inventory item.</p>
       <p>The Chrome companion does not read or transmit Vinted passwords or raw authentication cookies. It does not collect general browsing history. Its site access is limited to the explicitly listed Vinted origins and the paired dashboard origin.</p>
 
       <h2>How data is used</h2>
-      <p>Data is used only to provide and improve the disclosed reseller-workspace functions: inventory synchronization, order tracking, analytics, physical-stock reconciliation and related reliability/security operations. User data is not sold, used for personalized advertising, or transferred to advertising or data-broker services.</p>
+      <p>Data is used only to provide and improve the disclosed reseller-workspace functions: inventory synchronization, order tracking, analytics, physical-stock reconciliation, optional user-requested listing-photo analysis, listing preparation, and related reliability/security operations. User data is not sold, used for personalized advertising, or transferred to advertising or data-broker services.</p>
 
       <h2>Data sharing and human access</h2>
       <p>The Chrome companion sends synchronized data only to the dashboard origin with which the user explicitly pairs it. A self-hosted installation is controlled by that installation's operator. For a hosted installation, infrastructure providers may process data only as required to operate the service.</p>
