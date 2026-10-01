@@ -294,3 +294,106 @@ def test_workspace_native_analytics_history_reports_vinted_gains():
     assert sum(row["favourites_gained"] for row in data["daily"]) == 3
     assert data["followers"][-1]["followers"] == 104
     assert data["top_listings"][0]["views_gain_7d"] == 8
+
+
+
+def test_product_listings_feed_includes_latest_snapshot_and_all_statuses():
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "listings@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Listings",
+        },
+    )
+    assert registered.status_code == 200
+    csrf = registered.json()["csrf_token"]
+    created = client.post(
+        "/api/app/inventory",
+        headers={"X-CSRF-Token": csrf},
+        json={"sku": "L-1", "title": "Listing item", "quantity": 1, "category": "general"},
+    )
+    item_id = uuid.UUID(created.json()["item"]["id"])
+
+    now = datetime.now(timezone.utc)
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        account = models.ChannelAccount(
+            workspace_id=item.workspace_id,
+            channel=Channel.VINTED,
+            display_name="Vinted",
+            status="connected",
+            config={},
+        )
+        session.add(account)
+        session.flush()
+        active = models.ChannelListing(
+            workspace_id=item.workspace_id,
+            inventory_item_id=item.id,
+            channel_account_id=account.id,
+            channel=Channel.VINTED,
+            external_id="V-active",
+            external_sku="SKU-A",
+            title="Same title",
+            price_cents=1200,
+            currency="EUR",
+            status="active",
+            quantity=1,
+            first_seen_at=now - timedelta(days=20),
+            last_seen_at=now,
+            extra={"listed_at": (now - timedelta(days=30)).isoformat()},
+        )
+        sold = models.ChannelListing(
+            workspace_id=item.workspace_id,
+            inventory_item_id=item.id,
+            channel_account_id=account.id,
+            channel=Channel.VINTED,
+            external_id="V-sold",
+            title="Sold title",
+            price_cents=900,
+            currency="EUR",
+            status="sold",
+            quantity=0,
+            first_seen_at=now - timedelta(days=40),
+            last_seen_at=now,
+            extra={},
+        )
+        session.add_all([active, sold])
+        session.flush()
+        session.add_all(
+            [
+                models.ListingSnapshot(
+                    channel_listing_id=active.id,
+                    captured_at=now - timedelta(days=2),
+                    price_cents=1200,
+                    status="active",
+                    views=10,
+                    favourites=2,
+                ),
+                models.ListingSnapshot(
+                    channel_listing_id=active.id,
+                    captured_at=now - timedelta(days=1),
+                    price_cents=1200,
+                    status="active",
+                    views=18,
+                    favourites=5,
+                ),
+            ]
+        )
+
+    response = client.get("/api/app/listings")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["count"] == 2
+    rows = {row["external_id"]: row for row in data["listings"]}
+    assert set(rows) == {"V-active", "V-sold"}
+    assert rows["V-active"]["views"] == 18
+    assert rows["V-active"]["favourites"] == 5
+    assert rows["V-active"]["external_sku"] == "SKU-A"
+    assert rows["V-active"]["listed_at"].startswith((now - timedelta(days=30)).date().isoformat())
+    assert rows["V-sold"]["status"] == "sold"
+
+    vinted = client.get("/api/app/listings?channel=vinted")
+    assert vinted.status_code == 200
+    assert vinted.json()["count"] == 2
