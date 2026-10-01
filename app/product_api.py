@@ -657,11 +657,16 @@ def listing_assistant_status(
 
 @router.post("/api/app/listing-assistant/analyze")
 async def listing_assistant_analyze(
+    request: Request,
     photos: list[UploadFile] = File(...),
     hints_json: str = Form("{}"),
     context: RequestContext = Depends(require_write_context),
 ):
-    del context
+    rate_limiter.check(
+        f"listing-analysis:{context.user.id}",
+        limit=30,
+        window_seconds=900,
+    )
     try:
         hints = json.loads(hints_json or "{}")
         if not isinstance(hints, dict):
