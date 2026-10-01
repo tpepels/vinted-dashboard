@@ -210,7 +210,11 @@ def _mapped(raw: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
     return result
 
 
-def _category(value: Any, mapped: dict[str, Any]) -> str:
+def _category(
+    value: Any,
+    mapped: dict[str, Any],
+    default_category: str = ItemCategory.GENERAL,
+) -> str:
     raw = str(value or "").strip().lower()
     if raw in {ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL}:
         return raw
@@ -218,10 +222,19 @@ def _category(value: Any, mapped: dict[str, Any]) -> str:
         return ItemCategory.BOOK
     if any(mapped.get(key) for key in ("brand", "size", "colour", "material")):
         return ItemCategory.CLOTHING
-    return ItemCategory.GENERAL
+    return (
+        default_category
+        if default_category in {ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL}
+        else ItemCategory.GENERAL
+    )
 
 
-def _row_payload(raw: dict[str, Any], mapping: dict[str, str]) -> tuple[dict[str, Any], list[str]]:
+def _row_payload(
+    raw: dict[str, Any],
+    mapping: dict[str, str],
+    *,
+    default_category: str = ItemCategory.GENERAL,
+) -> tuple[dict[str, Any], list[str]]:
     mapped = _mapped(raw, mapping)
     errors: list[str] = []
     sku = normalize_sku(mapped.get("sku"))
@@ -253,7 +266,11 @@ def _row_payload(raw: dict[str, Any], mapping: dict[str, str]) -> tuple[dict[str
     payload = {
         "sku": sku,
         "title": title,
-        "category": _category(mapped.get("category"), mapped),
+        "category": _category(
+            mapped.get("category"),
+            mapped,
+            default_category=default_category,
+        ),
         "quantity": quantity,
         "condition": str(mapped.get("condition") or "").strip() or None,
         "cost_cents": _money(mapped.get("cost")),
@@ -275,6 +292,7 @@ def preview_inventory_import(
     mapping: dict[str, str],
     *,
     full_snapshot: bool = False,
+    default_category: str = ItemCategory.GENERAL,
 ) -> dict[str, Any]:
     if "sku" not in mapping.values() or "title" not in mapping.values():
         raise ValueError("Map both a SKU and Title column before importing")
@@ -297,7 +315,11 @@ def preview_inventory_import(
     incoming_skus: set[str] = set()
 
     for index, raw in enumerate(rows, start=2):
-        payload, errors = _row_payload(raw, mapping)
+        payload, errors = _row_payload(
+            raw,
+            mapping,
+            default_category=default_category,
+        )
         sku = payload.get("sku")
         action = "new"
         potential_duplicates: list[dict[str, str]] = []
@@ -356,6 +378,7 @@ def preview_inventory_import(
         "missing_existing_count": len(missing_existing),
         "can_apply": counts["conflict"] == 0,
         "full_snapshot": full_snapshot,
+        "default_category": default_category,
     }
 
 
@@ -366,9 +389,15 @@ def apply_inventory_import(
     mapping: dict[str, str],
     *,
     full_snapshot: bool = False,
+    default_category: str = ItemCategory.GENERAL,
 ) -> dict[str, Any]:
     preview = preview_inventory_import(
-        session, workspace_id, rows, mapping, full_snapshot=full_snapshot
+        session,
+        workspace_id,
+        rows,
+        mapping,
+        full_snapshot=full_snapshot,
+        default_category=default_category,
     )
     if not preview["can_apply"]:
         raise ValueError("Import has conflicts. Resolve them before applying.")
@@ -382,7 +411,11 @@ def apply_inventory_import(
     incoming: set[str] = set()
     created = updated = unchanged = 0
     for raw in rows:
-        payload, errors = _row_payload(raw, mapping)
+        payload, errors = _row_payload(
+            raw,
+            mapping,
+            default_category=default_category,
+        )
         if errors:
             raise ValueError("Import changed after preview and now contains invalid rows")
         sku = str(payload["sku"])
