@@ -1,0 +1,330 @@
+"""Cross-channel sold reconciliation.
+
+A confirmed seller-side sale consumes one physical master-stock item. Any
+other active marketplace listing linked to that item becomes an audited close
+action. Remote closing is only queued for connectors with a supported close
+path. Vinted remains manual: the app surfaces the listing and records the
+user's acknowledgement, but does not perform an unattended destructive Vinted
+action.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app import db, models
+from app.constants import Channel, ItemStatus, ListingStatus
+from app.product_models import BackgroundJob, CrossChannelAction
+from app.stock_policy import sale_counts_as_sold
+
+
+ACTION_TYPE = "close_listing"
+REMOTE_CHANNELS = {Channel.EBAY, Channel.BIBLIO}
+OPEN_LISTING_STATUSES = {
+    ListingStatus.ACTIVE,
+    getattr(ListingStatus, "RESERVED", "reserved"),
+}
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def resolve_sale_item(
+    session: Session,
+    sale: models.Sale,
+    *,
+    external_item_id: str | None = None,
+) -> models.InventoryItem | None:
+    """Resolve a sale to stock using only exact identifiers.
+
+    Existing explicit linkage wins. Otherwise an exact marketplace listing id
+    is used. As a backwards-compatible fallback for historical Vinted orders
+    that lacked an item id, an exact normalized title is accepted only when it
+    identifies exactly one listing in that workspace/channel.
+    """
+    if sale.inventory_item_id:
+        item = session.get(models.InventoryItem, sale.inventory_item_id)
+        if item is not None and item.workspace_id == sale.workspace_id:
+            return item
+
+    if external_item_id:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == sale.workspace_id,
+                models.ChannelListing.channel == sale.channel,
+                models.ChannelListing.external_id == str(external_item_id),
+            )
+        ).scalar_one_or_none()
+        if listing is not None and listing.inventory_item_id:
+            sale.inventory_item_id = listing.inventory_item_id
+            return session.get(models.InventoryItem, listing.inventory_item_id)
+
+    title = " ".join(str(sale.title or "").casefold().split())
+    if not title:
+        return None
+    candidates = session.execute(
+        select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == sale.workspace_id,
+            models.ChannelListing.channel == sale.channel,
+        )
+    ).scalars().all()
+    exact = [
+        row for row in candidates
+        if " ".join(str(row.title or "").casefold().split()) == title
+        and row.inventory_item_id is not None
+    ]
+    item_ids = {row.inventory_item_id for row in exact}
+    if len(item_ids) != 1:
+        return None
+    item_id = next(iter(item_ids))
+    sale.inventory_item_id = item_id
+    return session.get(models.InventoryItem, item_id)
+
+
+def _action_mode(channel: str) -> tuple[str, str]:
+    if channel == Channel.VINTED:
+        return "manual", "attention"
+    if channel in REMOTE_CHANNELS:
+        return "remote", "queued"
+    return "manual", "attention"
+
+
+def _enqueue_action_job(session: Session, action: CrossChannelAction) -> None:
+    session.add(
+        BackgroundJob(
+            workspace_id=action.workspace_id,
+            job_type="cross_channel_close",
+            payload={"action_id": str(action.id)},
+            status="queued",
+            available_at=utcnow(),
+        )
+    )
+
+
+def plan_sale_reconciliation(
+    session: Session,
+    sale: models.Sale,
+    *,
+    external_item_id: str | None = None,
+) -> list[CrossChannelAction]:
+    if sale.direction != "sell" or not sale_counts_as_sold(sale):
+        return []
+
+    item = resolve_sale_item(session, sale, external_item_id=external_item_id)
+    if item is None:
+        return []
+
+    item.quantity = 0
+    item.status = ItemStatus.SOLD
+
+    listings = session.execute(
+        select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == sale.workspace_id,
+            models.ChannelListing.inventory_item_id == item.id,
+            models.ChannelListing.channel != sale.channel,
+            models.ChannelListing.status.in_(OPEN_LISTING_STATUSES),
+        )
+    ).scalars().all()
+
+    created: list[CrossChannelAction] = []
+    for listing in listings:
+        existing = session.execute(
+            select(CrossChannelAction).where(
+                CrossChannelAction.trigger_sale_id == sale.id,
+                CrossChannelAction.channel_listing_id == listing.id,
+                CrossChannelAction.action_type == ACTION_TYPE,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            continue
+        mode, status = _action_mode(listing.channel)
+        action = CrossChannelAction(
+            workspace_id=sale.workspace_id,
+            inventory_item_id=item.id,
+            trigger_sale_id=sale.id,
+            channel_listing_id=listing.id,
+            channel=listing.channel,
+            action_type=ACTION_TYPE,
+            mode=mode,
+            status=status,
+            detail={
+                "sale_channel": sale.channel,
+                "sale_external_order_id": sale.external_order_id,
+                "listing_external_id": listing.external_id,
+            },
+        )
+        session.add(action)
+        session.flush()
+        if mode == "remote":
+            _enqueue_action_job(session, action)
+        created.append(action)
+    return created
+
+
+def _get_action(session: Session, action_id: uuid.UUID) -> CrossChannelAction:
+    action = session.get(CrossChannelAction, action_id)
+    if action is None:
+        raise ValueError("Cross-channel action not found")
+    return action
+
+
+def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
+    with db.session_scope() as session:
+        action = _get_action(session, action_id)
+        if action.status in {"success", "acknowledged"}:
+            return {"ok": True, "already_complete": True}
+        if action.mode != "remote":
+            raise RuntimeError("Manual action cannot be executed by the worker")
+        listing = session.get(models.ChannelListing, action.channel_listing_id)
+        if listing is None:
+            action.status = "success"
+            action.completed_at = utcnow()
+            return {"ok": True, "listing_missing": True}
+        workspace_id = action.workspace_id
+        external_id = listing.external_id
+        channel = action.channel
+        action.status = "running"
+        action.attempts += 1
+        action.last_error = None
+
+    if channel == Channel.EBAY:
+        from app.connectors.hosted import close_ebay_workspace_listing
+
+        detail = close_ebay_workspace_listing(workspace_id, external_id)
+        terminal_status = ListingStatus.ENDED
+    elif channel == Channel.BIBLIO:
+        from app.connectors.hosted import close_biblio_workspace_listing
+
+        detail = close_biblio_workspace_listing(workspace_id, action.channel_listing_id)
+        terminal_status = ListingStatus.SOLD
+    else:
+        raise RuntimeError(f"Unsupported remote close channel: {channel}")
+
+    with db.session_scope() as session:
+        action = _get_action(session, action_id)
+        listing = session.get(models.ChannelListing, action.channel_listing_id)
+        if listing is not None:
+            listing.status = terminal_status
+            listing.quantity = 0
+        action.status = "success"
+        action.completed_at = utcnow()
+        action.last_error = None
+        action.detail = {**dict(action.detail or {}), **dict(detail or {})}
+    return {"ok": True, **dict(detail or {})}
+
+
+def record_action_failure(
+    action_id: uuid.UUID,
+    error: str,
+    *,
+    will_retry: bool,
+) -> None:
+    with db.session_scope() as session:
+        action = _get_action(session, action_id)
+        action.status = "queued" if will_retry else "error"
+        action.last_error = str(error)[:2000]
+        if not will_retry:
+            action.completed_at = utcnow()
+
+
+def acknowledge_manual_action(
+    session: Session,
+    workspace_id: uuid.UUID,
+    action_id: uuid.UUID,
+) -> CrossChannelAction:
+    action = _get_action(session, action_id)
+    if action.workspace_id != workspace_id:
+        raise ValueError("Cross-channel action not found")
+    if action.mode != "manual":
+        raise ValueError("Only manual actions can be acknowledged")
+    if action.status not in {"attention", "error"}:
+        raise ValueError("Action is not awaiting manual attention")
+    action.status = "acknowledged"
+    action.completed_at = utcnow()
+    action.last_error = None
+    return action
+
+
+def retry_action(
+    session: Session,
+    workspace_id: uuid.UUID,
+    action_id: uuid.UUID,
+) -> CrossChannelAction:
+    action = _get_action(session, action_id)
+    if action.workspace_id != workspace_id:
+        raise ValueError("Cross-channel action not found")
+    if action.mode != "remote" or action.status != "error":
+        raise ValueError("Only failed remote actions can be retried")
+    action.status = "queued"
+    action.completed_at = None
+    action.last_error = None
+    _enqueue_action_job(session, action)
+    return action
+
+
+def serialize_actions(
+    session: Session,
+    workspace_id: uuid.UUID,
+    *,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    rows = session.execute(
+        select(CrossChannelAction)
+        .where(CrossChannelAction.workspace_id == workspace_id)
+        .order_by(CrossChannelAction.created_at.desc())
+        .limit(limit)
+    ).scalars().all()
+    result: list[dict[str, Any]] = []
+    for action in rows:
+        listing = session.get(models.ChannelListing, action.channel_listing_id)
+        sale = session.get(models.Sale, action.trigger_sale_id)
+        item = session.get(models.InventoryItem, action.inventory_item_id) if action.inventory_item_id else None
+        result.append(
+            {
+                "id": str(action.id),
+                "status": action.status,
+                "mode": action.mode,
+                "channel": action.channel,
+                "action_type": action.action_type,
+                "attempts": action.attempts,
+                "last_error": action.last_error,
+                "created_at": action.created_at.isoformat() if action.created_at else None,
+                "completed_at": action.completed_at.isoformat() if action.completed_at else None,
+                "listing": {
+                    "id": str(listing.id),
+                    "external_id": listing.external_id,
+                    "title": listing.title,
+                    "status": listing.status,
+                    "url": listing.url,
+                } if listing else None,
+                "sale": {
+                    "id": str(sale.id),
+                    "channel": sale.channel,
+                    "external_order_id": sale.external_order_id,
+                    "title": sale.title,
+                } if sale else None,
+                "item": {
+                    "id": str(item.id),
+                    "sku": item.sku,
+                    "title": item.title,
+                } if item else None,
+            }
+        )
+    return result
+
+
+def unlinked_sell_count(session: Session, workspace_id: uuid.UUID) -> int:
+    sales = session.execute(
+        select(models.Sale).where(
+            models.Sale.workspace_id == workspace_id,
+            models.Sale.direction == "sell",
+            models.Sale.inventory_item_id.is_(None),
+        )
+    ).scalars().all()
+    return sum(1 for sale in sales if sale_counts_as_sold(sale))
