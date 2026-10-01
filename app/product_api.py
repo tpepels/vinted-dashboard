@@ -1148,10 +1148,10 @@ def analytics_history(
             )
         ).scalars().all()
 
-    by_listing: dict[Any, list[models.ListingSnapshot]] = {}
+    by_listing: dict[Any, list[Any]] = {}
     daily: dict[str, dict[str, int]] = {}
     for snap in snapshots:
-        by_listing.setdefault(snap.channel_listing_id, []).append(snap)
+        by_listing.setdefault(snap.listing_id, []).append(snap)
 
     for series in by_listing.values():
         previous = None
