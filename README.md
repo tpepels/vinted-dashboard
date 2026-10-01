@@ -56,6 +56,14 @@ Books can carry ISBN, author, publisher, edition, binding and publication year.
 Clothing can carry brand, size, colour, material and measurements. Marketplace
 records are linked underneath the same physical item.
 
+The **Quick listing** workflow can create a master inventory item from a compact
+review form. With the optional photo assistant enabled, the user explicitly
+selects product photos and clicks Analyze; the server suggests visible facts,
+title and description, then the UI asks for the remaining category-specific
+measurements and asking price. Selected photo bytes are not persisted by the
+dashboard. The final Vinted step is a manual handoff: the product does not
+publish, relist, like or message on the user's behalf.
+
 All commercial data is workspace-scoped. Users may belong to multiple
 workspaces; API access checks membership before exposing or mutating inventory.
 
