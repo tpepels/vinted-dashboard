@@ -66,7 +66,6 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         capabilities=frozenset({
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
-            Capability.FETCH_ORDERS,
             Capability.ANALYTICS,
             Capability.BROWSER_ASSISTED,
         }),
