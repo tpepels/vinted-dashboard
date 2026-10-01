@@ -82,7 +82,7 @@
       </section>
 
       <section id="inventory" class="view">
-        <div class="toolbar"><input id="inventory-q" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="add-item" class="btn primary">Add item</button></div>
+        <div class="toolbar"><input id="inventory-q" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="quick-listing" class="btn primary" type="button">Quick listing</button><button id="add-item" class="btn" type="button">Add item</button></div>
         <form id="bulk-form" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">BULK EDIT</p><h2>Edit selected inventory</h2></div><button id="cancel-bulk" class="btn" type="button">Cancel</button></div>
           <p class="muted">Only non-empty fields below are changed. Existing values in blank fields are left alone.</p>
@@ -97,6 +97,73 @@
           </div>
           <div class="actions"><button class="btn primary" type="submit">Apply to selected</button></div>
         </form>
+        <form id="quick-listing-form" class="card form quick-listing hidden">
+          <div class="card-head inline-head">
+            <div><p class="eyebrow">QUICK LISTING</p><h2>Photos to listing</h2></div>
+            <button id="cancel-quick-listing" class="btn" type="button">Close</button>
+          </div>
+          <p class="muted">Select product photos, optionally analyze them, review the detected facts, then fill only the remaining measurements and price. Photos are not stored by the dashboard.</p>
+          <div class="quick-photo-grid">
+            <label>Photos
+              <input id="quick-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+            </label>
+            <label>Category hint
+              <select id="quick-category-hint">
+                <option value="">Automatic</option>
+                <option value="clothing">Clothing</option>
+                <option value="book">Book</option>
+                <option value="general">General goods</option>
+              </select>
+            </label>
+            <div class="quick-analyze-action">
+              <button id="quick-analyze" class="btn" type="button">Analyze photos</button>
+              <span id="quick-ai-status" class="muted"></span>
+            </div>
+          </div>
+          <div id="quick-photo-preview" class="quick-photo-preview"></div>
+
+          <div class="quick-section">
+            <div class="card-head"><div><p class="eyebrow">REVIEW</p><h3>Detected listing facts</h3></div></div>
+            <div class="form-grid">
+              <label>Category<select name="quick_category" id="quick-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option></select></label>
+              <label>Item type<input name="item_type" id="quick-item-type" placeholder="jeans, jacket, book…"></label>
+              <label>Brand<input name="brand"></label>
+              <label>Size<input name="size"></label>
+              <label>Colour<input name="colour"></label>
+              <label>Material<input name="material"></label>
+              <label>Condition<input name="condition"></label>
+              <label>Author<input name="author"></label>
+              <label>ISBN<input name="isbn"></label>
+              <label>Publisher<input name="publisher"></label>
+              <label>Edition<input name="edition"></label>
+              <label>Optional SKU<input name="sku" placeholder="Generated automatically"></label>
+              <label>Storage location<input name="location"></label>
+              <label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label>
+              <label>Currency<input name="currency" maxlength="3" value="EUR"></label>
+            </div>
+            <label>Title<input name="title" id="quick-title" required></label>
+            <label>Description<textarea name="description" id="quick-description" rows="6"></textarea></label>
+          </div>
+
+          <div class="quick-section quick-required-section">
+            <div class="card-head"><div><p class="eyebrow">STILL NEEDED</p><h3>Complete the listing</h3></div></div>
+            <div id="quick-required" class="form-grid"></div>
+          </div>
+
+          <label>Internal notes<textarea name="notes" rows="2"></textarea></label>
+          <div id="quick-confidence" class="muted"></div>
+          <div class="actions">
+            <button id="quick-create" class="btn primary" type="submit">Create master item</button>
+          </div>
+        </form>
+        <div id="quick-listing-result" class="card form quick-result hidden">
+          <div class="card-head inline-head"><div><p class="eyebrow">MANUAL HANDOFF</p><h2>Listing package ready</h2></div><button id="close-quick-result" class="btn" type="button">Close</button></div>
+          <p class="muted">The item is now in master stock. The dashboard does not publish, relist, like or message on Vinted. Copy the prepared listing and upload the selected photos yourself.</p>
+          <div class="form-grid"><label>SKU<input id="quick-result-sku" readonly></label><label>Price<input id="quick-result-price" readonly></label></div>
+          <label>Title<textarea id="quick-result-title" rows="2" readonly></textarea></label>
+          <label>Description<textarea id="quick-result-description" rows="6" readonly></textarea></label>
+          <div class="actions"><button id="copy-quick-title" class="btn" type="button">Copy title</button><button id="copy-quick-description" class="btn" type="button">Copy description</button><button id="quick-open-inventory" class="btn primary" type="button">Back to inventory</button></div>
+        </div>
         <form id="item-form" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">MASTER INVENTORY</p><h2 id="item-form-title">Add item</h2></div><span id="item-form-channels" class="muted"></span></div>
           <div class="form-grid"><label>SKU<input name="sku" required></label><label>Title<input name="title" required></label><label>Category<select name="category" id="item-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="1"></label><label>Condition<input name="condition"></label><label>Location<input name="location"></label><label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Default selling price<input name="price" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Currency<input name="currency" maxlength="3" value="EUR"></label></div>
