@@ -370,13 +370,13 @@ def live_connector_checks(workspace_slug: str | None = None) -> list[dict[str, A
     results.append(
         {
             "channel": Channel.VINTED,
-            "ok": bool(account and int(vinted_count or 0) > 0),
+            "ok": bool(account and account.last_synced_at),
             "mode": "persisted browser data",
             "listings": int(vinted_count or 0),
             "last_sync_age_minutes": age,
             "warning": (
-                "No Vinted workspace data has been synced yet"
-                if not account or int(vinted_count or 0) == 0
+                "No Vinted browser snapshot has been synced yet"
+                if not account or not account.last_synced_at
                 else None
             ),
         }
