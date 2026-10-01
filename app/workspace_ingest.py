@@ -17,6 +17,8 @@ from typing import Any
 from sqlalchemy import select
 
 from app import db, models
+from app.connectors.workspace_sync import recompute_inventory_item
+from app.cross_channel import reconcile_sale_state
 from app.constants import (
     Channel,
     ChannelAccountStatus,
@@ -148,13 +150,7 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
 
     item.title = listing.title
     item.currency = listing.currency or item.currency
-    item.quantity = quantity
-    if status == ListingStatus.SOLD:
-        item.status = ItemStatus.SOLD
-    elif quantity > 0:
-        item.status = ItemStatus.ACTIVE
-    else:
-        item.status = ItemStatus.ARCHIVED
+    recompute_inventory_item(session, item)
     return listing
 
 
@@ -205,9 +201,7 @@ def record_workspace_snapshot(
                 if listing.inventory_item_id:
                     item = session.get(models.InventoryItem, listing.inventory_item_id)
                     if item is not None:
-                        item.quantity = 0
-                        if item.status == ItemStatus.ACTIVE:
-                            item.status = ItemStatus.ARCHIVED
+                        recompute_inventory_item(session, item)
 
         current = snapshot.get("current_user") or {}
         profile_exists = session.execute(
@@ -290,7 +284,17 @@ def record_workspace_snapshot(
             sale.is_closed = bool(order.get("is_closed"))
             sale.occurred_at = _dt(order.get("updated_at"), captured_at)
             sale.last_seen_at = captured_at
-            sale.extra = {"url": order.get("vinted_url")}
+            item_external_id = str(order.get("item_id") or "").strip() or None
+            sale.extra = {
+                "url": order.get("vinted_url"),
+                "item_external_id": item_external_id,
+            }
+            session.flush()
+            reconcile_sale_state(
+                session,
+                sale,
+                external_item_id=item_external_id,
+            )
 
         run_exists = session.execute(
             select(models.ConnectorSyncRun.id).where(
