@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from sqlalchemy import text
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -259,12 +258,11 @@ def health():
 @app.get("/api/ready")
 def ready():
     try:
-        from app import db
-        with db.session_scope() as session:
-            session.execute(text("SELECT 1"))
+        from app.runtime_config import database_readiness
+        result = database_readiness()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Database is not ready") from exc
-    return {"ok": True}
+        raise HTTPException(status_code=503, detail="Service is not ready") from exc
+    return {"ok": True, **result}
 
 
 @app.get("/api/dashboard")
