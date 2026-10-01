@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import uuid
 
@@ -14,6 +14,7 @@ from app.cross_channel import (
     auto_link_unlinked_sales,
     plan_sale_reconciliation,
     reconcile_sale_state,
+    unlinked_sale_reconciliation,
 )
 from app.product_models import BackgroundJob, CrossChannelAction
 from app.workspace_ingest import record_workspace_snapshot
@@ -102,7 +103,7 @@ def test_sale_queues_other_remote_channels_once_and_marks_physical_stock_sold():
             title="One physical copy",
             category="book",
             quantity=1,
-            status="active",
+            status="sold",
             attributes={},
         )
         session.add(item)
@@ -441,16 +442,22 @@ def test_auto_link_historical_sale_by_unique_exact_channel_title():
         sale_id = sale.id
 
         result = auto_link_unlinked_sales(session, workspace_id)
-        assert result == {"linked": 1, "remaining": 0, "actions_created": 0}
+        assert result == {
+            "linked": 1,
+            "remaining": 0,
+            "ambiguous": 0,
+            "unmatched": 0,
+            "actions_created": 0,
+        }
         session.flush()
 
         linked = session.get(models.Sale, sale_id)
         assert linked.inventory_item_id == item_id
-        assert linked.extra["auto_link_reason"] == "exact_unique_channel_title"
+        assert linked.extra["auto_link_reason"] == "exact_unique_title"
         assert session.get(models.InventoryItem, item_id).status == "sold"
 
 
-def test_auto_link_historical_sale_by_unique_master_title_without_listing():
+def test_auto_link_historical_sale_by_unique_nonactive_master_title_without_listing():
     workspace_id = _workspace()
     with db.session_scope() as session:
         item = models.InventoryItem(
@@ -458,8 +465,8 @@ def test_auto_link_historical_sale_by_unique_master_title_without_listing():
             sku="MASTER-ONLY",
             title="Master only title",
             category="book",
-            quantity=1,
-            status="active",
+            quantity=0,
+            status="sold",
             attributes={},
         )
         session.add(item)
@@ -474,7 +481,7 @@ def test_auto_link_historical_sale_by_unique_master_title_without_listing():
         assert result["remaining"] == 0
         linked = session.get(models.Sale, sale_id)
         assert linked.inventory_item_id == item_id
-        assert linked.extra["auto_link_reason"] == "exact_unique_inventory_title"
+        assert linked.extra["auto_link_reason"] == "exact_unique_title"
 
 
 def test_auto_link_leaves_duplicate_exact_titles_ambiguous():
@@ -507,7 +514,13 @@ def test_auto_link_leaves_duplicate_exact_titles_ambiguous():
         sale_id = sale.id
 
         result = auto_link_unlinked_sales(session, workspace_id)
-        assert result == {"linked": 0, "remaining": 1, "actions_created": 0}
+        assert result == {
+            "linked": 0,
+            "remaining": 1,
+            "ambiguous": 1,
+            "unmatched": 0,
+            "actions_created": 0,
+        }
         assert session.get(models.Sale, sale_id).inventory_item_id is None
 
 
@@ -545,3 +558,71 @@ def test_vinted_sync_retries_historical_unlinked_sale_after_listing_arrives():
         item = session.get(models.InventoryItem, linked.inventory_item_id)
         assert item.title == "Late arriving listing"
         assert item.status == "sold"
+
+
+
+def test_auto_link_does_not_attach_old_sale_to_newer_active_copy():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="NEW-COPY",
+            title="Repeated title",
+            category="book",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        _listing(session, workspace_id, item, "vinted", "NEW-COPY")
+        sale = _sale(session, workspace_id, None)
+        sale.title = "Repeated title"
+        sale.occurred_at = NOW - timedelta(days=30)
+        sale.first_seen_at = NOW - timedelta(days=30)
+        sale.last_seen_at = NOW - timedelta(days=30)
+        sale_id = sale.id
+
+        result = auto_link_unlinked_sales(session, workspace_id)
+        assert result["linked"] == 0
+        assert result["unmatched"] == 1
+        assert session.get(models.Sale, sale_id).inventory_item_id is None
+
+
+def test_reconciliation_ui_classification_only_requires_ambiguous_sales():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        first = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="AMB-1",
+            title="Duplicate title",
+            category="book",
+            quantity=0,
+            status="sold",
+            attributes={},
+        )
+        second = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="AMB-2",
+            title="Duplicate title",
+            category="book",
+            quantity=0,
+            status="sold",
+            attributes={},
+        )
+        session.add_all([first, second])
+        session.flush()
+        ambiguous = _sale(session, workspace_id, None)
+        ambiguous.title = "duplicate title"
+
+        orphan = _sale(session, workspace_id, None)
+        orphan.title = "No retained stock record"
+
+        classified = unlinked_sale_reconciliation(session, workspace_id)
+        assert classified["review_count"] == 1
+        assert classified["historical_unmatched_count"] == 1
+        assert classified["review"][0]["id"] == str(ambiguous.id)
+        assert set(classified["review"][0]["candidate_item_ids"]) == {
+            str(first.id),
+            str(second.id),
+        }
