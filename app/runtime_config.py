@@ -89,7 +89,7 @@ def validate_configuration(
     else:
         try:
             Fernet(encryption_key.encode("ascii"))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, UnicodeError):
             errors.append("APP_ENCRYPTION_KEY must be a valid Fernet key")
 
     for name in ("LEGACY_UI_ENABLED", "LEGACY_API_ENABLED", "LEGACY_COMPAT_SYNC"):
