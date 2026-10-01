@@ -11,6 +11,15 @@
   ],
   "host_permissions": [
     "https://www.vinted.pt/*",
+    "https://www.vinted.fr/*",
+    "https://www.vinted.nl/*",
+    "https://www.vinted.be/*",
+    "https://www.vinted.it/*",
+    "https://www.vinted.es/*",
+    "https://www.vinted.lu/*",
+    "https://www.vinted.co.uk/*",
+    "https://www.vinted.de/*",
+    "https://www.vinted.pl/*",
     "__API_HOST_PERMISSION__"
   ],
   "background": {
@@ -19,7 +28,16 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.vinted.pt/*"
+        "https://www.vinted.pt/*",
+        "https://www.vinted.fr/*",
+        "https://www.vinted.nl/*",
+        "https://www.vinted.be/*",
+        "https://www.vinted.it/*",
+        "https://www.vinted.es/*",
+        "https://www.vinted.lu/*",
+        "https://www.vinted.co.uk/*",
+        "https://www.vinted.de/*",
+        "https://www.vinted.pl/*"
       ],
       "js": [
         "content.js"
