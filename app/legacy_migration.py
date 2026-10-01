@@ -83,6 +83,7 @@ class BackfillSummary:
     profile_observations: int = 0
     favorite_events: int = 0
     sales: int = 0
+    sales_auto_linked: int = 0
     market_research: int = 0
 
     def as_dict(self) -> dict[str, int]:
@@ -846,7 +847,8 @@ def run_legacy_backfill(
         _backfill_favorite_events(session, legacy_conn, workspace, listing_index, summary)
         _backfill_orders_history(session, legacy_conn, workspace, account_cache, summary)
         session.flush()
-        auto_link_unlinked_sales(session, workspace.id)
+        sale_links = auto_link_unlinked_sales(session, workspace.id)
+        summary.sales_auto_linked += int(sale_links["linked"])
         _backfill_market_research(session, legacy_conn, workspace, listing_index, summary)
     finally:
         legacy_conn.close()
