@@ -292,3 +292,28 @@ def test_production_requires_key_only_when_listing_assistant_is_enabled():
         database_url="postgresql://user:pass@db/app",
     )
     assert not any("OPENAI" in error for error in configured_errors)
+
+
+
+def test_listing_assistant_accepts_expanded_general_categories():
+    result = listing_assistant.normalize_analysis(
+        {
+            "category": "electronics",
+            "item_type": "camera",
+            "brand": "Nikon",
+            "size": "",
+            "colour": "black",
+            "material": "metal",
+            "condition": "used",
+            "author": "",
+            "isbn": "",
+            "publisher": "",
+            "edition": "",
+            "suggested_title": "Nikon camera",
+            "suggested_description": "Black Nikon camera.",
+            "visible_text": [],
+            "confidence_notes": [],
+        }
+    )
+    assert result["category"] == "electronics"
+    assert result["missing_fields"] == ["price"]
