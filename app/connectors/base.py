@@ -136,6 +136,17 @@ CONNECTORS: dict[str, ConnectorInfo] = {
             Capability.FETCH_ORDERS,
         }),
     ),
+    Channel.SQUARESPACE: ConnectorInfo(
+        channel=Channel.SQUARESPACE,
+        display_name=CHANNEL_DISPLAY_NAMES[Channel.SQUARESPACE],
+        group="store",
+        description="Squarespace products, inventory and orders through the Commerce APIs.",
+        capabilities=frozenset({
+            Capability.IMPORT_INVENTORY,
+            Capability.FETCH_LISTINGS,
+            Capability.FETCH_ORDERS,
+        }),
+    ),
     Channel.CSV: ConnectorInfo(
         channel=Channel.CSV,
         display_name="CSV / TSV",

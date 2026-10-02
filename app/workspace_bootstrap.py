@@ -37,6 +37,7 @@ CHANNEL_DISPLAY_NAMES = {
     Channel.WOOCOMMERCE: "WooCommerce",
     Channel.SHOPIFY: "Shopify",
     Channel.BIGCOMMERCE: "BigCommerce",
+    Channel.SQUARESPACE: "Squarespace",
 }
 
 

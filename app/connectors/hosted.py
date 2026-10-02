@@ -1397,6 +1397,391 @@ def sync_bigcommerce_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     return {"source": Channel.BIGCOMMERCE, **listing_result, **order_result}
 
 
+
+SQUARESPACE_API_BASE = "https://api.squarespace.com"
+SQUARESPACE_USER_AGENT = "ResellerDashboard/1.0"
+
+
+def _squarespace_headers(values: dict[str, str]) -> dict[str, str]:
+    token = values.get("access_token", "").strip()
+    if not token:
+        raise RuntimeError("Squarespace needs an API key or OAuth access token")
+    return {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": SQUARESPACE_USER_AGENT,
+        "Accept": "application/json",
+    }
+
+
+def _squarespace_get(
+    values: dict[str, str],
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    response = requests.get(
+        SQUARESPACE_API_BASE + "/" + path.lstrip("/"),
+        headers=_squarespace_headers(values),
+        params=params or {},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Squarespace API request failed ({response.status_code})")
+    return response.json()
+
+
+def _squarespace_paged(
+    values: dict[str, str],
+    path: str,
+    result_key: str,
+    *,
+    first_params: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _page in range(100):
+        params = {"cursor": cursor} if cursor else dict(first_params or {})
+        payload = _squarespace_get(values, path, params=params)
+        if not isinstance(payload, dict):
+            break
+        rows = payload.get(result_key) or []
+        if isinstance(rows, list):
+            result.extend(row for row in rows if isinstance(row, dict))
+        pagination = payload.get("pagination") or {}
+        if not pagination.get("hasNextPage"):
+            break
+        cursor = str(pagination.get("nextPageCursor") or "").strip()
+        if not cursor:
+            break
+    return result
+
+
+def _squarespace_site(values: dict[str, str]) -> dict[str, Any]:
+    payload = _squarespace_get(values, "1.0/authorization/website")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _squarespace_inventory(values: dict[str, str]) -> dict[str, dict[str, Any]]:
+    rows = _squarespace_paged(
+        values,
+        "1.0/commerce/inventory",
+        "inventory",
+    )
+    return {
+        str(row.get("variantId")): row
+        for row in rows
+        if row.get("variantId") not in (None, "")
+    }
+
+
+def _squarespace_products(values: dict[str, str]) -> list[dict[str, Any]]:
+    summaries = _squarespace_paged(
+        values,
+        "v2/commerce/products",
+        "products",
+    )
+    ids = [
+        str(row.get("id")).strip()
+        for row in summaries
+        if row.get("id") not in (None, "")
+    ]
+    details: list[dict[str, Any]] = []
+    for start in range(0, len(ids), 50):
+        batch = ",".join(ids[start:start + 50])
+        payload = _squarespace_get(values, f"v2/commerce/products/{batch}")
+        if isinstance(payload, dict):
+            rows = payload.get("products") or []
+            details.extend(row for row in rows if isinstance(row, dict))
+    if not details:
+        return summaries
+    by_id = {
+        str(row.get("id")): row
+        for row in details
+        if row.get("id") not in (None, "")
+    }
+    return [
+        by_id.get(str(summary.get("id")), summary)
+        for summary in summaries
+    ]
+
+
+def _squarespace_price(pricing: Any) -> tuple[int | None, str | None]:
+    if not isinstance(pricing, dict):
+        return None, None
+    on_sale = bool(pricing.get("onSale"))
+    money = pricing.get("salePrice") if on_sale else pricing.get("basePrice")
+    if not isinstance(money, dict):
+        money = pricing.get("basePrice") or pricing.get("salePrice")
+    if not isinstance(money, dict):
+        return None, None
+    currency = str(money.get("currency") or "").strip().upper() or None
+    return _money(money.get("value")), currency
+
+
+def _squarespace_listing_url(site_url: Any, product_url: Any) -> str | None:
+    raw = str(product_url or "").strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return raw
+    base = str(site_url or "").strip().rstrip("/")
+    if base.startswith("https://") and raw.startswith("/"):
+        return base + raw
+    return None
+
+
+def _squarespace_variant_title(product: dict[str, Any], variant: dict[str, Any]) -> str:
+    base = str(product.get("name") or "Untitled").strip() or "Untitled"
+    attributes = variant.get("attributes") or {}
+    if not isinstance(attributes, dict):
+        return base
+    suffix = " / ".join(
+        str(value).strip()
+        for value in attributes.values()
+        if str(value or "").strip()
+    )
+    return f"{base} - {suffix}" if suffix else base
+
+
+def _fetch_squarespace_products(
+    values: dict[str, str],
+    *,
+    site: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    site = site or _squarespace_site(values)
+    fallback_currency = (
+        str(site.get("currency") or values.get("currency") or "EUR").strip().upper()
+        or "EUR"
+    )
+    site_url = site.get("url")
+    inventory = _squarespace_inventory(values)
+    products = _squarespace_products(values)
+    result: list[dict[str, Any]] = []
+
+    for product in products:
+        product_id = product.get("id")
+        if product_id in (None, ""):
+            continue
+        visible = bool(product.get("isVisible", True))
+        created = _remote_datetime(product.get("createdOn"))
+        product_type = str(product.get("type") or "").strip().upper() or None
+        tags = list(product.get("tags") or [])
+        images = [
+            row for row in (product.get("images") or [])
+            if isinstance(row, dict)
+        ]
+        common = {
+            "description": product.get("description"),
+            "tags": tags,
+            "product_type": product_type,
+            "url": _squarespace_listing_url(site_url, product.get("url")),
+            "image_url": images[0].get("url") if images else None,
+            "listed_at": created.isoformat() if created else None,
+        }
+        variants = [
+            row for row in (product.get("variants") or [])
+            if isinstance(row, dict)
+        ]
+        if not variants:
+            price_cents, currency = _squarespace_price(product.get("pricing"))
+            result.append(
+                {
+                    "source_id": str(product_id),
+                    "sku": product.get("sku") or None,
+                    "title": product.get("name") or "Untitled",
+                    "status": ListingStatus.ACTIVE if visible else ListingStatus.INACTIVE,
+                    "quantity": 1 if visible else 0,
+                    "price_cents": price_cents,
+                    "currency": currency or fallback_currency,
+                    **common,
+                }
+            )
+            continue
+
+        for variant in variants:
+            variant_id = variant.get("id")
+            if variant_id in (None, ""):
+                continue
+            stock = inventory.get(str(variant_id), {})
+            unlimited = bool(stock.get("isUnlimited"))
+            inventory_managed = product_type in {"PHYSICAL", "SERVICE"}
+            quantity = (
+                1
+                if not inventory_managed or unlimited
+                else max(0, _int(stock.get("quantity"), 0) or 0)
+            )
+            active = visible and (not inventory_managed or unlimited or quantity > 0)
+            price_cents, currency = _squarespace_price(
+                variant.get("pricing") or product.get("pricing")
+            )
+            attributes = (
+                dict(variant.get("attributes") or {})
+                if isinstance(variant.get("attributes"), dict)
+                else {}
+            )
+            if unlimited:
+                attributes["inventory_unlimited"] = True
+            variant_image = variant.get("image") or {}
+            result.append(
+                {
+                    "source_id": str(variant_id),
+                    "sku": variant.get("sku") or stock.get("sku") or None,
+                    "title": _squarespace_variant_title(product, variant),
+                    "status": ListingStatus.ACTIVE if active else ListingStatus.INACTIVE,
+                    "quantity": quantity,
+                    "price_cents": price_cents,
+                    "currency": currency or fallback_currency,
+                    "attributes": attributes,
+                    "image_url": (
+                        variant_image.get("url")
+                        if isinstance(variant_image, dict) and variant_image.get("url")
+                        else common["image_url"]
+                    ),
+                    **{key: value for key, value in common.items() if key != "image_url"},
+                }
+            )
+    return result
+
+
+def _squarespace_order_status(order: dict[str, Any]) -> tuple[str, bool]:
+    payment = str(order.get("paymentState") or "").strip().upper()
+    fulfillment = str(order.get("fulfillmentStatus") or "").strip().upper()
+    if fulfillment in {"CANCELED", "CANCELLED"}:
+        return "cancelled", True
+    if payment in {"REFUNDED", "FAILED", "REFUND_FAILED"}:
+        return payment.lower(), True
+    if fulfillment == "FULFILLED" and payment == "PAID":
+        return "completed", True
+    status = payment.lower() or fulfillment.lower() or "open"
+    return status, fulfillment == "FULFILLED"
+
+
+def _fetch_squarespace_orders(values: dict[str, str]) -> list[dict[str, Any]]:
+    days = max(1, min(_int(values.get("order_days"), 365) or 365, 3650))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    payment_states = ",".join(
+        (
+            "NOT_CHARGED",
+            "AUTHORIZED",
+            "PAID",
+            "REFUNDED",
+            "PENDING",
+            "FAILED",
+            "REFUND_PENDING",
+            "REFUND_FAILED",
+            "PARTIALLY_PAID",
+        )
+    )
+    orders = _squarespace_paged(
+        values,
+        "1.0/commerce/orders",
+        "result",
+        first_params={
+            "modifiedAfter": cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "paymentStates": payment_states,
+        },
+    )
+    result: list[dict[str, Any]] = []
+    for order in orders:
+        order_id = order.get("id")
+        if order_id in (None, ""):
+            continue
+        status, is_closed = _squarespace_order_status(order)
+        occurred = _remote_datetime(order.get("createdOn"))
+        for line in order.get("lineItems") or []:
+            if not isinstance(line, dict):
+                continue
+            line_id = line.get("id")
+            if line_id in (None, ""):
+                continue
+            variant_id = line.get("variantId")
+            product_id = line.get("productId")
+            money = line.get("unitPricePaid") or {}
+            unit_cents = _money(money.get("value")) if isinstance(money, dict) else None
+            quantity = max(1, _int(line.get("quantity"), 1) or 1)
+            total_cents = unit_cents * quantity if unit_cents is not None else None
+            result.append(
+                {
+                    "external_order_id": f"{order_id}:{line_id}",
+                    "listing_external_id": str(variant_id or product_id or ""),
+                    "sku": line.get("sku"),
+                    "title": line.get("productName") or "Squarespace sale",
+                    "counterparty": None,
+                    "total_cents": total_cents,
+                    "currency": str(
+                        (money.get("currency") if isinstance(money, dict) else None)
+                        or values.get("currency")
+                        or "EUR"
+                    ),
+                    "status": status,
+                    "lifecycle_status": status,
+                    "is_closed": is_closed,
+                    "occurred_at": occurred.isoformat() if occurred else None,
+                    "quantity": quantity,
+                    "extra": {
+                        "order_id": order_id,
+                        "order_number": order.get("orderNumber"),
+                        "line_item_id": line_id,
+                        "product_id": product_id,
+                        "variant_id": variant_id,
+                        "payment_state": order.get("paymentState"),
+                        "fulfillment_status": order.get("fulfillmentStatus"),
+                    },
+                }
+            )
+    return result
+
+
+def test_squarespace_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.SQUARESPACE)
+    site = _squarespace_site(values)
+    products = _squarespace_get(values, "v2/commerce/products")
+    inventory = _squarespace_get(values, "1.0/commerce/inventory")
+    orders = _squarespace_get(
+        values,
+        "1.0/commerce/orders",
+        params={"paymentStates": "PAID,PARTIALLY_PAID,REFUNDED"},
+    )
+    return {
+        "ok": True,
+        "detail": "Squarespace products, inventory and orders are readable.",
+        "site_title": site.get("title"),
+        "products_visible": len((products or {}).get("products") or [])
+        if isinstance(products, dict)
+        else 0,
+        "inventory_visible": len((inventory or {}).get("inventory") or [])
+        if isinstance(inventory, dict)
+        else 0,
+        "orders_visible": len((orders or {}).get("result") or [])
+        if isinstance(orders, dict)
+        else 0,
+    }
+
+
+def sync_squarespace_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.SQUARESPACE)
+    site = _squarespace_site(values)
+    items = _fetch_squarespace_products(values, site=site)
+    orders = _fetch_squarespace_orders(values)
+    synced_at = datetime.now(timezone.utc)
+    listing_result = record_workspace_channel_snapshot(
+        workspace_id,
+        Channel.SQUARESPACE,
+        items,
+        synced_at=synced_at,
+        full_snapshot=True,
+        note="Squarespace Commerce APIs",
+    )
+    order_result = record_workspace_channel_orders(
+        workspace_id,
+        Channel.SQUARESPACE,
+        orders,
+        synced_at=synced_at,
+    )
+    return {"source": Channel.SQUARESPACE, **listing_result, **order_result}
+
+
 def import_biblio_workspace(
     workspace_id: uuid.UUID,
     rows: list[dict[str, Any]],

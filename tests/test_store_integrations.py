@@ -42,9 +42,9 @@ def _credential(workspace_id: uuid.UUID, channel: str, values: dict[str, str]) -
         )
 
 
-def test_catalog_exposes_shopify_and_bigcommerce():
+def test_catalog_exposes_store_connectors():
     catalog = {row["channel"]: row for row in connector_catalog()}
-    for channel in (Channel.SHOPIFY, Channel.BIGCOMMERCE):
+    for channel in (Channel.SHOPIFY, Channel.BIGCOMMERCE, Channel.SQUARESPACE):
         assert catalog[channel]["group"] == "store"
         assert Capability.FETCH_LISTINGS in catalog[channel]["capabilities"]
         assert Capability.FETCH_ORDERS in catalog[channel]["capabilities"]
@@ -418,3 +418,225 @@ def test_bigcommerce_rejects_malformed_store_hash(monkeypatch):
     )
     assert response.status_code == 400
     assert "store_hash" in response.json()["detail"]
+
+
+
+def test_squarespace_sync_imports_variants_inventory_and_orders(monkeypatch):
+    workspace_id = _workspace("squarespace-sync")
+    _credential(
+        workspace_id,
+        Channel.SQUARESPACE,
+        {
+            "access_token": "sqsp-test-token",
+            "currency": "EUR",
+            "order_days": "365",
+        },
+    )
+
+    def fake_get(url, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "Bearer sqsp-test-token"
+        assert kwargs["headers"]["User-Agent"] == "ResellerDashboard/1.0"
+        if url.endswith("/1.0/authorization/website"):
+            return FakeResponse(
+                {
+                    "id": "website-1",
+                    "title": "Example Shop",
+                    "currency": "EUR",
+                    "url": "https://example.squarespace.com",
+                }
+            )
+        if url.endswith("/1.0/commerce/inventory"):
+            return FakeResponse(
+                {
+                    "inventory": [
+                        {
+                            "variantId": "variant-101",
+                            "sku": "COAT-M-BLUE",
+                            "descriptor": "M / Blue",
+                            "isUnlimited": False,
+                            "quantity": 2,
+                        }
+                    ],
+                    "pagination": {"hasNextPage": False},
+                }
+            )
+        if url.endswith("/v2/commerce/products"):
+            return FakeResponse(
+                {
+                    "products": [
+                        {
+                            "id": "product-100",
+                            "name": "Vintage coat",
+                            "type": "PHYSICAL",
+                            "isVisible": True,
+                            "modifiedOn": "2026-01-05T12:00:00Z",
+                        }
+                    ],
+                    "pagination": {"hasNextPage": False},
+                }
+            )
+        if url.endswith("/v2/commerce/products/product-100"):
+            return FakeResponse(
+                {
+                    "products": [
+                        {
+                            "id": "product-100",
+                            "name": "Vintage coat",
+                            "description": "Blue wool coat",
+                            "type": "PHYSICAL",
+                            "isVisible": True,
+                            "createdOn": "2026-01-01T10:00:00Z",
+                            "modifiedOn": "2026-01-05T12:00:00Z",
+                            "url": "/shop/p/vintage-coat",
+                            "tags": ["vintage", "coat"],
+                            "images": [
+                                {"url": "https://images.example.test/coat.jpg"}
+                            ],
+                            "variants": [
+                                {
+                                    "id": "variant-101",
+                                    "sku": "COAT-M-BLUE",
+                                    "attributes": {
+                                        "Size": "M",
+                                        "Colour": "Blue",
+                                    },
+                                    "pricing": {
+                                        "basePrice": {
+                                            "currency": "EUR",
+                                            "value": 45.00,
+                                        },
+                                        "onSale": False,
+                                        "salePrice": {
+                                            "currency": "EUR",
+                                            "value": 40.00,
+                                        },
+                                    },
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        if url.endswith("/1.0/commerce/orders"):
+            return FakeResponse(
+                {
+                    "result": [
+                        {
+                            "id": "order-200",
+                            "orderNumber": "42",
+                            "createdOn": "2026-02-01T12:00:00Z",
+                            "modifiedOn": "2026-02-01T13:00:00Z",
+                            "paymentState": "PAID",
+                            "fulfillmentStatus": "FULFILLED",
+                            "lineItems": [
+                                {
+                                    "id": "line-201",
+                                    "productId": "product-100",
+                                    "variantId": "variant-101",
+                                    "productName": "Vintage coat",
+                                    "sku": "COAT-M-BLUE",
+                                    "quantity": 1,
+                                    "unitPricePaid": {
+                                        "currency": "EUR",
+                                        "value": 45.00,
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                    "pagination": {"hasNextPage": False},
+                }
+            )
+        raise AssertionError(url)
+
+    monkeypatch.setattr(hosted.requests, "get", fake_get)
+    result = hosted.sync_squarespace_workspace(workspace_id)
+    assert result["items"] == 1
+    assert result["orders"] == 1
+    assert result["linked"] == 1
+
+    with db.session_scope() as session:
+        item = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == workspace_id,
+                models.InventoryItem.sku == "COAT-M-BLUE",
+            )
+        ).scalar_one()
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.SQUARESPACE,
+            )
+        ).scalar_one()
+        sale = session.execute(
+            select(models.Sale).where(
+                models.Sale.workspace_id == workspace_id,
+                models.Sale.channel == Channel.SQUARESPACE,
+            )
+        ).scalar_one()
+
+        assert item.quantity == 2
+        assert listing.external_id == "variant-101"
+        assert listing.external_sku == "COAT-M-BLUE"
+        assert listing.price_cents == 4500
+        assert listing.url == "https://example.squarespace.com/shop/p/vintage-coat"
+        assert listing.extra["remote_metadata"]["attributes"] == {
+            "Size": "M",
+            "Colour": "Blue",
+        }
+        assert sale.inventory_item_id == item.id
+        assert sale.external_order_id == "order-200:line-201"
+        assert sale.total_cents == 4500
+        assert sale.status == "completed"
+
+
+def test_squarespace_credentials_are_accepted(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "squarespace@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Squarespace",
+        },
+    )
+    assert registered.status_code == 200
+    csrf = registered.json()["csrf_token"]
+
+    saved = client.put(
+        "/api/app/connectors/squarespace/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {"access_token": "sqsp-api-key", "order_days": "365"}},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["operational"] is True
+
+    connectors = {
+        row["channel"]: row
+        for row in client.get("/api/app/connectors").json()["connectors"]
+    }
+    assert connectors["squarespace"]["configured"] is True
+    assert connectors["squarespace"]["operational"] is True
+    assert connectors["squarespace"]["sync_available"] is True
+
+
+def test_squarespace_credentials_require_token(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "squarespace-missing@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Squarespace Missing",
+        },
+    )
+    csrf = registered.json()["csrf_token"]
+    response = client.put(
+        "/api/app/connectors/squarespace/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {"order_days": "365"}},
+    )
+    assert response.status_code == 400
+    assert "API key or OAuth access token" in response.json()["detail"]

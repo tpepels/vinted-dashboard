@@ -102,6 +102,16 @@ const connectorSchemas = {
       ["currency", "Fallback currency", "EUR", "text"],
     ],
   },
+  squarespace: {
+    title: "Squarespace",
+    help: "Squarespace Commerce APIs. Generate an API key with read-only Products, Inventory and Orders permissions, or use an OAuth access token.",
+    test: true,
+    fields: [
+      ["access_token", "API key or OAuth access token", "", "password"],
+      ["order_days", "Order history days", "365", "number"],
+      ["currency", "Fallback currency", "EUR", "text"],
+    ],
+  },
 };
 
 function esc(value) {
