@@ -113,3 +113,18 @@ def test_listing_dates_distinguish_actual_listed_date_from_first_observed():
 def test_vinted_analytics_labels_first_observed_age_as_minimum():
     assert "minimum - first observed" in APP_JS
     assert "summary.actual_age_count" in APP_JS
+
+
+
+def test_general_marketplace_integrations_are_exposed_in_product_ui():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert '<option value="etsy">Etsy</option>' in html
+    assert '<option value="woocommerce">WooCommerce</option>' in html
+    assert 'id="test-connector"' in html
+    assert "etsy: {" in APP_JS
+    assert "woocommerce: {" in APP_JS
+    assert '"/test-connection"' in APP_JS
+    assert "listings_r and transactions_r" in APP_JS
+    assert "WooCommerce REST API v3" in APP_JS
