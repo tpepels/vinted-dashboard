@@ -21,6 +21,10 @@ from app import db, models
 from app.constants import Channel, ItemStatus, ListingStatus
 from app.product_models import BackgroundJob, CrossChannelAction
 from app.stock_policy import sale_counts_as_sold
+from app.connectors.workspace_sync import (
+    item_has_remaining_stock_on_sale_channel,
+    recompute_inventory_item,
+)
 
 
 ACTION_TYPE = "close_listing"
@@ -307,6 +311,20 @@ def plan_sale_reconciliation(
 
     item = resolve_sale_item(session, sale, external_item_id=external_item_id)
     if item is None:
+        return []
+
+    if item_has_remaining_stock_on_sale_channel(session, item, sale):
+        recompute_inventory_item(session, item)
+        pending = session.execute(
+            select(CrossChannelAction).where(
+                CrossChannelAction.trigger_sale_id == sale.id,
+                CrossChannelAction.status.in_(["queued", "running", "attention", "error"]),
+            )
+        ).scalars().all()
+        for action in pending:
+            action.status = "cancelled"
+            action.completed_at = utcnow()
+            action.last_error = None
         return []
 
     item.quantity = 0
