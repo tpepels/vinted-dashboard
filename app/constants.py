@@ -14,6 +14,8 @@ class Channel:
     VINTED = "vinted"
     EBAY = "ebay"
     BIBLIO = "biblio"
+    ETSY = "etsy"
+    WOOCOMMERCE = "woocommerce"
     CSV = "csv"
     EXCEL = "excel"
     MANUAL = "manual"
@@ -26,6 +28,8 @@ KNOWN_CHANNELS = (
     Channel.VINTED,
     Channel.EBAY,
     Channel.BIBLIO,
+    Channel.ETSY,
+    Channel.WOOCOMMERCE,
     Channel.CSV,
     Channel.EXCEL,
     Channel.MANUAL,
