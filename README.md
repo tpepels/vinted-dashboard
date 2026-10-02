@@ -343,7 +343,7 @@ without affecting master inventory, import/export, eBay/BIBLIO or account data.
 ## General marketplace integrations
 
 The workspace connector catalog includes Etsy, WooCommerce, Shopify,
-BigCommerce, Squarespace and Wix in addition to Vinted, eBay and BIBLIO.
+BigCommerce, Squarespace, Wix and Depop in addition to Vinted, eBay and BIBLIO.
 
 - Etsy uses Open API v3 and reads active listings plus seller receipts/order
   lines. Save the app keystring, shared secret and Shop ID, then use the
@@ -366,6 +366,12 @@ BigCommerce, Squarespace and Wix in addition to Vinted, eBay and BIBLIO.
   Configure a Wix account API key restricted to the target site plus that
   site's UUID. Product ID + variant ID is the remote listing identity because
   Wix does not guarantee variant IDs are globally unique.
-- All six integrations are read-only toward the remote store in this release.
+- Depop uses the private Selling API for approved partners. Direct seller
+  integrations use a static per-shop API key; production and staging use
+  separate keys and fixed API origins. The connector imports all products and
+  orders read-only, uses Depop product ID as the stable listing identity, and
+  never stores buyer address details. OAuth is intentionally not exposed until
+  a Depop OAuth client has actually been issued.
+- All seven integrations are read-only toward the remote store in this release.
   Synced listings and order lines feed the shared inventory, reconciliation,
   sales and profitability workflows.
