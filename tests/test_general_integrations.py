@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 import uuid
 
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ from app import db, entry, models
 from app.connectors import hosted
 from app.connectors.base import Capability, connector_catalog
 from app.constants import Channel, ItemCategory
-from app.crypto import encrypt_json
+from app.crypto import decrypt_json, encrypt_json
 from app.product_models import ConnectorCredential
 
 
@@ -349,6 +350,187 @@ def test_connector_credentials_api_accepts_etsy_and_woocommerce(monkeypatch):
     assert connectors["etsy"]["sync_available"] is True
     assert connectors["woocommerce"]["configured"] is True
     assert connectors["woocommerce"]["sync_available"] is True
+
+
+def test_etsy_app_details_can_be_saved_before_oauth(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "etsy-oauth-setup@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Etsy OAuth Setup",
+        },
+    )
+    assert registered.status_code == 200
+    csrf = registered.json()["csrf_token"]
+
+    saved = client.put(
+        "/api/app/connectors/etsy/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "values": {
+                "keystring": "key",
+                "shared_secret": "secret",
+                "shop_id": "42",
+            }
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["operational"] is False
+
+    etsy = {
+        row["channel"]: row
+        for row in client.get("/api/app/connectors").json()["connectors"]
+    }["etsy"]
+    assert etsy["configured"] is True
+    assert etsy["operational"] is False
+    assert etsy["authorization_required"] is True
+    assert etsy["sync_available"] is False
+
+    sync = client.post(
+        "/api/app/connectors/etsy/sync",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert sync.status_code == 400
+    assert "authorization" in sync.json()["detail"].lower()
+
+
+def test_etsy_oauth_pkce_flow_stores_refreshable_tokens(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://dashboard.example.test")
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "etsy-oauth@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Etsy OAuth",
+        },
+    )
+    assert registered.status_code == 200
+    csrf = registered.json()["csrf_token"]
+    workspace_id = uuid.UUID(registered.json()["workspace"]["id"])
+
+    saved = client.put(
+        "/api/app/connectors/etsy/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "values": {
+                "keystring": "etsy-key",
+                "shared_secret": "etsy-secret",
+                "shop_id": "42",
+            }
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    started = client.post(
+        "/api/app/connectors/etsy/oauth/start",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert started.status_code == 200, started.text
+    start_body = started.json()
+    parsed = urlparse(start_body["authorization_url"])
+    params = parse_qs(parsed.query)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "www.etsy.com"
+    assert parsed.path == "/oauth/connect"
+    assert params["response_type"] == ["code"]
+    assert params["client_id"] == ["etsy-key"]
+    assert params["scope"] == ["listings_r transactions_r"]
+    assert params["code_challenge_method"] == ["S256"]
+    assert params["redirect_uri"] == [
+        "https://dashboard.example.test/api/app/connectors/etsy/oauth/callback"
+    ]
+    state = params["state"][0]
+    assert state.startswith(f"{workspace_id}.")
+    assert params["code_challenge"][0]
+
+    exchange = {}
+
+    def fake_post(url, **kwargs):
+        assert url == "https://api.etsy.com/v3/public/oauth/token"
+        exchange.update(kwargs["data"])
+        return FakeResponse(
+            {
+                "access_token": "123.access",
+                "refresh_token": "123.refresh",
+                "expires_in": 3600,
+                "scope": "listings_r transactions_r",
+            }
+        )
+
+    monkeypatch.setattr(hosted.requests, "post", fake_post)
+    callback = client.get(
+        "/api/app/connectors/etsy/oauth/callback",
+        params={"state": state, "code": "authorization-code"},
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303, callback.text
+    assert callback.headers["location"] == "/?connector=etsy&oauth=connected"
+    assert exchange["grant_type"] == "authorization_code"
+    assert exchange["client_id"] == "etsy-key"
+    assert exchange["code"] == "authorization-code"
+    assert exchange["redirect_uri"] == params["redirect_uri"][0]
+    assert 43 <= len(exchange["code_verifier"]) <= 128
+
+    with db.session_scope() as session:
+        credential = session.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.workspace_id == workspace_id,
+                ConnectorCredential.channel == Channel.ETSY,
+            )
+        ).scalar_one()
+        values = decrypt_json(credential.encrypted_payload)
+    assert values["oauth_token"] == "123.access"
+    assert values["refresh_token"] == "123.refresh"
+    assert values["oauth_scope"] == "listings_r transactions_r"
+    assert "_oauth_state" not in values
+    assert "_oauth_code_verifier" not in values
+
+    etsy = {
+        row["channel"]: row
+        for row in client.get("/api/app/connectors").json()["connectors"]
+    }["etsy"]
+    assert etsy["operational"] is True
+    assert etsy["authorization_required"] is False
+    assert etsy["sync_available"] is True
+
+
+def test_etsy_oauth_rejects_wrong_state(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://dashboard.example.test")
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "etsy-oauth-state@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Etsy OAuth State",
+        },
+    )
+    csrf = registered.json()["csrf_token"]
+    saved = client.put(
+        "/api/app/connectors/etsy/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {"keystring": "key", "shared_secret": "secret", "shop_id": "42"}},
+    )
+    assert saved.status_code == 200
+    started = client.post(
+        "/api/app/connectors/etsy/oauth/start",
+        headers={"X-CSRF-Token": csrf},
+    )
+    state = parse_qs(urlparse(started.json()["authorization_url"]).query)["state"][0]
+    bad_state = state.rsplit(".", 1)[0] + ".wrong"
+    callback = client.get(
+        "/api/app/connectors/etsy/oauth/callback",
+        params={"state": bad_state, "code": "authorization-code"},
+        follow_redirects=False,
+    )
+    assert callback.status_code == 400
+    assert "state" in callback.json()["detail"].lower()
 
 
 def test_woocommerce_rejects_non_https_store_url(monkeypatch):
