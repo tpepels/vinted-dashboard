@@ -342,8 +342,8 @@ without affecting master inventory, import/export, eBay/BIBLIO or account data.
 
 ## General marketplace integrations
 
-The workspace connector catalog includes Etsy, WooCommerce, Shopify and
-BigCommerce in addition to Vinted, eBay and BIBLIO.
+The workspace connector catalog includes Etsy, WooCommerce, Shopify,
+BigCommerce and Squarespace in addition to Vinted, eBay and BIBLIO.
 
 - Etsy uses Open API v3 and reads active listings plus seller receipts/order
   lines. Save the app keystring, shared secret and Shop ID, then use the
@@ -358,6 +358,10 @@ BigCommerce in addition to Vinted, eBay and BIBLIO.
 - BigCommerce uses the REST Management API through
   `api.bigcommerce.com/stores/{store_hash}`. Configure a store hash and OAuth
   access token with read-only Products and Orders permissions.
-- All four integrations are read-only toward the remote store in this release.
+- Squarespace uses Products API v2 plus the Inventory and Orders APIs. Configure
+  an API key with read-only Products, Inventory and Orders permissions, or an
+  OAuth access token. Variant IDs remain the remote listing identity while SKU
+  drives deterministic master-inventory matching.
+- All five integrations are read-only toward the remote store in this release.
   Synced listings and order lines feed the shared inventory, reconciliation,
   sales and profitability workflows.
