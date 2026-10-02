@@ -2377,10 +2377,26 @@ def enqueue_connector_sync(
         )
         if not stored and not (bootstrap and env_ready):
             raise HTTPException(status_code=400, detail="eBay OAuth is not configured")
-    if channel in {Channel.ETSY, Channel.WOOCOMMERCE} and not stored:
+    if channel == Channel.ETSY:
+        if not stored:
+            raise HTTPException(status_code=400, detail="etsy credentials are not configured")
+        with db.session_scope() as session:
+            credential = session.execute(
+                select(ConnectorCredential).where(
+                    ConnectorCredential.workspace_id == context.workspace.id,
+                    ConnectorCredential.channel == Channel.ETSY,
+                )
+            ).scalar_one()
+            try:
+                values = decrypt_json(credential.encrypted_payload)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not _etsy_oauth_authorized(values):
+            raise HTTPException(status_code=400, detail="Etsy authorization is not complete")
+    elif channel == Channel.WOOCOMMERCE and not stored:
         raise HTTPException(
             status_code=400,
-            detail=f"{channel} credentials are not configured",
+            detail="woocommerce credentials are not configured",
         )
     job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
     return {"ok": True, "job_id": str(job_id), "queued": True}
