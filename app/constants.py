@@ -16,6 +16,8 @@ class Channel:
     BIBLIO = "biblio"
     ETSY = "etsy"
     WOOCOMMERCE = "woocommerce"
+    SHOPIFY = "shopify"
+    BIGCOMMERCE = "bigcommerce"
     CSV = "csv"
     EXCEL = "excel"
     MANUAL = "manual"
@@ -30,6 +32,8 @@ KNOWN_CHANNELS = (
     Channel.BIBLIO,
     Channel.ETSY,
     Channel.WOOCOMMERCE,
+    Channel.SHOPIFY,
+    Channel.BIGCOMMERCE,
     Channel.CSV,
     Channel.EXCEL,
     Channel.MANUAL,
