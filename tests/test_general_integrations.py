@@ -172,6 +172,13 @@ def test_etsy_sync_imports_listing_metadata_and_links_order(monkeypatch):
 
 
 def test_woocommerce_sync_supports_clothing_and_variations(monkeypatch):
+    monkeypatch.setattr(
+        hosted.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (hosted.socket.AF_INET, hosted.socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ],
+    )
     workspace_id = _workspace("woo-sync")
     _credential(
         workspace_id,
@@ -365,3 +372,67 @@ def test_woocommerce_rejects_non_https_store_url(monkeypatch):
     )
     assert response.status_code == 400
     assert "HTTPS" in response.json()["detail"]
+
+
+
+def test_woocommerce_rejects_private_store_url(monkeypatch):
+    workspace_id = _workspace("woo-private")
+    _credential(
+        workspace_id,
+        Channel.WOOCOMMERCE,
+        {
+            "store_url": "https://shop.example.test",
+            "consumer_key": "ck_test",
+            "consumer_secret": "cs_test",
+        },
+    )
+    monkeypatch.setattr(
+        hosted.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (hosted.socket.AF_INET, hosted.socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
+        ],
+    )
+    try:
+        hosted.test_woocommerce_workspace(workspace_id)
+    except RuntimeError as exc:
+        assert "private or local" in str(exc)
+    else:
+        raise AssertionError("private-address WooCommerce store should be rejected")
+
+
+def test_expanded_category_catalog_is_accepted_by_bulk_inventory(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "categories@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Categories",
+        },
+    )
+    assert registered.status_code == 200
+    csrf = registered.json()["csrf_token"]
+    created = client.post(
+        "/api/app/inventory",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "sku": "CAMERA-1",
+            "title": "Film camera",
+            "category": "electronics",
+            "quantity": 1,
+            "currency": "EUR",
+        },
+    )
+    assert created.status_code == 200, created.text
+    item_id = created.json()["item"]["id"]
+
+    response = client.post(
+        "/api/app/inventory/bulk",
+        headers={"X-CSRF-Token": csrf},
+        json={"item_ids": [item_id], "category": "collectibles"},
+    )
+    assert response.status_code == 200, response.text
+    inventory = client.get("/api/app/inventory").json()["items"]
+    assert inventory[0]["category"] == "collectibles"
