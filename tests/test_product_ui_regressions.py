@@ -130,15 +130,21 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     ).read_text(encoding="utf-8")
     assert '<option value="etsy">Etsy</option>' in html
     assert '<option value="woocommerce">WooCommerce</option>' in html
+    assert '<option value="shopify">Shopify</option>' in html
+    assert '<option value="bigcommerce">BigCommerce</option>' in html
     assert 'id="test-connector"' in html
     assert "etsy: {" in APP_JS
     assert "woocommerce: {" in APP_JS
+    assert "shopify: {" in APP_JS
+    assert "bigcommerce: {" in APP_JS
     assert '"/test-connection"' in APP_JS
     assert "listings_r and transactions_r" in APP_JS
     assert 'id="authorize-etsy"' in html
     assert '"/api/app/connectors/etsy/oauth/start"' in APP_JS
     assert "oauth_redirect_uri" in APP_JS
     assert "WooCommerce REST API v3" in APP_JS
+    assert "read_products, read_inventory and read_orders" in APP_JS
+    assert "BigCommerce" in APP_JS
 
 
 
