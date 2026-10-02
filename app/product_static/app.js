@@ -2076,7 +2076,7 @@ async function connections() {
     ).join("")
     : '<div class="empty">No Chrome browsers paired yet.</div>';
 
-  $(".revoke").forEach((button) => {
+  $$(".revoke").forEach((button) => {
     button.onclick = async () => {
       try {
         await api("/api/app/extension/devices/" + button.dataset.id, { method: "DELETE" });
