@@ -264,7 +264,19 @@ def recompute_inventory_item(session: Session, item: models.InventoryItem) -> No
         if listing.extra.get("isbn") and "isbn" not in attributes:
             attributes["isbn"] = listing.extra["isbn"]
     item.attributes = attributes
-    item.category = ItemCategory.BOOK if _is_book(listings, attributes) else ItemCategory.GENERAL
+    if _is_book(listings, attributes):
+        item.category = ItemCategory.BOOK
+    elif item.category == ItemCategory.GENERAL:
+        hinted = next(
+            (
+                _category_hint((listing.extra or {}).get("remote_metadata", {}).get("category"))
+                for listing in listings
+                if _category_hint((listing.extra or {}).get("remote_metadata", {}).get("category"))
+            ),
+            None,
+        )
+        if hinted:
+            item.category = hinted
 
     if item.title == "Untitled":
         better_title = next((listing.title for listing in listings if listing.title != "Untitled"), None)
