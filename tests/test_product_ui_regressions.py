@@ -133,12 +133,14 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert '<option value="shopify">Shopify</option>' in html
     assert '<option value="bigcommerce">BigCommerce</option>' in html
     assert '<option value="squarespace">Squarespace</option>' in html
+    assert '<option value="wix">Wix</option>' in html
     assert 'id="test-connector"' in html
     assert "etsy: {" in APP_JS
     assert "woocommerce: {" in APP_JS
     assert "shopify: {" in APP_JS
     assert "bigcommerce: {" in APP_JS
     assert "squarespace: {" in APP_JS
+    assert "wix: {" in APP_JS
     assert '"/test-connection"' in APP_JS
     assert "listings_r and transactions_r" in APP_JS
     assert 'id="authorize-etsy"' in html
@@ -148,6 +150,7 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert "read_products, read_inventory and read_orders" in APP_JS
     assert "BigCommerce" in APP_JS
     assert "Squarespace Commerce APIs" in APP_JS
+    assert "Catalog V3, Inventory V3 and Orders" in APP_JS
 
 
 
