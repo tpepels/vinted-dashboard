@@ -24,7 +24,7 @@ jobs:
           PUBLIC_APP_URL: https://example.invalid
           PRIVACY_CONTACT_EMAIL: privacy@example.invalid
           COOKIE_SECURE: "true"
-          APP_ENCRYPTION_KEY: 6VnK8h3TbrhvEXAMPLEreplacewithvalidfernetkey=
+          APP_ENCRYPTION_KEY: Q_ApFxPhEaoQNVNETKcyU9MV_CXZSBcQc6lX4VCmHU4=
           DATABASE_URL: postgresql://user:pass@example.invalid/db
           LEGACY_UI_ENABLED: "false"
           LEGACY_API_ENABLED: "false"
