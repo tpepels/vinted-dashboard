@@ -49,6 +49,8 @@ Inventory item / physical copy
     Vinted
     eBay
     BIBLIO
+    Etsy / WooCommerce
+    Shopify / BigCommerce
     future connectors
 \`\`\`
 
@@ -340,15 +342,22 @@ without affecting master inventory, import/export, eBay/BIBLIO or account data.
 
 ## General marketplace integrations
 
-The workspace connector catalog includes Etsy and WooCommerce in addition to
-Vinted, eBay and BIBLIO.
+The workspace connector catalog includes Etsy, WooCommerce, Shopify and
+BigCommerce in addition to Vinted, eBay and BIBLIO.
 
 - Etsy uses Open API v3 and reads active listings plus seller receipts/order
-  lines. Configure an app keystring, shared secret, Shop ID and an OAuth token
-  or refresh token with `listings_r` and `transactions_r`.
+  lines. Save the app keystring, shared secret and Shop ID, then use the
+  dashboard OAuth/PKCE flow for `listings_r` and `transactions_r`; manual
+  access/refresh tokens remain available as a fallback.
 - WooCommerce uses the WC REST API v3 over HTTPS. Generate a read-only REST API
   key under WooCommerce > Settings > Advanced > REST API and configure the
   store URL, consumer key and consumer secret.
-- Both integrations are read-only toward the remote marketplace in this
-  release. Synced listings and order lines feed the shared inventory,
-  reconciliation, sales and profitability workflows.
+- Shopify uses the GraphQL Admin API and imports product variants plus order
+  lines. Configure the `.myshopify.com` store domain and an Admin API access
+  token with read-only product/inventory/order scopes.
+- BigCommerce uses the REST Management API through
+  `api.bigcommerce.com/stores/{store_hash}`. Configure a store hash and OAuth
+  access token with read-only Products and Orders permissions.
+- All four integrations are read-only toward the remote store in this release.
+  Synced listings and order lines feed the shared inventory, reconciliation,
+  sales and profitability workflows.
