@@ -1165,15 +1165,24 @@ def _bigcommerce_quantity(product: dict[str, Any], variant: dict[str, Any] | Non
 def _bigcommerce_product_common(product: dict[str, Any]) -> dict[str, Any]:
     images = list(product.get("images") or [])
     custom_url = product.get("custom_url") or {}
+    custom_path = custom_url.get("url") if isinstance(custom_url, dict) else None
     category_ids = [str(value) for value in (product.get("categories") or [])]
+    attributes: dict[str, Any] = {}
+    if category_ids:
+        attributes["category_ids"] = category_ids
+    if custom_path:
+        attributes["storefront_path"] = custom_path
     return {
         "description": product.get("description"),
+        "brand": product.get("brand_name") or None,
         "product_type": product.get("type"),
-        "tags": list(product.get("search_keywords") or "").split(",")
-        if product.get("search_keywords")
-        else [],
-        "attributes": {"category_ids": category_ids} if category_ids else {},
-        "url": custom_url.get("url") if isinstance(custom_url, dict) else None,
+        "tags": [
+            value.strip()
+            for value in str(product.get("search_keywords") or "").split(",")
+            if value.strip()
+        ],
+        "attributes": attributes,
+        "url": None,
         "image_url": (
             images[0].get("url_standard")
             if images and isinstance(images[0], dict)
