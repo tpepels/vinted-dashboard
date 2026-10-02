@@ -200,6 +200,11 @@ def test_vinted_behavior_segments_rates_price_changes_and_time_to_sale():
         _snap(session, high, NOW, views=100, favourites=6)
 
         sold_item = _item(session, workspace_id, "S", "Sold coat", "clothing")
+        sold_item.cost_cents = 800
+        sold_item.attributes = {
+            "cost_source": "vinted_purchase",
+            "cost_source_adjusted": True,
+        }
         sold = _listing(
             session,
             workspace_id,
@@ -290,12 +295,34 @@ def test_vinted_behavior_segments_rates_price_changes_and_time_to_sale():
     assert sold_row["listed_at_source"] == "vinted"
     assert sold_row["sold_at_source"] == "order"
     assert sold_row["sale_total_cents"] == 2000
+    assert sold_row["cost_cents"] == 800
+    assert sold_row["gross_profit_cents"] == 1200
+    assert sold_row["gross_margin_pct"] == 60.0
+    assert sold_row["roi_pct"] == 150.0
+    assert sold_row["economics_complete"] is True
+    assert sold_row["cost_source"] == "vinted_purchase"
+    assert sold_row["cost_source_adjusted"] is True
     assert sold_row["external_order_id"] == "SALE-1"
+
+    assert summary["costed_linked_sales"] == 1
+    assert summary["cost_coverage_pct"] == 100.0
+    assert summary["costed_revenue_cents"] == 2000
+    assert summary["acquisition_cost_cents"] == 800
+    assert summary["gross_profit_cents"] == 1200
+    assert summary["gross_margin_pct"] == 60.0
+    assert summary["roi_pct"] == 150.0
 
     categories = {row["category"]: row for row in data["categories"]}
     assert categories["book"]["active_listings"] == 3
     assert categories["clothing"]["active_listings"] == 0
     assert categories["clothing"]["linked_sales"] == 1
+    assert categories["clothing"]["costed_sales"] == 1
+    assert categories["clothing"]["costed_revenue_cents"] == 2000
+    assert categories["clothing"]["cost_cents"] == 800
+    assert categories["clothing"]["gross_profit_cents"] == 1200
+    assert categories["clothing"]["cost_coverage_pct"] == 100.0
+    assert categories["clothing"]["gross_margin_pct"] == 60.0
+    assert categories["clothing"]["roi_pct"] == 150.0
 
 
 def test_vinted_behavior_ignores_cancelled_sales_for_time_to_sale():
@@ -529,3 +556,93 @@ def test_sold_stock_uses_first_observed_fallback_and_selected_window():
     assert row["listed_at_source"] == "first_seen"
     assert row["sold_at_source"] == "first_seen"
     assert row["days_online"] == 8.0
+
+
+
+def test_vinted_profitability_keeps_incomplete_sales_out_of_profit_math():
+    workspace_id = _workspace("vinted-profit-coverage")
+    with db.session_scope() as session:
+        costless_item = _item(session, workspace_id, "NO-COST", "No cost")
+        costless_listing = _listing(
+            session,
+            workspace_id,
+            costless_item,
+            "NO-COST",
+            age_days=10,
+            status="sold",
+            price_cents=1500,
+        )
+        missing_revenue_item = _item(session, workspace_id, "NO-REVENUE", "No revenue")
+        missing_revenue_item.cost_cents = 700
+        missing_revenue_listing = _listing(
+            session,
+            workspace_id,
+            missing_revenue_item,
+            "NO-REVENUE",
+            age_days=10,
+            status="sold",
+            price_cents=1500,
+        )
+        complete_item = _item(session, workspace_id, "COMPLETE", "Complete")
+        complete_item.cost_cents = 1000
+        complete_listing = _listing(
+            session,
+            workspace_id,
+            complete_item,
+            "COMPLETE",
+            age_days=10,
+            status="sold",
+            price_cents=800,
+        )
+
+        for external_id, item, total in [
+            ("NO-COST-SALE", costless_item, 1500),
+            ("NO-REVENUE-SALE", missing_revenue_item, None),
+            ("COMPLETE-SALE", complete_item, 800),
+        ]:
+            session.add(
+                models.Sale(
+                    workspace_id=workspace_id,
+                    inventory_item_id=item.id,
+                    channel="vinted",
+                    external_order_id=external_id,
+                    direction="sell",
+                    title=item.title,
+                    total_cents=total,
+                    currency="EUR",
+                    status="completed",
+                    lifecycle_status="completed",
+                    is_closed=True,
+                    occurred_at=NOW - timedelta(days=2),
+                    first_seen_at=NOW - timedelta(days=2),
+                    last_seen_at=NOW - timedelta(days=2),
+                    extra={},
+                )
+            )
+        session.flush()
+
+        data = build_vinted_analytics(
+            session,
+            workspace_id,
+            days=30,
+            strategy=dict(DEFAULT_STRATEGY),
+            now=NOW,
+        )
+
+    assert data["summary"]["linked_sales"] == 3
+    assert data["summary"]["costed_linked_sales"] == 1
+    assert data["summary"]["cost_coverage_pct"] == 33.3
+    assert data["summary"]["costed_revenue_cents"] == 800
+    assert data["summary"]["acquisition_cost_cents"] == 1000
+    assert data["summary"]["gross_profit_cents"] == -200
+    assert data["summary"]["gross_margin_pct"] == -25.0
+    assert data["summary"]["roi_pct"] == -20.0
+
+    sold = {row["external_order_id"]: row for row in data["sold_stock"]}
+    assert sold["NO-COST-SALE"]["economics_complete"] is False
+    assert sold["NO-COST-SALE"]["cost_cents"] is None
+    assert sold["NO-COST-SALE"]["gross_profit_cents"] is None
+    assert sold["NO-REVENUE-SALE"]["economics_complete"] is False
+    assert sold["NO-REVENUE-SALE"]["revenue_cents"] is None
+    assert sold["NO-REVENUE-SALE"]["gross_profit_cents"] is None
+    assert sold["COMPLETE-SALE"]["gross_profit_cents"] == -200
