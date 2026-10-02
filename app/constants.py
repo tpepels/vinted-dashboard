@@ -19,6 +19,7 @@ class Channel:
     SHOPIFY = "shopify"
     BIGCOMMERCE = "bigcommerce"
     SQUARESPACE = "squarespace"
+    WIX = "wix"
     CSV = "csv"
     EXCEL = "excel"
     MANUAL = "manual"
@@ -36,6 +37,7 @@ KNOWN_CHANNELS = (
     Channel.SHOPIFY,
     Channel.BIGCOMMERCE,
     Channel.SQUARESPACE,
+    Channel.WIX,
     Channel.CSV,
     Channel.EXCEL,
     Channel.MANUAL,
