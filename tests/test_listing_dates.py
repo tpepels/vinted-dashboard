@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+import uuid
+
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from app import db, entry, models
+from app.strategy import DEFAULT_STRATEGY
+from app.vinted_analytics import build_vinted_analytics
+from app.workspace_ingest import record_workspace_snapshot
+
+
+NOW = datetime.now(timezone.utc)
+
+
+def _workspace(slug: str = "listing-dates") -> uuid.UUID:
+    with db.session_scope() as session:
+        workspace = models.Workspace(name="Listing dates", slug=slug, settings={})
+        session.add(workspace)
+        session.flush()
+        return workspace.id
+
+
+def _snapshot(*, listed_at: str | None, collected_at: datetime) -> dict:
+    return {
+        "collected_at": collected_at.timestamp(),
+        "current_user": {"id": "seller-1", "username": "seller"},
+        "listings": [
+            {
+                "id": "V-DATE-1",
+                "title": "Old Vinted listing",
+                "status": "active",
+                "price_cents": 1000,
+                "currency": "EUR",
+                "listed_at": listed_at,
+                "favourites": 2,
+                "views": 10,
+                "metadata": {},
+            }
+        ],
+        "notifications": [],
+        "orders": [],
+    }
+
+
+def test_later_true_vinted_date_repairs_first_seen_age():
+    workspace_id = _workspace()
+    first_sync = NOW - timedelta(days=5)
+    true_listed = NOW - timedelta(days=120)
+
+    record_workspace_snapshot(
+        workspace_id,
+        _snapshot(listed_at=None, collected_at=first_sync),
+    )
+
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-DATE-1",
+            )
+        ).scalar_one()
+        assert listing.extra.get("listed_at") is None
+        assert listing.first_seen_at == first_sync
+
+        before = build_vinted_analytics(
+            session,
+            workspace_id,
+            days=30,
+            strategy=dict(DEFAULT_STRATEGY),
+            now=NOW,
+        )
+        assert before["listings"][0]["age_days"] == 5
+        assert before["listings"][0]["listed_at_source"] == "first_seen"
+        assert before["summary"]["actual_age_count"] == 0
+
+    record_workspace_snapshot(
+        workspace_id,
+        _snapshot(listed_at=true_listed.isoformat(), collected_at=NOW),
+        extension_version="2.3.0",
+    )
+
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-DATE-1",
+            )
+        ).scalar_one()
+        assert listing.extra["listed_at"] == true_listed.isoformat()
+        assert listing.first_seen_at == first_sync
+
+        after = build_vinted_analytics(
+            session,
+            workspace_id,
+            days=30,
+            strategy=dict(DEFAULT_STRATEGY),
+            now=NOW,
+        )
+        row = after["listings"][0]
+        assert row["age_days"] == 120
+        assert row["listed_at_source"] == "vinted"
+        assert row["listed_at"] == true_listed.isoformat()
+        assert after["summary"]["actual_age_count"] == 1
+
+
+def test_listings_api_does_not_call_first_seen_a_listed_date(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "listing-date-api@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Listing Date API",
+        },
+    )
+    assert registered.status_code == 200, registered.text
+
+    with db.session_scope() as session:
+        workspace = session.query(models.Workspace).one()
+        item = models.InventoryItem(
+            workspace_id=workspace.id,
+            sku="DATE-API",
+            title="Observed only",
+            category="book",
+            quantity=1,
+            status="active",
+            currency="EUR",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        first_seen = NOW - timedelta(days=40)
+        session.add(
+            models.ChannelListing(
+                workspace_id=workspace.id,
+                inventory_item_id=item.id,
+                channel="vinted",
+                external_id="DATE-API",
+                title=item.title,
+                price_cents=900,
+                currency="EUR",
+                status="active",
+                quantity=1,
+                first_seen_at=first_seen,
+                last_seen_at=NOW,
+                extra={},
+            )
+        )
+
+    response = client.get("/api/app/listings")
+    assert response.status_code == 200
+    row = response.json()["listings"][0]
+    assert row["listed_at"] is None
+    assert row["listed_at_source"] == "first_seen"
+    assert row["first_seen_at"] == first_seen.isoformat()
+
+
+def test_listings_api_identifies_true_vinted_listed_date(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "listing-date-real@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Listing Date Real",
+        },
+    )
+    assert registered.status_code == 200, registered.text
+
+    true_listed = NOW - timedelta(days=90)
+    with db.session_scope() as session:
+        workspace = session.query(models.Workspace).one()
+        item = models.InventoryItem(
+            workspace_id=workspace.id,
+            sku="DATE-REAL",
+            title="Actual date",
+            category="book",
+            quantity=1,
+            status="active",
+            currency="EUR",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        session.add(
+            models.ChannelListing(
+                workspace_id=workspace.id,
+                inventory_item_id=item.id,
+                channel="vinted",
+                external_id="DATE-REAL",
+                title=item.title,
+                price_cents=1100,
+                currency="EUR",
+                status="active",
+                quantity=1,
+                first_seen_at=NOW - timedelta(days=3),
+                last_seen_at=NOW,
+                extra={"listed_at": true_listed.isoformat()},
+            )
+        )
+
+    row = client.get("/api/app/listings").json()["listings"][0]
+    assert row["listed_at"] == true_listed.isoformat()
+    assert row["listed_at_source"] == "vinted"
