@@ -58,6 +58,7 @@ from app.connectors.hosted import (
     test_bigcommerce_workspace,
     test_etsy_workspace,
     test_shopify_workspace,
+    test_squarespace_workspace,
     test_woocommerce_workspace,
 )
 from app.connectors.workspace_sync import recompute_inventory_item
@@ -2007,6 +2008,7 @@ def connectors(context: RequestContext = Depends(require_context)):
             Channel.WOOCOMMERCE,
             Channel.SHOPIFY,
             Channel.BIGCOMMERCE,
+            Channel.SQUARESPACE,
         }:
             configured = channel in stored_credentials
             operational = configured
@@ -2023,6 +2025,7 @@ def connectors(context: RequestContext = Depends(require_context)):
                     Channel.WOOCOMMERCE,
                     Channel.SHOPIFY,
                     Channel.BIGCOMMERCE,
+                    Channel.SQUARESPACE,
                 },
                 "status": (
                     account.status
@@ -2132,6 +2135,12 @@ def save_connector_credentials(
                 )
             if not str(merged.get("access_token") or "").strip():
                 raise HTTPException(status_code=400, detail="BigCommerce needs access_token")
+        elif channel == Channel.SQUARESPACE:
+            if not str(merged.get("access_token") or "").strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Squarespace needs an API key or OAuth access token",
+                )
         if not merged:
             raise HTTPException(status_code=400, detail="No credentials supplied")
         if row is None:
@@ -2391,6 +2400,7 @@ def enqueue_connector_sync(
         Channel.WOOCOMMERCE,
         Channel.SHOPIFY,
         Channel.BIGCOMMERCE,
+        Channel.SQUARESPACE,
     }:
         raise HTTPException(status_code=400, detail="This connector has no server-side sync job")
     bootstrap = context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
@@ -2433,6 +2443,7 @@ def enqueue_connector_sync(
         Channel.WOOCOMMERCE,
         Channel.SHOPIFY,
         Channel.BIGCOMMERCE,
+        Channel.SQUARESPACE,
     } and not stored:
         raise HTTPException(
             status_code=400,
@@ -2480,6 +2491,8 @@ def generic_connector_test(
         tester = test_shopify_workspace
     elif channel == Channel.BIGCOMMERCE:
         tester = test_bigcommerce_workspace
+    elif channel == Channel.SQUARESPACE:
+        tester = test_squarespace_workspace
     else:
         raise HTTPException(status_code=400, detail="This connector has no generic connection test")
     if not has_workspace_connector_credentials(context.workspace.id, channel):
