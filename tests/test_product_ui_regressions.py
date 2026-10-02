@@ -24,7 +24,7 @@ def test_today_handles_missing_array_payloads_defensively():
 
 
 def test_today_does_not_surface_historical_unlinked_sales_as_cross_channel_actions():
-    assert "function renderStockActions(rows)" in APP_JS
+    assert "function renderStockActions(rows)" not in APP_JS
     assert "sold order(s) still need a master-stock link" not in APP_JS
 
 
