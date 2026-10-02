@@ -12,8 +12,10 @@ import base64
 import csv
 import ftplib
 import io
+import ipaddress
 import os
 import re
+import socket
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -355,11 +357,12 @@ def _fetch_etsy_orders(values: dict[str, str]) -> list[dict[str, Any]]:
                 "limit": 100,
                 "offset": offset,
                 "min_created": min_created,
-                "was_paid": "true",
             },
         )
         receipts = list(payload.get("results") or [])
         for receipt in receipts:
+            if receipt.get("was_paid") is False:
+                continue
             receipt_id = receipt.get("receipt_id")
             transactions = list(receipt.get("transactions") or [])
             if not transactions and receipt_id not in (None, ""):
@@ -462,14 +465,47 @@ def sync_etsy_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     }
 
 
-def _woocommerce_base(values: dict[str, str]) -> str:
-    raw = values.get("store_url", "").strip().rstrip("/")
+def _public_https_base(raw_value: str, *, label: str) -> str:
+    raw = str(raw_value or "").strip().rstrip("/")
     parsed = urlparse(raw)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-        raise RuntimeError("WooCommerce store_url must be a bare HTTPS site URL")
-    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-        raise RuntimeError("WooCommerce store_url must not include a path, query or fragment")
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise RuntimeError(f"{label} must use a public HTTPS URL")
+    if parsed.query or parsed.fragment:
+        raise RuntimeError(f"{label} must not include a query or fragment")
+    hostname = parsed.hostname.casefold()
+    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+        raise RuntimeError(f"{label} must use a public hostname")
+    try:
+        literal = ipaddress.ip_address(hostname.strip("[]"))
+    except ValueError:
+        literal = None
+    if literal is not None and not literal.is_global:
+        raise RuntimeError(f"{label} must not use a private or local IP address")
+    try:
+        addresses = {
+            address
+            for family, _socktype, _proto, _canonname, sockaddr in socket.getaddrinfo(
+                hostname, parsed.port or 443, type=socket.SOCK_STREAM
+            )
+            for address in [sockaddr[0]]
+        }
+    except OSError as exc:
+        raise RuntimeError(f"{label} hostname could not be resolved") from exc
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if not ip.is_global:
+            raise RuntimeError(f"{label} resolves to a private or local IP address")
     return raw
+
+
+def _woocommerce_base(values: dict[str, str]) -> str:
+    return _public_https_base(
+        values.get("store_url", ""),
+        label="WooCommerce store_url",
+    )
 
 
 def _woocommerce_headers(values: dict[str, str]) -> dict[str, str]:
