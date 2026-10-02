@@ -79,6 +79,29 @@ const connectorSchemas = {
       ["currency", "Store currency", "EUR", "text"],
     ],
   },
+  shopify: {
+    title: "Shopify",
+    help: "GraphQL Admin API. Use a store access token with read_products, read_inventory and read_orders. Order history is limited by the scopes granted to the Shopify app.",
+    test: true,
+    fields: [
+      ["store_domain", "Store domain", "your-store.myshopify.com", "text"],
+      ["access_token", "Admin API access token", "shpat_…", "password"],
+      ["api_version", "Admin API version", "2026-10", "text"],
+      ["order_days", "Order history days", "60", "number"],
+      ["currency", "Fallback currency", "EUR", "text"],
+    ],
+  },
+  bigcommerce: {
+    title: "BigCommerce",
+    help: "REST Management API. Use a store hash and OAuth access token with read-only Products and Orders permissions.",
+    test: true,
+    fields: [
+      ["store_hash", "Store hash", "abc123", "text"],
+      ["access_token", "OAuth access token", "", "password"],
+      ["order_days", "Order history days", "365", "number"],
+      ["currency", "Fallback currency", "EUR", "text"],
+    ],
+  },
 };
 
 function esc(value) {
