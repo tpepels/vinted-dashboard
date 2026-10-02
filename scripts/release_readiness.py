@@ -15,14 +15,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.runtime_config import privacy_contact_email, validate_configuration
-
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.runtime_config import privacy_contact_email, validate_configuration
 MANIFEST_PATH = ROOT / "app" / "extension" / "manifest.json"
 PRIVACY_PATH = ROOT / "app" / "product_static" / "privacy.html"
 
