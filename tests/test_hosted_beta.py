@@ -23,6 +23,7 @@ def production_env():
     return {
         "APP_ENV": "production",
         "PUBLIC_APP_URL": "https://reseller.example",
+        "PRIVACY_CONTACT_EMAIL": "privacy@reseller.example",
         "COOKIE_SECURE": "true",
         "APP_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii"),
         "LEGACY_UI_ENABLED": "false",
