@@ -1590,6 +1590,7 @@ function analyticsBars(target, rows, labelKey, countKey, labelMap = {}) {
 function renderVintedBehavior(data) {
   const summary = data.summary || {};
   const strategy = data.strategy || {};
+  const analyticsCurrency = data.currency || "EUR";
   $("#vinted-coverage").textContent =
     (summary.tracked_active_listings || 0) + " of " + (summary.active_listings || 0)
     + " active listings have snapshot history";
@@ -1605,7 +1606,7 @@ function renderVintedBehavior(data) {
       summary.median_days_to_sale == null ? "" : "median " + summary.median_days_to_sale + " d to sale")
     + metric(
       "Gross profit",
-      summary.costed_linked_sales ? money(summary.gross_profit_cents, "EUR") : "—",
+      summary.costed_linked_sales ? money(summary.gross_profit_cents, analyticsCurrency) : "—",
       summary.costed_linked_sales + " of " + (summary.linked_sales || 0) + " sales costed"
     )
     + metric(
@@ -1648,9 +1649,9 @@ function renderVintedBehavior(data) {
         + "</td><td>" + esc(row.linked_sales)
         + '</td><td data-sort-value="' + esc(row.cost_coverage_pct == null ? "" : row.cost_coverage_pct) + '">'
         + (row.linked_sales ? esc(row.costed_sales + "/" + row.linked_sales) : "—")
-        + '</td><td data-sort-value="' + esc(row.costed_revenue_cents || 0) + '">' + money(row.costed_revenue_cents, "EUR")
-        + '</td><td data-sort-value="' + esc(row.cost_cents || 0) + '">' + money(row.cost_cents, "EUR")
-        + '</td><td data-sort-value="' + esc(row.gross_profit_cents || 0) + '">' + (row.costed_sales ? money(row.gross_profit_cents, "EUR") : "—")
+        + '</td><td data-sort-value="' + esc(row.costed_revenue_cents || 0) + '">' + money(row.costed_revenue_cents, analyticsCurrency)
+        + '</td><td data-sort-value="' + esc(row.cost_cents || 0) + '">' + money(row.cost_cents, analyticsCurrency)
+        + '</td><td data-sort-value="' + esc(row.gross_profit_cents || 0) + '">' + (row.costed_sales ? money(row.gross_profit_cents, analyticsCurrency) : "—")
         + '</td><td data-sort-value="' + esc(row.gross_margin_pct == null ? "" : row.gross_margin_pct) + '">'
         + (row.gross_margin_pct == null ? "—" : esc(row.gross_margin_pct) + "%")
         + '</td><td data-sort-value="' + esc(row.roi_pct == null ? "" : row.roi_pct) + '">'
