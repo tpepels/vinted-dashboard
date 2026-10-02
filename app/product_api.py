@@ -78,6 +78,7 @@ from app.product_models import (
     ExtensionPairing,
     ImportJob,
     MappingPreset,
+    BackgroundJob,
 )
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
 from app.purchase_costs import apply_purchase_cost, purchase_cost_suggestions
@@ -974,47 +975,168 @@ def today(context: RequestContext = Depends(require_context)):
             listing_limit=None,
         )
         segment_actions = {
-            "low_interest_stale": ("Refresh listing", 100),
-            "high_interest_stale": ("Review price", 90),
-            "momentum": ("Leave alone", 40),
+            "low_interest_stale": ("Refresh listing", 80),
+            "high_interest_stale": ("Review price", 75),
         }
         actions: list[dict[str, Any]] = []
+        work_queue: list[dict[str, Any]] = []
+
         for row in behavior.get("listings") or []:
             suggestion = segment_actions.get(row.get("segment"))
             if suggestion is None:
                 continue
             label, priority = suggestion
-            actions.append(
+            action = {
+                "listing_id": row["listing_id"],
+                "item_id": row.get("item_id"),
+                "title": row["title"],
+                "channel": Channel.VINTED,
+                "action": label,
+                "priority": priority,
+                "age_days": row["age_days"],
+                "favourites": row["favourites"],
+                "favourites_gain": row["favourites_gain_7d"],
+                "views_gain": row["views_gain_7d"],
+                "url": row.get("url"),
+            }
+            actions.append(action)
+            detail_parts = [f'{row["age_days"]} days online']
+            if row.get("favourites") is not None:
+                detail_parts.append(f'{row["favourites"]} favourites')
+            if row.get("views_gain_7d"):
+                detail_parts.append(f'+{row["views_gain_7d"]} views in 7d')
+            work_queue.append(
                 {
-                    "listing_id": row["listing_id"],
-                    "item_id": row.get("item_id"),
-                    "title": row["title"],
-                    "channel": Channel.VINTED,
-                    "action": label,
+                    "id": f'listing:{row["listing_id"]}',
+                    "kind": "listing",
                     "priority": priority,
-                    "age_days": row["age_days"],
-                    "favourites": row["favourites"],
-                    "favourites_gain": row["favourites_gain_7d"],
-                    "views_gain": row["views_gain_7d"],
+                    "title": row["title"],
+                    "label": label,
+                    "detail": " · ".join(detail_parts),
+                    "view": "listings",
                     "url": row.get("url"),
                 }
             )
+
         actions.sort(key=lambda row: (-row["priority"], -row["age_days"]))
+
         cross_channel_actions = serialize_actions(session, context.workspace.id, limit=50)
         stock_attention = [
             row for row in cross_channel_actions
             if row["status"] in {"queued", "running", "attention", "error"}
         ]
-        # Historical unlinked sales still belong on Reconcile. They are not
-        # themselves a cross-channel action, and surfacing hundreds of them on
-        # Today obscures genuinely actionable close/retry work.
-        unlinked_sales = unlinked_sell_count(session, context.workspace.id)
+        for row in stock_attention:
+            title = (row.get("item") or {}).get("title") or (row.get("listing") or {}).get("title") or "Sold item"
+            priority = 120 if row["status"] == "error" else 115 if row["status"] == "attention" else 90
+            work_queue.append(
+                {
+                    "id": f'stock:{row["id"]}',
+                    "kind": "stock_action",
+                    "priority": priority,
+                    "title": title,
+                    "label": "Close sold stock listing",
+                    "detail": f'{row["channel"]} · {row["status"]}'
+                    + (f' · {row["last_error"]}' if row.get("last_error") else ""),
+                    "view": "reconcile",
+                    "stock_action": row,
+                }
+            )
+
+        sale_reconciliation = unlinked_sale_reconciliation(session, context.workspace.id)
+        if sale_reconciliation["review_count"]:
+            count = int(sale_reconciliation["review_count"])
+            work_queue.append(
+                {
+                    "id": "reconcile:sales",
+                    "kind": "reconcile",
+                    "priority": 110,
+                    "title": f'Resolve {count} ambiguous sold order' + ("" if count == 1 else "s"),
+                    "label": "Review matches",
+                    "detail": "The exact title matches more than one physical stock item.",
+                    "view": "reconcile",
+                }
+            )
+
+        cost_matches = purchase_cost_suggestions(session, context.workspace.id)
+        if cost_matches["count"]:
+            count = int(cost_matches["count"])
+            work_queue.append(
+                {
+                    "id": "costs:purchases",
+                    "kind": "purchase_cost",
+                    "priority": 85,
+                    "title": f'Review {count} purchase cost match' + ("" if count == 1 else "es"),
+                    "label": "Record acquisition costs",
+                    "detail": "Vinted purchases can fill missing inventory cost after review.",
+                    "view": "sales",
+                }
+            )
+
+        recent_open_sales = session.execute(
+            select(models.Sale)
+            .where(
+                models.Sale.workspace_id == context.workspace.id,
+                models.Sale.direction == "sell",
+                models.Sale.occurred_at >= now - timedelta(days=30),
+            )
+            .order_by(models.Sale.occurred_at.desc())
+            .limit(100)
+        ).scalars().all()
+        open_sales = [
+            row for row in recent_open_sales
+            if sale_counts_as_sold(row) and not row.is_closed
+        ]
+        if open_sales:
+            count = len(open_sales)
+            work_queue.append(
+                {
+                    "id": "sales:open",
+                    "kind": "open_sales",
+                    "priority": 100,
+                    "title": f'{count} sold order' + ("" if count == 1 else "s") + " still open",
+                    "label": "Check order status",
+                    "detail": "Review payment, shipment or transaction status.",
+                    "view": "sales",
+                }
+            )
+
+        recent_jobs = session.execute(
+            select(BackgroundJob)
+            .where(BackgroundJob.workspace_id == context.workspace.id)
+            .order_by(BackgroundJob.created_at.desc())
+            .limit(100)
+        ).scalars().all()
+        latest_by_type: dict[str, BackgroundJob] = {}
+        for job in recent_jobs:
+            latest_by_type.setdefault(job.job_type, job)
+        for job_type, job in latest_by_type.items():
+            if job.status != "error" or job_type in {"noop", "cross_channel_close"}:
+                continue
+            label = job_type.removesuffix("_sync").replace("_", " ").strip().title()
+            work_queue.append(
+                {
+                    "id": f'job:{job.id}',
+                    "kind": "connector_error",
+                    "priority": 105,
+                    "title": f'{label} needs attention',
+                    "label": "Open connections",
+                    "detail": job.last_error or "The latest background job failed.",
+                    "view": "connections",
+                }
+            )
+
+        work_queue.sort(key=lambda row: (-int(row["priority"]), str(row["title"]).casefold()))
+
     return {
         "actions": actions[:50],
         "count": len(actions),
         "strategy": settings,
         "cross_channel_actions": stock_attention,
-        "unlinked_sell_count": unlinked_sales,
+        "unlinked_sell_count": sale_reconciliation["review_count"],
+        "purchase_cost_suggestion_count": cost_matches["count"],
+        "open_sell_order_count": len(open_sales),
+        "work_queue": work_queue[:75],
+        "work_queue_count": len(work_queue),
     }
 
 
