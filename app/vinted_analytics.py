@@ -148,14 +148,14 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def listing_started_at(listing: models.ChannelListing) -> datetime:
-    raw = (listing.extra or {}).get("listed_at")
-    return _parse_datetime(raw) or listing.first_seen_at
+def listing_started_at(listing: models.ChannelListing) -> datetime | None:
+    return _parse_datetime((listing.extra or {}).get("listed_at"))
 
 
-def listing_started_source(listing: models.ChannelListing) -> str:
-    raw = (listing.extra or {}).get("listed_at")
-    return "vinted" if _parse_datetime(raw) is not None else "first_seen"
+def listing_started_source(listing: models.ChannelListing) -> str | None:
+    if listing_started_at(listing) is None:
+        return None
+    return str((listing.extra or {}).get("listed_at_source") or "vinted")
 
 
 def sale_time(sale: models.Sale) -> tuple[datetime | None, str | None]:
@@ -212,16 +212,16 @@ def _price_changes(series: list[SnapshotPoint], cutoff: datetime) -> int:
 
 def _segment(
     *,
-    age_days: int,
+    age_days: int | None,
     favourites: int,
     favourites_gain_7d: int,
     strategy: dict[str, int],
 ) -> str:
     if favourites_gain_7d >= strategy["momentum_favourites_7d"]:
         return "momentum"
-    if age_days >= strategy["very_stale_days"] and favourites <= strategy["low_favourites"]:
+    if age_days is not None and age_days >= strategy["very_stale_days"] and favourites <= strategy["low_favourites"]:
         return "low_interest_stale"
-    if age_days >= strategy["stale_days"] and favourites >= strategy["high_favourites"]:
+    if age_days is not None and age_days >= strategy["stale_days"] and favourites >= strategy["high_favourites"]:
         return "high_interest_stale"
     return "steady"
 
@@ -342,17 +342,21 @@ def build_vinted_analytics(
             continue
         started = listing_started_at(listing)
         started_source = listing_started_source(listing)
-        if started_source == "vinted":
+        age_days = (
+            max(0, int((now - started).total_seconds() // 86400))
+            if started is not None
+            else None
+        )
+        if age_days is not None:
             actual_age_count += 1
-        age_days = max(0, int((now - started).total_seconds() // 86400))
-        if age_days < 30:
-            age_buckets["0-29 days"] += 1
-        elif age_days < 60:
-            age_buckets["30-59 days"] += 1
-        elif age_days < 90:
-            age_buckets["60-89 days"] += 1
-        else:
-            age_buckets["90+ days"] += 1
+            if age_days < 30:
+                age_buckets["0-29 days"] += 1
+            elif age_days < 60:
+                age_buckets["30-59 days"] += 1
+            elif age_days < 90:
+                age_buckets["60-89 days"] += 1
+            else:
+                age_buckets["90+ days"] += 1
 
         series = series_by_listing.get(listing.id, [])
         latest = series[-1] if series else None
@@ -391,7 +395,11 @@ def build_vinted_analytics(
             if views > 0
             else None
         )
-        views_per_day = round(views / max(1, age_days), 1)
+        views_per_day = (
+            round(views / max(1, age_days), 1)
+            if age_days is not None
+            else None
+        )
         item = items.get(listing.inventory_item_id)
         category = item.category if item else "general"
         segment = _segment(
@@ -432,7 +440,7 @@ def build_vinted_analytics(
                 "url": listing.url,
                 "category": category,
                 "age_days": age_days,
-                "listed_at": started.isoformat(),
+                "listed_at": started.isoformat() if started is not None else None,
                 "listed_at_source": started_source,
                 "price_cents": latest.price_cents if latest else listing.price_cents,
                 "currency": listing.currency or "EUR",
@@ -474,19 +482,28 @@ def build_vinted_analytics(
         sold_at, sold_at_source = sale_time(sale)
         if sold_at is None or sold_at < window_start:
             continue
-        candidates = []
-        for listing in listings_by_item.get(sale.inventory_item_id, []):
-            started = listing_started_at(listing)
-            if started <= sold_at:
-                candidates.append((started, listing))
-        if not candidates:
+        item_listings = listings_by_item.get(sale.inventory_item_id, [])
+        if not item_listings:
             continue
-        started, _listing = max(candidates, key=lambda pair: pair[0])
-        days_to_sale = max(
-            0.0,
-            (sold_at - started).total_seconds() / 86400,
-        )
-        time_to_sale.append(days_to_sale)
+        dated_candidates = []
+        for listing in item_listings:
+            started = listing_started_at(listing)
+            if started is not None and started <= sold_at:
+                dated_candidates.append((started, listing))
+        if dated_candidates:
+            started, _listing = max(dated_candidates, key=lambda pair: pair[0])
+            days_to_sale = max(
+                0.0,
+                (sold_at - started).total_seconds() / 86400,
+            )
+            time_to_sale.append(days_to_sale)
+        else:
+            started = None
+            days_to_sale = None
+            _listing = max(
+                item_listings,
+                key=lambda listing: listing.last_seen_at or listing.first_seen_at,
+            )
         linked_sales += 1
         item = items.get(sale.inventory_item_id)
         category = item.category if item else "general"
@@ -499,11 +516,11 @@ def build_vinted_analytics(
                 "title": sale.title or _listing.title,
                 "category": category,
                 "url": _listing.url,
-                "listed_at": started.isoformat(),
+                "listed_at": started.isoformat() if started is not None else None,
                 "listed_at_source": listing_started_source(_listing),
                 "sold_at": sold_at.isoformat(),
                 "sold_at_source": sold_at_source,
-                "days_online": round(days_to_sale, 1),
+                "days_online": round(days_to_sale, 1) if days_to_sale is not None else None,
                 "sale_total_cents": sale.total_cents,
                 "listing_price_cents": _listing.price_cents,
                 "currency": sale.currency or _listing.currency or "EUR",
@@ -544,7 +561,7 @@ def build_vinted_analytics(
         reverse=True,
     )
 
-    active_ages = [int(row["age_days"]) for row in rows]
+    active_ages = [int(row["age_days"]) for row in rows if row["age_days"] is not None]
     current_views = sum(int(row["views"]) for row in rows)
     current_favourites = sum(int(row["favourites"]) for row in rows)
     window_views = sum(int(row["views_gain_window"]) for row in rows)
@@ -626,6 +643,7 @@ def build_vinted_analytics(
             ),
             "median_active_age_days": _median([float(value) for value in active_ages]),
             "actual_age_count": actual_age_count,
+            "unknown_age_count": len(rows) - actual_age_count,
             "linked_sales": linked_sales,
             "costed_linked_sales": len(complete_sold_rows),
             "cost_coverage_pct": (

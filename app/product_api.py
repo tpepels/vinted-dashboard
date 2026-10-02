@@ -638,7 +638,11 @@ def listings(
     result = []
     for listing, snapshot in rows:
         listed_at = (listing.extra or {}).get("listed_at")
-        listed_at_source = "vinted" if listed_at else "first_seen"
+        listed_at_source = (
+            str((listing.extra or {}).get("listed_at_source") or "vinted")
+            if listed_at
+            else None
+        )
         result.append(
             {
                 "id": str(listing.id),

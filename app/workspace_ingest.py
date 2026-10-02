@@ -48,6 +48,25 @@ def _dt(value: Any, fallback: datetime) -> datetime:
         return fallback
 
 
+def _exact_vinted_iso(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            number = float(value)
+            if number > 1e11:
+                number /= 1000
+            parsed = datetime.fromtimestamp(number, tz=timezone.utc)
+        else:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+    return parsed.isoformat()
+
+
 def _int(value: Any) -> int | None:
     try:
         if value in (None, ""):
@@ -197,13 +216,25 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
     listing.quantity = quantity
     listing.last_seen_at = captured_at
     existing_extra = dict(listing.extra or {})
-    listed_at = row.get("listed_at") or existing_extra.get("listed_at")
+    incoming_listed_at = _exact_vinted_iso(row.get("listed_at"))
+    existing_listed_at = _exact_vinted_iso(existing_extra.get("listed_at"))
+    listed_at = incoming_listed_at or existing_listed_at
+    listed_at_source = (
+        str(row.get("listed_at_source") or "vinted")
+        if incoming_listed_at
+        else (
+            str(existing_extra.get("listed_at_source") or "vinted")
+            if existing_listed_at
+            else None
+        )
+    )
     incoming_metadata = _clean_vinted_metadata(row.get("metadata"))
     existing_metadata = _clean_vinted_metadata(existing_extra.get("metadata"))
     metadata = {**existing_metadata, **incoming_metadata}
     listing.extra = {
         **existing_extra,
         "listed_at": listed_at,
+        "listed_at_source": listed_at_source,
         "metadata": metadata,
     }
     _apply_vinted_metadata(item, metadata, captured_at)
@@ -225,7 +256,8 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
                 views=_int(row.get("views")),
                 favourites=_int(row.get("favourites")),
                 raw={
-                    "listed_at": row.get("listed_at"),
+                    "listed_at": incoming_listed_at,
+                    "listed_at_source": listed_at_source,
                     "url": row.get("vinted_url") or row.get("url"),
                     "metadata": metadata,
                 },

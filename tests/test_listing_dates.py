@@ -72,14 +72,16 @@ def test_later_true_vinted_date_repairs_first_seen_age():
             strategy=dict(DEFAULT_STRATEGY),
             now=NOW,
         )
-        assert before["listings"][0]["age_days"] == 5
-        assert before["listings"][0]["listed_at_source"] == "first_seen"
+        assert before["listings"][0]["age_days"] is None
+        assert before["listings"][0]["listed_at"] is None
+        assert before["listings"][0]["listed_at_source"] is None
         assert before["summary"]["actual_age_count"] == 0
+        assert before["summary"]["unknown_age_count"] == 1
 
     record_workspace_snapshot(
         workspace_id,
         _snapshot(listed_at=true_listed.isoformat(), collected_at=NOW),
-        extension_version="2.3.0",
+        extension_version="2.4.0",
     )
 
     with db.session_scope() as session:
@@ -155,7 +157,7 @@ def test_listings_api_does_not_call_first_seen_a_listed_date(monkeypatch):
     assert response.status_code == 200
     row = response.json()["listings"][0]
     assert row["listed_at"] is None
-    assert row["listed_at_source"] == "first_seen"
+    assert row["listed_at_source"] is None
     assert row["first_seen_at"] == first_seen.isoformat()
 
 
@@ -207,3 +209,30 @@ def test_listings_api_identifies_true_vinted_listed_date(monkeypatch):
     row = client.get("/api/app/listings").json()["listings"][0]
     assert row["listed_at"] == true_listed.isoformat()
     assert row["listed_at_source"] == "vinted"
+
+
+
+def test_relative_or_invalid_vinted_dates_are_not_accepted():
+    workspace_id = _workspace("listing-date-invalid")
+    record_workspace_snapshot(
+        workspace_id,
+        _snapshot(listed_at="17 hours ago", collected_at=NOW - timedelta(days=20)),
+        extension_version="2.4.0",
+    )
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-DATE-1",
+            )
+        ).scalar_one()
+        assert listing.extra.get("listed_at") is None
+        data = build_vinted_analytics(
+            session,
+            workspace_id,
+            days=30,
+            strategy=dict(DEFAULT_STRATEGY),
+            now=NOW,
+        )
+        assert data["listings"][0]["listed_at"] is None
+        assert data["listings"][0]["age_days"] is None

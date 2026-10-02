@@ -1312,7 +1312,7 @@ function duplicateInfo(rows) {
 }
 
 function listingDisplayDate(row) {
-  return row.listed_at || row.first_seen_at || null;
+  return row.listed_at || null;
 }
 
 function listingComparator(sort) {
@@ -1429,15 +1429,8 @@ function renderListings() {
           + '</div><div class="sub">' + esc(row.external_sku || row.external_id || "") + "</div></td>"
           + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + "</span></td>"
           + "<td>" + esc(row.status) + "</td>"
-          + (showDate ? (() => {
-            const displayDate = listingDisplayDate(row);
-            const fallback = row.listed_at_source === "first_seen";
-            return '<td>' + dateOnly(displayDate)
-              + (fallback ? '<div class="sub">first observed</div>' : '')
-              + '</td><td>' + age(displayDate)
-              + (fallback ? '<div class="sub">minimum age</div>' : '')
-              + '</td>';
-          })() : "")
+          + (showDate ? '<td>' + dateOnly(listingDisplayDate(row))
+            + '</td><td>' + age(listingDisplayDate(row)) + '</td>' : "")
           + (showFavourites ? "<td>" + esc(row.favourites == null ? "—" : row.favourites) + "</td>" : "")
           + (showViews ? "<td>" + esc(row.views == null ? "—" : row.views) + "</td>" : "")
           + "<td>" + money(row.price_cents, row.currency) + "</td></tr>";
@@ -1659,8 +1652,7 @@ function renderVintedBehavior(data) {
       summary.favourites_per_100_views == null ? "—" : summary.favourites_per_100_views)
     + metric("Median active age",
       summary.median_active_age_days == null ? "—" : summary.median_active_age_days + " d",
-      (summary.actual_age_count || 0) + " actual Vinted date"
-        + ((summary.actual_age_count || 0) === 1 ? "" : "s"))
+      (summary.actual_age_count || 0) + " of " + (summary.active_listings || 0) + " exact Vinted dates")
     + metric("Linked Vinted sales", summary.linked_sales || 0,
       summary.median_days_to_sale == null ? "" : "median " + summary.median_days_to_sale + " d to sale")
     + metric(
@@ -1731,13 +1723,13 @@ function renderVintedBehavior(data) {
           : esc(row.title);
         return '<tr><td><div class="title">' + title + '</div></td>'
           + '<td>' + esc(row.category) + '</td>'
-          + '<td data-sort-value="' + esc(new Date(row.listed_at).getTime()) + '">' + esc(when(row.listed_at))
-          + (row.listed_at_source === "first_seen" ? '<div class="sub">first observed</div>' : "")
-          + '</td>'
+          + '<td data-sort-value="' + esc(row.listed_at ? new Date(row.listed_at).getTime() : "") + '">'
+          + (row.listed_at ? esc(when(row.listed_at)) : "—") + '</td>'
           + '<td data-sort-value="' + esc(new Date(row.sold_at).getTime()) + '">' + esc(when(row.sold_at))
           + (row.sold_at_source === "first_seen" ? '<div class="sub">first observed</div>' : "")
           + '</td>'
-          + '<td data-sort-value="' + esc(row.days_online) + '">' + esc(row.days_online) + ' d</td>'
+          + '<td data-sort-value="' + esc(row.days_online == null ? "" : row.days_online) + '">'
+          + (row.days_online == null ? "—" : esc(row.days_online) + " d") + '</td>'
           + '<td data-sort-value="' + esc(row.sale_total_cents == null ? "" : row.sale_total_cents) + '">'
           + money(row.sale_total_cents, row.currency) + '</td>'
           + '<td data-sort-value="' + esc(row.cost_cents == null ? "" : row.cost_cents) + '">'
@@ -1774,8 +1766,8 @@ function renderVintedBehavior(data) {
           : esc(row.title);
         return '<tr class="analytics-listing" data-id="' + esc(row.listing_id) + '"><td><div class="title">'
           + title + '</div><div class="sub">' + esc(row.category) + " · "
-          + money(row.price_cents, row.currency) + "</div></td><td>" + esc(row.age_days) + " d"
-          + (row.listed_at_source === "first_seen" ? '<div class="sub">minimum - first observed</div>' : "")
+          + money(row.price_cents, row.currency) + "</div></td><td>"
+          + (row.age_days == null ? "—" : esc(row.age_days) + " d")
           + "</td><td>"
           + esc(row.views) + '</td><td class="gain">+' + esc(row.views_gain_7d)
           + "</td><td>" + esc(row.favourites) + '</td><td class="gain">+' + esc(row.favourites_gain_7d)
