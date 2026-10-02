@@ -39,6 +39,7 @@ CHANNEL_DISPLAY_NAMES = {
     Channel.BIGCOMMERCE: "BigCommerce",
     Channel.SQUARESPACE: "Squarespace",
     Channel.WIX: "Wix",
+    Channel.DEPOP: "Depop",
 }
 
 
