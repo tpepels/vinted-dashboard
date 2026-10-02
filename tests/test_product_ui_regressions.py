@@ -19,8 +19,8 @@ def test_reconciliation_bulk_selection_uses_multi_element_selector():
 
 
 def test_today_handles_missing_array_payloads_defensively():
-    assert "Array.isArray(todayData.actions)" in APP_JS
-    assert "Array.isArray(todayData.cross_channel_actions)" in APP_JS
+    assert "Array.isArray(todayData.work_queue)" in APP_JS
+    assert "Array.isArray(rows) ? rows : []" in APP_JS
 
 
 def test_today_does_not_surface_historical_unlinked_sales_as_cross_channel_actions():
