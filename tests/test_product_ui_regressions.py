@@ -133,7 +133,7 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert '<option value="shopify">Shopify</option>' in html
     assert '<option value="bigcommerce">BigCommerce</option>' in html
     assert '<option value="squarespace">Squarespace</option>' in html
-    assert '<option value="wix">Wix</option>' in html
+    assert html.count('<option value="wix">Wix</option>') >= 2
     assert 'id="test-connector"' in html
     assert "etsy: {" in APP_JS
     assert "woocommerce: {" in APP_JS
