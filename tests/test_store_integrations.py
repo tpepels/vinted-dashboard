@@ -44,7 +44,12 @@ def _credential(workspace_id: uuid.UUID, channel: str, values: dict[str, str]) -
 
 def test_catalog_exposes_store_connectors():
     catalog = {row["channel"]: row for row in connector_catalog()}
-    for channel in (Channel.SHOPIFY, Channel.BIGCOMMERCE, Channel.SQUARESPACE):
+    for channel in (
+        Channel.SHOPIFY,
+        Channel.BIGCOMMERCE,
+        Channel.SQUARESPACE,
+        Channel.WIX,
+    ):
         assert catalog[channel]["group"] == "store"
         assert Capability.FETCH_LISTINGS in catalog[channel]["capabilities"]
         assert Capability.FETCH_ORDERS in catalog[channel]["capabilities"]
@@ -640,3 +645,287 @@ def test_squarespace_credentials_require_token(monkeypatch):
     )
     assert response.status_code == 400
     assert "API key or OAuth access token" in response.json()["detail"]
+
+
+
+def test_wix_sync_imports_variants_inventory_and_orders(monkeypatch):
+    workspace_id = _workspace("wix-sync")
+    site_id = "11111111-2222-3333-4444-555555555555"
+    _credential(
+        workspace_id,
+        Channel.WIX,
+        {
+            "site_id": site_id,
+            "api_key": "wix-api-key",
+            "currency": "EUR",
+            "order_days": "365",
+        },
+    )
+
+    def fake_post(url, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "wix-api-key"
+        assert kwargs["headers"]["wix-site-id"] == site_id
+        body = kwargs["json"]
+
+        if url.endswith("/stores/v3/products/query-variants"):
+            assert body["fields"] == ["CURRENCY"]
+            return FakeResponse(
+                {
+                    "variants": [
+                        {
+                            "variantId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                            "visible": True,
+                            "sku": "WIX-COAT-M",
+                            "optionChoices": [
+                                {
+                                    "optionChoiceNames": {
+                                        "optionName": "Size",
+                                        "choiceName": "M",
+                                        "renderType": "TEXT_CHOICES",
+                                    }
+                                },
+                                {
+                                    "optionChoiceNames": {
+                                        "optionName": "Colour",
+                                        "choiceName": "Blue",
+                                        "renderType": "TEXT_CHOICES",
+                                    }
+                                },
+                            ],
+                            "price": {
+                                "actualPrice": {
+                                    "amount": "72.50",
+                                    "formattedAmount": "€72.50",
+                                }
+                            },
+                            "inventoryStatus": {
+                                "inStock": True,
+                                "preorderEnabled": False,
+                            },
+                            "productData": {
+                                "productId": "99999999-8888-7777-6666-555555555555",
+                                "name": "Wool coat",
+                                "productType": "PHYSICAL",
+                                "visible": True,
+                                "currency": "EUR",
+                                "directCategoryIds": ["outerwear"],
+                            },
+                        }
+                    ],
+                    "pagingMetadata": {"cursors": {}},
+                }
+            )
+
+        if url.endswith("/stores/v3/inventory-items/query"):
+            return FakeResponse(
+                {
+                    "inventoryItems": [
+                        {
+                            "id": "inventory-one",
+                            "productId": "99999999-8888-7777-6666-555555555555",
+                            "variantId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                            "locationId": "location-one",
+                            "trackQuantity": True,
+                            "quantity": 2,
+                            "inStock": True,
+                        },
+                        {
+                            "id": "inventory-two",
+                            "productId": "99999999-8888-7777-6666-555555555555",
+                            "variantId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                            "locationId": "location-two",
+                            "trackQuantity": True,
+                            "quantity": 1,
+                            "inStock": True,
+                        },
+                    ],
+                    "pagingMetadata": {"cursors": {}},
+                }
+            )
+
+        if url.endswith("/ecom/v1/orders/search"):
+            return FakeResponse(
+                {
+                    "orders": [
+                        {
+                            "id": "order-wix-1",
+                            "number": "10042",
+                            "createdDate": "2026-02-10T12:00:00Z",
+                            "status": "APPROVED",
+                            "paymentStatus": "PAID",
+                            "fulfillmentStatus": "FULFILLED",
+                            "currency": "EUR",
+                            "lineItems": [
+                                {
+                                    "id": "line-wix-1",
+                                    "productName": {"original": "Wool coat"},
+                                    "catalogReference": {
+                                        "catalogItemId": "99999999-8888-7777-6666-555555555555",
+                                        "appId": hosted.WIX_STORES_APP_ID,
+                                        "options": {
+                                            "variantId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+                                        },
+                                    },
+                                    "quantity": 1,
+                                    "physicalProperties": {"sku": "WIX-COAT-M"},
+                                    "price": {"amount": "72.50"},
+                                }
+                            ],
+                        }
+                    ],
+                    "metadata": {"cursors": {}},
+                }
+            )
+        raise AssertionError(url)
+
+    monkeypatch.setattr(hosted.requests, "post", fake_post)
+    result = hosted.sync_wix_workspace(workspace_id)
+    assert result["items"] == 1
+    assert result["orders"] == 1
+    assert result["linked"] == 1
+
+    with db.session_scope() as session:
+        item = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == workspace_id,
+                models.InventoryItem.sku == "WIX-COAT-M",
+            )
+        ).scalar_one()
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.WIX,
+            )
+        ).scalar_one()
+        sale = session.execute(
+            select(models.Sale).where(
+                models.Sale.workspace_id == workspace_id,
+                models.Sale.channel == Channel.WIX,
+            )
+        ).scalar_one()
+
+        assert item.quantity == 3
+        assert listing.external_id == (
+            "99999999-8888-7777-6666-555555555555:"
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        )
+        assert listing.external_sku == "WIX-COAT-M"
+        assert listing.price_cents == 7250
+        assert listing.extra["remote_metadata"]["attributes"] == {
+            "Size": "M",
+            "Colour": "Blue",
+            "category_ids": ["outerwear"],
+        }
+        assert sale.inventory_item_id == item.id
+        assert sale.external_order_id == "order-wix-1:line-wix-1"
+        assert sale.total_cents == 7250
+        assert sale.status == "completed"
+
+
+def test_wix_credentials_are_accepted(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "wix@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Wix",
+        },
+    )
+    assert registered.status_code == 200
+    csrf = registered.json()["csrf_token"]
+
+    saved = client.put(
+        "/api/app/connectors/wix/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "values": {
+                "site_id": "11111111-2222-3333-4444-555555555555",
+                "api_key": "wix-api-key",
+                "order_days": "365",
+            }
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["operational"] is True
+
+    connectors = {
+        row["channel"]: row
+        for row in client.get("/api/app/connectors").json()["connectors"]
+    }
+    assert connectors["wix"]["configured"] is True
+    assert connectors["wix"]["operational"] is True
+    assert connectors["wix"]["sync_available"] is True
+
+
+def test_wix_rejects_invalid_site_id(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "wix-invalid@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Wix Invalid",
+        },
+    )
+    csrf = registered.json()["csrf_token"]
+
+    response = client.put(
+        "/api/app/connectors/wix/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "values": {
+                "site_id": "../not-a-site",
+                "api_key": "wix-api-key",
+            }
+        },
+    )
+    assert response.status_code == 400
+    assert "valid site UUID" in response.json()["detail"]
+
+
+def test_wix_ignores_non_store_order_lines(monkeypatch):
+    workspace_id = _workspace("wix-non-store-line")
+    _credential(
+        workspace_id,
+        Channel.WIX,
+        {
+            "site_id": "11111111-2222-3333-4444-555555555555",
+            "api_key": "wix-api-key",
+        },
+    )
+
+    monkeypatch.setattr(
+        hosted,
+        "_wix_post",
+        lambda values, path, body=None: {
+            "orders": [
+                {
+                    "id": "order-1",
+                    "status": "APPROVED",
+                    "paymentStatus": "PAID",
+                    "lineItems": [
+                        {
+                            "id": "line-other",
+                            "catalogReference": {
+                                "catalogItemId": "external-item",
+                                "appId": "some-other-wix-app",
+                            },
+                            "quantity": 1,
+                            "price": {"amount": "10"},
+                        }
+                    ],
+                }
+            ]
+        }
+        if path == "ecom/v1/orders/search"
+        else {},
+    )
+    assert hosted._fetch_wix_orders(
+        {
+            "site_id": "11111111-2222-3333-4444-555555555555",
+            "api_key": "wix-api-key",
+        }
+    ) == []
