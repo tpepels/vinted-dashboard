@@ -102,16 +102,16 @@ def test_today_navigation_uses_multi_element_selector():
 
 
 
-def test_listing_dates_distinguish_actual_listed_date_from_first_observed():
+def test_listing_dates_use_only_real_vinted_timestamp():
     assert "function listingDisplayDate(row)" in APP_JS
-    assert "row.listed_at || row.first_seen_at" in APP_JS
-    assert "first observed" in APP_JS
-    assert "minimum age" in APP_JS
-    assert 'row.listed_at_source === "first_seen"' in APP_JS
+    assert "return row.listed_at || null;" in APP_JS
+    assert "row.listed_at || row.first_seen_at" not in APP_JS
+    assert "first observed" not in APP_JS
+    assert "minimum age" not in APP_JS
 
 
-def test_vinted_analytics_labels_first_observed_age_as_minimum():
-    assert "minimum - first observed" in APP_JS
+def test_vinted_analytics_renders_unknown_age_as_unavailable():
+    assert 'row.age_days == null ? "—"' in APP_JS
     assert "summary.actual_age_count" in APP_JS
 
 
