@@ -218,6 +218,28 @@ def _apply_generic_metadata(
         inventory_item.category = hinted
 
 
+def item_has_remaining_stock_on_sale_channel(
+    session: Session,
+    item: models.InventoryItem,
+    sale: models.Sale,
+) -> bool:
+    """Return whether the marketplace that produced the sale still reports stock.
+
+    This distinguishes one-off resale stock from quantity-based store stock.
+    """
+    listings = session.execute(
+        select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == item.workspace_id,
+            models.ChannelListing.inventory_item_id == item.id,
+            models.ChannelListing.channel == sale.channel,
+            models.ChannelListing.status == ListingStatus.ACTIVE,
+        )
+    ).scalars().all()
+    return any(
+        listing.quantity is None or int(listing.quantity or 0) > 0
+        for listing in listings
+    )
+
 def recompute_inventory_item(session: Session, item: models.InventoryItem) -> None:
     """Re-derives an ``InventoryItem``'s aggregate quantity/status/category
     from *all* of its current listings (not just the one just touched),
@@ -243,24 +265,28 @@ def recompute_inventory_item(session: Session, item: models.InventoryItem) -> No
             models.Sale.direction == "sell",
         )
     ).scalars().all()
-    if any(sale_counts_as_sold(sale) for sale in consuming_sales):
+    consuming = [sale for sale in consuming_sales if sale_counts_as_sold(sale)]
+    has_remaining_sale_channel_stock = any(
+        item_has_remaining_stock_on_sale_channel(session, item, sale)
+        for sale in consuming
+    )
+    statuses = {listing.status for listing in listings}
+    if consuming and not has_remaining_sale_channel_stock:
+        item.status = ItemStatus.SOLD
+        item.quantity = 0
+    elif ListingStatus.ACTIVE in statuses:
+        item.status = ItemStatus.ACTIVE
+        item.quantity = max(
+            (listing.quantity or 0)
+            for listing in listings
+            if listing.status == ListingStatus.ACTIVE
+        )
+    elif statuses and statuses <= {ListingStatus.SOLD}:
         item.status = ItemStatus.SOLD
         item.quantity = 0
     else:
-        statuses = {listing.status for listing in listings}
-        if ListingStatus.ACTIVE in statuses:
-            item.status = ItemStatus.ACTIVE
-            item.quantity = max(
-                (listing.quantity or 0)
-                for listing in listings
-                if listing.status == ListingStatus.ACTIVE
-            )
-        elif statuses and statuses <= {ListingStatus.SOLD}:
-            item.status = ItemStatus.SOLD
-            item.quantity = 0
-        else:
-            item.status = ItemStatus.ARCHIVED
-            item.quantity = 0
+        item.status = ItemStatus.ARCHIVED
+        item.quantity = 0
 
     attributes = dict(item.attributes)
     for listing in listings:
@@ -584,6 +610,29 @@ def record_workspace_channel_orders(
                     touched[item.id] = item
 
         session.flush()
+        from app.cross_channel import reconcile_sale_state
+
+        written_ids = [
+            str(raw.get("external_order_id") or raw.get("id") or "").strip()
+            for raw in orders
+            if str(raw.get("external_order_id") or raw.get("id") or "").strip()
+        ]
+        if written_ids:
+            for sale in session.execute(
+                select(models.Sale).where(
+                    models.Sale.workspace_id == workspace.id,
+                    models.Sale.channel == channel,
+                    models.Sale.direction == "sell",
+                    models.Sale.external_order_id.in_(written_ids),
+                )
+            ).scalars().all():
+                reconcile_sale_state(
+                    session,
+                    sale,
+                    external_item_id=str(
+                        (sale.extra or {}).get("listing_external_id") or ""
+                    ).strip() or None,
+                )
         for item in touched.values():
             recompute_inventory_item(session, item)
     return {"orders": written, "linked": linked}
