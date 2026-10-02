@@ -85,6 +85,12 @@ def handle(job: dict) -> None:
         from app.connectors.hosted import sync_wix_workspace
         sync_wix_workspace(workspace_id)
         return
+    if job_type == "depop_sync":
+        if workspace_id is None:
+            raise RuntimeError("depop_sync requires a workspace")
+        from app.connectors.hosted import sync_depop_workspace
+        sync_depop_workspace(workspace_id)
+        return
     if job_type == "cross_channel_close":
         action_id = payload.get("action_id")
         if not action_id:
