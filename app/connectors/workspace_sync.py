@@ -161,16 +161,21 @@ def _category_hint(value: Any) -> str | None:
     text = str(value or "").casefold()
     if not text:
         return None
-    if any(token in text for token in ("book", "books", "livro", "livros", "libro", "libros")):
-        return ItemCategory.BOOK
-    if any(
-        token in text
-        for token in (
-            "clothing", "clothes", "apparel", "fashion", "shirt", "dress", "jacket",
-            "trouser", "pants", "jeans", "shoe", "shoes", "footwear", "accessories",
-        )
-    ):
-        return ItemCategory.CLOTHING
+    rules = (
+        (ItemCategory.BOOK, ("book", "books", "livro", "livros", "libro", "libros")),
+        (ItemCategory.CLOTHING, ("clothing", "clothes", "apparel", "fashion", "shirt", "dress", "jacket", "trouser", "pants", "jeans", "shoe", "footwear")),
+        (ItemCategory.ELECTRONICS, ("electronics", "computer", "phone", "camera", "audio", "video game console")),
+        (ItemCategory.HOME, ("home", "furniture", "kitchen", "decor", "garden", "houseware")),
+        (ItemCategory.COLLECTIBLES, ("collectible", "collectibles", "memorabilia", "antique", "vintage collectible")),
+        (ItemCategory.TOYS_GAMES, ("toy", "toys", "board game", "games", "puzzle")),
+        (ItemCategory.MEDIA, ("music", "movie", "movies", "dvd", "blu-ray", "vinyl", "cd", "media")),
+        (ItemCategory.SPORTS, ("sport", "sports", "fitness", "cycling", "outdoor gear")),
+        (ItemCategory.BEAUTY, ("beauty", "cosmetic", "skincare", "fragrance", "perfume")),
+        (ItemCategory.ART_CRAFTS, ("art", "craft", "crafts", "handmade", "artwork", "supplies")),
+    )
+    for category, tokens in rules:
+        if any(token in text for token in tokens):
+            return category
     return None
 
 
