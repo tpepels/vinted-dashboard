@@ -229,6 +229,9 @@ def _money_resource(value: Any) -> tuple[int | None, str | None]:
 
 
 def _etsy_access_token(values: dict[str, str]) -> str:
+    cached = values.get("_runtime_oauth_token", "").strip()
+    if cached:
+        return cached
     keystring = values.get("keystring", "").strip()
     refresh_token = values.get("refresh_token", "").strip()
     if refresh_token:
@@ -247,6 +250,7 @@ def _etsy_access_token(values: dict[str, str]) -> str:
         token = str((response.json() or {}).get("access_token") or "").strip()
         if not token:
             raise RuntimeError("Etsy OAuth refresh returned no access token")
+        values["_runtime_oauth_token"] = token
         return token
     token = values.get("oauth_token", "").strip()
     if not token:
