@@ -521,26 +521,6 @@ function bindCrossChannelButtons(after) {
   });
 }
 
-function renderStockActions(rows) {
-  const actionRows = Array.isArray(rows) ? rows : [];
-  const card = $("#stock-actions").closest(".stock-alerts");
-  card.classList.toggle("hidden", actionRows.length === 0);
-  if (!actionRows.length) {
-    $("#stock-alert-count").textContent = "";
-    $("#stock-actions").innerHTML = "";
-    return;
-  }
-  $("#stock-alert-count").textContent =
-    actionRows.length + " active action" + (actionRows.length === 1 ? "" : "s");
-  $("#stock-actions").innerHTML = actionRows.map((row) =>
-    '<div class="action-row"><div><strong>' + esc(row.item?.title || row.listing?.title || "Sold item")
-    + '</strong><p>' + esc(row.channel) + " · " + esc(row.status)
-    + (row.last_error ? " · " + esc(row.last_error) : "")
-    + '</p></div><div class="actions compact">' + crossChannelActionControls(row) + "</div></div>"
-  ).join("");
-  bindCrossChannelButtons(today);
-}
-
 function selectedInventoryIds() {
   return $$(".inventory-select:checked").map((box) => box.dataset.id);
 }
