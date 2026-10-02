@@ -1285,6 +1285,10 @@ function duplicateInfo(rows) {
   return { duplicateGroups, counts };
 }
 
+function listingDisplayDate(row) {
+  return row.listed_at || row.first_seen_at || null;
+}
+
 function listingComparator(sort) {
   const number = (value, fallback = -1) => {
     const parsed = Number(value);
@@ -1292,8 +1296,8 @@ function listingComparator(sort) {
   };
   if (sort === "oldest") {
     return (a, b) => {
-      const ad = timeValue(a.listed_at);
-      const bd = timeValue(b.listed_at);
+      const ad = timeValue(listingDisplayDate(a));
+      const bd = timeValue(listingDisplayDate(b));
       if (ad && bd) return ad - bd;
       if (ad) return -1;
       if (bd) return 1;
@@ -1308,8 +1312,8 @@ function listingComparator(sort) {
     return (a, b) => String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base" });
   }
   return (a, b) => {
-    const ad = timeValue(a.listed_at);
-    const bd = timeValue(b.listed_at);
+    const ad = timeValue(listingDisplayDate(a));
+    const bd = timeValue(listingDisplayDate(b));
     if (ad && bd) return bd - ad;
     if (ad) return -1;
     if (bd) return 1;
@@ -1380,7 +1384,7 @@ function renderListings() {
 
   const showFavourites = filtered.some((row) => row.favourites != null);
   const showViews = filtered.some((row) => row.views != null);
-  const showDate = filtered.some((row) => timeValue(row.listed_at) > 0);
+  const showDate = filtered.some((row) => timeValue(listingDisplayDate(row)) > 0);
 
   $("#listings-table").innerHTML = filtered.length
     ? '<table><thead><tr><th>Listing</th><th>Marketplace</th><th>Status</th>'
@@ -1399,7 +1403,15 @@ function renderListings() {
           + '</div><div class="sub">' + esc(row.external_sku || row.external_id || "") + "</div></td>"
           + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + "</span></td>"
           + "<td>" + esc(row.status) + "</td>"
-          + (showDate ? "<td>" + dateOnly(row.listed_at) + "</td><td>" + age(row.listed_at) + "</td>" : "")
+          + (showDate ? (() => {
+            const displayDate = listingDisplayDate(row);
+            const fallback = row.listed_at_source === "first_seen";
+            return '<td>' + dateOnly(displayDate)
+              + (fallback ? '<div class="sub">first observed</div>' : '')
+              + '</td><td>' + age(displayDate)
+              + (fallback ? '<div class="sub">minimum age</div>' : '')
+              + '</td>';
+          })() : "")
           + (showFavourites ? "<td>" + esc(row.favourites == null ? "—" : row.favourites) + "</td>" : "")
           + (showViews ? "<td>" + esc(row.views == null ? "—" : row.views) + "</td>" : "")
           + "<td>" + money(row.price_cents, row.currency) + "</td></tr>";
@@ -1620,7 +1632,9 @@ function renderVintedBehavior(data) {
     + metric("Favourites / 100 views",
       summary.favourites_per_100_views == null ? "—" : summary.favourites_per_100_views)
     + metric("Median active age",
-      summary.median_active_age_days == null ? "—" : summary.median_active_age_days + " d")
+      summary.median_active_age_days == null ? "—" : summary.median_active_age_days + " d",
+      (summary.actual_age_count || 0) + " actual Vinted date"
+        + ((summary.actual_age_count || 0) === 1 ? "" : "s"))
     + metric("Linked Vinted sales", summary.linked_sales || 0,
       summary.median_days_to_sale == null ? "" : "median " + summary.median_days_to_sale + " d to sale")
     + metric(
@@ -1734,7 +1748,9 @@ function renderVintedBehavior(data) {
           : esc(row.title);
         return '<tr class="analytics-listing" data-id="' + esc(row.listing_id) + '"><td><div class="title">'
           + title + '</div><div class="sub">' + esc(row.category) + " · "
-          + money(row.price_cents, row.currency) + "</div></td><td>" + esc(row.age_days) + " d</td><td>"
+          + money(row.price_cents, row.currency) + "</div></td><td>" + esc(row.age_days) + " d"
+          + (row.listed_at_source === "first_seen" ? '<div class="sub">minimum - first observed</div>' : "")
+          + "</td><td>"
           + esc(row.views) + '</td><td class="gain">+' + esc(row.views_gain_7d)
           + "</td><td>" + esc(row.favourites) + '</td><td class="gain">+' + esc(row.favourites_gain_7d)
           + "</td><td>" + esc(row.favourites_per_100_views == null ? "—" : row.favourites_per_100_views)

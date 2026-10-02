@@ -183,4 +183,20 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "2.2.0"
+    assert manifest["version"] == "2.3.0"
+
+
+
+def test_content_script_enriches_missing_listing_dates_from_item_detail_and_caches_them():
+    content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV1"' in content
+    assert "/api/v2/items/" in content
+    assert '"created_at_ts"' in content
+    assert "await enrichListingDates(listings);" in content
+    assert "HTTP 429" in content
+
+
+def test_ci_does_not_commit_a_static_fernet_key():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "APP_ENCRYPTION_KEY:" not in workflow
+    assert "Fernet.generate_key()" in workflow

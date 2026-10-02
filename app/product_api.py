@@ -645,8 +645,7 @@ def listings(
     result = []
     for listing, snapshot in rows:
         listed_at = (listing.extra or {}).get("listed_at")
-        if not listed_at:
-            listed_at = listing.first_seen_at.isoformat() if listing.first_seen_at else None
+        listed_at_source = "vinted" if listed_at else "first_seen"
         result.append(
             {
                 "id": str(listing.id),
@@ -663,6 +662,7 @@ def listings(
                 "quantity": listing.quantity,
                 "url": listing.url,
                 "listed_at": listed_at,
+                "listed_at_source": listed_at_source,
                 "first_seen_at": (
                     listing.first_seen_at.isoformat() if listing.first_seen_at else None
                 ),
