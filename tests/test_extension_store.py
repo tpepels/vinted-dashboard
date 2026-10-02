@@ -183,13 +183,13 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "2.3.0"
+    assert manifest["version"] == "2.4.0"
 
 
 
 def test_content_script_enriches_missing_listing_dates_from_item_detail_and_caches_them():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
-    assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV1"' in content
+    assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV2"' in content
     assert "/api/v2/items/" in content
     assert '"created_at_ts"' in content
     assert "await enrichListingDates(listings);" in content
