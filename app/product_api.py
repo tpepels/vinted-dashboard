@@ -43,6 +43,7 @@ from app.constants import (
     ItemStatus,
     ListingStatus,
     MembershipRole,
+    KNOWN_ITEM_CATEGORIES,
 )
 from app.connectors.base import connector_catalog
 from app.connectors.hosted import (
@@ -512,12 +513,7 @@ def onboarding(context: RequestContext = Depends(require_context)):
     completed = bool(saved.get("completed")) if explicit else bool(inventory_count)
     saved_category = saved.get("primary_category")
     primary_category = str(saved_category or ItemCategory.GENERAL)
-    if primary_category not in {
-        ItemCategory.BOOK,
-        ItemCategory.CLOTHING,
-        ItemCategory.GENERAL,
-        "mixed",
-    }:
+    if primary_category not in {*KNOWN_ITEM_CATEGORIES, "mixed"}:
         primary_category = ItemCategory.GENERAL
 
     return {
@@ -529,12 +525,7 @@ def onboarding(context: RequestContext = Depends(require_context)):
         "vinted_bridge_paired": bool(active_devices),
         "reconciliation_count": len(suggestions),
         "steps": {
-            "choose_category": saved_category in {
-                ItemCategory.BOOK,
-                ItemCategory.CLOTHING,
-                ItemCategory.GENERAL,
-                "mixed",
-            },
+            "choose_category": saved_category in {*KNOWN_ITEM_CATEGORIES, "mixed"},
             "stock_loaded": bool(inventory_count),
             "marketplace_connected": bool(active_devices or connected_channels),
             "matches_reviewed": not bool(suggestions),
@@ -547,7 +538,7 @@ def update_onboarding(
     payload: OnboardingRequest,
     context: RequestContext = Depends(require_write_context),
 ):
-    allowed = {ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL, "mixed"}
+    allowed = {*KNOWN_ITEM_CATEGORIES, "mixed"}
     if payload.primary_category is not None and payload.primary_category not in allowed:
         raise HTTPException(status_code=400, detail="Unknown primary inventory category")
     with db.session_scope() as session:
@@ -817,11 +808,7 @@ def bulk_update_inventory(
     if not values:
         raise HTTPException(status_code=400, detail="Choose at least one field to update")
     if "category" in values:
-        if values["category"] not in {
-            ItemCategory.BOOK,
-            ItemCategory.CLOTHING,
-            ItemCategory.GENERAL,
-        }:
+        if values["category"] not in KNOWN_ITEM_CATEGORIES:
             raise HTTPException(status_code=400, detail="Unknown item category")
     if "status" in values:
         if values["status"] not in {
