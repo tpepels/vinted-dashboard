@@ -1163,13 +1163,14 @@ def analytics(context: RequestContext = Depends(require_context)):
                 models.ChannelListing.status == ListingStatus.ACTIVE,
             )
         ).scalar_one()
-        sold_rows = session.execute(
+        sale_rows = session.execute(
             select(models.Sale).where(
                 models.Sale.workspace_id == context.workspace.id,
                 models.Sale.direction == "sell",
                 models.Sale.occurred_at >= year_start,
             )
         ).scalars().all()
+        sold_rows = [row for row in sale_rows if sale_counts_as_sold(row)]
         followers = session.execute(
             select(models.ProfileObservation)
             .join(models.ChannelAccount, models.ChannelAccount.id == models.ProfileObservation.channel_account_id)
@@ -1245,18 +1246,35 @@ def analytics(context: RequestContext = Depends(require_context)):
         (int(ask) - int(item.cost_cents or 0)) * max(0, int(item.quantity or 0))
         for item, ask in margin_rows
     )
-    costed_sales = [
+    revenue_known_sales = [
         row for row in sold_rows
+        if row.total_cents is not None
+    ]
+    complete_sales = [
+        row for row in revenue_known_sales
         if row.inventory_item_id in sold_items
         and sold_items[row.inventory_item_id].cost_cents is not None
     ]
     sales_ytd_cost_cents = sum(
-        int(sold_items[row.inventory_item_id].cost_cents or 0)
-        for row in costed_sales
+        int(sold_items[row.inventory_item_id].cost_cents)
+        for row in complete_sales
     )
     sales_ytd_costed_revenue_cents = sum(
-        int(row.total_cents or 0)
-        for row in costed_sales
+        int(row.total_cents)
+        for row in complete_sales
+    )
+    sales_ytd_gross_profit_cents = (
+        sales_ytd_costed_revenue_cents - sales_ytd_cost_cents
+    )
+    sales_ytd_gross_margin_pct = (
+        round(sales_ytd_gross_profit_cents * 100 / sales_ytd_costed_revenue_cents, 1)
+        if sales_ytd_costed_revenue_cents > 0
+        else None
+    )
+    sales_ytd_roi_pct = (
+        round(sales_ytd_gross_profit_cents * 100 / sales_ytd_cost_cents, 1)
+        if sales_ytd_cost_cents > 0
+        else None
     )
     return {
         "active_inventory": int(inventory_count or 0),
@@ -1270,11 +1288,19 @@ def analytics(context: RequestContext = Depends(require_context)):
         "inventory_ask_cents": inventory_ask_cents,
         "inventory_potential_margin_cents": inventory_potential_margin_cents,
         "sales_ytd_count": len(sold_rows),
-        "sales_ytd_cents": sum(int(row.total_cents or 0) for row in sold_rows),
-        "sales_ytd_costed_count": len(costed_sales),
+        "sales_ytd_revenue_known_count": len(revenue_known_sales),
+        "sales_ytd_cents": sum(int(row.total_cents) for row in revenue_known_sales),
+        "sales_ytd_costed_count": len(complete_sales),
+        "sales_ytd_cost_coverage_pct": (
+            round(len(complete_sales) * 100 / len(revenue_known_sales), 1)
+            if revenue_known_sales
+            else None
+        ),
         "sales_ytd_cost_cents": sales_ytd_cost_cents,
         "sales_ytd_costed_revenue_cents": sales_ytd_costed_revenue_cents,
-        "sales_ytd_gross_profit_cents": sales_ytd_costed_revenue_cents - sales_ytd_cost_cents,
+        "sales_ytd_gross_profit_cents": sales_ytd_gross_profit_cents,
+        "sales_ytd_gross_margin_pct": sales_ytd_gross_margin_pct,
+        "sales_ytd_roi_pct": sales_ytd_roi_pct,
         "currency": next(
             (item.currency for item in active_items if item.currency),
             next((row.currency for row in sold_rows if row.currency), "EUR"),
