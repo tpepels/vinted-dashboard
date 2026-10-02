@@ -18,6 +18,21 @@ jobs:
       - run: python -m app.ops --help
       - run: python -m app.runtime_config
       - run: python scripts/hosted_smoke.py --help
+      - run: python scripts/release_readiness.py --json
+        env:
+          APP_ENV: production
+          PUBLIC_APP_URL: https://example.invalid
+          PRIVACY_CONTACT_EMAIL: privacy@example.invalid
+          COOKIE_SECURE: "true"
+          APP_ENCRYPTION_KEY: 6VnK8h3TbrhvEXAMPLEreplacewithvalidfernetkey=
+          DATABASE_URL: postgresql://user:pass@example.invalid/db
+          LEGACY_UI_ENABLED: "false"
+          LEGACY_API_ENABLED: "false"
+          LEGACY_COMPAT_SYNC: "false"
+          EXTENSION_MARKET_RESEARCH_ENABLED: "false"
+          EXTENSION_LATEST_VERSION: 2.2.0
+          BACKUP_PROVIDER: ci-managed-snapshot
+          BACKUP_RESTORE_DRILL_AT: 2026-10-01
       - run: python -m pytest -q
       - run: node --check app/static/app.js
       - run: node --check app/product_static/app.js
