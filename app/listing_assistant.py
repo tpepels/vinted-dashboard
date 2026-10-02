@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
-from app.constants import ItemCategory, ItemStatus
+from app.constants import ItemCategory, ItemStatus, KNOWN_ITEM_CATEGORIES
 
 
 SUPPORTED_IMAGE_TYPES = {
@@ -88,11 +88,7 @@ def _schema() -> dict[str, Any]:
     properties = {
         "category": {
             "type": "string",
-            "enum": [
-                ItemCategory.CLOTHING,
-                ItemCategory.BOOK,
-                ItemCategory.GENERAL,
-            ],
+            "enum": list(KNOWN_ITEM_CATEGORIES),
         },
         "item_type": string,
         "brand": string,
@@ -123,7 +119,8 @@ def _prompt(hints: dict[str, Any]) -> str:
         "Analyze these reseller listing photos. Return only evidence supported "
         "by the images. Never invent a brand, size, material, edition, ISBN, "
         "condition detail or defect. Use an empty string when a field cannot "
-        "be established. category must be clothing, book, or general. "
+        "be established. category must be one of: book, clothing, electronics, "
+        "home, collectibles, toys_games, media, sports, beauty, art_crafts, general. "
         "item_type should be a short literal noun such as jeans, jacket, book, "
         "shoes, mug. For condition, describe only visible condition in plain "
         "language; do not map it to a marketplace condition grade. "
@@ -236,11 +233,7 @@ def analyze_photos(
 
 def normalize_analysis(result: dict[str, Any]) -> dict[str, Any]:
     category = str(result.get("category") or ItemCategory.GENERAL).strip().lower()
-    if category not in {
-        ItemCategory.CLOTHING,
-        ItemCategory.BOOK,
-        ItemCategory.GENERAL,
-    }:
+    if category not in KNOWN_ITEM_CATEGORIES:
         category = ItemCategory.GENERAL
     normalized = {
         "category": category,
@@ -320,6 +313,14 @@ def auto_sku(
     prefix = {
         ItemCategory.CLOTHING: "CL",
         ItemCategory.BOOK: "BK",
+        ItemCategory.ELECTRONICS: "EL",
+        ItemCategory.HOME: "HM",
+        ItemCategory.COLLECTIBLES: "CO",
+        ItemCategory.TOYS_GAMES: "TG",
+        ItemCategory.MEDIA: "MD",
+        ItemCategory.SPORTS: "SP",
+        ItemCategory.BEAUTY: "BE",
+        ItemCategory.ART_CRAFTS: "AC",
         ItemCategory.GENERAL: "GN",
     }.get(category, "GN")
     stamp = current.strftime("%y%m%d")
@@ -344,11 +345,7 @@ def create_master_item(
     title = str(values.get("title") or "").strip()
     description = str(values.get("description") or "").strip()
     category = str(values.get("category") or ItemCategory.GENERAL).strip().lower()
-    if category not in {
-        ItemCategory.CLOTHING,
-        ItemCategory.BOOK,
-        ItemCategory.GENERAL,
-    }:
+    if category not in KNOWN_ITEM_CATEGORIES:
         raise ValueError("Unknown item category")
     if not title:
         raise ValueError("Title is required")
