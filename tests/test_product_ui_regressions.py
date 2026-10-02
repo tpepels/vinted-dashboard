@@ -70,3 +70,23 @@ def test_category_profitability_is_rendered_from_complete_sales_only():
     assert "<th>Costed</th><th>Revenue</th><th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th>" in APP_JS
     assert 'row.costed_sales + "/" + row.linked_sales' in APP_JS
     assert 'row.costed_sales ? money(row.gross_profit_cents, analyticsCurrency) : "—"' in APP_JS
+
+
+
+def test_today_is_rendered_as_one_unified_work_queue():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="today-work-count"' in html
+    assert 'class="card today-work"' in html
+    assert 'id="stock-actions"' not in html
+    assert "renderTodayWorkQueue(" in APP_JS
+    assert 'row.kind === "stock_action"' in APP_JS
+    assert 'button.dataset.kind === "purchase_cost"' in APP_JS
+
+
+def test_inventory_surfaces_enriched_vinted_metadata():
+    assert "item.attributes?.author" in APP_JS
+    assert "item.attributes?.brand" in APP_JS
+    assert "item.attributes?.size" in APP_JS
+    assert "item.attributes?.vinted_category" in APP_JS
