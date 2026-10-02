@@ -55,3 +55,18 @@ def test_purchase_cost_apply_uses_multi_element_selector():
     single = "$" + '(".purchase-cost-apply").forEach((button) => {'
     assert multi in lines
     assert single not in lines
+
+
+
+def test_profitability_analytics_exposes_sortable_sale_economics():
+    assert '"Gross margin YTD"' in APP_JS
+    assert "<th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th>" in APP_JS
+    assert 'row.gross_profit_cents == null ? "" : row.gross_profit_cents' in APP_JS
+    assert 'row.gross_margin_pct == null ? "" : row.gross_margin_pct' in APP_JS
+    assert 'row.roi_pct == null ? "" : row.roi_pct' in APP_JS
+
+
+def test_category_profitability_is_rendered_from_complete_sales_only():
+    assert "<th>Costed</th><th>Revenue</th><th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th>" in APP_JS
+    assert 'row.costed_sales + "/" + row.linked_sales' in APP_JS
+    assert 'row.costed_sales ? money(row.gross_profit_cents, analyticsCurrency) : "—"' in APP_JS
