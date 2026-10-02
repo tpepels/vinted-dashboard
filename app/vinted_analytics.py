@@ -322,6 +322,7 @@ def build_vinted_analytics(
             )
 
     rows: list[dict[str, Any]] = []
+    actual_age_count = 0
     segments = {
         "momentum": 0,
         "high_interest_stale": 0,
@@ -340,6 +341,9 @@ def build_vinted_analytics(
         if listing.status != ListingStatus.ACTIVE:
             continue
         started = listing_started_at(listing)
+        started_source = listing_started_source(listing)
+        if started_source == "vinted":
+            actual_age_count += 1
         age_days = max(0, int((now - started).total_seconds() // 86400))
         if age_days < 30:
             age_buckets["0-29 days"] += 1
@@ -428,6 +432,8 @@ def build_vinted_analytics(
                 "url": listing.url,
                 "category": category,
                 "age_days": age_days,
+                "listed_at": started.isoformat(),
+                "listed_at_source": started_source,
                 "price_cents": latest.price_cents if latest else listing.price_cents,
                 "currency": listing.currency or "EUR",
                 "views": views,
@@ -619,6 +625,7 @@ def build_vinted_analytics(
                 else None
             ),
             "median_active_age_days": _median([float(value) for value in active_ages]),
+            "actual_age_count": actual_age_count,
             "linked_sales": linked_sales,
             "costed_linked_sales": len(complete_sold_rows),
             "cost_coverage_pct": (
