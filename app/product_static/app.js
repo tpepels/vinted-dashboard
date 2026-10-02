@@ -112,6 +112,17 @@ const connectorSchemas = {
       ["currency", "Fallback currency", "EUR", "text"],
     ],
   },
+  wix: {
+    title: "Wix",
+    help: "Wix REST APIs. Create an API key with read-only Catalog V3, Inventory V3 and Orders permissions, restrict it to the target site, and enter that site's ID.",
+    test: true,
+    fields: [
+      ["site_id", "Site ID", "00000000-0000-0000-0000-000000000000", "text"],
+      ["api_key", "API key", "", "password"],
+      ["order_days", "Order history days", "365", "number"],
+      ["currency", "Fallback currency", "EUR", "text"],
+    ],
+  },
 };
 
 function esc(value) {
