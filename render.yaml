@@ -17,6 +17,10 @@ services:
         sync: false
       - key: PUBLIC_APP_URL
         sync: false
+      - key: PRIVACY_CONTACT_EMAIL
+        sync: false
+      - key: EXTENSION_LATEST_VERSION
+        value: "2.2.0"
       - key: COOKIE_SECURE
         value: "true"
       - key: LEGACY_UI_ENABLED
@@ -50,6 +54,10 @@ services:
         sync: false
       - key: PUBLIC_APP_URL
         sync: false
+      - key: PRIVACY_CONTACT_EMAIL
+        sync: false
+      - key: EXTENSION_LATEST_VERSION
+        value: "2.2.0"
       - key: COOKIE_SECURE
         value: "true"
       - key: LEGACY_UI_ENABLED
