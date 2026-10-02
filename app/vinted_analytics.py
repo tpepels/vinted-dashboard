@@ -232,6 +232,37 @@ def _median(values: list[float]) -> float | None:
     return round(float(median(values)), 1)
 
 
+def _sale_economics(
+    sale: models.Sale,
+    item: models.InventoryItem | None,
+) -> dict[str, Any]:
+    revenue = int(sale.total_cents) if sale.total_cents is not None else None
+    cost = int(item.cost_cents) if item is not None and item.cost_cents is not None else None
+    complete = revenue is not None and cost is not None
+    profit = revenue - cost if complete else None
+    margin_pct = (
+        round(profit * 100 / revenue, 1)
+        if complete and revenue > 0
+        else None
+    )
+    roi_pct = (
+        round(profit * 100 / cost, 1)
+        if complete and cost > 0
+        else None
+    )
+    attributes = dict(item.attributes or {}) if item is not None else {}
+    return {
+        "revenue_cents": revenue,
+        "cost_cents": cost,
+        "gross_profit_cents": profit,
+        "gross_margin_pct": margin_pct,
+        "roi_pct": roi_pct,
+        "economics_complete": complete,
+        "cost_source": attributes.get("cost_source"),
+        "cost_source_adjusted": bool(attributes.get("cost_source_adjusted")),
+    }
+
+
 def build_vinted_analytics(
     session: Session,
     workspace_id: uuid.UUID,
@@ -377,6 +408,10 @@ def build_vinted_analytics(
                 "views_gain": 0,
                 "favourites_gain": 0,
                 "linked_sales": 0,
+                "costed_sales": 0,
+                "costed_revenue_cents": 0,
+                "cost_cents": 0,
+                "gross_profit_cents": 0,
             },
         )
         category_row["active_listings"] += 1
@@ -449,6 +484,7 @@ def build_vinted_analytics(
         linked_sales += 1
         item = items.get(sale.inventory_item_id)
         category = item.category if item else "general"
+        economics = _sale_economics(sale, item)
         sold_stock.append(
             {
                 "sale_id": str(sale.id),
@@ -466,6 +502,7 @@ def build_vinted_analytics(
                 "listing_price_cents": _listing.price_cents,
                 "currency": sale.currency or _listing.currency or "EUR",
                 "external_order_id": sale.external_order_id,
+                **economics,
             }
         )
         category_row = category_rows.setdefault(
@@ -478,9 +515,18 @@ def build_vinted_analytics(
                 "views_gain": 0,
                 "favourites_gain": 0,
                 "linked_sales": 0,
+                "costed_sales": 0,
+                "costed_revenue_cents": 0,
+                "cost_cents": 0,
+                "gross_profit_cents": 0,
             },
         )
         category_row["linked_sales"] += 1
+        if economics["economics_complete"]:
+            category_row["costed_sales"] += 1
+            category_row["costed_revenue_cents"] += int(economics["revenue_cents"])
+            category_row["cost_cents"] += int(economics["cost_cents"])
+            category_row["gross_profit_cents"] += int(economics["gross_profit_cents"])
 
     rows.sort(
         key=lambda row: (
@@ -499,6 +545,21 @@ def build_vinted_analytics(
     window_favourites = sum(int(row["favourites_gain_window"]) for row in rows)
     price_changes = sum(int(row["price_changes_30d"]) for row in rows)
 
+    complete_sold_rows = [row for row in sold_stock if row["economics_complete"]]
+    costed_revenue_cents = sum(int(row["revenue_cents"]) for row in complete_sold_rows)
+    acquisition_cost_cents = sum(int(row["cost_cents"]) for row in complete_sold_rows)
+    gross_profit_cents = sum(int(row["gross_profit_cents"]) for row in complete_sold_rows)
+    gross_margin_pct = (
+        round(gross_profit_cents * 100 / costed_revenue_cents, 1)
+        if costed_revenue_cents > 0
+        else None
+    )
+    roi_pct = (
+        round(gross_profit_cents * 100 / acquisition_cost_cents, 1)
+        if acquisition_cost_cents > 0
+        else None
+    )
+
     category_result = sorted(
         category_rows.values(),
         key=lambda row: (
@@ -513,6 +574,24 @@ def build_vinted_analytics(
         favourites = int(category_row["favourites"])
         category_row["favourites_per_100_views"] = (
             round(favourites * 100 / views, 1) if views > 0 else None
+        )
+        category_revenue = int(category_row["costed_revenue_cents"])
+        category_cost = int(category_row["cost_cents"])
+        category_profit = int(category_row["gross_profit_cents"])
+        category_row["cost_coverage_pct"] = (
+            round(int(category_row["costed_sales"]) * 100 / int(category_row["linked_sales"]), 1)
+            if int(category_row["linked_sales"]) > 0
+            else None
+        )
+        category_row["gross_margin_pct"] = (
+            round(category_profit * 100 / category_revenue, 1)
+            if category_revenue > 0
+            else None
+        )
+        category_row["roi_pct"] = (
+            round(category_profit * 100 / category_cost, 1)
+            if category_cost > 0
+            else None
         )
 
     return {
@@ -535,6 +614,17 @@ def build_vinted_analytics(
             ),
             "median_active_age_days": _median([float(value) for value in active_ages]),
             "linked_sales": linked_sales,
+            "costed_linked_sales": len(complete_sold_rows),
+            "cost_coverage_pct": (
+                round(len(complete_sold_rows) * 100 / linked_sales, 1)
+                if linked_sales
+                else None
+            ),
+            "costed_revenue_cents": costed_revenue_cents,
+            "acquisition_cost_cents": acquisition_cost_cents,
+            "gross_profit_cents": gross_profit_cents,
+            "gross_margin_pct": gross_margin_pct,
+            "roi_pct": roi_pct,
             "median_days_to_sale": _median(time_to_sale),
             "price_changes_30d": price_changes,
         },
