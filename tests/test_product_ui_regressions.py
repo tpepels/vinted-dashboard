@@ -90,3 +90,12 @@ def test_inventory_surfaces_enriched_vinted_metadata():
     assert "item.attributes?.brand" in APP_JS
     assert "item.attributes?.size" in APP_JS
     assert "item.attributes?.vinted_category" in APP_JS
+
+
+
+def test_today_navigation_uses_multi_element_selector():
+    lines = [line.strip() for line in APP_JS.splitlines()]
+    multi = "$" + "$" + '(".today-nav").forEach((button) => {'
+    single = "$" + '(".today-nav").forEach((button) => {'
+    assert multi in lines
+    assert single not in lines
