@@ -816,6 +816,574 @@ def sync_woocommerce_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     }
 
 
+
+def _shopify_domain(values: dict[str, str]) -> str:
+    raw = values.get("store_domain", "").strip().lower()
+    if not raw:
+        raise RuntimeError("Shopify needs store_domain")
+    if "://" in raw:
+        parsed = urlparse(raw)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.port
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise RuntimeError("Shopify store_domain must be a bare HTTPS myshopify.com store")
+        raw = parsed.hostname.lower()
+    if "/" in raw or ":" in raw or "@" in raw:
+        raise RuntimeError("Shopify store_domain must be a bare myshopify.com hostname")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*\.myshopify\.com", raw):
+        raise RuntimeError("Shopify store_domain must end in .myshopify.com")
+    return raw
+
+
+def _shopify_graphql(
+    values: dict[str, str],
+    query: str,
+    *,
+    variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    token = values.get("access_token", "").strip()
+    if not token:
+        raise RuntimeError("Shopify needs access_token")
+    version = values.get("api_version", "2026-10").strip() or "2026-10"
+    if not re.fullmatch(r"\d{4}-\d{2}", version):
+        raise RuntimeError("Shopify api_version must look like 2026-10")
+    response = requests.post(
+        f"https://{_shopify_domain(values)}/admin/api/{version}/graphql.json",
+        headers={
+            "X-Shopify-Access-Token": token,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        json={"query": query, "variables": variables or {}},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Shopify Admin API request failed ({response.status_code})")
+    payload = response.json() or {}
+    errors = payload.get("errors") or []
+    if errors:
+        detail = str((errors[0] or {}).get("message") or "GraphQL error")
+        raise RuntimeError(f"Shopify Admin API error: {detail}")
+    data = payload.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+SHOPIFY_VARIANTS_QUERY = """
+query ResellerVariants($cursor: String) {
+  productVariants(first: 100, after: $cursor) {
+    nodes {
+      id
+      displayName
+      title
+      sku
+      price
+      inventoryQuantity
+      availableForSale
+      createdAt
+      selectedOptions { name value }
+      product {
+        id
+        title
+        status
+        productType
+        vendor
+        tags
+        onlineStoreUrl
+        featuredMedia { preview { image { url } } }
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+"""
+
+
+SHOPIFY_ORDERS_QUERY = """
+query ResellerOrders($cursor: String, $query: String!) {
+  orders(first: 100, after: $cursor, query: $query, reverse: true) {
+    nodes {
+      id
+      name
+      createdAt
+      cancelledAt
+      closed
+      displayFinancialStatus
+      displayFulfillmentStatus
+      currencyCode
+      lineItems(first: 100) {
+        nodes {
+          id
+          name
+          sku
+          quantity
+          currentQuantity
+          originalTotalSet { shopMoney { amount currencyCode } }
+          variant { id }
+        }
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+"""
+
+
+def _fetch_shopify_products(values: dict[str, str]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _page in range(100):
+        data = _shopify_graphql(
+            values,
+            SHOPIFY_VARIANTS_QUERY,
+            variables={"cursor": cursor},
+        )
+        connection = data.get("productVariants") or {}
+        nodes = list(connection.get("nodes") or [])
+        for variant in nodes:
+            variant_id = variant.get("id")
+            if not variant_id:
+                continue
+            product = variant.get("product") or {}
+            options = {
+                str(row.get("name")): row.get("value")
+                for row in (variant.get("selectedOptions") or [])
+                if isinstance(row, dict) and row.get("name")
+            }
+            quantity = _int(variant.get("inventoryQuantity"))
+            if quantity is None:
+                quantity = 1 if variant.get("availableForSale") else 0
+            active = (
+                str(product.get("status") or "").upper() == "ACTIVE"
+                and bool(variant.get("availableForSale"))
+            )
+            image_url = (
+                ((product.get("featuredMedia") or {}).get("preview") or {})
+                .get("image", {})
+                .get("url")
+            )
+            title = str(variant.get("displayName") or "").strip()
+            if not title:
+                product_title = str(product.get("title") or "Untitled")
+                variant_title = str(variant.get("title") or "").strip()
+                title = (
+                    product_title
+                    if not variant_title or variant_title == "Default Title"
+                    else f"{product_title} - {variant_title}"
+                )
+            created = _remote_datetime(variant.get("createdAt"))
+            result.append(
+                {
+                    "source_id": str(variant_id),
+                    "sku": variant.get("sku") or None,
+                    "title": title,
+                    "status": ListingStatus.ACTIVE if active else ListingStatus.INACTIVE,
+                    "quantity": max(0, quantity),
+                    "price_cents": _money(variant.get("price")),
+                    "currency": values.get("currency", "EUR").strip().upper() or "EUR",
+                    "listed_at": created.isoformat() if created else None,
+                    "category": product.get("productType") or None,
+                    "brand": product.get("vendor") or None,
+                    "tags": list(product.get("tags") or []),
+                    "attributes": options,
+                    "product_type": product.get("productType") or None,
+                    "url": product.get("onlineStoreUrl"),
+                    "image_url": image_url,
+                }
+            )
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = str(page_info.get("endCursor") or "")
+        if not cursor:
+            break
+    return result
+
+
+def _shopify_order_status(order: dict[str, Any]) -> tuple[str, bool]:
+    if order.get("cancelledAt"):
+        return "cancelled", True
+    financial = str(order.get("displayFinancialStatus") or "").strip().lower()
+    fulfillment = str(order.get("displayFulfillmentStatus") or "").strip().lower()
+    if financial in {"refunded", "voided"}:
+        return financial, True
+    if fulfillment == "fulfilled":
+        return "completed", True
+    return financial or fulfillment or "open", bool(order.get("closed"))
+
+
+def _fetch_shopify_orders(values: dict[str, str]) -> list[dict[str, Any]]:
+    days = max(1, min(_int(values.get("order_days"), 60) or 60, 3650))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    search = "created_at:>=" + cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _page in range(100):
+        data = _shopify_graphql(
+            values,
+            SHOPIFY_ORDERS_QUERY,
+            variables={"cursor": cursor, "query": search},
+        )
+        connection = data.get("orders") or {}
+        orders = list(connection.get("nodes") or [])
+        for order in orders:
+            order_id = order.get("id")
+            if not order_id:
+                continue
+            status, is_closed = _shopify_order_status(order)
+            occurred = _remote_datetime(order.get("createdAt"))
+            for line in ((order.get("lineItems") or {}).get("nodes") or []):
+                line_id = line.get("id")
+                if not line_id:
+                    continue
+                money = ((line.get("originalTotalSet") or {}).get("shopMoney") or {})
+                variant = line.get("variant") or {}
+                result.append(
+                    {
+                        "external_order_id": f"{order_id}:{line_id}",
+                        "listing_external_id": str(variant.get("id") or ""),
+                        "sku": line.get("sku"),
+                        "title": line.get("name") or "Shopify sale",
+                        "counterparty": None,
+                        "total_cents": _money(money.get("amount")),
+                        "currency": str(
+                            money.get("currencyCode")
+                            or order.get("currencyCode")
+                            or values.get("currency", "EUR")
+                        ),
+                        "status": status,
+                        "lifecycle_status": status,
+                        "is_closed": is_closed,
+                        "occurred_at": occurred.isoformat() if occurred else None,
+                        "quantity": _int(line.get("quantity"), 1) or 1,
+                        "extra": {
+                            "order_id": order_id,
+                            "order_name": order.get("name"),
+                            "line_item_id": line_id,
+                            "current_quantity": _int(line.get("currentQuantity")),
+                        },
+                    }
+                )
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = str(page_info.get("endCursor") or "")
+        if not cursor:
+            break
+    return result
+
+
+def test_shopify_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.SHOPIFY)
+    variants = _shopify_graphql(
+        values,
+        "query { productVariants(first: 1) { nodes { id } } }",
+    )
+    orders = _shopify_graphql(
+        values,
+        "query { orders(first: 1) { nodes { id } } }",
+    )
+    return {
+        "ok": True,
+        "detail": "Shopify product and order scopes are readable.",
+        "variants_visible": len(((variants.get("productVariants") or {}).get("nodes") or [])),
+        "orders_visible": len(((orders.get("orders") or {}).get("nodes") or [])),
+    }
+
+
+def sync_shopify_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.SHOPIFY)
+    items = _fetch_shopify_products(values)
+    orders = _fetch_shopify_orders(values)
+    synced_at = datetime.now(timezone.utc)
+    listing_result = record_workspace_channel_snapshot(
+        workspace_id,
+        Channel.SHOPIFY,
+        items,
+        synced_at=synced_at,
+        full_snapshot=True,
+        note="Shopify GraphQL Admin API",
+    )
+    order_result = record_workspace_channel_orders(
+        workspace_id,
+        Channel.SHOPIFY,
+        orders,
+        synced_at=synced_at,
+    )
+    return {"source": Channel.SHOPIFY, **listing_result, **order_result}
+
+
+def _bigcommerce_headers(values: dict[str, str]) -> dict[str, str]:
+    token = values.get("access_token", "").strip()
+    if not token:
+        raise RuntimeError("BigCommerce needs access_token")
+    return {
+        "X-Auth-Token": token,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+
+def _bigcommerce_store_hash(values: dict[str, str]) -> str:
+    store_hash = values.get("store_hash", "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9]+", store_hash):
+        raise RuntimeError("BigCommerce store_hash must contain only letters and numbers")
+    return store_hash
+
+
+def _bigcommerce_get(
+    values: dict[str, str],
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    response = requests.get(
+        f"https://api.bigcommerce.com/stores/{_bigcommerce_store_hash(values)}/{path.lstrip('/')}",
+        headers=_bigcommerce_headers(values),
+        params=params or {},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"BigCommerce API request failed ({response.status_code})")
+    return response.json()
+
+
+def _bigcommerce_quantity(product: dict[str, Any], variant: dict[str, Any] | None = None) -> int:
+    source = variant or product
+    tracking = str(product.get("inventory_tracking") or "none").lower()
+    if tracking == "none":
+        return 1
+    return max(0, _int(source.get("inventory_level"), 0) or 0)
+
+
+def _bigcommerce_product_common(product: dict[str, Any]) -> dict[str, Any]:
+    images = list(product.get("images") or [])
+    custom_url = product.get("custom_url") or {}
+    category_ids = [str(value) for value in (product.get("categories") or [])]
+    return {
+        "description": product.get("description"),
+        "product_type": product.get("type"),
+        "tags": list(product.get("search_keywords") or "").split(",")
+        if product.get("search_keywords")
+        else [],
+        "attributes": {"category_ids": category_ids} if category_ids else {},
+        "url": custom_url.get("url") if isinstance(custom_url, dict) else None,
+        "image_url": (
+            images[0].get("url_standard")
+            if images and isinstance(images[0], dict)
+            else None
+        ),
+    }
+
+
+def _fetch_bigcommerce_products(values: dict[str, str]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    page = 1
+    while page <= 100:
+        payload = _bigcommerce_get(
+            values,
+            "v3/catalog/products",
+            params={"limit": 100, "page": page, "include": "variants,images"},
+        )
+        rows = list((payload or {}).get("data") or []) if isinstance(payload, dict) else []
+        for product in rows:
+            product_id = product.get("id")
+            if product_id in (None, ""):
+                continue
+            common = _bigcommerce_product_common(product)
+            variants = list(product.get("variants") or [])
+            visible = bool(product.get("is_visible", True))
+            availability = str(product.get("availability") or "available").lower()
+            created = _remote_datetime(product.get("date_created"))
+            if variants:
+                for variant in variants:
+                    variant_id = variant.get("id")
+                    if variant_id in (None, ""):
+                        continue
+                    quantity = _bigcommerce_quantity(product, variant)
+                    options = {
+                        str(row.get("option_display_name") or row.get("option_id")): row.get("label")
+                        for row in (variant.get("option_values") or [])
+                        if isinstance(row, dict)
+                    }
+                    suffix = " / ".join(
+                        str(value) for value in options.values() if value not in (None, "")
+                    )
+                    result.append(
+                        {
+                            "source_id": f"{product_id}:{variant_id}",
+                            "sku": variant.get("sku") or product.get("sku") or None,
+                            "title": str(product.get("name") or "Untitled")
+                            + (f" - {suffix}" if suffix else ""),
+                            "status": (
+                                ListingStatus.ACTIVE
+                                if visible and availability != "disabled" and quantity > 0
+                                else ListingStatus.INACTIVE
+                            ),
+                            "quantity": quantity,
+                            "price_cents": _money(
+                                variant.get("price")
+                                if variant.get("price") not in (None, "")
+                                else product.get("price")
+                            ),
+                            "currency": values.get("currency", "EUR").strip().upper() or "EUR",
+                            "listed_at": created.isoformat() if created else None,
+                            **common,
+                            "attributes": {**common.get("attributes", {}), **options},
+                        }
+                    )
+            else:
+                quantity = _bigcommerce_quantity(product)
+                result.append(
+                    {
+                        "source_id": str(product_id),
+                        "sku": product.get("sku") or None,
+                        "title": product.get("name") or "Untitled",
+                        "status": (
+                            ListingStatus.ACTIVE
+                            if visible and availability != "disabled" and quantity > 0
+                            else ListingStatus.INACTIVE
+                        ),
+                        "quantity": quantity,
+                        "price_cents": _money(product.get("price")),
+                        "currency": values.get("currency", "EUR").strip().upper() or "EUR",
+                        "listed_at": created.isoformat() if created else None,
+                        **common,
+                    }
+                )
+        pagination = ((payload or {}).get("meta") or {}).get("pagination") or {}
+        total_pages = _int(pagination.get("total_pages"), page) or page
+        if page >= total_pages or len(rows) < 100:
+            break
+        page += 1
+    return result
+
+
+def _bigcommerce_order_status(raw: dict[str, Any]) -> tuple[str, bool]:
+    status = str(raw.get("status") or "open").strip().lower().replace(" ", "_")
+    closed = status in {
+        "completed", "shipped", "cancelled", "canceled", "refunded",
+        "partially_refunded", "declined",
+    }
+    return status, closed
+
+
+def _fetch_bigcommerce_orders(values: dict[str, str]) -> list[dict[str, Any]]:
+    days = max(1, min(_int(values.get("order_days"), 365) or 365, 3650))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    result: list[dict[str, Any]] = []
+    page = 1
+    while page <= 100:
+        orders = _bigcommerce_get(
+            values,
+            "v2/orders",
+            params={
+                "limit": 50,
+                "page": page,
+                "min_date_created": cutoff.strftime("%a, %d %b %Y %H:%M:%S +0000"),
+            },
+        )
+        rows = orders if isinstance(orders, list) else []
+        for order in rows:
+            order_id = order.get("id")
+            if order_id in (None, ""):
+                continue
+            status, is_closed = _bigcommerce_order_status(order)
+            occurred = _remote_datetime(order.get("date_created"))
+            products = _bigcommerce_get(values, f"v2/orders/{order_id}/products")
+            for line in products if isinstance(products, list) else []:
+                line_id = line.get("id")
+                if line_id in (None, ""):
+                    continue
+                product_id = line.get("product_id")
+                variant_id = _int(line.get("variant_id"), 0) or 0
+                listing_external_id = (
+                    f"{product_id}:{variant_id}" if variant_id else str(product_id or "")
+                )
+                result.append(
+                    {
+                        "external_order_id": f"{order_id}:{line_id}",
+                        "listing_external_id": listing_external_id,
+                        "sku": line.get("sku"),
+                        "title": line.get("name") or "BigCommerce sale",
+                        "counterparty": None,
+                        "total_cents": _money(
+                            line.get("total_inc_tax")
+                            if line.get("total_inc_tax") not in (None, "")
+                            else line.get("total_ex_tax")
+                        ),
+                        "currency": str(
+                            order.get("currency_code") or values.get("currency", "EUR")
+                        ),
+                        "status": status,
+                        "lifecycle_status": status,
+                        "is_closed": is_closed,
+                        "occurred_at": occurred.isoformat() if occurred else None,
+                        "quantity": _int(line.get("quantity"), 1) or 1,
+                        "extra": {
+                            "order_id": order_id,
+                            "line_item_id": line_id,
+                            "product_id": product_id,
+                            "variant_id": variant_id,
+                        },
+                    }
+                )
+        if len(rows) < 50:
+            break
+        page += 1
+    return result
+
+
+def test_bigcommerce_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.BIGCOMMERCE)
+    products = _bigcommerce_get(
+        values,
+        "v3/catalog/products",
+        params={"limit": 1, "page": 1},
+    )
+    orders = _bigcommerce_get(
+        values,
+        "v2/orders",
+        params={"limit": 1, "page": 1},
+    )
+    return {
+        "ok": True,
+        "detail": "BigCommerce catalog and orders are readable.",
+        "products_visible": len((products or {}).get("data") or [])
+        if isinstance(products, dict)
+        else 0,
+        "orders_visible": len(orders) if isinstance(orders, list) else 0,
+    }
+
+
+def sync_bigcommerce_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.BIGCOMMERCE)
+    items = _fetch_bigcommerce_products(values)
+    orders = _fetch_bigcommerce_orders(values)
+    synced_at = datetime.now(timezone.utc)
+    listing_result = record_workspace_channel_snapshot(
+        workspace_id,
+        Channel.BIGCOMMERCE,
+        items,
+        synced_at=synced_at,
+        full_snapshot=True,
+        note="BigCommerce REST Management API",
+    )
+    order_result = record_workspace_channel_orders(
+        workspace_id,
+        Channel.BIGCOMMERCE,
+        orders,
+        synced_at=synced_at,
+    )
+    return {"source": Channel.BIGCOMMERCE, **listing_result, **order_result}
+
+
 def import_biblio_workspace(
     workspace_id: uuid.UUID,
     rows: list[dict[str, Any]],
