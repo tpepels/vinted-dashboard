@@ -2184,7 +2184,7 @@ async def biblio_workspace_import(
     return {"ok": True, **result}
 
 
-@router.post("/api/app/connectors/{channel}/test")
+@router.post("/api/app/connectors/{channel}/test-connection")
 def generic_connector_test(
     channel: str,
     context: RequestContext = Depends(require_write_context),
