@@ -21,3 +21,26 @@ Before giving the hosted beta to external users:
 
 The commercial Store extension deliberately does not ship the personal
 rendered-market-search module or unattended destructive marketplace actions.
+
+
+## Release gate
+
+A public release is not considered ready from configuration alone. Record the
+actual PostgreSQL backup mechanism and the date of the most recent successful
+restore drill, then run:
+
+```bash
+export BACKUP_PROVIDER=render-managed-postgres
+export BACKUP_RESTORE_DRILL_AT=2026-10-01
+python scripts/release_readiness.py --origin https://your-domain
+```
+
+By default the restore drill must be no more than 90 days old. The command also
+requires a valid `PRIVACY_CONTACT_EMAIL`, checks that
+`EXTENSION_LATEST_VERSION` matches the source extension manifest, verifies the
+privacy/Limited Use policy, validates production runtime settings, and runs the
+live hosted smoke check when `--origin` is supplied.
+
+The restore-drill date is operator-supplied evidence. The application does not
+pretend it can verify a managed provider's backup contents without performing
+a restore.
