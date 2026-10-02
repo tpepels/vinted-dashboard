@@ -1894,8 +1894,8 @@ def _wix_inventory_by_variant(
             {
                 "tracked": False,
                 "untracked": False,
+                "untracked_in_stock": False,
                 "quantity": 0,
-                "in_stock": False,
                 "locations": 0,
             },
         )
@@ -1906,7 +1906,9 @@ def _wix_inventory_by_variant(
             current["quantity"] += max(0, _int(row.get("quantity"), 0) or 0)
         else:
             current["untracked"] = True
-        current["in_stock"] = current["in_stock"] or bool(row.get("inStock"))
+            current["untracked_in_stock"] = (
+                current["untracked_in_stock"] or bool(row.get("inStock"))
+            )
     return grouped
 
 
@@ -1972,11 +1974,14 @@ def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
         if not isinstance(status_info, dict):
             status_info = {}
 
-        if stock and stock.get("tracked") and not stock.get("untracked"):
+        if stock and stock.get("untracked_in_stock"):
+            in_stock = True
+            quantity = 1
+        elif stock and stock.get("tracked"):
             quantity = max(0, _int(stock.get("quantity"), 0) or 0)
             in_stock = quantity > 0 or bool(status_info.get("preorderEnabled"))
         elif stock and stock.get("untracked"):
-            in_stock = bool(stock.get("in_stock")) or bool(status_info.get("inStock"))
+            in_stock = bool(status_info.get("inStock"))
             quantity = 1 if in_stock else 0
         else:
             in_stock = bool(status_info.get("inStock")) or bool(status_info.get("preorderEnabled"))
@@ -2077,7 +2082,7 @@ def _fetch_wix_orders(values: dict[str, str]) -> list[dict[str, Any]]:
                 catalog = line.get("catalogReference") or {}
                 if not isinstance(catalog, dict):
                     catalog = {}
-                if catalog.get("appId") not in (None, "", WIX_STORES_APP_ID):
+                if catalog.get("appId") != WIX_STORES_APP_ID:
                     continue
                 options = catalog.get("options") or {}
                 if not isinstance(options, dict):
