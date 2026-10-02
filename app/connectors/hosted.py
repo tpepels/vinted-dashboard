@@ -260,6 +260,48 @@ def _etsy_access_token(values: dict[str, str]) -> str:
     return token
 
 
+def exchange_etsy_authorization_code(
+    values: dict[str, str],
+    *,
+    code: str,
+    code_verifier: str,
+    redirect_uri: str,
+) -> dict[str, str]:
+    keystring = values.get("keystring", "").strip()
+    if not keystring or not code.strip() or not code_verifier.strip() or not redirect_uri.strip():
+        raise RuntimeError("Etsy OAuth exchange is missing required values")
+    response = requests.post(
+        "https://api.etsy.com/v3/public/oauth/token",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "grant_type": "authorization_code",
+            "client_id": keystring,
+            "redirect_uri": redirect_uri,
+            "code": code,
+            "code_verifier": code_verifier,
+        },
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Etsy OAuth exchange failed ({response.status_code})")
+    payload = response.json() or {}
+    access_token = str(payload.get("access_token") or "").strip()
+    refresh_token = str(payload.get("refresh_token") or "").strip()
+    if not access_token or not refresh_token:
+        raise RuntimeError("Etsy OAuth exchange returned incomplete token data")
+    result = {
+        "oauth_token": access_token,
+        "refresh_token": refresh_token,
+    }
+    scope = str(payload.get("scope") or "").strip()
+    if scope:
+        result["oauth_scope"] = scope
+    expires_in = payload.get("expires_in")
+    if expires_in not in (None, ""):
+        result["oauth_expires_in"] = str(expires_in)
+    return result
+
+
 def _etsy_headers(values: dict[str, str]) -> dict[str, str]:
     keystring = values.get("keystring", "").strip()
     shared_secret = values.get("shared_secret", "").strip()
