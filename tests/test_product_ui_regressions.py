@@ -133,7 +133,8 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert '<option value="shopify">Shopify</option>' in html
     assert '<option value="bigcommerce">BigCommerce</option>' in html
     assert '<option value="squarespace">Squarespace</option>' in html
-    assert html.count('<option value="wix">Wix</option>') >= 2
+    assert html.count('<option value="wix">Wix</option>') == 2
+    assert html.count('<option value="depop">Depop</option>') == 2
     assert 'id="test-connector"' in html
     assert "etsy: {" in APP_JS
     assert "woocommerce: {" in APP_JS
@@ -141,6 +142,7 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert "bigcommerce: {" in APP_JS
     assert "squarespace: {" in APP_JS
     assert "wix: {" in APP_JS
+    assert "depop: {" in APP_JS
     assert '"/test-connection"' in APP_JS
     assert "listings_r and transactions_r" in APP_JS
     assert 'id="authorize-etsy"' in html
@@ -151,6 +153,7 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert "BigCommerce" in APP_JS
     assert "Squarespace Commerce APIs" in APP_JS
     assert "Catalog V3, Inventory V3 and Orders" in APP_JS
+    assert "Private Depop Selling API" in APP_JS
 
 
 
