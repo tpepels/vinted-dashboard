@@ -3,6 +3,7 @@ function idOf(v){if(v&&typeof v==="object")v=first(v,"id","user_id");return v==n
 function nameOf(v){if(v&&typeof v==="object")v=first(v,"login","username","name","display_name");return v==null||v===""?null:String(v)}
 function money(v){let currency="EUR";if(v&&typeof v==="object"){currency=String(first(v,"currency_code","currency","code")||"EUR");v=first(v,"amount","value","price")}if(v==null||v==="")return [null,currency];const n=Number.parseFloat(String(v).replace("€","").replaceAll(" ","").replace(",","."));return [Number.isFinite(n)?Math.round(n*100):null,currency]}
 function stamp(v){if(v==null||v==="")return null;const t=String(v).trim();if(/^\d+(?:\.\d+)?$/.test(t)){let n=Number(t);if(n<1e11)n*=1000;const d=new Date(n);if(!Number.isNaN(d.getTime()))return d.toISOString()}return String(v)}
+function exactStamp(v){const normalized=stamp(v);if(!normalized)return null;const d=new Date(normalized);return Number.isNaN(d.getTime())?null:d.toISOString()}
 function metaText(v){if(v==null||v==="")return null;if(Array.isArray(v)){const values=v.map(metaText).filter(Boolean);return values.length?values.join(", "):null}if(typeof v==="object")v=first(v,"title","name","label","display_value","value","text");return v==null||v===""?null:String(v).trim()||null}
 function metaKey(v){return String(v||"").toLowerCase().replace(/[^a-z0-9]+/g,"")}
 function attributeValue(raw,...names){const wanted=new Set(names.map(metaKey));for(const [key,value] of Object.entries(raw||{})){if(wanted.has(metaKey(key))){const text=metaText(value);if(text)return text}}for(const group of[first(raw,"attributes","item_attributes","details","item_details"),first(raw,"item","product")]){if(!group)continue;if(Array.isArray(group)){for(const entry of group){if(!entry||typeof entry!=="object")continue;const key=first(entry,"code","key","name","title","label","type");if(!wanted.has(metaKey(key)))continue;const text=metaText(first(entry,"value","value_name","display_value","selected_value","title","name","label"));if(text)return text}}else if(typeof group==="object"){for(const [key,value] of Object.entries(group)){if(wanted.has(metaKey(key))){const text=metaText(value);if(text)return text}}}}return null}
@@ -10,21 +11,24 @@ function listingMetadata(raw){const values={condition:attributeValue(raw,"status
 function listFrom(payload,keys){if(Array.isArray(payload))return payload;if(!payload||typeof payload!=="object")return[];for(const k of keys)if(Array.isArray(payload[k]))return payload[k];const d=payload.data;if(Array.isArray(d))return d;if(d&&typeof d==="object")for(const k of keys)if(Array.isArray(d[k]))return d[k];return[]}
 function closed(v){const s=String(v||"").toLowerCase().replaceAll("-","_").replaceAll(" ","_");return["cancelled","canceled","completed","complete","closed","finished","refunded","failed"].some(x=>s.includes(x))}
 function listingStatus(raw,forced){if(raw?.is_reserved)return"reserved";if(raw?.is_hidden)return"hidden";if(raw?.is_draft)return"draft";if(raw?.is_closed||raw?.is_sold)return"sold";if(forced)return forced==="closed"?"sold":forced;const s=String(first(raw,"state","item_status","listing_status")||"").toLowerCase();return["sold","reserved","hidden","draft"].includes(s)?s:"active"}
-function listingRow(raw,forced){const [price,currency]=money(first(raw,"price","total_item_price","item_price"));const itemId=idOf(first(raw,"id","item_id"));let url=first(raw,"url","web_url");if(url)url=new URL(String(url),location.origin).href;else if(itemId)url=`${location.origin}/items/${itemId}`;const listedAt=stamp(first(raw,"created_at_ts","created_timestamp_ts","created_at","uploaded_at","uploaded_ts","posted_at","upload_date_dte"));return{id:itemId,title:String(first(raw,"title","name")||"Untitled"),price_cents:price,currency,status:listingStatus(raw,forced),vinted_url:url||null,image_url:first(raw?.photo,"full_size_url","url")||null,listed_at:listedAt,listed_at_source:listedAt?"list":null,favourites:first(raw,"favourite_count","favorites_count","favourites_count"),views:first(raw,"view_count","views_count"),metadata:listingMetadata(raw)}}
+function listingRow(raw,forced){const [price,currency]=money(first(raw,"price","total_item_price","item_price"));const itemId=idOf(first(raw,"id","item_id"));let url=first(raw,"url","web_url");if(url)url=new URL(String(url),location.origin).href;else if(itemId)url=`${location.origin}/items/${itemId}`;const listedAt=exactStamp(first(raw,"created_at_ts","created_timestamp_ts","created_at","uploaded_at","uploaded_ts","posted_at","upload_date_dte"));return{id:itemId,title:String(first(raw,"title","name")||"Untitled"),price_cents:price,currency,status:listingStatus(raw,forced),vinted_url:url||null,image_url:first(raw?.photo,"full_size_url","url")||null,listed_at:listedAt,listed_at_source:listedAt?"list":null,favourites:first(raw,"favourite_count","favorites_count","favourites_count"),views:first(raw,"view_count","views_count"),metadata:listingMetadata(raw)}}
 function orderRow(raw,direction){const [price,currency]=money(first(raw,"price","total_price","total","amount"));const lifecycle=String(first(raw,"transaction_user_status","state")||"").toLowerCase().trim().replaceAll(" ","_").replaceAll("-","_");const status=String(first(raw,"status")||lifecycle||"open").toLowerCase().trim().replaceAll(" ","_").replaceAll("-","_");const thread=first(raw,"conversation_id","thread_id");const oid=first(raw,"id","transaction_id","order_id")||thread;const item=first(raw,"item","transaction_item","listing","item_snapshot");const itemId=idOf(first(raw,"item_id","listing_id")||item);let url=first(raw,"url","web_url","link");if(!url&&thread)url=`${location.origin}/inbox/${thread}`;else if(url)url=new URL(String(url),location.origin).href;return{id:String(oid||""),thread_id:String(thread||""),item_id:itemId,direction,title:String(first(raw,"title","item_title","name")||first(item,"title","name")||"Vinted order"),counterparty:nameOf(first(raw,"opposite_user","other_user","user")),total_cents:price,currency,status,lifecycle_status:lifecycle||status,is_closed:closed(lifecycle||status),tracking_code:first(raw,"tracking_code","tracking_number","shipment_tracking_code"),updated_at:stamp(first(raw,"updated_at","date","created_at","created_at_ts")),vinted_url:url||null}}
 function notificationRow(raw){let body=first(raw,"body","text","message","description");if(body&&typeof body==="object")body=first(body,"text","value");body=String(body||"");const title=String(first(raw,"title","subject","heading")||body||"Vinted notification");let url=first(raw,"link","url","deep_link","target_url");if(url)url=new URL(String(url),location.origin).href;let category="other",item_id=null,item_title=null,actor=null;if(String(url||"").includes("/want_it/")){category="favorite";item_id=String(url).match(/\/items\/(\d+)/)?.[1]||null;const m=body.match(/^(.+?) adicionou o teu (.+?) aos seus favoritos\.?$/i)||body.match(/^(.+?) added your (.+?) to (?:their|his|her) favou?rites\.?$/i);if(m){actor=m[1].trim();item_title=m[2].trim()}}return{id:String(first(raw,"id","notification_id")||""),kind:String(first(raw,"entry_type","type","notification_type","event_type")||"notification"),category,item_id,item_title,actor,title,body,occurred_at:stamp(first(raw,"updated_at","created_at","created_at_ts","timestamp")),read:Boolean(first(raw,"is_read","read","seen")||first(raw,"read_at","seen_at")),url:url||null}}
 
 async function fetchJson(path,params={}){const url=new URL(path,location.origin);for(const[k,v]of Object.entries(params))url.searchParams.set(k,String(v));const r=await fetch(url,{headers:{"Accept":"application/json, text/plain, */*","X-Platform":"web"}});if(r.status===404)return null;if(!r.ok)throw new Error(`Vinted returned HTTP ${r.status} for ${url.pathname}`);return await r.json()}
-const LISTED_AT_CACHE_KEY="vintedListedAtCacheV1";
+const LISTED_AT_CACHE_KEY="vintedListedAtCacheV2";
 async function enrichListingDates(listings){
   let stored={};try{stored=await chrome.storage.local.get([LISTED_AT_CACHE_KEY])}catch{}
   const cache=(stored&&typeof stored[LISTED_AT_CACHE_KEY]==="object"&&stored[LISTED_AT_CACHE_KEY])||{};
   const missing=[];let changed=false;
   for(const row of listings.values()){
     if(!row?.id)continue;
-    if(row.listed_at){if(cache[row.id]!==row.listed_at){cache[row.id]=row.listed_at;changed=true}continue}
-    if(cache[row.id]){row.listed_at=cache[row.id];row.listed_at_source="cache";continue}
-    missing.push(row);
+    const direct=exactStamp(row.listed_at);
+    if(direct){row.listed_at=direct;if(cache[row.id]!==direct){cache[row.id]=direct;changed=true}continue}
+    const cached=exactStamp(cache[row.id]);
+    if(cached){row.listed_at=cached;row.listed_at_source="vinted_cache";continue}
+    if(cache[row.id]){delete cache[row.id];changed=true}
+    row.listed_at=null;row.listed_at_source=null;missing.push(row);
   }
   let cursor=0,rateLimited=false;
   async function worker(){
@@ -33,9 +37,9 @@ async function enrichListingDates(listings){
       try{
         const payload=await fetchJson(`/api/v2/items/${row.id}`,{localize:"false"});
         const raw=payload?.item||payload?.data?.item||payload?.data||payload||{};
-        const created=stamp(first(raw,"created_at_ts","created_timestamp_ts","created_at","uploaded_at","uploaded_ts","posted_at","upload_date_dte"));
+        const created=exactStamp(first(raw,"created_at_ts","created_timestamp_ts","created_at","uploaded_at","uploaded_ts","posted_at","upload_date_dte"));
         if(created){
-          row.listed_at=created;row.listed_at_source="detail";cache[row.id]=created;changed=true;
+          row.listed_at=created;row.listed_at_source="vinted_detail";cache[row.id]=created;changed=true;
           row.metadata={...listingMetadata(raw),...(row.metadata||{})};
         }
       }catch(error){
