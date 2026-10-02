@@ -1649,9 +1649,12 @@ function renderVintedBehavior(data) {
         + "</td><td>" + esc(row.linked_sales)
         + '</td><td data-sort-value="' + esc(row.cost_coverage_pct == null ? "" : row.cost_coverage_pct) + '">'
         + (row.linked_sales ? esc(row.costed_sales + "/" + row.linked_sales) : "—")
-        + '</td><td data-sort-value="' + esc(row.costed_revenue_cents || 0) + '">' + money(row.costed_revenue_cents, analyticsCurrency)
-        + '</td><td data-sort-value="' + esc(row.cost_cents || 0) + '">' + money(row.cost_cents, analyticsCurrency)
-        + '</td><td data-sort-value="' + esc(row.gross_profit_cents || 0) + '">' + (row.costed_sales ? money(row.gross_profit_cents, analyticsCurrency) : "—")
+        + '</td><td data-sort-value="' + esc(row.costed_sales ? row.costed_revenue_cents : "") + '">'
+        + (row.costed_sales ? money(row.costed_revenue_cents, analyticsCurrency) : "—")
+        + '</td><td data-sort-value="' + esc(row.costed_sales ? row.cost_cents : "") + '">'
+        + (row.costed_sales ? money(row.cost_cents, analyticsCurrency) : "—")
+        + '</td><td data-sort-value="' + esc(row.costed_sales ? row.gross_profit_cents : "") + '">'
+        + (row.costed_sales ? money(row.gross_profit_cents, analyticsCurrency) : "—")
         + '</td><td data-sort-value="' + esc(row.gross_margin_pct == null ? "" : row.gross_margin_pct) + '">'
         + (row.gross_margin_pct == null ? "—" : esc(row.gross_margin_pct) + "%")
         + '</td><td data-sort-value="' + esc(row.roi_pct == null ? "" : row.roi_pct) + '">'
@@ -1752,7 +1755,12 @@ async function analytics() {
       marginInventory ? money(summary.inventory_potential_margin_cents, summary.currency) : "—",
       marginInventory + " of " + activeInventory + " have cost + ask"
     )
-    + metric("Sales YTD", summary.sales_ytd_count, money(summary.sales_ytd_cents, summary.currency))
+    + metric(
+      "Sales YTD",
+      summary.sales_ytd_count,
+      money(summary.sales_ytd_cents, summary.currency)
+        + " · " + summary.sales_ytd_revenue_known_count + " of " + summary.sales_ytd_count + " amounts known"
+    )
     + metric(
       "Gross profit YTD",
       summary.sales_ytd_costed_count
