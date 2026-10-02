@@ -183,4 +183,4 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "2.1.0"
+    assert manifest["version"] == "2.2.0"

@@ -381,21 +381,57 @@ async function today() {
         : "Add acquisition costs to calculate margin"
     );
 
-  const todayActions = Array.isArray(todayData.actions) ? todayData.actions : [];
-  $("#today-actions").innerHTML = todayActions.length
-    ? todayActions.map((row) =>
-      '<div class="action-row"><div><strong>' + esc(row.title) + "</strong><p>"
-      + esc(row.channel) + " · " + row.age_days + " days old"
-      + (row.favourites == null ? "" : " · " + row.favourites + " favourites")
-      + (row.favourites_gain == null ? "" : " · +" + row.favourites_gain + " favourites in 7d")
-      + (row.views_gain == null ? "" : " · +" + row.views_gain + " views in 7d")
-      + '</p></div><div class="action-tag">' + esc(row.action) + "</div></div>"
-    ).join("")
-    : '<div class="empty">No listing crosses your action thresholds today.</div>';
-
-  renderStockActions(
-    Array.isArray(todayData.cross_channel_actions) ? todayData.cross_channel_actions : []
+  renderTodayWorkQueue(
+    Array.isArray(todayData.work_queue) ? todayData.work_queue : [],
+    Number(todayData.work_queue_count || 0),
   );
+}
+
+function todayWorkControls(row) {
+  if (row.kind === "stock_action" && row.stock_action) {
+    return crossChannelActionControls(row.stock_action);
+  }
+  const controls = [];
+  if (row.url) {
+    controls.push('<a class="btn" target="_blank" rel="noreferrer" href="' + esc(row.url) + '">Open listing</a>');
+  }
+  if (row.view) {
+    controls.push(
+      '<button class="btn primary today-nav" type="button" data-view="' + esc(row.view)
+      + '" data-kind="' + esc(row.kind || "") + '">' + esc(row.label || "Open") + "</button>"
+    );
+  }
+  return controls.join("");
+}
+
+function renderTodayWorkQueue(rows, total) {
+  const queue = Array.isArray(rows) ? rows : [];
+  $("#today-work-count").textContent = total
+    ? total + " task" + (total === 1 ? "" : "s")
+    : "Clear";
+
+  $("#today-actions").innerHTML = queue.length
+    ? queue.map((row) =>
+      '<div class="work-row work-' + esc(row.kind || "general") + '">'
+      + '<div class="work-copy"><div class="work-heading"><span class="work-kind">'
+      + esc((row.kind || "task").replaceAll("_", " ")) + '</span><strong>' + esc(row.title)
+      + '</strong></div><p>' + esc(row.detail || "") + '</p></div>'
+      + '<div class="actions compact">' + todayWorkControls(row) + "</div></div>"
+    ).join("")
+    : '<div class="today-clear"><strong>You are caught up.</strong><span>No reseller task needs attention right now.</span></div>';
+
+  $$(".today-nav").forEach((button) => {
+    button.onclick = async () => {
+      const view = button.dataset.view;
+      await selectView(view);
+      if (button.dataset.kind === "purchase_cost" && view === "sales") {
+        $("#sales-direction").value = "buy";
+        renderSales();
+        $("#purchase-cost-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    };
+  });
+  bindCrossChannelButtons(today);
 }
 
 function onboardingStep(label, done, detail) {
@@ -485,26 +521,6 @@ function bindCrossChannelButtons(after) {
   });
 }
 
-function renderStockActions(rows) {
-  const actionRows = Array.isArray(rows) ? rows : [];
-  const card = $("#stock-actions").closest(".stock-alerts");
-  card.classList.toggle("hidden", actionRows.length === 0);
-  if (!actionRows.length) {
-    $("#stock-alert-count").textContent = "";
-    $("#stock-actions").innerHTML = "";
-    return;
-  }
-  $("#stock-alert-count").textContent =
-    actionRows.length + " active action" + (actionRows.length === 1 ? "" : "s");
-  $("#stock-actions").innerHTML = actionRows.map((row) =>
-    '<div class="action-row"><div><strong>' + esc(row.item?.title || row.listing?.title || "Sold item")
-    + '</strong><p>' + esc(row.channel) + " · " + esc(row.status)
-    + (row.last_error ? " · " + esc(row.last_error) : "")
-    + '</p></div><div class="actions compact">' + crossChannelActionControls(row) + "</div></div>"
-  ).join("");
-  bindCrossChannelButtons(today);
-}
-
 function selectedInventoryIds() {
   return $$(".inventory-select:checked").map((box) => box.dataset.id);
 }
@@ -537,7 +553,10 @@ async function inventory() {
     ? '<table><thead><tr><th><input id="inventory-select-all" type="checkbox" aria-label="Select all"></th><th>Item</th><th>SKU</th><th>Category</th><th>Qty</th><th>Location</th><th>Cost</th><th>Ask</th><th>Margin</th><th>Channels</th><th>Status</th><th></th></tr></thead><tbody>'
       + visibleItems.map((item) =>
         '<tr><td><input class="inventory-select" type="checkbox" data-id="' + esc(item.id) + '" aria-label="Select ' + esc(item.title) + '"></td>'
-        + '<td><div class="title">' + esc(item.title) + '</div><div class="sub">' + esc(item.condition || "") + '</div></td>'
+        + '<td><div class="title">' + esc(item.title) + '</div><div class="sub">'
+        + [item.condition, item.attributes?.author, item.attributes?.brand, item.attributes?.size, item.attributes?.vinted_category]
+          .filter(Boolean).map(esc).join(" · ")
+        + '</div></td>'
         + '<td>' + esc(item.sku) + "</td><td>" + esc(item.category)
         + "</td><td>" + item.quantity + "</td><td>" + esc(item.location || "—")
         + "</td><td>" + money(item.cost_cents, item.currency)

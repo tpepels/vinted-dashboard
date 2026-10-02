@@ -19,12 +19,12 @@ def test_reconciliation_bulk_selection_uses_multi_element_selector():
 
 
 def test_today_handles_missing_array_payloads_defensively():
-    assert "Array.isArray(todayData.actions)" in APP_JS
-    assert "Array.isArray(todayData.cross_channel_actions)" in APP_JS
+    assert "Array.isArray(todayData.work_queue)" in APP_JS
+    assert "Array.isArray(rows) ? rows : []" in APP_JS
 
 
 def test_today_does_not_surface_historical_unlinked_sales_as_cross_channel_actions():
-    assert "function renderStockActions(rows)" in APP_JS
+    assert "function renderStockActions(rows)" not in APP_JS
     assert "sold order(s) still need a master-stock link" not in APP_JS
 
 
@@ -70,3 +70,32 @@ def test_category_profitability_is_rendered_from_complete_sales_only():
     assert "<th>Costed</th><th>Revenue</th><th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th>" in APP_JS
     assert 'row.costed_sales + "/" + row.linked_sales' in APP_JS
     assert 'row.costed_sales ? money(row.gross_profit_cents, analyticsCurrency) : "—"' in APP_JS
+
+
+
+def test_today_is_rendered_as_one_unified_work_queue():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="today-work-count"' in html
+    assert 'class="card today-work"' in html
+    assert 'id="stock-actions"' not in html
+    assert "renderTodayWorkQueue(" in APP_JS
+    assert 'row.kind === "stock_action"' in APP_JS
+    assert 'button.dataset.kind === "purchase_cost"' in APP_JS
+
+
+def test_inventory_surfaces_enriched_vinted_metadata():
+    assert "item.attributes?.author" in APP_JS
+    assert "item.attributes?.brand" in APP_JS
+    assert "item.attributes?.size" in APP_JS
+    assert "item.attributes?.vinted_category" in APP_JS
+
+
+
+def test_today_navigation_uses_multi_element_selector():
+    lines = [line.strip() for line in APP_JS.splitlines()]
+    multi = "$" + "$" + '(".today-nav").forEach((button) => {'
+    single = "$" + '(".today-nav").forEach((button) => {'
+    assert multi in lines
+    assert single not in lines

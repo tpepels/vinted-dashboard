@@ -57,6 +57,82 @@ def _int(value: Any) -> int | None:
         return None
 
 
+_VINTED_METADATA_KEYS = {
+    "condition",
+    "category",
+    "brand",
+    "size",
+    "color",
+    "material",
+    "description",
+    "isbn",
+    "author",
+    "publisher",
+    "language",
+}
+
+
+def _clean_vinted_metadata(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for key in _VINTED_METADATA_KEYS:
+        raw = value.get(key)
+        if raw in (None, ""):
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        cleaned[key] = text[:5000 if key == "description" else 500]
+    return cleaned
+
+
+def _looks_like_book_category(value: str | None) -> bool:
+    text = str(value or "").casefold()
+    return any(
+        token in text
+        for token in (
+            "book",
+            "books",
+            "livro",
+            "livros",
+            "livre",
+            "livres",
+            "libro",
+            "libros",
+            "buch",
+            "bücher",
+            "ksiaz",
+            "książ",
+        )
+    )
+
+
+def _apply_vinted_metadata(
+    item: models.InventoryItem,
+    metadata: dict[str, str],
+    captured_at: datetime,
+) -> None:
+    if not metadata:
+        return
+    if not item.condition and metadata.get("condition"):
+        item.condition = metadata["condition"]
+    if item.category == ItemCategory.GENERAL and _looks_like_book_category(metadata.get("category")):
+        item.category = ItemCategory.BOOK
+
+    attributes = dict(item.attributes or {})
+    generic_keys = ("brand", "size", "color", "material", "description", "isbn", "author", "publisher", "language")
+    for key in generic_keys:
+        if metadata.get(key) and not attributes.get(key):
+            attributes[key] = metadata[key]
+    if metadata.get("category"):
+        attributes["vinted_category"] = metadata["category"]
+    if metadata.get("description"):
+        attributes["vinted_description"] = metadata["description"]
+    attributes["vinted_metadata_synced_at"] = captured_at.isoformat()
+    item.attributes = attributes
+
+
 def _listing_item(session, workspace, account, row: dict[str, Any], captured_at: datetime):
     external_id = str(row.get("id") or row.get("source_id") or "").strip()
     if not external_id:
@@ -122,10 +198,15 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
     listing.last_seen_at = captured_at
     existing_extra = dict(listing.extra or {})
     listed_at = row.get("listed_at") or existing_extra.get("listed_at")
+    incoming_metadata = _clean_vinted_metadata(row.get("metadata"))
+    existing_metadata = _clean_vinted_metadata(existing_extra.get("metadata"))
+    metadata = {**existing_metadata, **incoming_metadata}
     listing.extra = {
         **existing_extra,
         "listed_at": listed_at,
+        "metadata": metadata,
     }
+    _apply_vinted_metadata(item, metadata, captured_at)
     session.flush()
 
     snap_exists = session.execute(
@@ -146,6 +227,7 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
                 raw={
                     "listed_at": row.get("listed_at"),
                     "url": row.get("vinted_url") or row.get("url"),
+                    "metadata": metadata,
                 },
             )
         )
