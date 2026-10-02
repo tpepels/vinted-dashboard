@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -12,6 +13,11 @@ from app.product_models import ConnectorCredential, ExtensionCredential
 
 
 NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _disable_rate_limit(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
 
 
 def _register(client: TestClient, email: str) -> str:
