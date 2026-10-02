@@ -106,7 +106,7 @@ def test_listing_dates_use_only_real_vinted_timestamp():
     assert "function listingDisplayDate(row)" in APP_JS
     assert "return row.listed_at || null;" in APP_JS
     assert "row.listed_at || row.first_seen_at" not in APP_JS
-    assert "first observed" not in APP_JS
+    assert 'row.listed_at_source === "first_seen"' not in APP_JS
     assert "minimum age" not in APP_JS
 
 
