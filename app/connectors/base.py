@@ -158,6 +158,17 @@ CONNECTORS: dict[str, ConnectorInfo] = {
             Capability.FETCH_ORDERS,
         }),
     ),
+    Channel.DEPOP: ConnectorInfo(
+        channel=Channel.DEPOP,
+        display_name=CHANNEL_DISPLAY_NAMES[Channel.DEPOP],
+        group="marketplace",
+        description="Depop products and orders through the private Selling API for approved partners.",
+        capabilities=frozenset({
+            Capability.IMPORT_INVENTORY,
+            Capability.FETCH_LISTINGS,
+            Capability.FETCH_ORDERS,
+        }),
+    ),
     Channel.CSV: ConnectorInfo(
         channel=Channel.CSV,
         display_name="CSV / TSV",
