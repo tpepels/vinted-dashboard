@@ -411,7 +411,7 @@ def test_etsy_oauth_pkce_flow_stores_refreshable_tokens(monkeypatch):
     )
     assert registered.status_code == 200
     csrf = registered.json()["csrf_token"]
-    workspace_id = uuid.UUID(registered.json()["workspace"]["id"])
+    workspace_id = uuid.UUID(client.get("/api/auth/me").json()["workspace"]["id"])
 
     saved = client.put(
         "/api/app/connectors/etsy/credentials",
