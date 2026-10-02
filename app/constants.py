@@ -37,12 +37,35 @@ KNOWN_CHANNELS = (
 
 
 class ItemCategory:
-    """Category of an inventory item. The schema stores this as free text;
-    these are simply the categories the current product understands."""
+    """Broad master categories. Marketplace-specific taxonomy is retained
+    separately in item/listing metadata, so these stay intentionally coarse."""
 
     BOOK = "book"
     CLOTHING = "clothing"
+    ELECTRONICS = "electronics"
+    HOME = "home"
+    COLLECTIBLES = "collectibles"
+    TOYS_GAMES = "toys_games"
+    MEDIA = "media"
+    SPORTS = "sports"
+    BEAUTY = "beauty"
+    ART_CRAFTS = "art_crafts"
     GENERAL = "general"
+
+
+KNOWN_ITEM_CATEGORIES = (
+    ItemCategory.BOOK,
+    ItemCategory.CLOTHING,
+    ItemCategory.ELECTRONICS,
+    ItemCategory.HOME,
+    ItemCategory.COLLECTIBLES,
+    ItemCategory.TOYS_GAMES,
+    ItemCategory.MEDIA,
+    ItemCategory.SPORTS,
+    ItemCategory.BEAUTY,
+    ItemCategory.ART_CRAFTS,
+    ItemCategory.GENERAL,
+)
 
 
 class ItemStatus:
