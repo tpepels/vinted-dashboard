@@ -6,6 +6,8 @@ routes remain available separately for backwards compatibility.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import re
@@ -14,8 +16,10 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
@@ -47,6 +51,7 @@ from app.constants import (
 )
 from app.connectors.base import connector_catalog
 from app.connectors.hosted import (
+    exchange_etsy_authorization_code,
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
     test_biblio_workspace,
@@ -84,6 +89,7 @@ from app.product_models import (
 )
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
 from app.purchase_costs import apply_purchase_cost, purchase_cost_suggestions
+from app.runtime_config import public_app_origin
 from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
 from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
@@ -98,6 +104,28 @@ from app.workspace_ingest import maybe_record_legacy_snapshot, record_workspace_
 
 router = APIRouter()
 APP_NAME = os.getenv("APP_NAME", "Reseller Dashboard").strip() or "Reseller Dashboard"
+
+
+ETSY_OAUTH_SCOPES = ("listings_r", "transactions_r")
+ETSY_OAUTH_CALLBACK_PATH = "/api/app/connectors/etsy/oauth/callback"
+ETSY_OAUTH_TTL = timedelta(minutes=10)
+
+
+def _etsy_oauth_redirect_uri() -> str | None:
+    origin = public_app_origin()
+    return f"{origin}{ETSY_OAUTH_CALLBACK_PATH}" if origin else None
+
+
+def _etsy_oauth_authorized(values: dict[str, Any]) -> bool:
+    return bool(
+        str(values.get("oauth_token") or "").strip()
+        or str(values.get("refresh_token") or "").strip()
+    )
+
+
+def _etsy_pkce_challenge(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
 class RegisterRequest(BaseModel):
@@ -1917,7 +1945,7 @@ def connectors(context: RequestContext = Depends(require_context)):
             )
         ).scalars().all()
         stored_credentials = {
-            row.channel
+            row.channel: row
             for row in session.execute(
                 select(ConnectorCredential).where(
                     ConnectorCredential.workspace_id == context.workspace.id
@@ -1938,6 +1966,7 @@ def connectors(context: RequestContext = Depends(require_context)):
         account = account_by_channel.get(channel)
         configured = False
         operational = False
+        note = None
 
         if channel == Channel.VINTED:
             configured = operational = bool(extension_count)
@@ -1961,7 +1990,18 @@ def connectors(context: RequestContext = Depends(require_context)):
             )
             configured = channel in stored_credentials or (is_bootstrap and env_ready)
             operational = configured
-        elif channel in {Channel.ETSY, Channel.WOOCOMMERCE}:
+        elif channel == Channel.ETSY:
+            configured = channel in stored_credentials
+            values: dict[str, Any] = {}
+            if configured:
+                try:
+                    values = decrypt_json(stored_credentials[channel].encrypted_payload)
+                except ValueError:
+                    values = {}
+            operational = configured and _etsy_oauth_authorized(values)
+            if configured and not operational:
+                note = "App details saved; Etsy authorization is still required."
+        elif channel == Channel.WOOCOMMERCE:
             configured = channel in stored_credentials
             operational = configured
 
@@ -1986,7 +2026,13 @@ def connectors(context: RequestContext = Depends(require_context)):
                     if account and account.last_synced_at
                     else None
                 ),
-                "note": None,
+                "note": note,
+                "authorization_required": (
+                    channel == Channel.ETSY and configured and not operational
+                ),
+                "oauth_redirect_uri": (
+                    _etsy_oauth_redirect_uri() if channel == Channel.ETSY else None
+                ),
             }
         )
     return {"connectors": result}
@@ -2002,6 +2048,7 @@ def save_connector_credentials(
     if channel not in known or channel in {Channel.VINTED, Channel.CSV, Channel.EXCEL}:
         raise HTTPException(status_code=400, detail="This connector does not accept stored credentials")
     cleaned = {str(k): str(v) for k, v in payload.values.items() if str(v).strip()}
+    operational = True
     with db.session_scope() as session:
         row = session.execute(
             select(ConnectorCredential).where(
@@ -2037,14 +2084,7 @@ def save_connector_credentials(
                     status_code=400,
                     detail="Etsy needs keystring, shared_secret and shop_id",
                 )
-            if not (
-                str(merged.get("oauth_token") or "").strip()
-                or str(merged.get("refresh_token") or "").strip()
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Etsy needs oauth_token or refresh_token",
-                )
+            operational = _etsy_oauth_authorized(merged)
         elif channel == Channel.WOOCOMMERCE:
             required = ("store_url", "consumer_key", "consumer_secret")
             if not all(str(merged.get(key) or "").strip() for key in required):
@@ -2074,14 +2114,210 @@ def save_connector_credentials(
         account.config = {
             **dict(account.config or {}),
             "credentials_stored": True,
-            "integration_state": "configured",
+            "integration_state": "configured" if operational else "authorization_required",
         }
     return {
         "ok": True,
         "stored_keys": sorted(merged),
         "encrypted": True,
-        "operational": True,
+        "operational": operational,
     }
+
+
+@router.post("/api/app/connectors/etsy/oauth/start")
+def start_etsy_oauth(
+    context: RequestContext = Depends(require_write_context),
+):
+    redirect_uri = _etsy_oauth_redirect_uri()
+    if redirect_uri is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Set PUBLIC_APP_URL to the public HTTPS origin before authorizing Etsy",
+        )
+
+    state = f"{context.workspace.id}.{secrets.token_urlsafe(32)}"
+    verifier = secrets.token_urlsafe(64)
+    challenge = _etsy_pkce_challenge(verifier)
+    with db.session_scope() as session:
+        row = session.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.workspace_id == context.workspace.id,
+                ConnectorCredential.channel == Channel.ETSY,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=400, detail="Save the Etsy app details first")
+        try:
+            values = decrypt_json(row.encrypted_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        required = ("keystring", "shared_secret", "shop_id")
+        if not all(str(values.get(key) or "").strip() for key in required):
+            raise HTTPException(status_code=400, detail="Save the Etsy app details first")
+        values.update(
+            {
+                "_oauth_state": state,
+                "_oauth_code_verifier": verifier,
+                "_oauth_redirect_uri": redirect_uri,
+                "_oauth_started_at": utcnow().isoformat(),
+                "_oauth_user_id": str(context.user.id),
+            }
+        )
+        row.encrypted_payload = encrypt_json(values)
+        account, _ = get_or_create_channel_account(
+            session, context.workspace, Channel.ETSY, {}
+        )
+        account.status = ChannelAccountStatus.DISCONNECTED
+        account.config = {
+            **dict(account.config or {}),
+            "credentials_stored": True,
+            "integration_state": "authorization_pending",
+        }
+
+    authorization_url = "https://www.etsy.com/oauth/connect?" + urlencode(
+        {
+            "response_type": "code",
+            "redirect_uri": redirect_uri,
+            "scope": " ".join(ETSY_OAUTH_SCOPES),
+            "client_id": values["keystring"],
+            "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+    )
+    return {
+        "authorization_url": authorization_url,
+        "redirect_uri": redirect_uri,
+        "scopes": list(ETSY_OAUTH_SCOPES),
+    }
+
+
+@router.get(ETSY_OAUTH_CALLBACK_PATH)
+def complete_etsy_oauth(
+    state: str | None = None,
+    code: str | None = None,
+    error: str | None = None,
+    context: RequestContext = Depends(require_context),
+):
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing Etsy OAuth state")
+    try:
+        workspace_id = uuid.UUID(state.split(".", 1)[0])
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid Etsy OAuth state") from exc
+
+    with db.session_scope() as session:
+        membership = session.execute(
+            select(models.Membership).where(
+                models.Membership.user_id == context.user.id,
+                models.Membership.workspace_id == workspace_id,
+            )
+        ).scalar_one_or_none()
+        if membership is None:
+            raise HTTPException(status_code=403, detail="Etsy OAuth workspace access denied")
+        row = session.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.workspace_id == workspace_id,
+                ConnectorCredential.channel == Channel.ETSY,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=400, detail="Etsy credentials are not configured")
+        try:
+            values = decrypt_json(row.encrypted_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not secrets.compare_digest(str(values.get("_oauth_state") or ""), state):
+            raise HTTPException(status_code=400, detail="Invalid or expired Etsy OAuth state")
+        if str(values.get("_oauth_user_id") or "") != str(context.user.id):
+            raise HTTPException(status_code=403, detail="Etsy OAuth user mismatch")
+        try:
+            started_at = datetime.fromisoformat(str(values.get("_oauth_started_at") or ""))
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            started_at = started_at.astimezone(timezone.utc)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Etsy OAuth state") from exc
+        now = utcnow()
+        if started_at > now + timedelta(minutes=1) or now - started_at > ETSY_OAUTH_TTL:
+            raise HTTPException(status_code=400, detail="Etsy OAuth state expired")
+        verifier = str(values.get("_oauth_code_verifier") or "")
+        redirect_uri = str(values.get("_oauth_redirect_uri") or "")
+
+    if error:
+        with db.session_scope() as session:
+            row = session.execute(
+                select(ConnectorCredential).where(
+                    ConnectorCredential.workspace_id == workspace_id,
+                    ConnectorCredential.channel == Channel.ETSY,
+                )
+            ).scalar_one()
+            pending = decrypt_json(row.encrypted_payload)
+            if secrets.compare_digest(str(pending.get("_oauth_state") or ""), state):
+                for key in (
+                    "_oauth_state", "_oauth_code_verifier", "_oauth_redirect_uri",
+                    "_oauth_started_at", "_oauth_user_id",
+                ):
+                    pending.pop(key, None)
+                row.encrypted_payload = encrypt_json(pending)
+        return RedirectResponse(url="/?connector=etsy&oauth=denied", status_code=303)
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing Etsy authorization code")
+
+    try:
+        token_values = exchange_etsy_authorization_code(
+            values,
+            code=code,
+            code_verifier=verifier,
+            redirect_uri=redirect_uri,
+        )
+    except RuntimeError as exc:
+        with db.session_scope() as session:
+            row = session.execute(
+                select(ConnectorCredential).where(
+                    ConnectorCredential.workspace_id == workspace_id,
+                    ConnectorCredential.channel == Channel.ETSY,
+                )
+            ).scalar_one()
+            pending = decrypt_json(row.encrypted_payload)
+            if secrets.compare_digest(str(pending.get("_oauth_state") or ""), state):
+                for key in (
+                    "_oauth_state", "_oauth_code_verifier", "_oauth_redirect_uri",
+                    "_oauth_started_at", "_oauth_user_id",
+                ):
+                    pending.pop(key, None)
+                row.encrypted_payload = encrypt_json(pending)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    with db.session_scope() as session:
+        row = session.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.workspace_id == workspace_id,
+                ConnectorCredential.channel == Channel.ETSY,
+            )
+        ).scalar_one()
+        current = decrypt_json(row.encrypted_payload)
+        if not secrets.compare_digest(str(current.get("_oauth_state") or ""), state):
+            raise HTTPException(status_code=400, detail="Etsy OAuth state was already consumed")
+        current.update(token_values)
+        for key in (
+            "_oauth_state", "_oauth_code_verifier", "_oauth_redirect_uri",
+            "_oauth_started_at", "_oauth_user_id",
+        ):
+            current.pop(key, None)
+        row.encrypted_payload = encrypt_json(current)
+        workspace = session.get(models.Workspace, workspace_id)
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        account, _ = get_or_create_channel_account(session, workspace, Channel.ETSY, {})
+        account.status = ChannelAccountStatus.DISCONNECTED
+        account.config = {
+            **dict(account.config or {}),
+            "credentials_stored": True,
+            "integration_state": "configured",
+        }
+
+    return RedirectResponse(url="/?connector=etsy&oauth=connected", status_code=303)
 
 
 @router.delete("/api/app/connectors/{channel}/credentials")
@@ -2141,10 +2377,26 @@ def enqueue_connector_sync(
         )
         if not stored and not (bootstrap and env_ready):
             raise HTTPException(status_code=400, detail="eBay OAuth is not configured")
-    if channel in {Channel.ETSY, Channel.WOOCOMMERCE} and not stored:
+    if channel == Channel.ETSY:
+        if not stored:
+            raise HTTPException(status_code=400, detail="etsy credentials are not configured")
+        with db.session_scope() as session:
+            credential = session.execute(
+                select(ConnectorCredential).where(
+                    ConnectorCredential.workspace_id == context.workspace.id,
+                    ConnectorCredential.channel == Channel.ETSY,
+                )
+            ).scalar_one()
+            try:
+                values = decrypt_json(credential.encrypted_payload)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not _etsy_oauth_authorized(values):
+            raise HTTPException(status_code=400, detail="Etsy authorization is not complete")
+    elif channel == Channel.WOOCOMMERCE and not stored:
         raise HTTPException(
             status_code=400,
-            detail=f"{channel} credentials are not configured",
+            detail="woocommerce credentials are not configured",
         )
     job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
     return {"ok": True, "job_id": str(job_id), "queued": True}

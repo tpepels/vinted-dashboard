@@ -55,7 +55,7 @@ const connectorSchemas = {
   },
   etsy: {
     title: "Etsy",
-    help: "Official Open API v3. The token needs listings_r and transactions_r. Use a refresh token when available.",
+    help: "Official Open API v3. Save the app keystring, shared secret and Shop ID, then authorize with Etsy for read-only listings_r and transactions_r access. Manual tokens remain available as a fallback.",
     test: true,
     fields: [
       ["keystring", "App keystring", "", "text"],
@@ -304,7 +304,15 @@ async function init() {
     $("#auth-name").textContent = state.me.app_name;
     $("#workspace-name").textContent = state.me.workspace.name;
     renderBillingLock(state.me.billing);
-    await load("today");
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("connector") === "etsy" && params.get("oauth")) {
+      await selectView("connections");
+      if (params.get("oauth") === "connected") flash("Etsy authorization completed.");
+      else if (params.get("oauth") === "denied") flash("Etsy authorization was not granted.", true);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else {
+      await load("today");
+    }
   } catch {
     authScreen("login");
   }
@@ -2018,9 +2026,11 @@ async function connections() {
   $("#connector-grid").innerHTML = data.connectors.map((connector) => {
     const connected = connector.status === "connected";
     const statusClass = connected ? "status-ok" : (connector.configured ? "status-warn" : "");
-    const statusText = connected
-      ? "Connected"
-      : (connector.configured ? "Configured - not synced yet" : "Not configured");
+    const statusText = connector.authorization_required
+      ? "Authorization required"
+      : (connected
+        ? "Connected"
+        : (connector.configured ? "Configured - not synced yet" : "Not configured"));
     return '<div class="connector"><h2>' + esc(connector.display_name) + "</h2><p>"
       + esc(connector.description) + '</p><div class="meta ' + statusClass + '">'
       + statusText
@@ -2076,6 +2086,21 @@ async function connections() {
       }
     };
   });
+  return data;
+}
+
+function renderEtsyOAuthTools(connector) {
+  const active = state.connectorChannel === "etsy";
+  $("#etsy-tools").classList.toggle("hidden", !active);
+  if (!active) return;
+  const callback = connector?.oauth_redirect_uri || "";
+  $("#etsy-oauth-help").textContent = callback
+    ? "Register this exact redirect URI in the Etsy app: " + callback
+    : "Set PUBLIC_APP_URL to the public HTTPS origin before using Etsy OAuth.";
+  $("#authorize-etsy").classList.toggle("hidden", !connector?.configured || !callback);
+  $("#authorize-etsy").textContent = connector?.operational
+    ? "Reauthorize with Etsy"
+    : "Authorize with Etsy";
 }
 
 function openConnectorConfig(channel, connector) {
@@ -2089,7 +2114,8 @@ function openConnectorConfig(channel, connector) {
     + '" placeholder="' + esc(placeholder) + '"></label>'
   ).join("");
   $("#biblio-tools").classList.toggle("hidden", channel !== "biblio");
-  $("#test-connector").classList.toggle("hidden", !schema.test || !connector?.configured);
+  renderEtsyOAuthTools(connector);
+  $("#test-connector").classList.toggle("hidden", !schema.test || !connector?.operational);
   $("#remove-connector").classList.toggle("hidden", !connector?.configured);
   $("#connector-config-status").textContent = connector?.configured
     ? "Credentials are stored. Leave an existing secret field blank to keep its current value."
@@ -2112,14 +2138,34 @@ $("#connector-config").onsubmit = async (event) => {
     if (String(value).trim()) values[key] = String(value).trim();
   });
   try {
-    await api("/api/app/connectors/" + channel + "/credentials", {
+    const saved = await api("/api/app/connectors/" + channel + "/credentials", {
       method: "PUT",
       body: JSON.stringify({ values }),
     });
-    $("#connector-config-status").textContent = "Connection settings saved.";
-    $("#test-connector").classList.toggle("hidden", !connectorSchemas[channel]?.test);
-    flash(connectorSchemas[channel].title + " configured.");
-    await connections();
+    $("#connector-config-status").textContent = channel === "etsy" && !saved.operational
+      ? "App details saved. Authorize with Etsy next."
+      : "Connection settings saved.";
+    $("#test-connector").classList.toggle(
+      "hidden",
+      !connectorSchemas[channel]?.test || !saved.operational,
+    );
+    flash(channel === "etsy" && !saved.operational
+      ? "Etsy app details saved."
+      : connectorSchemas[channel].title + " configured.");
+    const data = await connections();
+    if (state.connectorChannel === channel) {
+      renderEtsyOAuthTools(data.connectors.find((row) => row.channel === channel));
+    }
+  } catch (error) {
+    $("#connector-config-status").textContent = error.message;
+  }
+};
+
+$("#authorize-etsy").onclick = async () => {
+  $("#connector-config-status").textContent = "Opening Etsy authorization…";
+  try {
+    const result = await api("/api/app/connectors/etsy/oauth/start", { method: "POST" });
+    window.location.assign(result.authorization_url);
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
   }

@@ -93,6 +93,14 @@ def test_inventory_surfaces_enriched_vinted_metadata():
 
 
 
+def test_connection_device_revoke_uses_multi_element_selector():
+    lines = [line.strip() for line in APP_JS.splitlines()]
+    multi = "$" + "$" + '(".revoke").forEach((button) => {'
+    single = "$" + '(".revoke").forEach((button) => {'
+    assert multi in lines
+    assert single not in lines
+
+
 def test_today_navigation_uses_multi_element_selector():
     lines = [line.strip() for line in APP_JS.splitlines()]
     multi = "$" + "$" + '(".today-nav").forEach((button) => {'
@@ -127,6 +135,9 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert "woocommerce: {" in APP_JS
     assert '"/test-connection"' in APP_JS
     assert "listings_r and transactions_r" in APP_JS
+    assert 'id="authorize-etsy"' in html
+    assert '"/api/app/connectors/etsy/oauth/start"' in APP_JS
+    assert "oauth_redirect_uri" in APP_JS
     assert "WooCommerce REST API v3" in APP_JS
 
 
