@@ -594,8 +594,14 @@ def build_vinted_analytics(
             else None
         )
 
+    analytics_currency = next(
+        (row["currency"] for row in sold_stock if row.get("currency")),
+        next((row["currency"] for row in rows if row.get("currency")), "EUR"),
+    )
+
     return {
         "days": days,
+        "currency": analytics_currency,
         "strategy": strategy,
         "summary": {
             "active_listings": len(rows),
