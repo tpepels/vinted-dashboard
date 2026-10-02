@@ -92,6 +92,28 @@ CONNECTORS: dict[str, ConnectorInfo] = {
             Capability.SYNC_INVENTORY,
         }),
     ),
+    Channel.ETSY: ConnectorInfo(
+        channel=Channel.ETSY,
+        display_name=CHANNEL_DISPLAY_NAMES[Channel.ETSY],
+        group="marketplace",
+        description="Etsy listings and seller orders through the official Open API v3.",
+        capabilities=frozenset({
+            Capability.IMPORT_INVENTORY,
+            Capability.FETCH_LISTINGS,
+            Capability.FETCH_ORDERS,
+        }),
+    ),
+    Channel.WOOCOMMERCE: ConnectorInfo(
+        channel=Channel.WOOCOMMERCE,
+        display_name=CHANNEL_DISPLAY_NAMES[Channel.WOOCOMMERCE],
+        group="store",
+        description="WooCommerce products, variations and orders through the WC REST API v3.",
+        capabilities=frozenset({
+            Capability.IMPORT_INVENTORY,
+            Capability.FETCH_LISTINGS,
+            Capability.FETCH_ORDERS,
+        }),
+    ),
     Channel.CSV: ConnectorInfo(
         channel=Channel.CSV,
         display_name="CSV / TSV",
