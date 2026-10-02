@@ -1782,6 +1782,408 @@ def sync_squarespace_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     return {"source": Channel.SQUARESPACE, **listing_result, **order_result}
 
 
+
+WIX_API_BASE = "https://www.wixapis.com"
+WIX_STORES_APP_ID = "215238eb-22a5-4c36-9e7b-e7c08025e04e"
+
+
+def _wix_headers(values: dict[str, str]) -> dict[str, str]:
+    api_key = values.get("api_key", "").strip()
+    site_id = values.get("site_id", "").strip()
+    if not api_key or not site_id:
+        raise RuntimeError("Wix needs api_key and site_id")
+    return {
+        "Authorization": api_key,
+        "wix-site-id": site_id,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _wix_post(
+    values: dict[str, str],
+    path: str,
+    *,
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    response = requests.post(
+        WIX_API_BASE + "/" + path.lstrip("/"),
+        headers=_wix_headers(values),
+        json=body or {},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Wix API request failed ({response.status_code})")
+    payload = response.json() or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _wix_next_cursor(payload: dict[str, Any]) -> str | None:
+    for key in ("pagingMetadata", "metadata"):
+        metadata = payload.get(key) or {}
+        if not isinstance(metadata, dict):
+            continue
+        cursors = metadata.get("cursors") or {}
+        if isinstance(cursors, dict):
+            value = cursors.get("next")
+            if value:
+                return str(value)
+        value = metadata.get("nextCursor")
+        if value:
+            return str(value)
+    return None
+
+
+def _wix_query_variants(values: dict[str, str]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _page in range(100):
+        cursor_paging: dict[str, Any] = {"limit": 1000}
+        if cursor:
+            cursor_paging["cursor"] = cursor
+        payload = _wix_post(
+            values,
+            "stores/v3/products/query-variants",
+            body={
+                "fields": ["CURRENCY"],
+                "query": {"cursorPaging": cursor_paging},
+            },
+        )
+        rows = payload.get("variants") or []
+        if isinstance(rows, list):
+            result.extend(row for row in rows if isinstance(row, dict))
+        cursor = _wix_next_cursor(payload)
+        if not cursor:
+            break
+    return result
+
+
+def _wix_query_inventory(values: dict[str, str]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _page in range(100):
+        cursor_paging: dict[str, Any] = {"limit": 1000}
+        if cursor:
+            cursor_paging["cursor"] = cursor
+        payload = _wix_post(
+            values,
+            "stores/v3/inventory-items/query",
+            body={"query": {"cursorPaging": cursor_paging}},
+        )
+        rows = payload.get("inventoryItems") or []
+        if isinstance(rows, list):
+            result.extend(row for row in rows if isinstance(row, dict))
+        cursor = _wix_next_cursor(payload)
+        if not cursor:
+            break
+    return result
+
+
+def _wix_inventory_by_variant(
+    rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        product_id = str(row.get("productId") or "").strip()
+        variant_id = str(row.get("variantId") or "").strip()
+        if not product_id or not variant_id:
+            continue
+        key = f"{product_id}:{variant_id}"
+        current = grouped.setdefault(
+            key,
+            {
+                "tracked": False,
+                "untracked": False,
+                "quantity": 0,
+                "in_stock": False,
+                "locations": 0,
+            },
+        )
+        current["locations"] += 1
+        tracked = bool(row.get("trackQuantity"))
+        if tracked:
+            current["tracked"] = True
+            current["quantity"] += max(0, _int(row.get("quantity"), 0) or 0)
+        else:
+            current["untracked"] = True
+        current["in_stock"] = current["in_stock"] or bool(row.get("inStock"))
+    return grouped
+
+
+def _wix_variant_attributes(variant: dict[str, Any]) -> dict[str, Any]:
+    attributes: dict[str, Any] = {}
+    for row in variant.get("optionChoices") or []:
+        if not isinstance(row, dict):
+            continue
+        names = row.get("optionChoiceNames") or {}
+        if not isinstance(names, dict):
+            continue
+        name = str(names.get("optionName") or "").strip()
+        choice = str(names.get("choiceName") or "").strip()
+        if name and choice:
+            attributes[name] = choice
+    product = variant.get("productData") or {}
+    if isinstance(product, dict):
+        category_ids = [
+            str(value)
+            for value in (product.get("directCategoryIds") or [])
+            if value not in (None, "")
+        ]
+        if category_ids:
+            attributes["category_ids"] = category_ids
+    return attributes
+
+
+def _wix_variant_image(variant: dict[str, Any]) -> str | None:
+    media = variant.get("media") or {}
+    if not isinstance(media, dict):
+        return None
+    for candidate in (
+        media.get("url"),
+        (media.get("thumbnail") or {}).get("url")
+        if isinstance(media.get("thumbnail"), dict)
+        else None,
+        (media.get("image") or {}).get("url")
+        if isinstance(media.get("image"), dict)
+        else None,
+    ):
+        if candidate:
+            return str(candidate)
+    return None
+
+
+def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
+    variants = _wix_query_variants(values)
+    inventory = _wix_inventory_by_variant(_wix_query_inventory(values))
+    fallback_currency = values.get("currency", "EUR").strip().upper() or "EUR"
+    result: list[dict[str, Any]] = []
+
+    for variant in variants:
+        product = variant.get("productData") or {}
+        if not isinstance(product, dict):
+            product = {}
+        product_id = str(product.get("productId") or "").strip()
+        variant_id = str(variant.get("variantId") or "").strip()
+        if not product_id or not variant_id:
+            continue
+        source_id = f"{product_id}:{variant_id}"
+        stock = inventory.get(source_id)
+        status_info = variant.get("inventoryStatus") or {}
+        if not isinstance(status_info, dict):
+            status_info = {}
+
+        if stock and stock.get("tracked") and not stock.get("untracked"):
+            quantity = max(0, _int(stock.get("quantity"), 0) or 0)
+            in_stock = quantity > 0 or bool(status_info.get("preorderEnabled"))
+        elif stock and stock.get("untracked"):
+            in_stock = bool(stock.get("in_stock")) or bool(status_info.get("inStock"))
+            quantity = 1 if in_stock else 0
+        else:
+            in_stock = bool(status_info.get("inStock")) or bool(status_info.get("preorderEnabled"))
+            quantity = 1 if in_stock else 0
+
+        visible = bool(product.get("visible", True)) and bool(variant.get("visible", True))
+        active = visible and in_stock
+        attributes = _wix_variant_attributes(variant)
+        suffix = " / ".join(
+            str(value)
+            for key, value in attributes.items()
+            if key != "category_ids" and value not in (None, "")
+        )
+        base_title = str(product.get("name") or "Untitled").strip() or "Untitled"
+        price = ((variant.get("price") or {}).get("actualPrice") or {})
+        currency = str(product.get("currency") or fallback_currency).strip().upper() or fallback_currency
+
+        result.append(
+            {
+                "source_id": source_id,
+                "sku": variant.get("sku") or None,
+                "title": base_title + (f" - {suffix}" if suffix else ""),
+                "status": ListingStatus.ACTIVE if active else ListingStatus.INACTIVE,
+                "quantity": quantity,
+                "price_cents": _money(price.get("amount")) if isinstance(price, dict) else None,
+                "currency": currency,
+                "product_type": product.get("productType"),
+                "attributes": attributes,
+                "image_url": _wix_variant_image(variant),
+            }
+        )
+    return result
+
+
+def _wix_order_status(order: dict[str, Any]) -> tuple[str, bool]:
+    status = str(order.get("status") or "").strip().upper()
+    payment = str(order.get("paymentStatus") or "").strip().upper()
+    fulfillment = str(order.get("fulfillmentStatus") or "").strip().upper()
+
+    if status in {"CANCELED", "CANCELLED", "REJECTED"}:
+        return "cancelled", True
+    if "REFUND" in payment:
+        return payment.lower(), True
+    if payment in {"FAILED", "DECLINED"}:
+        return payment.lower(), True
+    if status == "APPROVED" and payment == "PAID" and fulfillment == "FULFILLED":
+        return "completed", True
+    if payment:
+        return payment.lower(), fulfillment == "FULFILLED"
+    if status:
+        return status.lower(), status in {"CANCELED", "CANCELLED", "REJECTED"}
+    return fulfillment.lower() or "open", fulfillment == "FULFILLED"
+
+
+def _fetch_wix_orders(values: dict[str, str]) -> list[dict[str, Any]]:
+    days = max(1, min(_int(values.get("order_days"), 365) or 365, 3650))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    for _page in range(100):
+        cursor_paging: dict[str, Any] = {"limit": 100}
+        if cursor:
+            cursor_paging["cursor"] = cursor
+        payload = _wix_post(
+            values,
+            "ecom/v1/orders/search",
+            body={
+                "search": {
+                    "filter": {
+                        "createdDate": {
+                            "$gte": cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+                        }
+                    },
+                    "cursorPaging": cursor_paging,
+                }
+            },
+        )
+        orders = payload.get("orders") or []
+        for order in orders if isinstance(orders, list) else []:
+            if not isinstance(order, dict):
+                continue
+            order_id = str(order.get("id") or "").strip()
+            if not order_id:
+                continue
+            status, is_closed = _wix_order_status(order)
+            occurred = _remote_datetime(order.get("createdDate"))
+            order_currency = str(
+                order.get("currency") or values.get("currency") or "EUR"
+            ).strip().upper() or "EUR"
+
+            for line in order.get("lineItems") or []:
+                if not isinstance(line, dict):
+                    continue
+                line_id = str(line.get("id") or "").strip()
+                if not line_id:
+                    continue
+                catalog = line.get("catalogReference") or {}
+                if not isinstance(catalog, dict):
+                    catalog = {}
+                if catalog.get("appId") not in (None, "", WIX_STORES_APP_ID):
+                    continue
+                options = catalog.get("options") or {}
+                if not isinstance(options, dict):
+                    options = {}
+                product_id = str(catalog.get("catalogItemId") or "").strip()
+                variant_id = str(options.get("variantId") or "").strip()
+                listing_external_id = (
+                    f"{product_id}:{variant_id}"
+                    if product_id and variant_id
+                    else product_id
+                )
+                physical = line.get("physicalProperties") or {}
+                if not isinstance(physical, dict):
+                    physical = {}
+                price = line.get("price") or {}
+                unit_cents = _money(price.get("amount")) if isinstance(price, dict) else None
+                quantity = max(1, _int(line.get("quantity"), 1) or 1)
+                title_obj = line.get("productName") or {}
+                title = (
+                    title_obj.get("original")
+                    if isinstance(title_obj, dict)
+                    else title_obj
+                ) or "Wix sale"
+
+                result.append(
+                    {
+                        "external_order_id": f"{order_id}:{line_id}",
+                        "listing_external_id": listing_external_id,
+                        "sku": physical.get("sku") or None,
+                        "title": title,
+                        "counterparty": None,
+                        "total_cents": unit_cents * quantity if unit_cents is not None else None,
+                        "currency": order_currency,
+                        "status": status,
+                        "lifecycle_status": status,
+                        "is_closed": is_closed,
+                        "occurred_at": occurred.isoformat() if occurred else None,
+                        "quantity": quantity,
+                        "extra": {
+                            "order_id": order_id,
+                            "order_number": order.get("number"),
+                            "line_item_id": line_id,
+                            "product_id": product_id or None,
+                            "variant_id": variant_id or None,
+                            "payment_status": order.get("paymentStatus"),
+                            "fulfillment_status": order.get("fulfillmentStatus"),
+                        },
+                    }
+                )
+        cursor = _wix_next_cursor(payload)
+        if not cursor:
+            break
+    return result
+
+
+def test_wix_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.WIX)
+    variants = _wix_post(
+        values,
+        "stores/v3/products/query-variants",
+        body={
+            "fields": ["CURRENCY"],
+            "query": {"cursorPaging": {"limit": 1}},
+        },
+    )
+    inventory = _wix_post(
+        values,
+        "stores/v3/inventory-items/query",
+        body={"query": {"cursorPaging": {"limit": 1}}},
+    )
+    orders = _wix_post(
+        values,
+        "ecom/v1/orders/search",
+        body={"search": {"cursorPaging": {"limit": 1}}},
+    )
+    return {
+        "ok": True,
+        "detail": "Wix catalog, inventory and orders are readable.",
+        "variants_visible": len(variants.get("variants") or []),
+        "inventory_visible": len(inventory.get("inventoryItems") or []),
+        "orders_visible": len(orders.get("orders") or []),
+    }
+
+
+def sync_wix_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.WIX)
+    items = _fetch_wix_products(values)
+    orders = _fetch_wix_orders(values)
+    synced_at = datetime.now(timezone.utc)
+    listing_result = record_workspace_channel_snapshot(
+        workspace_id,
+        Channel.WIX,
+        items,
+        synced_at=synced_at,
+        full_snapshot=True,
+        note="Wix Catalog V3, Inventory V3 and eCommerce Orders",
+    )
+    order_result = record_workspace_channel_orders(
+        workspace_id,
+        Channel.WIX,
+        orders,
+        synced_at=synced_at,
+    )
+    return {"source": Channel.WIX, **listing_result, **order_result}
+
+
 def import_biblio_workspace(
     workspace_id: uuid.UUID,
     rows: list[dict[str, Any]],
