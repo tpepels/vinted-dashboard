@@ -114,6 +114,28 @@ CONNECTORS: dict[str, ConnectorInfo] = {
             Capability.FETCH_ORDERS,
         }),
     ),
+    Channel.SHOPIFY: ConnectorInfo(
+        channel=Channel.SHOPIFY,
+        display_name=CHANNEL_DISPLAY_NAMES[Channel.SHOPIFY],
+        group="store",
+        description="Shopify product variants and orders through the GraphQL Admin API.",
+        capabilities=frozenset({
+            Capability.IMPORT_INVENTORY,
+            Capability.FETCH_LISTINGS,
+            Capability.FETCH_ORDERS,
+        }),
+    ),
+    Channel.BIGCOMMERCE: ConnectorInfo(
+        channel=Channel.BIGCOMMERCE,
+        display_name=CHANNEL_DISPLAY_NAMES[Channel.BIGCOMMERCE],
+        group="store",
+        description="BigCommerce catalog and orders through the REST Management API.",
+        capabilities=frozenset({
+            Capability.IMPORT_INVENTORY,
+            Capability.FETCH_LISTINGS,
+            Capability.FETCH_ORDERS,
+        }),
+    ),
     Channel.CSV: ConnectorInfo(
         channel=Channel.CSV,
         display_name="CSV / TSV",
