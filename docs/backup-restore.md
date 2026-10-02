@@ -92,3 +92,22 @@ PostgreSQL client tools.
 
 The operations CLI deliberately refuses to pretend that copying PostgreSQL
 files is a valid backup.
+
+
+## Hosted PostgreSQL restore drill
+
+Before external launch, and at least every 90 days thereafter, test a real
+restore rather than only confirming that snapshots exist.
+
+1. Select a recent managed PostgreSQL snapshot/backup.
+2. Restore it into a separate temporary database - never over production.
+3. Point a temporary web/worker deployment at the restored database.
+4. Run migrations only if the restored snapshot predates the current release.
+5. Run `python scripts/hosted_smoke.py https://temporary-restore-host`.
+6. Verify representative workspace counts and account-data export.
+7. Delete the temporary deployment/database after verification.
+8. Record `BACKUP_RESTORE_DRILL_AT=YYYY-MM-DD` and identify the mechanism in
+   `BACKUP_PROVIDER`.
+
+`scripts/release_readiness.py` uses that dated operational evidence because a
+managed-provider backup setting alone does not prove that a restore succeeds.
