@@ -2125,6 +2125,7 @@ $("#connector-config").onsubmit = async (event) => {
       body: JSON.stringify({ values }),
     });
     $("#connector-config-status").textContent = "Connection settings saved.";
+    $("#test-connector").classList.toggle("hidden", !connectorSchemas[channel]?.test);
     flash(connectorSchemas[channel].title + " configured.");
     await connections();
   } catch (error) {
