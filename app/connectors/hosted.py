@@ -21,6 +21,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -207,11 +208,14 @@ def _remote_datetime(value: Any) -> datetime | None:
             return datetime.fromtimestamp(float(value), tz=timezone.utc)
         except (OSError, OverflowError, ValueError):
             return None
-    raw = str(value).strip().replace("Z", "+00:00")
+    raw = str(value).strip()
     try:
-        parsed = datetime.fromisoformat(raw)
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
-        return None
+        try:
+            parsed = parsedate_to_datetime(raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
