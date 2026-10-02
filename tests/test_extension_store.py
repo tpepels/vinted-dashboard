@@ -42,7 +42,7 @@ def test_store_build_is_deterministic_and_minimally_permissioned(tmp_path):
 
     manifest = _manifest(first)
     assert manifest["manifest_version"] == 3
-    assert manifest["version"] == "2.1.0"
+    assert manifest["version"] == "2.2.0"
     assert set(manifest["permissions"]) == {"storage", "alarms", "scripting"}
     assert "tabs" not in manifest["permissions"]
     assert "<all_urls>" not in manifest["host_permissions"]
