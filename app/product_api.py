@@ -57,7 +57,6 @@ from app.cross_channel import (
     retry_action,
     serialize_actions,
     unlinked_sale_reconciliation,
-    unlinked_sell_count,
 )
 from app.crypto import decrypt_json, encrypt_json, using_derived_key
 from app.import_export import (
