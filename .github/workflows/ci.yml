@@ -26,5 +26,5 @@ jobs:
       - run: alembic upgrade head
         env:
           DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
-      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 2.0.0 --output /tmp/chrome-bridge.zip
+      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 2.2.0 --output /tmp/chrome-bridge.zip
       - run: docker build -t vinted-dashboard:test .
