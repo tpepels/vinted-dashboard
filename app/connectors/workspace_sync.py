@@ -151,9 +151,66 @@ def _apply_item(
     listing.quantity = quantity
     listing.last_seen_at = seen_at
     listing.extra = {**(listing.extra or {}), **extra}
+    _apply_generic_metadata(inventory_item, listing, item)
     session.flush()
 
     recompute_inventory_item(session, inventory_item)
+
+
+def _category_hint(value: Any) -> str | None:
+    text = str(value or "").casefold()
+    if not text:
+        return None
+    if any(token in text for token in ("book", "books", "livro", "livros", "libro", "libros")):
+        return ItemCategory.BOOK
+    if any(
+        token in text
+        for token in (
+            "clothing", "clothes", "apparel", "fashion", "shirt", "dress", "jacket",
+            "trouser", "pants", "jeans", "shoe", "shoes", "footwear", "accessories",
+        )
+    ):
+        return ItemCategory.CLOTHING
+    return None
+
+
+def _apply_generic_metadata(
+    inventory_item: models.InventoryItem,
+    listing: models.ChannelListing,
+    item: dict[str, Any],
+) -> None:
+    remote: dict[str, Any] = {}
+    for key in (
+        "category", "condition", "brand", "size", "color", "colour", "material",
+        "description", "image_url", "tags", "attributes", "product_type", "taxonomy_id",
+    ):
+        value = item.get(key)
+        if value not in (None, "", [], {}):
+            remote[key] = value
+    if remote:
+        listing.extra = {**(listing.extra or {}), "remote_metadata": remote}
+
+    if not inventory_item.condition and item.get("condition"):
+        inventory_item.condition = str(item["condition"]).strip() or None
+
+    attrs = dict(inventory_item.attributes or {})
+    for key in ("brand", "size", "color", "colour", "material"):
+        value = item.get(key)
+        if value not in (None, "") and key not in attrs:
+            attrs[key] = value
+    if item.get("category") not in (None, "") and "marketplace_category" not in attrs:
+        attrs["marketplace_category"] = item["category"]
+    if item.get("image_url") not in (None, "") and "image_url" not in attrs:
+        attrs["image_url"] = item["image_url"]
+    if item.get("tags") not in (None, [], "") and "tags" not in attrs:
+        attrs["tags"] = item["tags"]
+    if item.get("attributes") not in (None, {}, "") and "remote_attributes" not in attrs:
+        attrs["remote_attributes"] = item["attributes"]
+    inventory_item.attributes = attrs
+
+    hinted = _category_hint(item.get("category"))
+    if hinted and inventory_item.category == ItemCategory.GENERAL:
+        inventory_item.category = hinted
 
 
 def recompute_inventory_item(session: Session, item: models.InventoryItem) -> None:
@@ -393,6 +450,126 @@ def record_workspace_channel_snapshot(
             detail={"note": note} if note else {},
         )
     return {"items": len(seen_external_ids), "active": active_count}
+
+
+def record_workspace_channel_orders(
+    workspace_id,
+    channel: str,
+    orders: list[dict[str, Any]],
+    *,
+    synced_at: datetime,
+) -> dict[str, int]:
+    """Upsert connector order lines into the shared Sale ledger.
+
+    One row represents one marketplace order line so a multi-item order can
+    reconcile to multiple physical inventory items. Existing explicit links
+    are preserved. New rows match by exact channel listing identity first,
+    then by exact SKU.
+    """
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        if workspace is None:
+            raise ValueError("Workspace does not exist")
+        account, _created = get_or_create_channel_account(session, workspace, channel, {})
+        account.status = "connected"
+        account.last_synced_at = synced_at
+
+        touched: dict[Any, models.InventoryItem] = {}
+        written = 0
+        linked = 0
+        for raw in orders:
+            external_order_id = str(raw.get("external_order_id") or raw.get("id") or "").strip()
+            if not external_order_id:
+                continue
+            sale = session.execute(
+                select(models.Sale).where(
+                    models.Sale.workspace_id == workspace.id,
+                    models.Sale.channel == channel,
+                    models.Sale.direction == "sell",
+                    models.Sale.external_order_id == external_order_id,
+                )
+            ).scalar_one_or_none()
+
+            inventory_item = None
+            if sale is not None and sale.inventory_item_id is not None:
+                inventory_item = session.get(models.InventoryItem, sale.inventory_item_id)
+            listing_external_id = str(raw.get("listing_external_id") or "").strip()
+            if inventory_item is None and listing_external_id:
+                listing = session.execute(
+                    select(models.ChannelListing).where(
+                        models.ChannelListing.workspace_id == workspace.id,
+                        models.ChannelListing.channel == channel,
+                        models.ChannelListing.external_id == listing_external_id,
+                    )
+                ).scalar_one_or_none()
+                if listing is not None and listing.inventory_item_id is not None:
+                    inventory_item = session.get(models.InventoryItem, listing.inventory_item_id)
+            sku = normalize_sku(raw.get("sku"))
+            if inventory_item is None and sku:
+                inventory_item = session.execute(
+                    select(models.InventoryItem).where(
+                        models.InventoryItem.workspace_id == workspace.id,
+                        models.InventoryItem.sku == sku,
+                    )
+                ).scalar_one_or_none()
+
+            occurred_at = raw.get("occurred_at")
+            if isinstance(occurred_at, str):
+                try:
+                    occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+                except ValueError:
+                    occurred_at = None
+
+            if sale is None:
+                sale = models.Sale(
+                    workspace_id=workspace.id,
+                    channel_account_id=account.id,
+                    inventory_item_id=inventory_item.id if inventory_item else None,
+                    channel=channel,
+                    external_order_id=external_order_id,
+                    direction="sell",
+                    first_seen_at=synced_at,
+                    last_seen_at=synced_at,
+                    extra={},
+                )
+                session.add(sale)
+            elif sale.inventory_item_id is None and inventory_item is not None:
+                sale.inventory_item_id = inventory_item.id
+
+            sale.channel_account_id = account.id
+            sale.title = str(raw.get("title") or sale.title or "Marketplace sale")[:500]
+            sale.counterparty = (
+                str(raw.get("counterparty"))[:200]
+                if raw.get("counterparty") not in (None, "")
+                else sale.counterparty
+            )
+            sale.total_cents = raw.get("total_cents")
+            sale.currency = raw.get("currency") or sale.currency
+            sale.status = str(raw.get("status") or sale.status or "open")
+            sale.lifecycle_status = str(
+                raw.get("lifecycle_status") or sale.lifecycle_status or sale.status
+            )
+            sale.is_closed = bool(raw.get("is_closed"))
+            sale.occurred_at = occurred_at or sale.occurred_at
+            sale.last_seen_at = synced_at
+            sale.extra = {
+                **(sale.extra or {}),
+                **dict(raw.get("extra") or {}),
+                "sku": sku,
+                "listing_external_id": listing_external_id or None,
+                "quantity": raw.get("quantity"),
+            }
+            written += 1
+            if sale.inventory_item_id is not None:
+                linked += 1
+                item = inventory_item or session.get(models.InventoryItem, sale.inventory_item_id)
+                if item is not None:
+                    touched[item.id] = item
+
+        session.flush()
+        for item in touched.values():
+            recompute_inventory_item(session, item)
+    return {"orders": written, "linked": linked}
 
 
 def record_biblio_ftp_run(
