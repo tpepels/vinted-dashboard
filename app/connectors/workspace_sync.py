@@ -223,10 +223,16 @@ def item_has_remaining_stock_on_sale_channel(
     item: models.InventoryItem,
     sale: models.Sale,
 ) -> bool:
-    """Return whether the marketplace that produced the sale still reports stock.
+    """Return whether a quantity-aware selling channel still reports stock.
 
-    This distinguishes one-off resale stock from quantity-based store stock.
+    Vinted and the established one-off connector semantics remain exhaustive:
+    a seller-side sale consumes the physical item even if a stale active
+    listing is still present. Etsy and WooCommerce can represent multi-unit
+    stock, so an active same-channel listing with remaining quantity keeps the
+    master item active.
     """
+    if sale.channel not in {Channel.ETSY, Channel.WOOCOMMERCE}:
+        return False
     listings = session.execute(
         select(models.ChannelListing).where(
             models.ChannelListing.workspace_id == item.workspace_id,
