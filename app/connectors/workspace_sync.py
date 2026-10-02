@@ -236,6 +236,7 @@ def item_has_remaining_stock_on_sale_channel(
         Channel.WOOCOMMERCE,
         Channel.SHOPIFY,
         Channel.BIGCOMMERCE,
+        Channel.SQUARESPACE,
     }:
         return False
     listings = session.execute(
