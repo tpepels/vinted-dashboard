@@ -2189,6 +2189,308 @@ def sync_wix_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     return {"source": Channel.WIX, **listing_result, **order_result}
 
 
+
+DEPOP_API_BASES = {
+    "production": "https://partnerapi.depop.com",
+    "staging": "https://partnerapi-staging.depop.com",
+}
+
+
+def _depop_environment(values: dict[str, str]) -> str:
+    environment = str(values.get("environment") or "production").strip().lower()
+    if environment not in DEPOP_API_BASES:
+        raise RuntimeError("Depop environment must be production or staging")
+    return environment
+
+
+def _depop_headers(values: dict[str, str]) -> dict[str, str]:
+    api_key = str(values.get("api_key") or "").strip()
+    if not api_key:
+        raise RuntimeError("Depop needs a partner API key")
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+    }
+
+
+def _depop_get(
+    values: dict[str, str],
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    environment = _depop_environment(values)
+    response = requests.get(
+        DEPOP_API_BASES[environment] + "/" + path.lstrip("/"),
+        headers=_depop_headers(values),
+        params=params or {},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Depop API request failed ({response.status_code}) in {environment}"
+        )
+    payload = response.json() or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _depop_title(product: dict[str, Any]) -> str:
+    description = str(product.get("description") or "").strip()
+    if description:
+        first_line = next(
+            (line.strip() for line in description.splitlines() if line.strip()),
+            "",
+        )
+        if first_line:
+            return first_line[:160]
+    slug = str(product.get("slug") or "").strip()
+    if slug:
+        return slug.replace("-", " ")[:160]
+    return f"Depop item {product.get('product_id') or ''}".strip()
+
+
+def _depop_product_attributes(product: dict[str, Any]) -> dict[str, Any]:
+    attributes: dict[str, Any] = {}
+    raw = product.get("attributes")
+    if isinstance(raw, dict):
+        attributes.update(raw)
+    for key in (
+        "department",
+        "size_set_id",
+        "size_id",
+        "colour",
+        "style",
+        "age",
+        "source",
+    ):
+        value = product.get(key)
+        if value not in (None, "", [], {}):
+            attributes[key] = value
+    return attributes
+
+
+def _fetch_depop_products(values: dict[str, str]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _page in range(1000):
+        params: dict[str, Any] = {
+            "limit": 100,
+            "state": "all",
+            "sort_by": "id_desc",
+        }
+        if cursor:
+            params["cursor"] = cursor
+        payload = _depop_get(values, "api/v1/products/", params=params)
+        rows = payload.get("data") or []
+        for product in rows if isinstance(rows, list) else []:
+            if not isinstance(product, dict):
+                continue
+            product_id = product.get("product_id")
+            if product_id in (None, ""):
+                continue
+            quantity = max(0, _int(product.get("quantity"), 0) or 0)
+            remote_status = str(product.get("status") or "").strip().upper()
+            active = remote_status in {
+                "STATUS_ONSALE",
+                "ONSALE",
+                "ON_SALE",
+                "SELLING",
+            } and quantity > 0
+            pictures = [
+                row for row in (product.get("pictures") or [])
+                if isinstance(row, dict)
+            ]
+            created = _remote_datetime(product.get("created_at"))
+            current_price = (
+                product.get("current_price")
+                or product.get("discount_price")
+                or product.get("price_amount")
+            )
+            slug = str(product.get("slug") or "").strip()
+            attributes = _depop_product_attributes(product)
+            brand = product.get("brand_name") or product.get("brand")
+            colour = product.get("colour")
+            if isinstance(colour, list):
+                colour_value = ", ".join(str(value) for value in colour if value)
+            else:
+                colour_value = colour
+
+            result.append(
+                {
+                    "source_id": str(product_id),
+                    "sku": product.get("sku") or None,
+                    "title": _depop_title(product),
+                    "status": ListingStatus.ACTIVE if active else ListingStatus.INACTIVE,
+                    "quantity": quantity,
+                    "price_cents": _money(current_price),
+                    "currency": str(
+                        product.get("price_currency")
+                        or values.get("currency")
+                        or "EUR"
+                    ).strip().upper(),
+                    "url": (
+                        f"https://www.depop.com/products/{slug}/"
+                        if slug
+                        else None
+                    ),
+                    "listed_at": created.isoformat() if created else None,
+                    "description": product.get("description"),
+                    "category": product.get("product_type") or product.get("department"),
+                    "product_type": product.get("product_type"),
+                    "condition": product.get("condition"),
+                    "brand": brand,
+                    "color": colour_value,
+                    "tags": product.get("style") or product.get("source"),
+                    "attributes": attributes,
+                    "image_url": pictures[0].get("url") if pictures else None,
+                }
+            )
+
+        meta = payload.get("meta") or {}
+        if not isinstance(meta, dict) or not meta.get("has_more"):
+            break
+        cursor = str(meta.get("cursor") or "").strip()
+        if not cursor:
+            break
+    return result
+
+
+def _depop_order_status(order: dict[str, Any]) -> tuple[str, bool]:
+    raw = str(order.get("status") or "").strip().upper()
+    status = raw.lower() or "open"
+    return status, raw in {
+        "COMPLETED",
+        "REFUNDED",
+        "CANCELLED",
+        "CANCELED",
+        "FAILED",
+    }
+
+
+def _fetch_depop_orders(values: dict[str, str]) -> list[dict[str, Any]]:
+    days = max(1, min(_int(values.get("order_days"), 365) or 365, 3650))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    result: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    for _page in range(1000):
+        params: dict[str, Any] = {
+            "limit": 200,
+            "from": cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if cursor:
+            params["cursor"] = cursor
+        payload = _depop_get(values, "api/v1/orders/", params=params)
+        orders = payload.get("data") or []
+        for order in orders if isinstance(orders, list) else []:
+            if not isinstance(order, dict):
+                continue
+            purchase_id = str(order.get("purchase_id") or "").strip()
+            if not purchase_id:
+                continue
+            status, is_closed = _depop_order_status(order)
+            occurred = _remote_datetime(order.get("created_at"))
+            currency = str(
+                order.get("currency")
+                or values.get("currency")
+                or "EUR"
+            ).strip().upper()
+
+            for line in order.get("line_items") or []:
+                if not isinstance(line, dict):
+                    continue
+                purchase_item_id = str(line.get("purchase_item_id") or "").strip()
+                product_id = str(line.get("product_id") or "").strip()
+                if not purchase_item_id or not product_id:
+                    continue
+                description = str(line.get("description") or "").strip()
+                result.append(
+                    {
+                        "external_order_id": f"{purchase_id}:{purchase_item_id}",
+                        "listing_external_id": product_id,
+                        "sku": line.get("sku") or None,
+                        "title": (
+                            description.splitlines()[0][:160]
+                            if description
+                            else f"Depop sale {product_id}"
+                        ),
+                        "counterparty": None,
+                        "total_cents": _money(line.get("sold_price")),
+                        "currency": currency,
+                        "status": status,
+                        "lifecycle_status": status,
+                        "is_closed": is_closed,
+                        "occurred_at": occurred.isoformat() if occurred else None,
+                        "quantity": 1,
+                        "extra": {
+                            "purchase_id": purchase_id,
+                            "purchase_item_id": purchase_item_id,
+                            "product_id": product_id,
+                            "slug": line.get("slug"),
+                            "parcel_id": line.get("parcel_id"),
+                            "original_price": line.get("original_price"),
+                            "sold_via_offers": bool(line.get("sold_via_offers")),
+                            "image_url": line.get("image_url"),
+                            "seller_receives_amount": order.get("seller_receives_amount"),
+                            "seller_fee_breakdown": order.get("seller_fee_breakdown") or [],
+                        },
+                    }
+                )
+
+        meta = payload.get("meta") or {}
+        if not isinstance(meta, dict) or not meta.get("has_more"):
+            break
+        cursor = str(meta.get("cursor") or "").strip()
+        if not cursor:
+            break
+    return result
+
+
+def test_depop_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.DEPOP)
+    shop = _depop_get(values, "api/v1/shop/")
+    products = _depop_get(
+        values,
+        "api/v1/products/",
+        params={"limit": 1, "state": "all"},
+    )
+    orders = _depop_get(
+        values,
+        "api/v1/orders/",
+        params={"limit": 1},
+    )
+    return {
+        "ok": True,
+        "detail": "Depop shop, products and orders are readable.",
+        "environment": _depop_environment(values),
+        "username": shop.get("username"),
+        "products_visible": len(products.get("data") or []),
+        "orders_visible": len(orders.get("data") or []),
+    }
+
+
+def sync_depop_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.DEPOP)
+    items = _fetch_depop_products(values)
+    orders = _fetch_depop_orders(values)
+    synced_at = datetime.now(timezone.utc)
+    listing_result = record_workspace_channel_snapshot(
+        workspace_id,
+        Channel.DEPOP,
+        items,
+        synced_at=synced_at,
+        full_snapshot=True,
+        note=f"Depop Selling API ({_depop_environment(values)})",
+    )
+    order_result = record_workspace_channel_orders(
+        workspace_id,
+        Channel.DEPOP,
+        orders,
+        synced_at=synced_at,
+    )
+    return {"source": Channel.DEPOP, **listing_result, **order_result}
+
+
 def import_biblio_workspace(
     workspace_id: uuid.UUID,
     rows: list[dict[str, Any]],
