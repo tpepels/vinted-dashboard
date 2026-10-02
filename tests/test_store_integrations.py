@@ -259,7 +259,7 @@ def test_bigcommerce_sync_imports_variants_and_orders(monkeypatch):
                         "id": 400,
                         "status": "Completed",
                         "currency_code": "EUR",
-                        "date_created": "2026-02-05T12:00:00+00:00",
+                        "date_created": "Thu, 05 Feb 2026 12:00:00 +0000",
                     }
                 ]
             )
