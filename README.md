@@ -79,13 +79,9 @@ On an upgraded personal installation, the first real account registration
 claims the unclaimed bootstrap owner, so migrated history stays attached to
 that account.
 
-The original personal UI remains available at:
-
-\`\`\`text
-/classic
-\`\`\`
-
-Public hosted deployments should disable the classic UI/API with:
+The legacy personal UI is compatibility-only and disabled by default. Existing
+self-hosted installations may temporarily opt in to `/classic` while checking
+a migration. Public hosted deployments must keep the classic UI/API disabled:
 
 \`\`\`env
 LEGACY_UI_ENABLED=false
