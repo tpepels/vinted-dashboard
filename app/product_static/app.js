@@ -420,7 +420,7 @@ function renderTodayWorkQueue(rows, total) {
     ).join("")
     : '<div class="today-clear"><strong>You are caught up.</strong><span>No reseller task needs attention right now.</span></div>';
 
-  $(".today-nav").forEach((button) => {
+  $$(".today-nav").forEach((button) => {
     button.onclick = async () => {
       const view = button.dataset.view;
       await selectView(view);
