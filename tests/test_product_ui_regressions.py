@@ -128,3 +128,21 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert '"/test-connection"' in APP_JS
     assert "listings_r and transactions_r" in APP_JS
     assert "WooCommerce REST API v3" in APP_JS
+
+
+
+def test_expanded_resale_categories_are_available_in_inventory_ui():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    for value in (
+        "electronics",
+        "home",
+        "collectibles",
+        "toys_games",
+        "media",
+        "sports",
+        "beauty",
+        "art_crafts",
+    ):
+        assert f'<option value="{value}">' in html
