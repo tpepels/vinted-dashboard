@@ -1605,8 +1605,13 @@ def _fetch_squarespace_products(
                 continue
             stock = inventory.get(str(variant_id), {})
             unlimited = bool(stock.get("isUnlimited"))
-            quantity = 1 if unlimited else max(0, _int(stock.get("quantity"), 0) or 0)
-            active = visible and (unlimited or quantity > 0)
+            inventory_managed = product_type in {"PHYSICAL", "SERVICE"}
+            quantity = (
+                1
+                if not inventory_managed or unlimited
+                else max(0, _int(stock.get("quantity"), 0) or 0)
+            )
+            active = visible and (not inventory_managed or unlimited or quantity > 0)
             price_cents, currency = _squarespace_price(
                 variant.get("pricing") or product.get("pricing")
             )
