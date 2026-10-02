@@ -227,11 +227,16 @@ def item_has_remaining_stock_on_sale_channel(
 
     Vinted and the established one-off connector semantics remain exhaustive:
     a seller-side sale consumes the physical item even if a stale active
-    listing is still present. Etsy and WooCommerce can represent multi-unit
+    listing is still present. Store/catalog connectors can represent multi-unit
     stock, so an active same-channel listing with remaining quantity keeps the
     master item active.
     """
-    if sale.channel not in {Channel.ETSY, Channel.WOOCOMMERCE}:
+    if sale.channel not in {
+        Channel.ETSY,
+        Channel.WOOCOMMERCE,
+        Channel.SHOPIFY,
+        Channel.BIGCOMMERCE,
+    }:
         return False
     listings = session.execute(
         select(models.ChannelListing).where(

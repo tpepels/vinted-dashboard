@@ -61,6 +61,18 @@ def handle(job: dict) -> None:
         from app.connectors.hosted import sync_woocommerce_workspace
         sync_woocommerce_workspace(workspace_id)
         return
+    if job_type == "shopify_sync":
+        if workspace_id is None:
+            raise RuntimeError("shopify_sync requires a workspace")
+        from app.connectors.hosted import sync_shopify_workspace
+        sync_shopify_workspace(workspace_id)
+        return
+    if job_type == "bigcommerce_sync":
+        if workspace_id is None:
+            raise RuntimeError("bigcommerce_sync requires a workspace")
+        from app.connectors.hosted import sync_bigcommerce_workspace
+        sync_bigcommerce_workspace(workspace_id)
+        return
     if job_type == "cross_channel_close":
         action_id = payload.get("action_id")
         if not action_id:

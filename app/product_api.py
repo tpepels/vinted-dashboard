@@ -55,7 +55,9 @@ from app.connectors.hosted import (
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
     test_biblio_workspace,
+    test_bigcommerce_workspace,
     test_etsy_workspace,
+    test_shopify_workspace,
     test_woocommerce_workspace,
 )
 from app.connectors.workspace_sync import recompute_inventory_item
@@ -2001,7 +2003,11 @@ def connectors(context: RequestContext = Depends(require_context)):
             operational = configured and _etsy_oauth_authorized(values)
             if configured and not operational:
                 note = "App details saved; Etsy authorization is still required."
-        elif channel == Channel.WOOCOMMERCE:
+        elif channel in {
+            Channel.WOOCOMMERCE,
+            Channel.SHOPIFY,
+            Channel.BIGCOMMERCE,
+        }:
             configured = channel in stored_credentials
             operational = configured
 
@@ -2015,6 +2021,8 @@ def connectors(context: RequestContext = Depends(require_context)):
                     Channel.EBAY,
                     Channel.ETSY,
                     Channel.WOOCOMMERCE,
+                    Channel.SHOPIFY,
+                    Channel.BIGCOMMERCE,
                 },
                 "status": (
                     account.status
@@ -2098,6 +2106,32 @@ def save_connector_credentials(
                     status_code=400,
                     detail="WooCommerce store_url must use HTTPS",
                 )
+        elif channel == Channel.SHOPIFY:
+            store_domain = str(merged.get("store_domain") or "").strip().lower()
+            if store_domain.startswith("https://"):
+                store_domain = store_domain[8:].rstrip("/")
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*\.myshopify\.com", store_domain):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Shopify store_domain must be a myshopify.com hostname",
+                )
+            if not str(merged.get("access_token") or "").strip():
+                raise HTTPException(status_code=400, detail="Shopify needs access_token")
+            version = str(merged.get("api_version") or "2026-10").strip()
+            if not re.fullmatch(r"\d{4}-\d{2}", version):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Shopify api_version must look like 2026-10",
+                )
+        elif channel == Channel.BIGCOMMERCE:
+            store_hash = str(merged.get("store_hash") or "").strip().lower()
+            if not re.fullmatch(r"[a-z0-9]+", store_hash):
+                raise HTTPException(
+                    status_code=400,
+                    detail="BigCommerce store_hash must contain only letters and numbers",
+                )
+            if not str(merged.get("access_token") or "").strip():
+                raise HTTPException(status_code=400, detail="BigCommerce needs access_token")
         if not merged:
             raise HTTPException(status_code=400, detail="No credentials supplied")
         if row is None:
@@ -2355,6 +2389,8 @@ def enqueue_connector_sync(
         Channel.EBAY,
         Channel.ETSY,
         Channel.WOOCOMMERCE,
+        Channel.SHOPIFY,
+        Channel.BIGCOMMERCE,
     }:
         raise HTTPException(status_code=400, detail="This connector has no server-side sync job")
     bootstrap = context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
@@ -2393,10 +2429,14 @@ def enqueue_connector_sync(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not _etsy_oauth_authorized(values):
             raise HTTPException(status_code=400, detail="Etsy authorization is not complete")
-    elif channel == Channel.WOOCOMMERCE and not stored:
+    elif channel in {
+        Channel.WOOCOMMERCE,
+        Channel.SHOPIFY,
+        Channel.BIGCOMMERCE,
+    } and not stored:
         raise HTTPException(
             status_code=400,
-            detail="woocommerce credentials are not configured",
+            detail=f"{channel} credentials are not configured",
         )
     job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
     return {"ok": True, "job_id": str(job_id), "queued": True}
@@ -2436,6 +2476,10 @@ def generic_connector_test(
         tester = test_etsy_workspace
     elif channel == Channel.WOOCOMMERCE:
         tester = test_woocommerce_workspace
+    elif channel == Channel.SHOPIFY:
+        tester = test_shopify_workspace
+    elif channel == Channel.BIGCOMMERCE:
+        tester = test_bigcommerce_workspace
     else:
         raise HTTPException(status_code=400, detail="This connector has no generic connection test")
     if not has_workspace_connector_credentials(context.workspace.id, channel):

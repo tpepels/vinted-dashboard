@@ -35,6 +35,8 @@ CHANNEL_DISPLAY_NAMES = {
     Channel.BIBLIO: "BIBLIO",
     Channel.ETSY: "Etsy",
     Channel.WOOCOMMERCE: "WooCommerce",
+    Channel.SHOPIFY: "Shopify",
+    Channel.BIGCOMMERCE: "BigCommerce",
 }
 
 
