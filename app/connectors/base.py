@@ -147,6 +147,17 @@ CONNECTORS: dict[str, ConnectorInfo] = {
             Capability.FETCH_ORDERS,
         }),
     ),
+    Channel.WIX: ConnectorInfo(
+        channel=Channel.WIX,
+        display_name=CHANNEL_DISPLAY_NAMES[Channel.WIX],
+        group="store",
+        description="Wix Stores variants, inventory and orders through the current Wix REST APIs.",
+        capabilities=frozenset({
+            Capability.IMPORT_INVENTORY,
+            Capability.FETCH_LISTINGS,
+            Capability.FETCH_ORDERS,
+        }),
+    ),
     Channel.CSV: ConnectorInfo(
         channel=Channel.CSV,
         display_name="CSV / TSV",
