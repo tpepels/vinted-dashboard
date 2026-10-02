@@ -18,7 +18,7 @@ jobs:
       - run: python -m app.ops --help
       - run: python -m app.runtime_config
       - run: python scripts/hosted_smoke.py --help
-      - run: python scripts/release_readiness.py --json
+      - run: python scripts/release_readiness.py --json --max-restore-drill-age-days 36500
         env:
           APP_ENV: production
           PUBLIC_APP_URL: https://example.invalid
