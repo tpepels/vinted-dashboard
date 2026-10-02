@@ -123,6 +123,17 @@ const connectorSchemas = {
       ["currency", "Fallback currency", "EUR", "text"],
     ],
   },
+  depop: {
+    title: "Depop",
+    help: "Private Depop Selling API. Direct seller integrations require Depop partner approval and a per-shop API key. This connector is read-only.",
+    test: true,
+    fields: [
+      ["api_key", "Partner API key", "pak_…", "password"],
+      ["environment", "Environment", "production", "text"],
+      ["order_days", "Order history days", "365", "number"],
+      ["currency", "Fallback currency", "EUR", "text"],
+    ],
+  },
 };
 
 function esc(value) {

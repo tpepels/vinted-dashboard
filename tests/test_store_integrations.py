@@ -929,3 +929,249 @@ def test_wix_ignores_non_store_order_lines(monkeypatch):
             "api_key": "wix-api-key",
         }
     ) == []
+
+
+
+def test_catalog_exposes_depop_as_marketplace():
+    catalog = {row["channel"]: row for row in connector_catalog()}
+    assert catalog[Channel.DEPOP]["group"] == "marketplace"
+    assert Capability.FETCH_LISTINGS in catalog[Channel.DEPOP]["capabilities"]
+    assert Capability.FETCH_ORDERS in catalog[Channel.DEPOP]["capabilities"]
+
+
+def test_depop_sync_imports_products_and_orders(monkeypatch):
+    workspace_id = _workspace("depop-sync")
+    _credential(
+        workspace_id,
+        Channel.DEPOP,
+        {
+            "api_key": "pak_test_depop",
+            "environment": "staging",
+            "currency": "EUR",
+            "order_days": "365",
+        },
+    )
+
+    def fake_get(url, **kwargs):
+        assert url.startswith("https://partnerapi-staging.depop.com/")
+        assert kwargs["headers"]["Authorization"] == "Bearer pak_test_depop"
+
+        if url.endswith("/api/v1/products/"):
+            assert kwargs["params"]["state"] == "all"
+            assert kwargs["params"]["limit"] == 100
+            return FakeResponse(
+                {
+                    "meta": {"cursor": None, "has_more": False},
+                    "data": [
+                        {
+                            "sku": "DEP-COAT-1",
+                            "product_id": 7033001,
+                            "slug": "vintage-wool-coat-7033001",
+                            "status": "STATUS_ONSALE",
+                            "description": "Vintage wool coat\nExcellent condition.",
+                            "price_currency": "EUR",
+                            "price_amount": "35.00",
+                            "current_price": "31.50",
+                            "quantity": 2,
+                            "pictures": [
+                                {
+                                    "url": "https://media-photos-staging.depop.com/coat/P0.jpg",
+                                    "height": 1280,
+                                    "width": 1280,
+                                }
+                            ],
+                            "department": "menswear",
+                            "product_type": "coats-jackets",
+                            "condition": "used_excellent",
+                            "colour": ["blue"],
+                            "style": ["vintage"],
+                            "source": ["preloved"],
+                            "attributes": {"material": ["wool"]},
+                            "brand": "barbour",
+                            "created_at": "2026-01-15T10:30:00Z",
+                            "updated_at": "2026-01-20T14:20:00Z",
+                        }
+                    ],
+                }
+            )
+
+        if url.endswith("/api/v1/orders/"):
+            assert kwargs["params"]["limit"] == 200
+            assert "from" in kwargs["params"]
+            return FakeResponse(
+                {
+                    "meta": {"cursor": None, "has_more": False},
+                    "data": [
+                        {
+                            "seller_id": 123456,
+                            "purchase_id": "purchase-42",
+                            "status": "SHIPPING_PENDING",
+                            "currency": "EUR",
+                            "buyer_pays_amount": "35.50",
+                            "seller_receives_amount": "29.50",
+                            "buyer_shipping_price": "4.00",
+                            "line_items": [
+                                {
+                                    "purchase_item_id": 2385551,
+                                    "sku": "DEP-COAT-1",
+                                    "product_id": 7033001,
+                                    "slug": "vintage-wool-coat-7033001",
+                                    "parcel_id": "parcel-1",
+                                    "description": "Vintage wool coat",
+                                    "original_price": "35.00",
+                                    "sold_price": "31.50",
+                                    "sold_via_offers": True,
+                                    "image_url": "https://media-photos-staging.depop.com/coat/P0.jpg",
+                                }
+                            ],
+                            "seller_fee_breakdown": [
+                                {
+                                    "fee_type": "PAYMENT_FEE",
+                                    "amount": "2.00",
+                                    "currency": "EUR",
+                                }
+                            ],
+                            "buyer_address": {
+                                "name": "Must not be persisted",
+                                "address": "Private address",
+                            },
+                            "created_at": "2026-02-10T12:00:00Z",
+                        }
+                    ],
+                }
+            )
+        raise AssertionError(url)
+
+    monkeypatch.setattr(hosted.requests, "get", fake_get)
+    result = hosted.sync_depop_workspace(workspace_id)
+    assert result["items"] == 1
+    assert result["orders"] == 1
+    assert result["linked"] == 1
+
+    with db.session_scope() as session:
+        item = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == workspace_id,
+                models.InventoryItem.sku == "DEP-COAT-1",
+            )
+        ).scalar_one()
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.DEPOP,
+            )
+        ).scalar_one()
+        sale = session.execute(
+            select(models.Sale).where(
+                models.Sale.workspace_id == workspace_id,
+                models.Sale.channel == Channel.DEPOP,
+            )
+        ).scalar_one()
+
+        assert item.quantity == 2
+        assert item.attributes["brand"] == "barbour"
+        assert listing.external_id == "7033001"
+        assert listing.external_sku == "DEP-COAT-1"
+        assert listing.price_cents == 3150
+        assert listing.url == "https://www.depop.com/products/vintage-wool-coat-7033001/"
+        assert listing.extra["remote_metadata"]["attributes"] == {
+            "material": ["wool"],
+            "department": "menswear",
+            "colour": ["blue"],
+            "style": ["vintage"],
+            "source": ["preloved"],
+        }
+        assert sale.inventory_item_id == item.id
+        assert sale.external_order_id == "purchase-42:2385551"
+        assert sale.total_cents == 3150
+        assert sale.status == "shipping_pending"
+        assert "buyer_address" not in (sale.extra or {})
+
+
+def test_depop_credentials_are_accepted(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "depop@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Depop",
+        },
+    )
+    assert registered.status_code == 200
+    csrf = registered.json()["csrf_token"]
+
+    saved = client.put(
+        "/api/app/connectors/depop/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "values": {
+                "api_key": "pak_test_depop",
+                "environment": "production",
+                "order_days": "365",
+            }
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["operational"] is True
+
+    connectors = {
+        row["channel"]: row
+        for row in client.get("/api/app/connectors").json()["connectors"]
+    }
+    assert connectors["depop"]["configured"] is True
+    assert connectors["depop"]["operational"] is True
+    assert connectors["depop"]["sync_available"] is True
+    assert "partner approval" in connectors["depop"]["note"]
+
+
+def test_depop_rejects_invalid_environment(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "depop-invalid@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Depop Invalid",
+        },
+    )
+    csrf = registered.json()["csrf_token"]
+
+    response = client.put(
+        "/api/app/connectors/depop/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "values": {
+                "api_key": "pak_test_depop",
+                "environment": "local",
+            }
+        },
+    )
+    assert response.status_code == 400
+    assert "production or staging" in response.json()["detail"]
+
+
+def test_depop_pagination_uses_api_cursor(monkeypatch):
+    calls = []
+
+    def fake_get(values, path, params=None):
+        calls.append(dict(params or {}))
+        if len(calls) == 1:
+            return {
+                "meta": {"cursor": "next-page", "has_more": True},
+                "data": [],
+            }
+        return {
+            "meta": {"cursor": None, "has_more": False},
+            "data": [],
+        }
+
+    monkeypatch.setattr(hosted, "_depop_get", fake_get)
+    assert hosted._fetch_depop_products(
+        {"api_key": "pak_test_depop", "environment": "production"}
+    ) == []
+    assert calls[0]["state"] == "all"
+    assert "cursor" not in calls[0]
+    assert calls[1]["cursor"] == "next-page"

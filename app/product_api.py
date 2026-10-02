@@ -56,6 +56,7 @@ from app.connectors.hosted import (
     import_biblio_workspace,
     test_biblio_workspace,
     test_bigcommerce_workspace,
+    test_depop_workspace,
     test_etsy_workspace,
     test_shopify_workspace,
     test_squarespace_workspace,
@@ -2005,6 +2006,10 @@ def connectors(context: RequestContext = Depends(require_context)):
             operational = configured and _etsy_oauth_authorized(values)
             if configured and not operational:
                 note = "App details saved; Etsy authorization is still required."
+        elif channel == Channel.DEPOP:
+            configured = channel in stored_credentials
+            operational = configured
+            note = "Private Selling API - Depop partner approval is required for an API key."
         elif channel in {
             Channel.WOOCOMMERCE,
             Channel.SHOPIFY,
@@ -2029,6 +2034,7 @@ def connectors(context: RequestContext = Depends(require_context)):
                     Channel.BIGCOMMERCE,
                     Channel.SQUARESPACE,
                     Channel.WIX,
+                    Channel.DEPOP,
                 },
                 "status": (
                     account.status
@@ -2155,6 +2161,15 @@ def save_connector_credentials(
                     status_code=400,
                     detail="Wix site_id must be a valid site UUID",
                 ) from exc
+        elif channel == Channel.DEPOP:
+            if not str(merged.get("api_key") or "").strip():
+                raise HTTPException(status_code=400, detail="Depop needs a partner API key")
+            environment = str(merged.get("environment") or "production").strip().lower()
+            if environment not in {"production", "staging"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Depop environment must be production or staging",
+                )
         if not merged:
             raise HTTPException(status_code=400, detail="No credentials supplied")
         if row is None:
@@ -2416,6 +2431,7 @@ def enqueue_connector_sync(
         Channel.BIGCOMMERCE,
         Channel.SQUARESPACE,
         Channel.WIX,
+        Channel.DEPOP,
     }:
         raise HTTPException(status_code=400, detail="This connector has no server-side sync job")
     bootstrap = context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
@@ -2460,6 +2476,7 @@ def enqueue_connector_sync(
         Channel.BIGCOMMERCE,
         Channel.SQUARESPACE,
         Channel.WIX,
+        Channel.DEPOP,
     } and not stored:
         raise HTTPException(
             status_code=400,
@@ -2511,6 +2528,8 @@ def generic_connector_test(
         tester = test_squarespace_workspace
     elif channel == Channel.WIX:
         tester = test_wix_workspace
+    elif channel == Channel.DEPOP:
+        tester = test_depop_workspace
     else:
         raise HTTPException(status_code=400, detail="This connector has no generic connection test")
     if not has_workspace_connector_credentials(context.workspace.id, channel):

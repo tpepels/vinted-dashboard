@@ -20,6 +20,7 @@ class Channel:
     BIGCOMMERCE = "bigcommerce"
     SQUARESPACE = "squarespace"
     WIX = "wix"
+    DEPOP = "depop"
     CSV = "csv"
     EXCEL = "excel"
     MANUAL = "manual"
@@ -38,6 +39,7 @@ KNOWN_CHANNELS = (
     Channel.BIGCOMMERCE,
     Channel.SQUARESPACE,
     Channel.WIX,
+    Channel.DEPOP,
     Channel.CSV,
     Channel.EXCEL,
     Channel.MANUAL,

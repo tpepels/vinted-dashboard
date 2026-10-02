@@ -238,6 +238,7 @@ def item_has_remaining_stock_on_sale_channel(
         Channel.BIGCOMMERCE,
         Channel.SQUARESPACE,
         Channel.WIX,
+        Channel.DEPOP,
     }:
         return False
     listings = session.execute(
