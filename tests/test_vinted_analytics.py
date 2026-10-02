@@ -464,7 +464,7 @@ def test_existing_analytics_history_uses_downsampled_snapshot_points(monkeypatch
 
 
 
-def test_sold_stock_uses_first_observed_fallback_and_selected_window():
+def test_sold_stock_does_not_invent_listed_date_from_first_observed():
     workspace_id = _workspace("vinted-sold-window")
     with db.session_scope() as session:
         recent_item = _item(session, workspace_id, "RECENT", "Recent sold item")
@@ -553,9 +553,10 @@ def test_sold_stock_uses_first_observed_fallback_and_selected_window():
     assert len(data["sold_stock"]) == 1
     row = data["sold_stock"][0]
     assert row["external_order_id"] == "RECENT-SALE"
-    assert row["listed_at_source"] == "first_seen"
+    assert row["listed_at"] is None
+    assert row["listed_at_source"] is None
     assert row["sold_at_source"] == "first_seen"
-    assert row["days_online"] == 8.0
+    assert row["days_online"] is None
 
 
 
