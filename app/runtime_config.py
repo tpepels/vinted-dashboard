@@ -62,6 +62,19 @@ def public_app_origin(env: Mapping[str, str] | None = None) -> str | None:
     return _public_origin(str(values.get("PUBLIC_APP_URL", "")))
 
 
+def privacy_contact_email(env: Mapping[str, str] | None = None) -> str | None:
+    values = env if env is not None else os.environ
+    raw = str(values.get("PRIVACY_CONTACT_EMAIL", "")).strip()
+    if not raw or any(ch.isspace() for ch in raw):
+        return None
+    if raw.count("@") != 1:
+        return None
+    local, domain = raw.split("@", 1)
+    if not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
+        return None
+    return raw
+
+
 def validate_configuration(
     env: Mapping[str, str] | None = None,
     *,
@@ -76,6 +89,9 @@ def validate_configuration(
 
     if public_app_origin(values) is None:
         errors.append("PUBLIC_APP_URL must be a bare non-local HTTPS origin")
+
+    if privacy_contact_email(values) is None:
+        errors.append("PRIVACY_CONTACT_EMAIL must be a valid public contact email")
 
     if not _truthy(values.get("COOKIE_SECURE")):
         errors.append("COOKIE_SECURE must be true")
@@ -195,6 +211,7 @@ def safe_runtime_summary() -> dict[str, object]:
         "environment": app_environment(),
         "production": is_production(),
         "public_origin_configured": public_app_origin() is not None,
+        "privacy_contact_configured": privacy_contact_email() is not None,
         "database_backend": db.engine.url.get_backend_name(),
         "cookie_secure": _truthy(os.getenv("COOKIE_SECURE")),
         "billing_enabled": _truthy(os.getenv("BILLING_ENABLED")),

@@ -62,6 +62,7 @@ development fallbacks. It requires:
 - managed PostgreSQL in \`DATABASE_URL\`;
 - a valid Fernet \`APP_ENCRYPTION_KEY\` (derived-key mode is rejected);
 - a bare non-local \`PUBLIC_APP_URL=https://your-domain\`;
+- a public `PRIVACY_CONTACT_EMAIL` rendered on the privacy policy;
 - \`COOKIE_SECURE=true\`;
 - legacy UI/API/compatibility sync disabled;
 - extension market-research disabled;

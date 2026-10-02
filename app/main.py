@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -240,7 +240,17 @@ def index():
 
 @app.get("/privacy")
 def privacy():
-    return FileResponse(BASE_DIR / "product_static" / "privacy.html")
+    from html import escape
+    from app.runtime_config import privacy_contact_email
+
+    template = (BASE_DIR / "product_static" / "privacy.html").read_text(encoding="utf-8")
+    contact = privacy_contact_email()
+    if contact:
+        safe = escape(contact)
+        replacement = f'<a href="mailto:{safe}">{safe}</a>'
+    else:
+        replacement = "the administrator of this deployment"
+    return HTMLResponse(template.replace("__PRIVACY_CONTACT__", replacement))
 
 
 @app.get("/classic")
