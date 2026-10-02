@@ -336,3 +336,19 @@ anti-bot product. Do not add bot-evasion, automated likes/messages, mass
 relisting or unattended destructive Vinted actions. Browser-side Vinted logic
 is isolated behind the connector/bridge so it can be changed or disabled
 without affecting master inventory, import/export, eBay/BIBLIO or account data.
+
+
+## General marketplace integrations
+
+The workspace connector catalog includes Etsy and WooCommerce in addition to
+Vinted, eBay and BIBLIO.
+
+- Etsy uses Open API v3 and reads active listings plus seller receipts/order
+  lines. Configure an app keystring, shared secret, Shop ID and an OAuth token
+  or refresh token with `listings_r` and `transactions_r`.
+- WooCommerce uses the WC REST API v3 over HTTPS. Generate a read-only REST API
+  key under WooCommerce > Settings > Advanced > REST API and configure the
+  store URL, consumer key and consumer secret.
+- Both integrations are read-only toward the remote marketplace in this
+  release. Synced listings and order lines feed the shared inventory,
+  reconciliation, sales and profitability workflows.

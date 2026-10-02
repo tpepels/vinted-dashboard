@@ -43,12 +43,15 @@ from app.constants import (
     ItemStatus,
     ListingStatus,
     MembershipRole,
+    KNOWN_ITEM_CATEGORIES,
 )
 from app.connectors.base import connector_catalog
 from app.connectors.hosted import (
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
     test_biblio_workspace,
+    test_etsy_workspace,
+    test_woocommerce_workspace,
 )
 from app.connectors.workspace_sync import recompute_inventory_item
 from app.cross_channel import (
@@ -510,12 +513,7 @@ def onboarding(context: RequestContext = Depends(require_context)):
     completed = bool(saved.get("completed")) if explicit else bool(inventory_count)
     saved_category = saved.get("primary_category")
     primary_category = str(saved_category or ItemCategory.GENERAL)
-    if primary_category not in {
-        ItemCategory.BOOK,
-        ItemCategory.CLOTHING,
-        ItemCategory.GENERAL,
-        "mixed",
-    }:
+    if primary_category not in {*KNOWN_ITEM_CATEGORIES, "mixed"}:
         primary_category = ItemCategory.GENERAL
 
     return {
@@ -527,12 +525,7 @@ def onboarding(context: RequestContext = Depends(require_context)):
         "vinted_bridge_paired": bool(active_devices),
         "reconciliation_count": len(suggestions),
         "steps": {
-            "choose_category": saved_category in {
-                ItemCategory.BOOK,
-                ItemCategory.CLOTHING,
-                ItemCategory.GENERAL,
-                "mixed",
-            },
+            "choose_category": saved_category in {*KNOWN_ITEM_CATEGORIES, "mixed"},
             "stock_loaded": bool(inventory_count),
             "marketplace_connected": bool(active_devices or connected_channels),
             "matches_reviewed": not bool(suggestions),
@@ -545,7 +538,7 @@ def update_onboarding(
     payload: OnboardingRequest,
     context: RequestContext = Depends(require_write_context),
 ):
-    allowed = {ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL, "mixed"}
+    allowed = {*KNOWN_ITEM_CATEGORIES, "mixed"}
     if payload.primary_category is not None and payload.primary_category not in allowed:
         raise HTTPException(status_code=400, detail="Unknown primary inventory category")
     with db.session_scope() as session:
@@ -815,11 +808,7 @@ def bulk_update_inventory(
     if not values:
         raise HTTPException(status_code=400, detail="Choose at least one field to update")
     if "category" in values:
-        if values["category"] not in {
-            ItemCategory.BOOK,
-            ItemCategory.CLOTHING,
-            ItemCategory.GENERAL,
-        }:
+        if values["category"] not in KNOWN_ITEM_CATEGORIES:
             raise HTTPException(status_code=400, detail="Unknown item category")
     if "status" in values:
         if values["status"] not in {
@@ -1968,13 +1957,21 @@ def connectors(context: RequestContext = Depends(require_context)):
             )
             configured = channel in stored_credentials or (is_bootstrap and env_ready)
             operational = configured
+        elif channel in {Channel.ETSY, Channel.WOOCOMMERCE}:
+            configured = channel in stored_credentials
+            operational = configured
 
         result.append(
             {
                 **info,
                 "configured": configured,
                 "operational": operational,
-                "sync_available": operational and channel in {Channel.BIBLIO, Channel.EBAY},
+                "sync_available": operational and channel in {
+                    Channel.BIBLIO,
+                    Channel.EBAY,
+                    Channel.ETSY,
+                    Channel.WOOCOMMERCE,
+                },
                 "status": (
                     account.status
                     if account and operational
@@ -2028,6 +2025,34 @@ def save_connector_credentials(
                 raise HTTPException(
                     status_code=400,
                     detail="eBay needs oauth_token, or client_id + client_secret + refresh_token",
+                )
+        elif channel == Channel.ETSY:
+            required = ("keystring", "shared_secret", "shop_id")
+            if not all(str(merged.get(key) or "").strip() for key in required):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Etsy needs keystring, shared_secret and shop_id",
+                )
+            if not (
+                str(merged.get("oauth_token") or "").strip()
+                or str(merged.get("refresh_token") or "").strip()
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Etsy needs oauth_token or refresh_token",
+                )
+        elif channel == Channel.WOOCOMMERCE:
+            required = ("store_url", "consumer_key", "consumer_secret")
+            if not all(str(merged.get(key) or "").strip() for key in required):
+                raise HTTPException(
+                    status_code=400,
+                    detail="WooCommerce needs store_url, consumer_key and consumer_secret",
+                )
+            store_url = str(merged.get("store_url") or "").strip()
+            if not store_url.startswith("https://"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="WooCommerce store_url must use HTTPS",
                 )
         if not merged:
             raise HTTPException(status_code=400, detail="No credentials supplied")
@@ -2085,7 +2110,12 @@ def enqueue_connector_sync(
     channel: str,
     context: RequestContext = Depends(require_write_context),
 ):
-    if channel not in {Channel.BIBLIO, Channel.EBAY}:
+    if channel not in {
+        Channel.BIBLIO,
+        Channel.EBAY,
+        Channel.ETSY,
+        Channel.WOOCOMMERCE,
+    }:
         raise HTTPException(status_code=400, detail="This connector has no server-side sync job")
     bootstrap = context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
     stored = has_workspace_connector_credentials(context.workspace.id, channel)
@@ -2107,6 +2137,11 @@ def enqueue_connector_sync(
         )
         if not stored and not (bootstrap and env_ready):
             raise HTTPException(status_code=400, detail="eBay OAuth is not configured")
+    if channel in {Channel.ETSY, Channel.WOOCOMMERCE} and not stored:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{channel} credentials are not configured",
+        )
     job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
     return {"ok": True, "job_id": str(job_id), "queued": True}
 
@@ -2134,6 +2169,25 @@ async def biblio_workspace_import(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, **result}
+
+
+@router.post("/api/app/connectors/{channel}/test-connection")
+def generic_connector_test(
+    channel: str,
+    context: RequestContext = Depends(require_write_context),
+):
+    if channel == Channel.ETSY:
+        tester = test_etsy_workspace
+    elif channel == Channel.WOOCOMMERCE:
+        tester = test_woocommerce_workspace
+    else:
+        raise HTTPException(status_code=400, detail="This connector has no generic connection test")
+    if not has_workspace_connector_credentials(context.workspace.id, channel):
+        raise HTTPException(status_code=400, detail=f"{channel} credentials are not configured")
+    try:
+        return tester(context.workspace.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/app/connectors/biblio/test")

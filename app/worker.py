@@ -49,6 +49,18 @@ def handle(job: dict) -> None:
         from app.channels import sync_ebay_inventory
         sync_ebay_inventory()
         return
+    if job_type == "etsy_sync":
+        if workspace_id is None:
+            raise RuntimeError("etsy_sync requires a workspace")
+        from app.connectors.hosted import sync_etsy_workspace
+        sync_etsy_workspace(workspace_id)
+        return
+    if job_type == "woocommerce_sync":
+        if workspace_id is None:
+            raise RuntimeError("woocommerce_sync requires a workspace")
+        from app.connectors.hosted import sync_woocommerce_workspace
+        sync_woocommerce_workspace(workspace_id)
+        return
     if job_type == "cross_channel_close":
         action_id = payload.get("action_id")
         if not action_id:

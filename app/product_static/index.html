@@ -60,13 +60,7 @@
           <p class="muted">Choose what you mainly sell, load stock, connect a marketplace, then review any possible duplicate physical items.</p>
           <div class="onboarding-grid">
             <label>Primary inventory
-              <select id="onboarding-category">
-                <option value="">Choose category</option>
-                <option value="book">Books</option>
-                <option value="clothing">Clothing</option>
-                <option value="general">General goods</option>
-                <option value="mixed">Mixed inventory</option>
-              </select>
+              <select id="onboarding-category"><option value="">Choose category</option><option value="book">Books</option><option value="clothing">Clothing</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option><option value="general">General goods</option><option value="mixed">Mixed inventory</option></select>
             </label>
             <div id="onboarding-steps" class="onboarding-steps"></div>
           </div>
@@ -92,7 +86,7 @@
           <div class="card-head inline-head"><div><p class="eyebrow">BULK EDIT</p><h2>Edit selected inventory</h2></div><button id="cancel-bulk" class="btn" type="button">Cancel</button></div>
           <p class="muted">Only non-empty fields below are changed. Existing values in blank fields are left alone.</p>
           <div class="form-grid">
-            <label>Category<select name="category"><option value="">Leave unchanged</option><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option></select></label>
+            <label>Category<select name="category"><option value="">Leave unchanged</option><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option></select></label>
             <label>Condition<input name="condition" placeholder="Leave unchanged"></label>
             <label>Location<input name="location" placeholder="Leave unchanged"></label>
             <label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="Leave unchanged"></label>
@@ -113,12 +107,7 @@
               <input id="quick-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple>
             </label>
             <label>Category hint
-              <select id="quick-category-hint">
-                <option value="">Automatic</option>
-                <option value="clothing">Clothing</option>
-                <option value="book">Book</option>
-                <option value="general">General goods</option>
-              </select>
+              <select id="quick-category-hint"><option value="">Automatic</option><option value="general">General goods</option><option value="clothing">Clothing</option><option value="book">Book</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option></select>
             </label>
             <div class="quick-analyze-action">
               <button id="quick-analyze" class="btn" type="button">Analyze photos</button>
@@ -130,7 +119,7 @@
           <div class="quick-section">
             <div class="card-head"><div><p class="eyebrow">REVIEW</p><h3>Detected listing facts</h3></div></div>
             <div class="form-grid">
-              <label>Category<select name="quick_category" id="quick-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option></select></label>
+              <label>Category<select name="quick_category" id="quick-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option></select></label>
               <label>Item type<input name="item_type" id="quick-item-type" placeholder="jeans, jacket, book…"></label>
               <label class="quick-clothing-field">Brand<input name="brand"></label>
               <label class="quick-clothing-field">Size<input name="size"></label>
@@ -171,7 +160,7 @@
         </div>
         <form id="item-form" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">MASTER INVENTORY</p><h2 id="item-form-title">Add item</h2></div><span id="item-form-channels" class="muted"></span></div>
-          <div class="form-grid"><label>SKU<input name="sku" required></label><label>Title<input name="title" required></label><label>Category<select name="category" id="item-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="1"></label><label>Condition<input name="condition"></label><label>Location<input name="location"></label><label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Default selling price<input name="price" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Currency<input name="currency" maxlength="3" value="EUR"></label></div>
+          <div class="form-grid"><label>SKU<input name="sku" required></label><label>Title<input name="title" required></label><label>Category<select name="category" id="item-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="1"></label><label>Condition<input name="condition"></label><label>Location<input name="location"></label><label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Default selling price<input name="price" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Currency<input name="currency" maxlength="3" value="EUR"></label></div>
           <div id="book-fields" class="form-grid category-fields hidden"><label>Author<input name="author"></label><label>ISBN<input name="isbn"></label><label>Publisher<input name="publisher"></label><label>Edition<input name="edition"></label><label>Binding<input name="binding"></label><label>Publication year<input name="publication_year"></label></div>
           <div id="clothing-fields" class="form-grid category-fields hidden"><label>Brand<input name="brand"></label><label>Size<input name="size"></label><label>Colour<input name="colour"></label><label>Material<input name="material"></label><label>Measurements<input name="measurements"></label></div>
           <label>Notes<textarea name="notes" rows="3"></textarea></label>
@@ -237,7 +226,7 @@
             <option value="">All marketplaces</option>
             <option value="vinted">Vinted</option>
             <option value="ebay">eBay</option>
-            <option value="biblio">BIBLIO</option>
+            <option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option>
           </select>
           <select id="listing-status" aria-label="Listing status">
             <option value="">All statuses</option>
@@ -301,7 +290,7 @@
             <option value="">All marketplaces</option>
             <option value="vinted">Vinted</option>
             <option value="ebay">eBay</option>
-            <option value="biblio">BIBLIO</option>
+            <option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option>
           </select>
           <input id="sales-search" placeholder="Search order or person">
           <span id="sales-count" class="toolbar-count"></span>
@@ -336,8 +325,8 @@
 
       <section id="imports" class="view">
         <div class="two">
-          <div class="card form"><h2>Import inventory</h2><p class="muted">CSV, TSV and XLSX. Preview first; nothing is written until you apply it.</p><label>Saved mapping<select id="mapping-preset"><option value="">Automatic mapping</option></select></label><label>Default category<select id="import-default-category"><option value="general">General goods</option><option value="book">Books</option><option value="clothing">Clothing</option></select></label><input id="import-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><label class="check"><input id="full-snapshot" type="checkbox"> Archive active items missing from this file</label><button id="preview-import" class="btn primary" type="button">Preview</button><p id="import-status" class="muted"></p></div>
-          <div class="card form"><h2>Export inventory</h2><p class="muted">Export master inventory or one marketplace view without losing ownership of your data.</p><label>Status<select id="export-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select></label><label>Marketplace<select id="export-channel"><option value="">Master inventory</option><option value="vinted">Vinted</option><option value="ebay">eBay</option><option value="biblio">BIBLIO</option></select></label><div class="actions"><button id="export-csv" class="btn" type="button">CSV</button><button id="export-xlsx" class="btn" type="button">Excel</button></div></div>
+          <div class="card form"><h2>Import inventory</h2><p class="muted">CSV, TSV and XLSX. Preview first; nothing is written until you apply it.</p><label>Saved mapping<select id="mapping-preset"><option value="">Automatic mapping</option></select></label><label>Default category<select id="import-default-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option></select></label><input id="import-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><label class="check"><input id="full-snapshot" type="checkbox"> Archive active items missing from this file</label><button id="preview-import" class="btn primary" type="button">Preview</button><p id="import-status" class="muted"></p></div>
+          <div class="card form"><h2>Export inventory</h2><p class="muted">Export master inventory or one marketplace view without losing ownership of your data.</p><label>Status<select id="export-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select></label><label>Marketplace<select id="export-channel"><option value="">Master inventory</option><option value="vinted">Vinted</option><option value="ebay">eBay</option><option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option></select></label><div class="actions"><button id="export-csv" class="btn" type="button">CSV</button><button id="export-xlsx" class="btn" type="button">Excel</button></div></div>
         </div>
         <div id="mapping" class="card form hidden"><h2>Column mapping</h2><div id="mapping-grid"></div><label>Save mapping as<input id="preset-name" placeholder="Optional"></label><button id="apply-import" class="btn primary" type="button">Apply import</button></div>
         <div id="preview" class="card hidden"></div>
@@ -355,7 +344,7 @@
             <label>Initial BIBLIO inventory<input id="biblio-import-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv"></label>
             <button id="import-biblio" class="btn" type="button">Import BIBLIO inventory</button>
           </div>
-          <div class="actions"><button class="btn primary">Save connection</button><button id="remove-connector" class="btn danger hidden" type="button">Remove credentials</button></div>
+          <div class="actions"><button class="btn primary">Save connection</button><button id="test-connector" class="btn hidden" type="button">Test connection</button><button id="remove-connector" class="btn danger hidden" type="button">Remove credentials</button></div>
           <p id="connector-config-status" class="muted"></p>
         </form>
         <div class="card"><div class="card-head"><h2>Paired Chrome browsers</h2></div><div id="devices"></div></div>

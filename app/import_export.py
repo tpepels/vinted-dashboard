@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
-from app.constants import ItemCategory, ItemStatus
+from app.constants import ItemCategory, ItemStatus, KNOWN_ITEM_CATEGORIES
 from app.workspace_bootstrap import clean_isbn, normalize_sku
 
 
@@ -216,7 +216,7 @@ def _category(
     default_category: str = ItemCategory.GENERAL,
 ) -> str:
     raw = str(value or "").strip().lower()
-    if raw in {ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL}:
+    if raw in KNOWN_ITEM_CATEGORIES:
         return raw
     if any(mapped.get(key) for key in ("isbn", "author", "publisher", "binding")):
         return ItemCategory.BOOK
@@ -224,7 +224,7 @@ def _category(
         return ItemCategory.CLOTHING
     return (
         default_category
-        if default_category in {ItemCategory.BOOK, ItemCategory.CLOTHING, ItemCategory.GENERAL}
+        if default_category in KNOWN_ITEM_CATEGORIES
         else ItemCategory.GENERAL
     )
 

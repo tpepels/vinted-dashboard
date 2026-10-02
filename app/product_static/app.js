@@ -53,6 +53,32 @@ const connectorSchemas = {
       ["compatibility_level", "Trading API compatibility", "1477", "text"],
     ],
   },
+  etsy: {
+    title: "Etsy",
+    help: "Official Open API v3. The token needs listings_r and transactions_r. Use a refresh token when available.",
+    test: true,
+    fields: [
+      ["keystring", "App keystring", "", "text"],
+      ["shared_secret", "App shared secret", "", "password"],
+      ["shop_id", "Shop ID", "", "text"],
+      ["oauth_token", "OAuth access token", "", "password"],
+      ["refresh_token", "OAuth refresh token", "", "password"],
+      ["order_days", "Order history days", "365", "number"],
+      ["currency", "Fallback currency", "EUR", "text"],
+    ],
+  },
+  woocommerce: {
+    title: "WooCommerce",
+    help: "WooCommerce REST API v3. Create a read-only API key under WooCommerce > Settings > Advanced > REST API.",
+    test: true,
+    fields: [
+      ["store_url", "Store URL", "https://shop.example.com", "url"],
+      ["consumer_key", "Consumer key", "ck_…", "text"],
+      ["consumer_secret", "Consumer secret", "cs_…", "password"],
+      ["order_days", "Order history days", "365", "number"],
+      ["currency", "Store currency", "EUR", "text"],
+    ],
+  },
 };
 
 function esc(value) {
@@ -2071,6 +2097,7 @@ function openConnectorConfig(channel, connector) {
     + '" placeholder="' + esc(placeholder) + '"></label>'
   ).join("");
   $("#biblio-tools").classList.toggle("hidden", channel !== "biblio");
+  $("#test-connector").classList.toggle("hidden", !schema.test || !connector?.configured);
   $("#remove-connector").classList.toggle("hidden", !connector?.configured);
   $("#connector-config-status").textContent = connector?.configured
     ? "Credentials are stored. Leave an existing secret field blank to keep its current value."
@@ -2098,6 +2125,7 @@ $("#connector-config").onsubmit = async (event) => {
       body: JSON.stringify({ values }),
     });
     $("#connector-config-status").textContent = "Connection settings saved.";
+    $("#test-connector").classList.toggle("hidden", !connectorSchemas[channel]?.test);
     flash(connectorSchemas[channel].title + " configured.");
     await connections();
   } catch (error) {
@@ -2115,6 +2143,18 @@ $("#remove-connector").onclick = async () => {
     await connections();
   } catch (error) {
     flash(error.message, true);
+  }
+};
+
+$("#test-connector").onclick = async () => {
+  const channel = state.connectorChannel;
+  if (!channel || !connectorSchemas[channel]?.test) return;
+  $("#connector-config-status").textContent = "Testing connection…";
+  try {
+    const result = await api("/api/app/connectors/" + channel + "/test-connection", { method: "POST" });
+    $("#connector-config-status").textContent = result.detail || "Connection succeeded.";
+  } catch (error) {
+    $("#connector-config-status").textContent = error.message;
   }
 };
 
