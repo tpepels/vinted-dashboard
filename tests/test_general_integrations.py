@@ -169,6 +169,8 @@ def test_etsy_sync_imports_listing_metadata_and_links_order(monkeypatch):
         assert sale.inventory_item_id == item.id
         assert sale.total_cents == 2500
         assert sale.status == "completed"
+        assert item.status == "active"
+        assert item.quantity == 2
 
 
 def test_woocommerce_sync_supports_clothing_and_variations(monkeypatch):
@@ -294,6 +296,8 @@ def test_woocommerce_sync_supports_clothing_and_variations(monkeypatch):
         assert sale.inventory_item_id == item.id
         assert sale.total_cents == 3950
         assert sale.status == "processing"
+        assert item.status == "active"
+        assert item.quantity == 1
 
 
 def test_connector_credentials_api_accepts_etsy_and_woocommerce(monkeypatch):
