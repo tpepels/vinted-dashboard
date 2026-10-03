@@ -58,6 +58,16 @@ def _vinted_source(
     return rows[0]
 
 
+def _bookish(item: models.InventoryItem, metadata: dict[str, Any]) -> bool:
+    if item.category == ItemCategory.BOOK:
+        return True
+    attrs = dict(item.attributes or {})
+    if attrs.get("isbn") or attrs.get("author") or metadata.get("isbn") or metadata.get("author"):
+        return True
+    category = str(metadata.get("category") or attrs.get("vinted_category") or "").casefold()
+    return any(token in category for token in ("book", "livro", "livre", "libro", "buch", "książ"))
+
+
 def _existing_biblio(
     session: Session,
     workspace_id: uuid.UUID,
@@ -91,6 +101,8 @@ def build_biblio_candidate(
     attrs = dict(item.attributes or {})
     vextra = dict(vinted.extra or {}) if vinted else {}
     vmeta = dict(vextra.get("metadata") or {}) if isinstance(vextra.get("metadata"), dict) else {}
+    if not _bookish(item, vmeta):
+        raise ValueError("Only book inventory can be published to BIBLIO")
 
     title, title_source = _value(
         (vinted.title if vinted else None, "vinted"),
