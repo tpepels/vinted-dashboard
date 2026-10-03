@@ -206,6 +206,49 @@ def build_biblio_candidate(
     }
 
 
+def apply_biblio_overrides(
+    candidate: dict[str, Any],
+    overrides: dict[str, Any],
+) -> dict[str, Any]:
+    fields = dict(candidate.get("fields") or {})
+    sources = dict(candidate.get("field_sources") or {})
+    for key in ("title", "author", "description", "isbn"):
+        if key not in overrides or overrides[key] is None:
+            continue
+        value = str(overrides[key]).strip()
+        if value:
+            fields[key] = clean_isbn(value) if key == "isbn" else value
+            sources[key] = "review"
+    if overrides.get("price_cents") is not None:
+        price = int(overrides["price_cents"])
+        if price < 0:
+            raise ValueError("BIBLIO price cannot be negative")
+        fields["price_cents"] = price
+        sources["price_cents"] = "review"
+
+    missing: list[str] = []
+    for key, label in (
+        ("sku", "SKU"),
+        ("author", "author"),
+        ("title", "title"),
+        ("description", "description"),
+        ("price_cents", "price"),
+    ):
+        if fields.get(key) in (None, ""):
+            missing.append(label)
+    if int(fields.get("quantity") or 0) <= 0:
+        missing.append("available stock")
+
+    candidate = {
+        **candidate,
+        "fields": fields,
+        "field_sources": sources,
+        "missing": missing,
+        "ready": not missing,
+    }
+    return candidate
+
+
 def upsert_biblio_listing(
     session: Session,
     workspace: models.Workspace,
