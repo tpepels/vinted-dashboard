@@ -65,10 +65,23 @@ manual single-item form.
 Barcode intake supports keyboard-style USB/Bluetooth scanners, a live phone or
 laptop camera, and a captured barcode photo. Browsers with BarcodeDetector use
 it first; camera frames fall back to authenticated server-side ZXing-C++ decode
-so scanning does not depend on BarcodeDetector support. A scan creates one
-physical-copy row in a batch - scanning the same ISBN twice deliberately creates
-two separate master items with separate generated SKUs, condition, cost and
-location.
+so scanning does not depend on BarcodeDetector support. Scanning itself is
+non-blocking: the barcode is queued, acknowledged and the input is ready for the
+next item before ISBN enrichment starts. Two background enrichment workers fill
+in metadata while scanning continues.
+
+The unfinished scan batch and its defaults are persisted in browser local
+storage, so an accidental reload does not discard the session. After barcode
+mode has been used it reopens directly on the scanner. Ready rows can be committed
+without waiting for unidentified rows, which remain in the batch for review.
+Keyboard intake supports Ctrl/Cmd+Z or the Undo last button. Camera intake uses a
+frame-aware latch so one stationary barcode is added only once, while a second
+physical copy with the same barcode can be scanned after the first leaves the
+frame.
+
+A scan creates one physical-copy row in a batch - scanning the same ISBN twice
+deliberately creates two separate master items with separate generated SKUs,
+condition, cost and location.
 
 Valid ISBN-10/13 scans are enriched from Open Library's low-volume ISBN API with
 title, author, publisher, edition/format, year and cover metadata when available.

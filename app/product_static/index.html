@@ -127,7 +127,7 @@
               <div>
                 <p class="eyebrow">BARCODE INTAKE</p>
                 <h3>Scan physical stock</h3>
-                <p class="muted">A keyboard-style scanner can type directly below and press Enter. On a phone, use the camera. ISBNs are enriched automatically.</p>
+                <p class="muted">Scan continuously - each code enters the batch immediately while ISBN metadata fills in behind you. No waiting between books.</p>
               </div>
               <button id="stock-back-choices" class="btn" type="button">Other intake method</button>
             </div>
@@ -163,12 +163,14 @@
 
             <div class="stock-queue-head">
               <div><p class="eyebrow">BATCH</p><h3>Scanned items</h3></div>
-              <span id="stock-queue-count" class="muted">0 items</span>
+              <span id="stock-queue-count" class="muted">0 scanned</span>
             </div>
             <div id="stock-intake-queue" class="stock-intake-queue"><div class="empty">Scan a barcode to start the batch.</div></div>
             <div class="actions stock-create-actions">
+              <button id="stock-undo-last" class="btn" type="button" disabled>Undo last</button>
               <button id="stock-clear-batch" class="btn" type="button" disabled>Clear</button>
-              <button id="stock-create-batch" class="btn primary" type="button" disabled>Create stock items</button>
+              <span class="muted stock-keyboard-help">Scanner: Enter to add · Ctrl/Cmd+Z to undo</span>
+              <button id="stock-create-batch" class="btn primary" type="button" disabled>Create ready items</button>
             </div>
           </div>
         </div>

@@ -23,12 +23,19 @@ const state = {
   todayQueue: [],
   todayShowAll: false,
   stockIntakeQueue: [],
+  stockIntakeRestored: false,
+  stockWorkspaceKey: null,
+  stockEnrichmentQueue: [],
+  stockEnrichmentQueued: new Set(),
+  stockEnrichmentActive: 0,
+  stockAudioContext: null,
   barcodeStream: null,
   barcodeTimer: null,
   barcodeDetector: null,
   barcodeBusy: false,
   barcodeMisses: 0,
-  stockLastScan: null,
+  barcodeCameraLatch: null,
+  barcodeCameraClearFrames: 0,
 };
 
 const importFields = [
@@ -363,6 +370,11 @@ function renderBillingLock(info) {
 async function init() {
   try {
     state.me = await api("/api/auth/me");
+    const workspaceKey = state.me?.workspace?.id || state.me?.workspace?.slug || "default";
+    if (state.stockWorkspaceKey !== workspaceKey) {
+      resetStockIntakeRuntime();
+      state.stockWorkspaceKey = workspaceKey;
+    }
     appScreen();
     $("#app-name").textContent = state.me.app_name;
     $("#auth-name").textContent = state.me.app_name;
@@ -415,6 +427,8 @@ $("#register").onsubmit = async (event) => {
 
 $("#logout").onclick = async () => {
   try { await api("/api/auth/logout", { method: "POST" }); } catch {}
+  resetStockIntakeRuntime();
+  state.stockWorkspaceKey = null;
   state.me = null;
   authScreen("login");
 };
@@ -875,6 +889,14 @@ $("#inventory-reset").onclick = () => {
   $("#inventory-cost").value = "";
   inventory().catch((error) => flash(error.message, true));
 };
+function resetStockIntakeRuntime() {
+  stopBarcodeCamera();
+  state.stockIntakeQueue = [];
+  state.stockIntakeRestored = false;
+  state.stockEnrichmentQueue = [];
+  state.stockEnrichmentQueued.clear();
+}
+
 function stockIntakeDefaults() {
   return {
     location: String($("#stock-default-location")?.value || "").trim(),
@@ -890,59 +912,95 @@ function stockLocalId() {
   return "scan-" + Date.now() + "-" + Math.random().toString(16).slice(2);
 }
 
-function stopBarcodeCamera() {
-  if (state.barcodeTimer) {
-    window.clearInterval(state.barcodeTimer);
-    state.barcodeTimer = null;
+function stockSessionKey() {
+  const workspace = state.me?.workspace?.id || state.me?.workspace?.slug || "default";
+  return "reseller-dashboard:stock-intake:" + workspace;
+}
+
+function stockModeKey() {
+  const workspace = state.me?.workspace?.id || state.me?.workspace?.slug || "default";
+  return "reseller-dashboard:stock-intake-mode:" + workspace;
+}
+
+function persistStockIntakeSession() {
+  try {
+    localStorage.setItem(stockSessionKey(), JSON.stringify({
+      queue: state.stockIntakeQueue,
+      defaults: stockIntakeDefaults(),
+      saved_at: new Date().toISOString(),
+    }));
+  } catch {}
+}
+
+function persistStockIntakeMode(mode) {
+  try {
+    localStorage.setItem(stockModeKey(), mode);
+  } catch {}
+}
+
+function lastStockIntakeMode() {
+  try {
+    return localStorage.getItem(stockModeKey()) || "";
+  } catch {
+    return "";
   }
-  if (state.barcodeStream) {
-    state.barcodeStream.getTracks().forEach((track) => track.stop());
-    state.barcodeStream = null;
-  }
-  state.barcodeDetector = null;
-  state.barcodeBusy = false;
-  state.barcodeMisses = 0;
-  const video = $("#stock-barcode-video");
-  if (video) video.srcObject = null;
-  $("#stock-camera-box")?.classList.add("hidden");
-  $("#stock-stop-camera")?.classList.add("hidden");
-  $("#stock-start-camera")?.classList.remove("hidden");
 }
 
-function showStockChoices() {
-  stopBarcodeCamera();
-  $("#stock-intake-choices").classList.remove("hidden");
-  $("#stock-scan-workspace").classList.add("hidden");
+function restoreStockIntakeSession() {
+  if (state.stockIntakeRestored) return;
+  state.stockIntakeRestored = true;
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(stockSessionKey()) || "null");
+  } catch {}
+  if (!saved || typeof saved !== "object") return;
+
+  const defaults = saved.defaults || {};
+  if ($("#stock-default-location")) $("#stock-default-location").value = defaults.location || "";
+  if ($("#stock-default-condition")) $("#stock-default-condition").value = defaults.condition || "";
+  if ($("#stock-default-cost")) $("#stock-default-cost").value = defaults.cost || "";
+  if ($("#stock-default-price")) $("#stock-default-price").value = defaults.price || "";
+  if ($("#stock-default-currency")) $("#stock-default-currency").value = defaults.currency || "EUR";
+
+  const rows = Array.isArray(saved.queue) ? saved.queue.slice(0, 100) : [];
+  state.stockIntakeQueue = rows.map((row) => ({
+    ...row,
+    local_id: row.local_id || stockLocalId(),
+    enrichment_state: row.enrichment_state === "ready" || row.enrichment_state === "needs_review"
+      ? row.enrichment_state
+      : "pending",
+  }));
+  state.stockIntakeQueue
+    .filter((row) => row.enrichment_state === "pending")
+    .forEach((row) => queueStockEnrichment(row.local_id));
 }
 
-function showStockScanner() {
-  $("#stock-intake-choices").classList.add("hidden");
-  $("#stock-scan-workspace").classList.remove("hidden");
-  renderStockIntakeQueue();
-  window.setTimeout(() => $("#stock-barcode-input")?.focus(), 20);
+function stockRowReady(row) {
+  return Boolean(String(row?.title || "").trim())
+    && row?.enrichment_state !== "pending";
 }
 
-function openStockIntake(mode = "choices") {
-  $("#bulk-form")?.classList.add("hidden");
-  $("#quick-listing-form")?.classList.add("hidden");
-  $("#item-form")?.classList.add("hidden");
-  $("#stock-intake-panel").classList.remove("hidden");
-  if (mode === "scan") showStockScanner();
-  else showStockChoices();
-  $("#stock-intake-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function closeStockIntake() {
-  stopBarcodeCamera();
-  $("#stock-intake-panel").classList.add("hidden");
+function stockQueueStats() {
+  const total = state.stockIntakeQueue.length;
+  const pending = state.stockIntakeQueue.filter((row) => row.enrichment_state === "pending").length;
+  const ready = state.stockIntakeQueue.filter(stockRowReady).length;
+  const review = total - pending - ready;
+  return { total, pending, ready, review };
 }
 
 function updateStockQueueButtons() {
-  const count = state.stockIntakeQueue.length;
-  $("#stock-queue-count").textContent = count + " item" + (count === 1 ? "" : "s");
-  $("#stock-clear-batch").disabled = count === 0;
-  $("#stock-create-batch").disabled = count === 0
-    || state.stockIntakeQueue.some((row) => !String(row.title || "").trim());
+  const stats = stockQueueStats();
+  const parts = [stats.total + " scanned"];
+  if (stats.ready) parts.push(stats.ready + " ready");
+  if (stats.pending) parts.push(stats.pending + " identifying");
+  if (stats.review) parts.push(stats.review + " need review");
+  $("#stock-queue-count").textContent = parts.join(" · ");
+  $("#stock-clear-batch").disabled = stats.total === 0;
+  $("#stock-undo-last").disabled = stats.total === 0;
+  $("#stock-create-batch").disabled = stats.ready === 0;
+  $("#stock-create-batch").textContent = stats.ready
+    ? "Create " + stats.ready + " ready item" + (stats.ready === 1 ? "" : "s")
+    : "Create ready items";
 }
 
 function bindStockQueueInputs() {
@@ -952,6 +1010,12 @@ function bindStockQueueInputs() {
       const key = field.dataset.field;
       if (!Number.isInteger(index) || !state.stockIntakeQueue[index] || !key) return;
       state.stockIntakeQueue[index][key] = field.value;
+      if (key === "title") {
+        state.stockIntakeQueue[index].enrichment_state = String(field.value || "").trim()
+          ? "ready"
+          : (state.stockIntakeQueue[index].enrichment_state === "pending" ? "pending" : "needs_review");
+      }
+      persistStockIntakeSession();
       updateStockQueueButtons();
     };
   });
@@ -960,10 +1024,21 @@ function bindStockQueueInputs() {
       const index = Number(button.dataset.index);
       if (!Number.isInteger(index)) return;
       state.stockIntakeQueue.splice(index, 1);
+      persistStockIntakeSession();
       renderStockIntakeQueue();
       $("#stock-barcode-input")?.focus();
     };
   });
+}
+
+function stockRowStatus(row) {
+  if (row.enrichment_state === "pending") {
+    return '<span class="stock-row-state pending">Identifying…</span>';
+  }
+  if (row.enrichment_state === "needs_review") {
+    return '<span class="stock-row-state review">Needs review</span>';
+  }
+  return '<span class="stock-row-state ready">Ready</span>';
 }
 
 function renderStockIntakeQueue() {
@@ -989,9 +1064,13 @@ function renderStockIntakeQueue() {
       const cover = row.cover_url
         ? '<img class="stock-cover" src="' + esc(row.cover_url) + '" alt="">'
         : '<div class="stock-cover placeholder"></div>';
+      const titlePlaceholder = row.enrichment_state === "pending"
+        ? "Identifying…"
+        : "Item title required";
       return '<tr><td><div class="stock-item-cell">' + cover + '<div>'
+        + '<div class="stock-item-status">' + stockRowStatus(row) + '</div>'
         + '<input class="stock-row-input stock-title-input" data-index="' + index
-        + '" data-field="title" value="' + esc(row.title || "") + '" placeholder="Item title required">'
+        + '" data-field="title" value="' + esc(row.title || "") + '" placeholder="' + titlePlaceholder + '">'
         + '<div class="sub">' + esc(bookBits.join(" · ")) + " " + duplicate + '</div></div></div></td>'
         + '<td><input class="stock-row-input stock-small-input" data-index="' + index
         + '" data-field="condition" value="' + esc(row.condition || "") + '"></td>'
@@ -1008,76 +1087,165 @@ function renderStockIntakeQueue() {
   bindStockQueueInputs();
 }
 
-function acknowledgeStockScan() {
+function playStockScanTone() {
   try {
-    if (navigator.vibrate) navigator.vibrate(60);
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    if (!state.stockAudioContext) state.stockAudioContext = new AudioContext();
+    const context = state.stockAudioContext;
+    if (context.state === "suspended") context.resume().catch(() => {});
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.04, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.07);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.07);
   } catch {}
 }
 
-async function addScannedBarcode(code, format = "manual") {
-  const raw = String(code || "").trim();
-  if (!raw) return;
-  const now = Date.now();
-  if (
-    state.stockLastScan
-    && state.stockLastScan.code === raw
-    && now - state.stockLastScan.at < 1800
-  ) {
-    return;
+function acknowledgeStockScan() {
+  try {
+    if (navigator.vibrate) navigator.vibrate(45);
+  } catch {}
+  playStockScanTone();
+}
+
+function fastStockBarcodeKind(raw) {
+  const code = String(raw || "").trim();
+  const upper = code.toUpperCase();
+  if (upper.startsWith("RDLOC:")) return "location";
+  const compact = upper.replace(/[\s-]+/g, "");
+  if (/^\d{13}$/.test(compact) && (compact.startsWith("978") || compact.startsWith("979"))) return "isbn";
+  if (/^\d{9}[\dX]$/.test(compact)) return "isbn";
+  return "barcode";
+}
+
+function queueStockEnrichment(localId) {
+  if (!localId || state.stockEnrichmentQueued.has(localId)) return;
+  state.stockEnrichmentQueued.add(localId);
+  state.stockEnrichmentQueue.push(localId);
+  pumpStockEnrichment();
+}
+
+function pumpStockEnrichment() {
+  while (state.stockEnrichmentActive < 2 && state.stockEnrichmentQueue.length) {
+    const localId = state.stockEnrichmentQueue.shift();
+    state.stockEnrichmentActive += 1;
+    enrichStockRow(localId)
+      .catch(() => {})
+      .finally(() => {
+        state.stockEnrichmentQueued.delete(localId);
+        state.stockEnrichmentActive -= 1;
+        pumpStockEnrichment();
+      });
   }
-  state.stockLastScan = { code: raw, at: now };
-  $("#stock-scan-status").textContent = "Looking up " + raw + "…";
+}
+
+async function enrichStockRow(localId) {
+  const initial = state.stockIntakeQueue.find((row) => row.local_id === localId);
+  if (!initial) return;
   try {
     const data = await api("/api/app/stock-intake/barcode/lookup", {
       method: "POST",
-      body: JSON.stringify({ code: raw }),
+      body: JSON.stringify({ code: initial.barcode }),
     });
-    if (data.kind === "location") {
-      $("#stock-default-location").value = data.location || "";
-      $("#stock-scan-status").textContent = "Current location set to " + (data.location || "—") + ".";
-      acknowledgeStockScan();
-      $("#stock-barcode-input").value = "";
-      $("#stock-barcode-input").focus();
-      return;
-    }
+    const row = state.stockIntakeQueue.find((candidate) => candidate.local_id === localId);
+    if (!row) return;
 
     const metadata = data.metadata || {};
-    const defaults = stockIntakeDefaults();
     const titleParts = [metadata.title, metadata.subtitle].filter(Boolean);
-    state.stockIntakeQueue.push({
-      local_id: stockLocalId(),
-      barcode: data.code,
-      barcode_format: format || "unknown",
-      category: data.kind === "isbn" ? "book" : "general",
-      isbn: data.isbn || null,
-      title: titleParts.join(": "),
-      author: metadata.author || null,
-      publisher: metadata.publisher || null,
-      edition: metadata.edition || null,
-      publication_year: metadata.publication_year || null,
-      cover_url: metadata.cover_url || null,
-      source_url: metadata.source_url || null,
-      condition: defaults.condition,
-      cost: defaults.cost,
-      price: defaults.price,
-      currency: defaults.currency,
-      location: defaults.location,
-      existing_copy_count: Number(data.existing_copy_count || 0),
-    });
-    renderStockIntakeQueue();
-    acknowledgeStockScan();
-    $("#stock-scan-status").textContent = data.metadata_warning
-      ? "Added barcode. Book lookup warning: " + data.metadata_warning
-      : (data.kind === "isbn" && !metadata.found
-        ? "ISBN added, but no Open Library record was found. Enter the title before creating stock."
-        : "Added " + (metadata.title || data.code) + ".");
+    row.category = data.kind === "isbn" ? "book" : "general";
+    row.isbn = data.isbn || null;
+    if (!String(row.title || "").trim() && titleParts.length) row.title = titleParts.join(": ");
+    row.author = metadata.author || row.author || null;
+    row.publisher = metadata.publisher || row.publisher || null;
+    row.edition = metadata.edition || row.edition || null;
+    row.publication_year = metadata.publication_year || row.publication_year || null;
+    row.cover_url = metadata.cover_url || row.cover_url || null;
+    row.source_url = metadata.source_url || row.source_url || null;
+    row.existing_copy_count = Number(data.existing_copy_count || 0);
+    row.enrichment_warning = data.metadata_warning || null;
+    row.enrichment_state = String(row.title || "").trim() ? "ready" : "needs_review";
   } catch (error) {
-    $("#stock-scan-status").textContent = error.message;
-    flash(error.message, true);
-  } finally {
+    const row = state.stockIntakeQueue.find((candidate) => candidate.local_id === localId);
+    if (!row) return;
+    row.enrichment_warning = error.message;
+    row.enrichment_state = String(row.title || "").trim() ? "ready" : "needs_review";
+  }
+  persistStockIntakeSession();
+  renderStockIntakeQueue();
+}
+
+function undoLastStockScan() {
+  if (!state.stockIntakeQueue.length) return;
+  const removed = state.stockIntakeQueue.pop();
+  if (removed?.local_id) {
+    state.stockEnrichmentQueued.delete(removed.local_id);
+    state.stockEnrichmentQueue = state.stockEnrichmentQueue.filter((id) => id !== removed.local_id);
+  }
+  persistStockIntakeSession();
+  renderStockIntakeQueue();
+  $("#stock-scan-status").textContent = "Removed last scan.";
+  $("#stock-barcode-input")?.focus();
+}
+
+function addScannedBarcode(code, format = "manual") {
+  const raw = String(code || "").trim();
+  if (!raw) return false;
+
+  if (fastStockBarcodeKind(raw) === "location") {
+    const location = raw.split(":", 2)[1]?.trim() || "";
+    $("#stock-default-location").value = location;
+    persistStockIntakeSession();
+    $("#stock-scan-status").textContent = "Current location set to " + (location || "—") + ".";
     $("#stock-barcode-input").value = "";
     $("#stock-barcode-input").focus();
+    acknowledgeStockScan();
+    return true;
   }
+
+  if (state.stockIntakeQueue.length >= 100) {
+    $("#stock-scan-status").textContent = "This batch already has 100 items. Create ready stock or clear the batch before scanning more.";
+    flash("The scan batch is full at 100 items.", true);
+    return false;
+  }
+
+  const defaults = stockIntakeDefaults();
+  const kind = fastStockBarcodeKind(raw);
+  const row = {
+    local_id: stockLocalId(),
+    barcode: raw.replace(/[\s-]+/g, ""),
+    barcode_format: format || "unknown",
+    category: kind === "isbn" ? "book" : "general",
+    isbn: kind === "isbn" ? raw.replace(/[\s-]+/g, "").toUpperCase() : null,
+    title: "",
+    author: null,
+    publisher: null,
+    edition: null,
+    publication_year: null,
+    cover_url: null,
+    source_url: null,
+    condition: defaults.condition,
+    cost: defaults.cost,
+    price: defaults.price,
+    currency: defaults.currency,
+    location: defaults.location,
+    existing_copy_count: 0,
+    enrichment_state: "pending",
+  };
+
+  state.stockIntakeQueue.push(row);
+  persistStockIntakeSession();
+  renderStockIntakeQueue();
+  acknowledgeStockScan();
+  $("#stock-scan-status").textContent = "Scanned " + row.barcode + ". Ready for the next item.";
+  $("#stock-barcode-input").value = "";
+  $("#stock-barcode-input").focus();
+  queueStockEnrichment(row.local_id);
+  return true;
 }
 
 async function decodeBarcodeImage(file) {
@@ -1107,43 +1275,117 @@ async function captureBarcodeFrame() {
   return decodeBarcodeImage(file);
 }
 
+function acceptCameraBarcode(code, format) {
+  const raw = String(code || "").trim();
+  if (!raw) return false;
+  if (state.barcodeCameraLatch === raw) return false;
+  state.barcodeCameraLatch = raw;
+  state.barcodeCameraClearFrames = 0;
+  return addScannedBarcode(raw, format || "camera");
+}
+
+function noteCameraBarcodeMiss() {
+  state.barcodeCameraClearFrames += 1;
+  if (state.barcodeCameraClearFrames >= 2) {
+    state.barcodeCameraLatch = null;
+    state.barcodeCameraClearFrames = 0;
+  }
+}
+
 async function barcodeCameraTick() {
   if (state.barcodeBusy) return;
   const video = $("#stock-barcode-video");
   if (!video || video.readyState < 2) return;
   state.barcodeBusy = true;
   try {
-    let found = [];
     if (state.barcodeDetector) {
+      let found = [];
       try {
         found = await state.barcodeDetector.detect(video);
       } catch {
         state.barcodeDetector = null;
       }
-    }
-    if (found.length) {
-      state.barcodeMisses = 0;
-      const first = found[0];
-      await addScannedBarcode(first.rawValue, first.format || "camera");
-      $("#stock-camera-status").textContent = "Barcode captured. Ready for the next item.";
-      return;
+      if (found.length) {
+        state.barcodeMisses = 0;
+        const first = found[0];
+        acceptCameraBarcode(first.rawValue, first.format || "camera");
+        $("#stock-camera-status").textContent = "Captured. Move to the next barcode.";
+        return;
+      }
+      noteCameraBarcodeMiss();
+      state.barcodeMisses += 1;
+      if (state.barcodeMisses < 3) return;
+    } else {
+      state.barcodeMisses += 1;
+      if (state.barcodeMisses < 2) return;
     }
 
-    state.barcodeMisses += 1;
-    const fallbackAfter = state.barcodeDetector ? 3 : 2;
-    if (state.barcodeMisses >= fallbackAfter) {
-      state.barcodeMisses = 0;
-      const decoded = await captureBarcodeFrame();
-      if (decoded.length) {
-        await addScannedBarcode(decoded[0].code, decoded[0].format || "camera");
-        $("#stock-camera-status").textContent = "Barcode captured. Ready for the next item.";
-      }
+    state.barcodeMisses = 0;
+    const decoded = await captureBarcodeFrame();
+    if (decoded.length) {
+      acceptCameraBarcode(decoded[0].code, decoded[0].format || "camera");
+      $("#stock-camera-status").textContent = "Captured. Move to the next barcode.";
+    } else if (!state.barcodeDetector) {
+      noteCameraBarcodeMiss();
     }
   } catch (error) {
     $("#stock-camera-status").textContent = error.message;
   } finally {
     state.barcodeBusy = false;
   }
+}
+
+function stopBarcodeCamera() {
+  if (state.barcodeTimer) {
+    window.clearInterval(state.barcodeTimer);
+    state.barcodeTimer = null;
+  }
+  if (state.barcodeStream) {
+    state.barcodeStream.getTracks().forEach((track) => track.stop());
+    state.barcodeStream = null;
+  }
+  state.barcodeDetector = null;
+  state.barcodeBusy = false;
+  state.barcodeMisses = 0;
+  state.barcodeCameraLatch = null;
+  state.barcodeCameraClearFrames = 0;
+  const video = $("#stock-barcode-video");
+  if (video) video.srcObject = null;
+  $("#stock-camera-box")?.classList.add("hidden");
+  $("#stock-stop-camera")?.classList.add("hidden");
+  $("#stock-start-camera")?.classList.remove("hidden");
+}
+
+function showStockChoices() {
+  stopBarcodeCamera();
+  $("#stock-intake-choices").classList.remove("hidden");
+  $("#stock-scan-workspace").classList.add("hidden");
+}
+
+function showStockScanner() {
+  persistStockIntakeMode("scan");
+  restoreStockIntakeSession();
+  $("#stock-intake-choices").classList.add("hidden");
+  $("#stock-scan-workspace").classList.remove("hidden");
+  renderStockIntakeQueue();
+  window.setTimeout(() => $("#stock-barcode-input")?.focus(), 20);
+}
+
+function openStockIntake(mode = null) {
+  $("#bulk-form")?.classList.add("hidden");
+  $("#quick-listing-form")?.classList.add("hidden");
+  $("#item-form")?.classList.add("hidden");
+  $("#stock-intake-panel").classList.remove("hidden");
+  const preferred = mode || (lastStockIntakeMode() === "scan" ? "scan" : "choices");
+  if (preferred === "scan") showStockScanner();
+  else showStockChoices();
+  $("#stock-intake-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeStockIntake() {
+  stopBarcodeCamera();
+  persistStockIntakeSession();
+  $("#stock-intake-panel").classList.add("hidden");
 }
 
 async function startBarcodeCamera() {
@@ -1187,9 +1429,9 @@ async function startBarcodeCamera() {
     $("#stock-start-camera").classList.add("hidden");
     $("#stock-stop-camera").classList.remove("hidden");
     $("#stock-camera-status").textContent = state.barcodeDetector
-      ? "Camera ready. Native detection is active with server fallback."
-      : "Camera ready. Frames are decoded securely by the dashboard.";
-    state.barcodeTimer = window.setInterval(barcodeCameraTick, 450);
+      ? "Camera ready. Scan continuously."
+      : "Camera ready. Server decode fallback is active.";
+    state.barcodeTimer = window.setInterval(barcodeCameraTick, 400);
   } catch (error) {
     $("#stock-camera-box").classList.remove("hidden");
     $("#stock-camera-status").textContent = "Could not open the camera: " + error.message;
@@ -1197,15 +1439,15 @@ async function startBarcodeCamera() {
 }
 
 async function createScannedStockBatch() {
-  if (!state.stockIntakeQueue.length) return;
-  const missing = state.stockIntakeQueue.find((row) => !String(row.title || "").trim());
-  if (missing) {
-    flash("Every scanned item needs a title before creating stock.", true);
+  const readyRows = state.stockIntakeQueue.filter(stockRowReady);
+  if (!readyRows.length) {
+    flash("No ready items yet. Keep scanning or review unidentified rows.", true);
     return;
   }
   const button = $("#stock-create-batch");
   button.disabled = true;
-  const items = state.stockIntakeQueue.map((row) => ({
+  const createdIds = new Set(readyRows.map((row) => row.local_id));
+  const items = readyRows.map((row) => ({
     barcode: row.barcode || null,
     barcode_format: row.barcode_format || null,
     title: String(row.title || "").trim(),
@@ -1233,11 +1475,15 @@ async function createScannedStockBatch() {
       body: JSON.stringify({ items }),
     });
     const count = Number(result.count || 0);
-    state.stockIntakeQueue = [];
+    state.stockIntakeQueue = state.stockIntakeQueue.filter((row) => !createdIds.has(row.local_id));
+    persistStockIntakeSession();
     renderStockIntakeQueue();
-    closeStockIntake();
     await inventory();
-    flash("Created " + count + " stock item" + (count === 1 ? "." : "s."));
+    flash(
+      "Created " + count + " stock item" + (count === 1 ? "." : "s.")
+      + (state.stockIntakeQueue.length ? " Unresolved scans remain in the batch." : "")
+    );
+    $("#stock-barcode-input")?.focus();
   } catch (error) {
     flash(error.message, true);
     updateStockQueueButtons();
@@ -1410,23 +1656,32 @@ $("#close-stock-intake").onclick = closeStockIntake;
 $("#stock-choice-scan").onclick = showStockScanner;
 $("#stock-back-choices").onclick = showStockChoices;
 $("#stock-choice-photo").onclick = () => {
+  persistStockIntakeMode("photo");
   closeStockIntake();
   openQuickListing();
 };
 $("#stock-choice-import").onclick = async () => {
+  persistStockIntakeMode("import");
   closeStockIntake();
   await selectView("imports");
 };
 $("#stock-choice-connect").onclick = async () => {
+  persistStockIntakeMode("connect");
   closeStockIntake();
   await selectView("connections");
 };
 $("#stock-choice-manual").onclick = () => {
+  persistStockIntakeMode("manual");
   closeStockIntake();
   openItemForm(null);
 };
 $("#stock-barcode-submit").onclick = () => addScannedBarcode($("#stock-barcode-input").value);
 $("#stock-barcode-input").onkeydown = (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    undoLastStockScan();
+    return;
+  }
   if (event.key !== "Enter") return;
   event.preventDefault();
   addScannedBarcode(event.currentTarget.value);
@@ -1444,7 +1699,7 @@ $("#stock-barcode-image").onchange = async (event) => {
       return;
     }
     for (const row of decoded) {
-      await addScannedBarcode(row.code, row.format || "photo");
+      addScannedBarcode(row.code, row.format || "photo");
     }
   } catch (error) {
     $("#stock-scan-status").textContent = error.message;
@@ -1453,12 +1708,20 @@ $("#stock-barcode-image").onchange = async (event) => {
     event.currentTarget.value = "";
   }
 };
+$("#stock-undo-last").onclick = undoLastStockScan;
 $("#stock-clear-batch").onclick = () => {
   if (state.stockIntakeQueue.length && !window.confirm("Clear the scanned batch?")) return;
   state.stockIntakeQueue = [];
+  state.stockEnrichmentQueue = [];
+  state.stockEnrichmentQueued.clear();
+  persistStockIntakeSession();
   renderStockIntakeQueue();
   $("#stock-barcode-input").focus();
 };
+["stock-default-location", "stock-default-condition", "stock-default-cost", "stock-default-price", "stock-default-currency"]
+  .forEach((id) => {
+    $("#" + id).oninput = persistStockIntakeSession;
+  });
 $("#stock-create-batch").onclick = createScannedStockBatch;
 
 $("#cancel-quick-listing").onclick = closeQuickListing;
