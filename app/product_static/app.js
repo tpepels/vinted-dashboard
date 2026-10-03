@@ -20,6 +20,8 @@ const state = {
   quickPhotoUrls: [],
   quickRequiredValues: {},
   connectorChannel: null,
+  todayQueue: [],
+  todayShowAll: false,
 };
 
 const importFields = [
@@ -439,10 +441,11 @@ async function load(view) {
 }
 
 async function today() {
-  const [todayData, analyticsData, onboardingData] = await Promise.all([
+  const [todayData, analyticsData, onboardingData, connectorData] = await Promise.all([
     api("/api/app/today"),
     api("/api/app/analytics"),
     api("/api/app/onboarding"),
+    api("/api/app/connectors"),
   ]);
   state.onboarding = onboardingData;
   renderOnboarding(onboardingData);
@@ -450,6 +453,9 @@ async function today() {
   const activeInventory = Number(analyticsData.active_inventory || 0);
   const pricedCount = Number(analyticsData.priced_inventory_count || 0);
   const marginCount = Number(analyticsData.margin_inventory_count || 0);
+  const queue = Array.isArray(todayData.work_queue) ? todayData.work_queue : [];
+  state.todayQueue = queue;
+
   $("#today-metrics").innerHTML =
     metric("Active inventory", activeInventory)
     + metric(
@@ -470,10 +476,9 @@ async function today() {
         : "Add acquisition costs to calculate margin"
     );
 
-  renderTodayWorkQueue(
-    Array.isArray(todayData.work_queue) ? todayData.work_queue : [],
-    Number(todayData.work_queue_count || 0),
-  );
+  renderTodayFocus(queue);
+  renderTodaySourceStatus(connectorData.connectors || []);
+  renderTodayWorkQueue(queue, Number(todayData.work_queue_count || queue.length));
 }
 
 function todayWorkControls(row) {
@@ -493,21 +498,125 @@ function todayWorkControls(row) {
   return controls.join("");
 }
 
+function todayPriorityBand(row) {
+  const priority = Number(row?.priority || 0);
+  if (priority >= 105) return "urgent";
+  if (priority >= 90) return "attention";
+  return "opportunity";
+}
+
+function renderTodayFocus(rows) {
+  const queue = Array.isArray(rows) ? rows : [];
+  const urgent = queue.filter((row) => todayPriorityBand(row) === "urgent").length;
+  const attention = queue.filter((row) => todayPriorityBand(row) === "attention").length;
+  const opportunity = queue.filter((row) => todayPriorityBand(row) === "opportunity").length;
+  const first = queue[0];
+
+  if (!first) {
+    $("#today-focus-title").textContent = "Everything important is clear.";
+    $("#today-focus-detail").textContent = "No reseller task needs attention right now.";
+    return;
+  }
+
+  $("#today-focus-title").textContent = (urgent ? "Start with: " : "Next: ") + first.title;
+  const parts = [];
+  if (urgent) parts.push(urgent + " urgent");
+  if (attention) parts.push(attention + " follow-up");
+  if (opportunity) parts.push(opportunity + " optimization");
+  $("#today-focus-detail").textContent = parts.join(" · ") + " · highest-priority work is shown first";
+}
+
+function relativeTimestamp(value) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return null;
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + "m ago";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return hours + "h ago";
+  const days = Math.floor(hours / 24);
+  return days + "d ago";
+}
+
+function renderTodaySourceStatus(connectors) {
+  const rows = (connectors || [])
+    .filter((row) => row.group !== "files" && row.channel !== "manual")
+    .filter((row) => row.configured || row.operational)
+    .sort((a, b) => String(a.display_name || a.channel).localeCompare(String(b.display_name || b.channel)));
+
+  $("#today-source-status").innerHTML = rows.length
+    ? rows.map((row) => {
+      const synced = relativeTimestamp(row.last_synced_at);
+      const syncTime = row.last_synced_at ? new Date(row.last_synced_at).getTime() : null;
+      const ageHours = Number.isFinite(syncTime) ? Math.max(0, (Date.now() - syncTime) / 3600000) : null;
+      let status = "ready";
+      let dot = "warn";
+      if (!row.operational) {
+        status = "attention";
+        dot = "error";
+      } else if (ageHours != null && ageHours <= 24) {
+        status = "fresh";
+        dot = "ok";
+      } else if (ageHours != null && ageHours <= 168) {
+        status = "stale";
+        dot = "warn";
+      } else if (ageHours != null) {
+        status = "old";
+        dot = "error";
+      }
+      const detail = row.operational
+        ? (synced ? "Last sync " + synced : "Connected - no sync recorded yet")
+        : (row.note || "Connection needs attention");
+      return '<div class="source-row"><span class="source-dot ' + dot + '"></span>'
+        + '<div class="source-copy"><strong>' + esc(row.display_name || row.channel)
+        + '</strong><span>' + esc(detail) + '</span></div>'
+        + '<span class="source-state">' + esc(status) + '</span></div>';
+    }).join("")
+    : '<div class="source-empty">No marketplace source is connected yet.</div>';
+}
+
+function todayWorkRow(row) {
+  return '<div class="work-row work-' + esc(row.kind || "general") + '">'
+    + '<div class="work-copy"><div class="work-heading"><span class="work-kind">'
+    + esc((row.kind || "task").replaceAll("_", " ")) + '</span><strong>' + esc(row.title)
+    + '</strong></div><p>' + esc(row.detail || "") + '</p></div>'
+    + '<div class="actions compact">' + todayWorkControls(row) + "</div></div>";
+}
+
 function renderTodayWorkQueue(rows, total) {
   const queue = Array.isArray(rows) ? rows : [];
+  const visible = state.todayShowAll ? queue : queue.slice(0, 12);
   $("#today-work-count").textContent = total
     ? total + " task" + (total === 1 ? "" : "s")
     : "Clear";
 
-  $("#today-actions").innerHTML = queue.length
-    ? queue.map((row) =>
-      '<div class="work-row work-' + esc(row.kind || "general") + '">'
-      + '<div class="work-copy"><div class="work-heading"><span class="work-kind">'
-      + esc((row.kind || "task").replaceAll("_", " ")) + '</span><strong>' + esc(row.title)
-      + '</strong></div><p>' + esc(row.detail || "") + '</p></div>'
-      + '<div class="actions compact">' + todayWorkControls(row) + "</div></div>"
-    ).join("")
-    : '<div class="today-clear"><strong>You are caught up.</strong><span>No reseller task needs attention right now.</span></div>';
+  if (!queue.length) {
+    $("#today-actions").innerHTML =
+      '<div class="today-clear"><strong>You are caught up.</strong><span>No reseller task needs attention right now.</span></div>';
+  } else {
+    const definitions = [
+      ["urgent", "Urgent"],
+      ["attention", "Needs attention"],
+      ["opportunity", "Opportunities"],
+    ];
+    let html = definitions.map(([band, label]) => {
+      const fullGroup = queue.filter((row) => todayPriorityBand(row) === band);
+      const group = visible.filter((row) => todayPriorityBand(row) === band);
+      if (!group.length) return "";
+      return '<div class="work-group"><div class="work-group-title"><span>' + esc(label)
+        + '</span><span>' + fullGroup.length + '</span></div>'
+        + group.map(todayWorkRow).join("") + "</div>";
+    }).join("");
+    if (!state.todayShowAll && queue.length > visible.length) {
+      html += '<div class="work-more"><button id="today-show-all" class="btn" type="button">Show all '
+        + queue.length + " tasks</button></div>";
+    } else if (state.todayShowAll && queue.length > 12) {
+      html += '<div class="work-more"><button id="today-show-less" class="btn" type="button">Show top 12</button></div>';
+    }
+    $("#today-actions").innerHTML = html;
+  }
 
   $$(".today-nav").forEach((button) => {
     button.onclick = async () => {
@@ -520,6 +629,21 @@ function renderTodayWorkQueue(rows, total) {
       }
     };
   });
+  const showAll = $("#today-show-all");
+  if (showAll) {
+    showAll.onclick = () => {
+      state.todayShowAll = true;
+      renderTodayWorkQueue(state.todayQueue, state.todayQueue.length);
+    };
+  }
+  const showLess = $("#today-show-less");
+  if (showLess) {
+    showLess.onclick = () => {
+      state.todayShowAll = false;
+      renderTodayWorkQueue(state.todayQueue, state.todayQueue.length);
+      $(".today-work")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  }
   bindCrossChannelButtons(today);
 }
 
@@ -575,6 +699,16 @@ $("#onboarding-finish").onclick = async () => {
 $("#onboarding-import").onclick = () => selectView("imports");
 $("#onboarding-connect").onclick = () => selectView("connections");
 $("#onboarding-reconcile").onclick = () => selectView("reconcile");
+
+$$(".today-shortcut").forEach((button) => {
+  button.onclick = async () => {
+    await selectView(button.dataset.view);
+    if (button.dataset.action === "quick-listing") {
+      $("#quick-listing")?.click();
+    }
+  };
+});
+$("#today-open-connections").onclick = () => selectView("connections");
 
 function crossChannelActionControls(row) {
   const open = row.listing?.url
@@ -637,6 +771,8 @@ async function inventory() {
     if (costFilter === "recorded") return item.cost_cents != null;
     return true;
   });
+  $("#inventory-count").textContent = visibleItems.length
+    + " shown" + (visibleItems.length !== state.inventoryItems.length ? " of " + state.inventoryItems.length : "");
 
   $("#inventory-table").innerHTML = visibleItems.length
     ? '<table><thead><tr><th><input id="inventory-select-all" type="checkbox" aria-label="Select all"></th><th>Item</th><th>SKU</th><th>Category</th><th>Qty</th><th>Location</th><th>Cost</th><th>Ask</th><th>Margin</th><th>Channels</th><th>Status</th><th></th></tr></thead><tbody>'
@@ -722,6 +858,12 @@ $("#bulk-form").onsubmit = async (event) => {
 $("#inventory-q").oninput = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-status").onchange = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-cost").onchange = () => inventory().catch((error) => flash(error.message, true));
+$("#inventory-reset").onclick = () => {
+  $("#inventory-q").value = "";
+  $("#inventory-status").value = "";
+  $("#inventory-cost").value = "";
+  inventory().catch((error) => flash(error.message, true));
+};
 function clearQuickPhotoUrls() {
   state.quickPhotoUrls.forEach((url) => URL.revokeObjectURL(url));
   state.quickPhotoUrls = [];
@@ -1647,6 +1789,13 @@ function renderSales() {
   $(selector).addEventListener("change", renderSales);
 });
 $("#sales-search").addEventListener("input", renderSales);
+$("#sales-reset").onclick = () => {
+  $("#sales-direction").value = "sell";
+  $("#sales-state").value = "";
+  $("#sales-channel").value = "";
+  $("#sales-search").value = "";
+  renderSales();
+};
 
 function seriesChart(target, points, valueKey, { moneyValues = false } = {}) {
   const element = $(target);

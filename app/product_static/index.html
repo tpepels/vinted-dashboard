@@ -34,16 +34,22 @@
   <div id="shell" class="shell hidden">
     <aside>
       <div class="brand"><strong id="app-name">Reseller Dashboard</strong><small id="workspace-name"></small></div>
-      <nav>
-        <button class="nav active" data-view="today">Today</button>
-        <button class="nav" data-view="inventory">Inventory</button>
-        <button class="nav" data-view="reconcile">Reconcile</button>
-        <button class="nav" data-view="listings">Listings</button>
-        <button class="nav" data-view="sales">Sales</button>
-        <button class="nav" data-view="analytics">Analytics</button>
-        <button class="nav" data-view="imports">Import / Export</button>
-        <button class="nav" data-view="connections">Connections</button>
-        <button class="nav" data-view="settings">Settings</button>
+      <nav aria-label="Workspace">
+        <div class="nav-group">
+          <span class="nav-label">Work</span>
+          <button class="nav active" data-view="today">Today</button>
+          <button class="nav" data-view="inventory">Inventory</button>
+          <button class="nav" data-view="listings">Listings</button>
+          <button class="nav" data-view="sales">Sales</button>
+          <button class="nav" data-view="analytics">Analytics</button>
+        </div>
+        <div class="nav-group">
+          <span class="nav-label">Operations</span>
+          <button class="nav" data-view="reconcile">Reconcile</button>
+          <button class="nav" data-view="imports">Import / Export</button>
+          <button class="nav" data-view="connections">Connections</button>
+          <button class="nav" data-view="settings">Settings</button>
+        </div>
       </nav>
       <footer><a href="/privacy">Privacy</a><button id="logout" class="link">Sign out</button></footer>
     </aside>
@@ -70,18 +76,39 @@
             <button id="onboarding-reconcile" class="btn" type="button">Review matches</button>
           </div>
         </div>
-        <div id="today-metrics" class="metrics"></div>
-        <div class="card today-work">
-          <div class="card-head inline-head">
-            <div><p class="eyebrow">PRIORITY</p><h2>Today's work</h2></div>
-            <span id="today-work-count" class="muted"></span>
+        <div class="card today-command">
+          <div class="today-command-copy">
+            <p class="eyebrow">COMMAND CENTER</p>
+            <h2 id="today-focus-title">Loading today...</h2>
+            <p id="today-focus-detail" class="muted"></p>
           </div>
-          <div id="today-actions"></div>
+          <div class="today-command-actions">
+            <button class="btn primary today-shortcut" type="button" data-view="inventory" data-action="quick-listing">Create listing</button>
+            <button class="btn today-shortcut" type="button" data-view="reconcile">Reconcile stock</button>
+            <button class="btn today-shortcut" type="button" data-view="connections">Check sources</button>
+          </div>
+        </div>
+        <div id="today-metrics" class="metrics"></div>
+        <div class="today-layout">
+          <div class="card today-work">
+            <div class="card-head inline-head">
+              <div><p class="eyebrow">PRIORITY</p><h2>Today's work</h2></div>
+              <span id="today-work-count" class="muted"></span>
+            </div>
+            <div id="today-actions"></div>
+          </div>
+          <div class="card today-sources">
+            <div class="card-head inline-head">
+              <div><p class="eyebrow">SOURCES</p><h2>Data freshness</h2></div>
+              <button id="today-open-connections" class="btn" type="button">Manage</button>
+            </div>
+            <div id="today-source-status"></div>
+          </div>
         </div>
       </section>
 
       <section id="inventory" class="view">
-        <div class="toolbar"><input id="inventory-q" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><select id="inventory-cost" aria-label="Acquisition cost"><option value="">All costs</option><option value="missing">Missing cost</option><option value="recorded">Cost recorded</option></select><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="quick-listing" class="btn primary" type="button">Quick listing</button><button id="add-item" class="btn" type="button">Add item</button></div>
+        <div class="toolbar standard-toolbar"><input id="inventory-q" class="search" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><select id="inventory-cost" aria-label="Acquisition cost"><option value="">All costs</option><option value="missing">Missing cost</option><option value="recorded">Cost recorded</option></select><span id="inventory-count" class="toolbar-count"></span><button id="inventory-reset" class="btn" type="button">Reset</button><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="quick-listing" class="btn primary" type="button">Quick listing</button><button id="add-item" class="btn" type="button">Add item</button></div>
         <form id="bulk-form" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">BULK EDIT</p><h2>Edit selected inventory</h2></div><button id="cancel-bulk" class="btn" type="button">Cancel</button></div>
           <p class="muted">Only non-empty fields below are changed. Existing values in blank fields are left alone.</p>
@@ -275,7 +302,7 @@
           <p class="muted">Unique exact-title purchase matches are suggested only. The order amount is prefilled as a cost candidate, but edit it before applying if Vinted's amount includes shipping, buyer protection or anything else you do not want in stock cost.</p>
           <div id="purchase-cost-suggestions"></div>
         </div>
-        <div class="toolbar">
+        <div class="toolbar standard-toolbar">
           <select id="sales-direction" aria-label="Order direction">
             <option value="sell" selected>Sales</option>
             <option value="buy">Purchases</option>
@@ -290,10 +317,11 @@
             <option value="">All marketplaces</option>
             <option value="vinted">Vinted</option>
             <option value="ebay">eBay</option>
-            <option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option>
+            <option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option><option value="shopify">Shopify</option><option value="bigcommerce">BigCommerce</option><option value="squarespace">Squarespace</option><option value="wix">Wix</option><option value="depop">Depop</option>
           </select>
-          <input id="sales-search" placeholder="Search order or person">
+          <input id="sales-search" class="search" placeholder="Search order or person">
           <span id="sales-count" class="toolbar-count"></span>
+          <button id="sales-reset" class="btn" type="button">Reset</button>
         </div>
         <div id="sales-table" class="card table-wrap"></div>
       </section>

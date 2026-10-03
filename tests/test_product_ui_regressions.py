@@ -133,8 +133,8 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert '<option value="shopify">Shopify</option>' in html
     assert '<option value="bigcommerce">BigCommerce</option>' in html
     assert '<option value="squarespace">Squarespace</option>' in html
-    assert html.count('<option value="wix">Wix</option>') == 2
-    assert html.count('<option value="depop">Depop</option>') == 2
+    assert html.count('<option value="wix">Wix</option>') == 3
+    assert html.count('<option value="depop">Depop</option>') == 3
     assert 'id="test-connector"' in html
     assert "etsy: {" in APP_JS
     assert "woocommerce: {" in APP_JS
@@ -154,6 +154,16 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert "Squarespace Commerce APIs" in APP_JS
     assert "Catalog V3, Inventory V3 and Orders" in APP_JS
     assert "Private Depop Selling API" in APP_JS
+    assert '<span class="nav-label">Work</span>' in html
+    assert '<span class="nav-label">Operations</span>' in html
+    assert 'id="today-focus-title"' in html
+    assert 'id="today-source-status"' in html
+    assert 'id="inventory-reset"' in html
+    assert 'id="sales-reset"' in html
+    assert "function todayPriorityBand" in APP_JS
+    assert 'api("/api/app/connectors")' in APP_JS
+    assert "function renderTodaySourceStatus" in APP_JS
+    assert "Show all " in APP_JS
 
 
 
