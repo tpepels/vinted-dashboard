@@ -1139,8 +1139,8 @@ async function enrichStockRow(localId) {
 
     const metadata = data.metadata || {};
     const titleParts = [metadata.title, metadata.subtitle].filter(Boolean);
-    row.category = data.kind === "isbn" ? "book" : row.category || "general";
-    row.isbn = data.isbn || row.isbn || null;
+    row.category = data.kind === "isbn" ? "book" : "general";
+    row.isbn = data.isbn || null;
     if (!String(row.title || "").trim() && titleParts.length) row.title = titleParts.join(": ");
     row.author = metadata.author || row.author || null;
     row.publisher = metadata.publisher || row.publisher || null;
@@ -1275,32 +1275,35 @@ async function barcodeCameraTick() {
   if (!video || video.readyState < 2) return;
   state.barcodeBusy = true;
   try {
-    let found = [];
     if (state.barcodeDetector) {
+      let found = [];
       try {
         found = await state.barcodeDetector.detect(video);
       } catch {
         state.barcodeDetector = null;
       }
-    }
-    if (found.length) {
-      state.barcodeMisses = 0;
-      const first = found[0];
-      acceptCameraBarcode(first.rawValue, first.format || "camera");
-      $("#stock-camera-status").textContent = "Captured. Move to the next barcode.";
-      return;
+      if (found.length) {
+        state.barcodeMisses = 0;
+        const first = found[0];
+        acceptCameraBarcode(first.rawValue, first.format || "camera");
+        $("#stock-camera-status").textContent = "Captured. Move to the next barcode.";
+        return;
+      }
+      noteCameraBarcodeMiss();
+      state.barcodeMisses += 1;
+      if (state.barcodeMisses < 3) return;
+    } else {
+      state.barcodeMisses += 1;
+      if (state.barcodeMisses < 2) return;
     }
 
-    state.barcodeMisses += 1;
-    noteCameraBarcodeMiss();
-    const fallbackAfter = state.barcodeDetector ? 3 : 2;
-    if (state.barcodeMisses >= fallbackAfter) {
-      state.barcodeMisses = 0;
-      const decoded = await captureBarcodeFrame();
-      if (decoded.length) {
-        acceptCameraBarcode(decoded[0].code, decoded[0].format || "camera");
-        $("#stock-camera-status").textContent = "Captured. Move to the next barcode.";
-      }
+    state.barcodeMisses = 0;
+    const decoded = await captureBarcodeFrame();
+    if (decoded.length) {
+      acceptCameraBarcode(decoded[0].code, decoded[0].format || "camera");
+      $("#stock-camera-status").textContent = "Captured. Move to the next barcode.";
+    } else if (!state.barcodeDetector) {
+      noteCameraBarcodeMiss();
     }
   } catch (error) {
     $("#stock-camera-status").textContent = error.message;
