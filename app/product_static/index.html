@@ -71,7 +71,7 @@
             <div id="onboarding-steps" class="onboarding-steps"></div>
           </div>
           <div class="actions">
-            <button id="onboarding-import" class="btn primary" type="button">Import stock</button>
+            <button id="onboarding-import" class="btn primary" type="button">Add stock</button>
             <button id="onboarding-connect" class="btn" type="button">Connect marketplace</button>
             <button id="onboarding-reconcile" class="btn" type="button">Review matches</button>
           </div>
@@ -83,7 +83,7 @@
             <p id="today-focus-detail" class="muted"></p>
           </div>
           <div class="today-command-actions">
-            <button class="btn primary today-shortcut" type="button" data-view="inventory" data-action="quick-listing">Create listing</button>
+            <button class="btn primary today-shortcut" type="button" data-view="inventory" data-action="add-stock">Add stock</button>
             <button class="btn today-shortcut" type="button" data-view="reconcile">Reconcile stock</button>
             <button class="btn today-shortcut" type="button" data-view="connections">Check sources</button>
           </div>
@@ -108,7 +108,70 @@
       </section>
 
       <section id="inventory" class="view">
-        <div class="toolbar standard-toolbar"><input id="inventory-q" class="search" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><select id="inventory-cost" aria-label="Acquisition cost"><option value="">All costs</option><option value="missing">Missing cost</option><option value="recorded">Cost recorded</option></select><span id="inventory-count" class="toolbar-count"></span><button id="inventory-reset" class="btn" type="button">Reset</button><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="quick-listing" class="btn primary" type="button">Quick listing</button><button id="add-item" class="btn" type="button">Add item</button></div>
+        <div class="toolbar standard-toolbar"><input id="inventory-q" class="search" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><select id="inventory-cost" aria-label="Acquisition cost"><option value="">All costs</option><option value="missing">Missing cost</option><option value="recorded">Cost recorded</option></select><span id="inventory-count" class="toolbar-count"></span><button id="inventory-reset" class="btn" type="button">Reset</button><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="add-stock" class="btn primary" type="button">Add stock</button></div>
+        <div id="stock-intake-panel" class="card form stock-intake hidden">
+          <div class="card-head inline-head">
+            <div><p class="eyebrow">ADD STOCK</p><h2>How is this stock available?</h2></div>
+            <button id="close-stock-intake" class="btn" type="button">Close</button>
+          </div>
+          <div id="stock-intake-choices" class="stock-intake-choices">
+            <button id="stock-choice-scan" class="stock-choice" type="button"><strong>Scan barcodes</strong><span>USB/Bluetooth scanner, phone camera or barcode photo</span></button>
+            <button id="stock-choice-photo" class="stock-choice" type="button"><strong>Photograph item</strong><span>Analyze photos and prepare one listing</span></button>
+            <button id="stock-choice-import" class="stock-choice" type="button"><strong>Import file</strong><span>CSV, TSV or Excel inventory</span></button>
+            <button id="stock-choice-connect" class="stock-choice" type="button"><strong>Connect marketplace</strong><span>Build stock from existing online listings</span></button>
+            <button id="stock-choice-manual" class="stock-choice" type="button"><strong>Add manually</strong><span>Create one master inventory item</span></button>
+          </div>
+
+          <div id="stock-scan-workspace" class="stock-scan hidden">
+            <div class="stock-scan-top">
+              <div>
+                <p class="eyebrow">BARCODE INTAKE</p>
+                <h3>Scan physical stock</h3>
+                <p class="muted">A keyboard-style scanner can type directly below and press Enter. On a phone, use the camera. ISBNs are enriched automatically.</p>
+              </div>
+              <button id="stock-back-choices" class="btn" type="button">Other intake method</button>
+            </div>
+
+            <div class="stock-defaults">
+              <label>Current location<input id="stock-default-location" placeholder="BOX-17"></label>
+              <label>Condition<input id="stock-default-condition" placeholder="Good"></label>
+              <label>Cost each<input id="stock-default-cost" type="number" min="0" step="0.01" placeholder="0.00"></label>
+              <label>Asking price<input id="stock-default-price" type="number" min="0" step="0.01" placeholder="Optional"></label>
+              <label>Currency<input id="stock-default-currency" maxlength="3" value="EUR"></label>
+            </div>
+            <p class="muted stock-location-help">Location QR codes can contain <code>RDLOC:BOX-17</code>. Scanning one changes the current location instead of adding an item.</p>
+
+            <div class="stock-reader">
+              <label class="stock-reader-input">Barcode / ISBN
+                <input id="stock-barcode-input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scan here or type a code">
+              </label>
+              <div class="actions compact">
+                <button id="stock-barcode-submit" class="btn primary" type="button">Add code</button>
+                <button id="stock-start-camera" class="btn" type="button">Use camera</button>
+                <button id="stock-stop-camera" class="btn hidden" type="button">Stop camera</button>
+                <label class="btn stock-image-label">Scan photo<input id="stock-barcode-image" class="hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment"></label>
+              </div>
+              <span id="stock-scan-status" class="muted"></span>
+            </div>
+
+            <div id="stock-camera-box" class="stock-camera hidden">
+              <video id="stock-barcode-video" autoplay muted playsinline></video>
+              <canvas id="stock-barcode-canvas" class="hidden"></canvas>
+              <div class="stock-camera-guide" aria-hidden="true"></div>
+              <p id="stock-camera-status" class="muted">Point the rear camera at one barcode.</p>
+            </div>
+
+            <div class="stock-queue-head">
+              <div><p class="eyebrow">BATCH</p><h3>Scanned items</h3></div>
+              <span id="stock-queue-count" class="muted">0 items</span>
+            </div>
+            <div id="stock-intake-queue" class="stock-intake-queue"><div class="empty">Scan a barcode to start the batch.</div></div>
+            <div class="actions stock-create-actions">
+              <button id="stock-clear-batch" class="btn" type="button" disabled>Clear</button>
+              <button id="stock-create-batch" class="btn primary" type="button" disabled>Create stock items</button>
+            </div>
+          </div>
+        </div>
         <form id="bulk-form" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">BULK EDIT</p><h2>Edit selected inventory</h2></div><button id="cancel-bulk" class="btn" type="button">Cancel</button></div>
           <p class="muted">Only non-empty fields below are changed. Existing values in blank fields are left alone.</p>

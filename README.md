@@ -58,13 +58,31 @@ Books can carry ISBN, author, publisher, edition, binding and publication year.
 Clothing can carry brand, size, colour, material and measurements. Marketplace
 records are linked underneath the same physical item.
 
-The **Quick listing** workflow can create a master inventory item from a compact
-review form. With the optional photo assistant enabled, the user explicitly
-selects product photos and clicks Analyze; the server suggests visible facts,
-title and description, then the UI asks for the remaining category-specific
-measurements and asking price. Selected photo bytes are not persisted by the
-dashboard. The final Vinted step is a manual handoff: the product does not
-publish, relist, like or message on the user's behalf.
+The **Add stock** workflow is the primary intake entry point. It routes sellers
+to barcode scanning, photo-assisted intake, file import, marketplace sync or a
+manual single-item form.
+
+Barcode intake supports keyboard-style USB/Bluetooth scanners, a live phone or
+laptop camera, and a captured barcode photo. Browsers with BarcodeDetector use
+it first; camera frames fall back to authenticated server-side ZXing-C++ decode
+so scanning does not depend on BarcodeDetector support. A scan creates one
+physical-copy row in a batch - scanning the same ISBN twice deliberately creates
+two separate master items with separate generated SKUs, condition, cost and
+location.
+
+Valid ISBN-10/13 scans are enriched from Open Library's low-volume ISBN API with
+title, author, publisher, edition/format, year and cover metadata when available.
+The scanned ISBN remains usable when enrichment is unavailable. Scanning a QR
+payload such as `RDLOC:BOX-17` changes the current storage location for subsequent
+items instead of creating inventory.
+
+The **Photograph item** path reuses the Quick listing workflow. With the optional
+photo assistant enabled, the user explicitly selects product photos and clicks
+Analyze; the server suggests visible facts, title and description, then the UI
+asks for the remaining category-specific measurements and asking price. Selected
+photo bytes are not persisted by the dashboard. The final Vinted step is still a
+manual handoff for ordinary accounts: the product does not publish, relist, like
+or message on the user's behalf.
 
 All commercial data is workspace-scoped. Users may belong to multiple
 workspaces; API access checks membership before exposing or mutating inventory.
