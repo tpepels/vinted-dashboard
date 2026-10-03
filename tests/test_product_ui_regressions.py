@@ -208,7 +208,8 @@ def test_barcode_camera_has_native_detection_and_server_fallback():
     assert 'api("/api/app/stock-intake/barcode/decode"' in APP_JS
     assert 'api("/api/app/stock-intake/barcode/lookup"' in APP_JS
     assert "captureBarcodeFrame()" in APP_JS
-    assert "const fallbackAfter = state.barcodeDetector ? 3 : 2;" in APP_JS
+    assert "state.barcodeMisses < 3" in APP_JS
+    assert "state.barcodeMisses < 2" in APP_JS
     assert 'if (view !== "inventory" && state.barcodeStream) stopBarcodeCamera();' in APP_JS
 
 
@@ -216,7 +217,7 @@ def test_scanned_batch_keeps_each_physical_copy_separate():
     assert "state.stockIntakeQueue.push({" in APP_JS
     assert 'api("/api/app/stock-intake/items"' in APP_JS
     assert "existing_copy_count" in APP_JS
-    assert "Every scanned item needs a title" in APP_JS
+    assert "const readyRows = state.stockIntakeQueue.filter(stockRowReady);" in APP_JS
     assert "stockLocalId()" in APP_JS
 
 
