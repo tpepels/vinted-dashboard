@@ -717,6 +717,22 @@ def listings(
         rows = session.execute(
             query.order_by(models.ChannelListing.first_seen_at.desc()).limit(5000)
         ).all()
+        linked_item_ids = {
+            listing.inventory_item_id
+            for listing, _snapshot in rows
+            if listing.inventory_item_id is not None
+        }
+        linked_items = (
+            session.execute(
+                select(models.InventoryItem).where(
+                    models.InventoryItem.workspace_id == context.workspace.id,
+                    models.InventoryItem.id.in_(linked_item_ids),
+                )
+            ).scalars().all()
+            if linked_item_ids
+            else []
+        )
+        item_category_by_id = {item.id: item.category for item in linked_items}
 
     result = []
     for listing, snapshot in rows:
@@ -731,6 +747,11 @@ def listings(
                 "id": str(listing.id),
                 "inventory_item_id": (
                     str(listing.inventory_item_id) if listing.inventory_item_id else None
+                ),
+                "inventory_category": (
+                    item_category_by_id.get(listing.inventory_item_id)
+                    if listing.inventory_item_id
+                    else None
                 ),
                 "channel": listing.channel,
                 "external_id": listing.external_id,
