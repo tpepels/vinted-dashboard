@@ -23,7 +23,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
-from app import billing, db, jobs, listing_assistant, models
+from app import billing, db, jobs, listing_assistant, models, stock_intake
 from app.channels import parse_biblio_inventory
 from app.auth import (
     RequestContext,
@@ -209,6 +209,35 @@ class QuickListingCreateRequest(BaseModel):
     notes: str | None = None
     photo_count: int = 0
     analysis_used: bool = False
+
+
+class BarcodeLookupRequest(BaseModel):
+    code: str
+
+
+class StockIntakeItemRequest(BaseModel):
+    sku: str | None = None
+    barcode: str | None = None
+    barcode_format: str | None = None
+    title: str
+    category: str = ItemCategory.GENERAL
+    condition: str | None = None
+    cost_cents: int | None = Field(default=None, ge=0)
+    price_cents: int | None = Field(default=None, ge=0)
+    currency: str = "EUR"
+    location: str | None = None
+    notes: str | None = None
+    author: str | None = None
+    isbn: str | None = None
+    publisher: str | None = None
+    edition: str | None = None
+    publication_year: int | None = None
+    cover_url: str | None = None
+    source_url: str | None = None
+
+
+class StockIntakeBatchRequest(BaseModel):
+    items: list[StockIntakeItemRequest] = Field(min_length=1, max_length=100)
 
 
 class OnboardingRequest(BaseModel):
@@ -788,6 +817,169 @@ def listing_assistant_create(
         "item": result,
         "listing_package": package,
     }
+
+
+@router.post("/api/app/stock-intake/barcode/decode")
+async def stock_intake_barcode_decode(
+    image: UploadFile = File(...),
+    context: RequestContext = Depends(require_context),
+):
+    rate_limiter.check(
+        f"barcode-decode:{context.user.id}",
+        limit=180,
+        window_seconds=900,
+    )
+    body = await image.read(stock_intake.MAX_BARCODE_IMAGE_BYTES + 1)
+    try:
+        barcodes = stock_intake.decode_barcode_image(
+            str(image.content_type or ""),
+            body,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"barcodes": barcodes, "count": len(barcodes)}
+
+
+@router.post("/api/app/stock-intake/barcode/lookup")
+def stock_intake_barcode_lookup(
+    payload: BarcodeLookupRequest,
+    context: RequestContext = Depends(require_context),
+):
+    rate_limiter.check(
+        f"barcode-lookup:{context.user.id}",
+        limit=240,
+        window_seconds=900,
+    )
+    info = stock_intake.classify_barcode(payload.code)
+    if not info["code"]:
+        raise HTTPException(status_code=400, detail="Barcode is empty")
+
+    metadata = None
+    warning = None
+    if info["kind"] == "isbn":
+        try:
+            metadata = stock_intake.lookup_isbn(str(info["isbn"]))
+        except (ValueError, RuntimeError) as exc:
+            warning = str(exc)
+
+    existing: list[dict[str, Any]] = []
+    isbn = str(info.get("isbn") or "").strip()
+    if isbn:
+        with db.session_scope() as session:
+            rows = session.execute(
+                select(models.InventoryItem).where(
+                    models.InventoryItem.workspace_id == context.workspace.id,
+                    models.InventoryItem.category == ItemCategory.BOOK,
+                )
+            ).scalars().all()
+            for row in rows:
+                attributes = dict(row.attributes or {})
+                if stock_intake.normalize_barcode(attributes.get("isbn")) != isbn:
+                    continue
+                existing.append(
+                    {
+                        "id": str(row.id),
+                        "sku": row.sku,
+                        "title": row.title,
+                        "condition": row.condition,
+                        "location": row.location,
+                        "status": row.status,
+                    }
+                )
+
+    return {
+        **info,
+        "metadata": metadata,
+        "metadata_warning": warning,
+        "existing_copies": existing,
+        "existing_copy_count": len(existing),
+    }
+
+
+@router.post("/api/app/stock-intake/items")
+def stock_intake_create_items(
+    payload: StockIntakeBatchRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    created: list[dict[str, Any]] = []
+    try:
+        with db.session_scope() as session:
+            for incoming in payload.items:
+                values = incoming.model_dump()
+                title = str(values.get("title") or "").strip()
+                if not title:
+                    raise ValueError("Every stock item needs a title")
+                category = str(values.get("category") or ItemCategory.GENERAL).strip().lower()
+                if category not in KNOWN_ITEM_CATEGORIES:
+                    raise ValueError(f"Unknown item category: {category}")
+                currency = str(values.get("currency") or "EUR").strip().upper()
+                if len(currency) != 3 or not currency.isalpha():
+                    raise ValueError("Currency must be a 3-letter code")
+                sku = str(values.get("sku") or "").strip() or listing_assistant.auto_sku(
+                    session,
+                    context.workspace.id,
+                    category,
+                )
+                duplicate = session.execute(
+                    select(models.InventoryItem.id).where(
+                        models.InventoryItem.workspace_id == context.workspace.id,
+                        models.InventoryItem.sku == sku,
+                    )
+                ).scalar_one_or_none()
+                if duplicate is not None:
+                    raise ValueError(f"SKU already exists: {sku}")
+
+                attributes: dict[str, Any] = {
+                    "stock_intake_source": "barcode_scan",
+                }
+                barcode = stock_intake.normalize_barcode(values.get("barcode"))
+                if barcode:
+                    attributes["barcode"] = barcode
+                barcode_format = str(values.get("barcode_format") or "").strip()
+                if barcode_format:
+                    attributes["barcode_format"] = barcode_format
+                for key in (
+                    "author",
+                    "publisher",
+                    "edition",
+                    "cover_url",
+                    "source_url",
+                ):
+                    value = values.get(key)
+                    if value not in (None, ""):
+                        attributes[key] = value
+                if values.get("publication_year") is not None:
+                    attributes["publication_year"] = int(values["publication_year"])
+                isbn = stock_intake.normalize_barcode(values.get("isbn"))
+                if isbn:
+                    attributes["isbn"] = isbn
+                if values.get("price_cents") is not None:
+                    attributes["default_price_cents"] = int(values["price_cents"])
+
+                item = models.InventoryItem(
+                    workspace_id=context.workspace.id,
+                    sku=sku,
+                    title=title,
+                    category=category,
+                    quantity=1,
+                    condition=str(values.get("condition") or "").strip() or None,
+                    cost_cents=(
+                        int(values["cost_cents"])
+                        if values.get("cost_cents") is not None
+                        else None
+                    ),
+                    currency=currency,
+                    location=str(values.get("location") or "").strip() or None,
+                    notes=str(values.get("notes") or "").strip() or None,
+                    status=ItemStatus.ACTIVE,
+                    attributes=attributes,
+                )
+                session.add(item)
+                session.flush()
+                created.append(_serialize_item(item, []))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "created": created, "count": len(created)}
 
 
 @router.post("/api/app/inventory")
