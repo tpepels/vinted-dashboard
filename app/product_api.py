@@ -826,7 +826,7 @@ async def stock_intake_barcode_decode(
 ):
     rate_limiter.check(
         f"barcode-decode:{context.user.id}",
-        limit=180,
+        limit=1200,
         window_seconds=900,
     )
     body = await image.read(stock_intake.MAX_BARCODE_IMAGE_BYTES + 1)
