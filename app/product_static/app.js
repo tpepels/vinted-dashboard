@@ -1431,7 +1431,7 @@ async function startBarcodeCamera() {
     $("#stock-camera-status").textContent = state.barcodeDetector
       ? "Camera ready. Scan continuously."
       : "Camera ready. Server decode fallback is active.";
-    state.barcodeTimer = window.setInterval(barcodeCameraTick, 350);
+    state.barcodeTimer = window.setInterval(barcodeCameraTick, 400);
   } catch (error) {
     $("#stock-camera-box").classList.remove("hidden");
     $("#stock-camera-status").textContent = "Could not open the camera: " + error.message;
