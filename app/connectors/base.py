@@ -90,6 +90,7 @@ CONNECTORS: dict[str, ConnectorInfo] = {
             Capability.IMPORT_INVENTORY,
             Capability.EXPORT_INVENTORY,
             Capability.SYNC_INVENTORY,
+            Capability.CREATE_LISTING,
         }),
     ),
     Channel.ETSY: ConnectorInfo(

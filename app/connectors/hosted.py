@@ -2663,7 +2663,7 @@ def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
 
 
 def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
-    values = _credentials(workspace_id, Channel.BIBLIO)
+    values = _workspace_or_env_biblio_values(workspace_id)
     active, deletes = _biblio_rows(workspace_id)
     incomplete = [(row, _missing_biblio(row)) for row in active if _missing_biblio(row)]
     if incomplete:

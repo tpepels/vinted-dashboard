@@ -33,10 +33,9 @@ def handle(job: dict) -> None:
                     )
     if job_type == "biblio_sync":
         if workspace_id is not None:
-            from app.connectors.hosted import has_credentials, sync_biblio_workspace
-            if has_credentials(workspace_id, "biblio"):
-                sync_biblio_workspace(workspace_id)
-                return
+            from app.connectors.hosted import sync_biblio_workspace
+            sync_biblio_workspace(workspace_id)
+            return
         from app.channels import sync_biblio_ftp
         sync_biblio_ftp()
         return
