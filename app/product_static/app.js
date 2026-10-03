@@ -415,6 +415,7 @@ $$(".nav").forEach((button) => {
 });
 
 async function selectView(view) {
+  if (view !== "inventory" && state.barcodeStream) stopBarcodeCamera();
   state.view = view;
   $$(".nav").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === view));
@@ -981,7 +982,8 @@ async function barcodeCameraTick() {
     }
 
     state.barcodeMisses += 1;
-    if (!state.barcodeDetector || state.barcodeMisses >= 3) {
+    const fallbackAfter = state.barcodeDetector ? 3 : 2;
+    if (state.barcodeMisses >= fallbackAfter) {
       state.barcodeMisses = 0;
       const decoded = await captureBarcodeFrame();
       if (decoded.length) {
