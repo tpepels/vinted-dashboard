@@ -572,7 +572,10 @@ $("#onboarding-finish").onclick = async () => {
   }
 };
 
-$("#onboarding-import").onclick = () => selectView("imports");
+$("#onboarding-import").onclick = async () => {
+  await selectView("inventory");
+  openStockIntake();
+};
 $("#onboarding-connect").onclick = () => selectView("connections");
 $("#onboarding-reconcile").onclick = () => selectView("reconcile");
 
@@ -722,6 +725,375 @@ $("#bulk-form").onsubmit = async (event) => {
 $("#inventory-q").oninput = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-status").onchange = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-cost").onchange = () => inventory().catch((error) => flash(error.message, true));
+
+function stockIntakeDefaults() {
+  return {
+    location: String($("#stock-default-location")?.value || "").trim(),
+    condition: String($("#stock-default-condition")?.value || "").trim(),
+    cost: String($("#stock-default-cost")?.value || "").trim(),
+    price: String($("#stock-default-price")?.value || "").trim(),
+    currency: String($("#stock-default-currency")?.value || "EUR").trim().toUpperCase() || "EUR",
+  };
+}
+
+function stockLocalId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return "scan-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+}
+
+function stopBarcodeCamera() {
+  if (state.barcodeTimer) {
+    window.clearInterval(state.barcodeTimer);
+    state.barcodeTimer = null;
+  }
+  if (state.barcodeStream) {
+    state.barcodeStream.getTracks().forEach((track) => track.stop());
+    state.barcodeStream = null;
+  }
+  state.barcodeDetector = null;
+  state.barcodeBusy = false;
+  state.barcodeMisses = 0;
+  const video = $("#stock-barcode-video");
+  if (video) video.srcObject = null;
+  $("#stock-camera-box")?.classList.add("hidden");
+  $("#stock-stop-camera")?.classList.add("hidden");
+  $("#stock-start-camera")?.classList.remove("hidden");
+}
+
+function showStockChoices() {
+  stopBarcodeCamera();
+  $("#stock-intake-choices").classList.remove("hidden");
+  $("#stock-scan-workspace").classList.add("hidden");
+}
+
+function showStockScanner() {
+  $("#stock-intake-choices").classList.add("hidden");
+  $("#stock-scan-workspace").classList.remove("hidden");
+  renderStockIntakeQueue();
+  window.setTimeout(() => $("#stock-barcode-input")?.focus(), 20);
+}
+
+function openStockIntake(mode = "choices") {
+  $("#bulk-form")?.classList.add("hidden");
+  $("#quick-listing-form")?.classList.add("hidden");
+  $("#item-form")?.classList.add("hidden");
+  $("#stock-intake-panel").classList.remove("hidden");
+  if (mode === "scan") showStockScanner();
+  else showStockChoices();
+  $("#stock-intake-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeStockIntake() {
+  stopBarcodeCamera();
+  $("#stock-intake-panel").classList.add("hidden");
+}
+
+function updateStockQueueButtons() {
+  const count = state.stockIntakeQueue.length;
+  $("#stock-queue-count").textContent = count + " item" + (count === 1 ? "" : "s");
+  $("#stock-clear-batch").disabled = count === 0;
+  $("#stock-create-batch").disabled = count === 0
+    || state.stockIntakeQueue.some((row) => !String(row.title || "").trim());
+}
+
+function bindStockQueueInputs() {
+  $(".stock-row-input").forEach((field) => {
+    field.oninput = () => {
+      const index = Number(field.dataset.index);
+      const key = field.dataset.field;
+      if (!Number.isInteger(index) || !state.stockIntakeQueue[index] || !key) return;
+      state.stockIntakeQueue[index][key] = field.value;
+      updateStockQueueButtons();
+    };
+  });
+  $(".stock-row-remove").forEach((button) => {
+    button.onclick = () => {
+      const index = Number(button.dataset.index);
+      if (!Number.isInteger(index)) return;
+      state.stockIntakeQueue.splice(index, 1);
+      renderStockIntakeQueue();
+      $("#stock-barcode-input")?.focus();
+    };
+  });
+}
+
+function renderStockIntakeQueue() {
+  const rows = state.stockIntakeQueue;
+  updateStockQueueButtons();
+  if (!rows.length) {
+    $("#stock-intake-queue").innerHTML = '<div class="empty">Scan a barcode to start the batch.</div>';
+    return;
+  }
+  $("#stock-intake-queue").innerHTML = '<div class="table-wrap"><table class="stock-scan-table"><thead><tr>'
+    + '<th>Item</th><th>Condition</th><th>Cost</th><th>Ask</th><th>Location</th><th></th>'
+    + '</tr></thead><tbody>'
+    + rows.map((row, index) => {
+      const bookBits = [
+        row.isbn ? "ISBN " + row.isbn : row.barcode,
+        row.author,
+        row.publisher,
+      ].filter(Boolean);
+      const duplicate = Number(row.existing_copy_count || 0)
+        ? '<span class="stock-copy-note">' + Number(row.existing_copy_count)
+          + ' existing cop' + (Number(row.existing_copy_count) === 1 ? "y" : "ies") + '</span>'
+        : "";
+      const cover = row.cover_url
+        ? '<img class="stock-cover" src="' + esc(row.cover_url) + '" alt="">'
+        : '<div class="stock-cover placeholder"></div>';
+      return '<tr><td><div class="stock-item-cell">' + cover + '<div>'
+        + '<input class="stock-row-input stock-title-input" data-index="' + index
+        + '" data-field="title" value="' + esc(row.title || "") + '" placeholder="Item title required">'
+        + '<div class="sub">' + esc(bookBits.join(" · ")) + " " + duplicate + '</div></div></div></td>'
+        + '<td><input class="stock-row-input stock-small-input" data-index="' + index
+        + '" data-field="condition" value="' + esc(row.condition || "") + '"></td>'
+        + '<td><input class="stock-row-input stock-money-input" data-index="' + index
+        + '" data-field="cost" type="number" min="0" step="0.01" value="' + esc(row.cost || "") + '"></td>'
+        + '<td><input class="stock-row-input stock-money-input" data-index="' + index
+        + '" data-field="price" type="number" min="0" step="0.01" value="' + esc(row.price || "") + '"></td>'
+        + '<td><input class="stock-row-input stock-small-input" data-index="' + index
+        + '" data-field="location" value="' + esc(row.location || "") + '"></td>'
+        + '<td><button class="btn stock-row-remove" data-index="' + index + '" type="button">Remove</button></td>'
+        + '</tr>';
+    }).join("")
+    + "</tbody></table></div>";
+  bindStockQueueInputs();
+}
+
+function acknowledgeStockScan() {
+  try {
+    if (navigator.vibrate) navigator.vibrate(60);
+  } catch {}
+}
+
+async function addScannedBarcode(code, format = "manual") {
+  const raw = String(code || "").trim();
+  if (!raw) return;
+  const now = Date.now();
+  if (
+    state.stockLastScan
+    && state.stockLastScan.code === raw
+    && now - state.stockLastScan.at < 1800
+  ) {
+    return;
+  }
+  state.stockLastScan = { code: raw, at: now };
+  $("#stock-scan-status").textContent = "Looking up " + raw + "…";
+  try {
+    const data = await api("/api/app/stock-intake/barcode/lookup", {
+      method: "POST",
+      body: JSON.stringify({ code: raw }),
+    });
+    if (data.kind === "location") {
+      $("#stock-default-location").value = data.location || "";
+      $("#stock-scan-status").textContent = "Current location set to " + (data.location || "—") + ".";
+      acknowledgeStockScan();
+      $("#stock-barcode-input").value = "";
+      $("#stock-barcode-input").focus();
+      return;
+    }
+
+    const metadata = data.metadata || {};
+    const defaults = stockIntakeDefaults();
+    const titleParts = [metadata.title, metadata.subtitle].filter(Boolean);
+    state.stockIntakeQueue.push({
+      local_id: stockLocalId(),
+      barcode: data.code,
+      barcode_format: format || "unknown",
+      category: data.kind === "isbn" ? "book" : "general",
+      isbn: data.isbn || null,
+      title: titleParts.join(": "),
+      author: metadata.author || null,
+      publisher: metadata.publisher || null,
+      edition: metadata.edition || null,
+      publication_year: metadata.publication_year || null,
+      cover_url: metadata.cover_url || null,
+      source_url: metadata.source_url || null,
+      condition: defaults.condition,
+      cost: defaults.cost,
+      price: defaults.price,
+      currency: defaults.currency,
+      location: defaults.location,
+      existing_copy_count: Number(data.existing_copy_count || 0),
+    });
+    renderStockIntakeQueue();
+    acknowledgeStockScan();
+    $("#stock-scan-status").textContent = data.metadata_warning
+      ? "Added barcode. Book lookup warning: " + data.metadata_warning
+      : (data.kind === "isbn" && !metadata.found
+        ? "ISBN added, but no Open Library record was found. Enter the title before creating stock."
+        : "Added " + (metadata.title || data.code) + ".");
+  } catch (error) {
+    $("#stock-scan-status").textContent = error.message;
+    flash(error.message, true);
+  } finally {
+    $("#stock-barcode-input").value = "";
+    $("#stock-barcode-input").focus();
+  }
+}
+
+async function decodeBarcodeImage(file) {
+  if (!file) return [];
+  const body = new FormData();
+  body.append("image", file, file.name || "barcode.jpg");
+  const result = await api("/api/app/stock-intake/barcode/decode", {
+    method: "POST",
+    body,
+  });
+  return Array.isArray(result.barcodes) ? result.barcodes : [];
+}
+
+async function captureBarcodeFrame() {
+  const video = $("#stock-barcode-video");
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return [];
+  const canvas = $("#stock-barcode-canvas");
+  const maxWidth = 960;
+  const scale = Math.min(1, maxWidth / video.videoWidth);
+  canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+  canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+  const context = canvas.getContext("2d", { alpha: false });
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72));
+  if (!blob) return [];
+  const file = new File([blob], "camera-barcode.jpg", { type: "image/jpeg" });
+  return decodeBarcodeImage(file);
+}
+
+async function barcodeCameraTick() {
+  if (state.barcodeBusy) return;
+  const video = $("#stock-barcode-video");
+  if (!video || video.readyState < 2) return;
+  state.barcodeBusy = true;
+  try {
+    let found = [];
+    if (state.barcodeDetector) {
+      try {
+        found = await state.barcodeDetector.detect(video);
+      } catch {
+        state.barcodeDetector = null;
+      }
+    }
+    if (found.length) {
+      state.barcodeMisses = 0;
+      const first = found[0];
+      await addScannedBarcode(first.rawValue, first.format || "camera");
+      $("#stock-camera-status").textContent = "Barcode captured. Ready for the next item.";
+      return;
+    }
+
+    state.barcodeMisses += 1;
+    if (!state.barcodeDetector || state.barcodeMisses >= 3) {
+      state.barcodeMisses = 0;
+      const decoded = await captureBarcodeFrame();
+      if (decoded.length) {
+        await addScannedBarcode(decoded[0].code, decoded[0].format || "camera");
+        $("#stock-camera-status").textContent = "Barcode captured. Ready for the next item.";
+      }
+    }
+  } catch (error) {
+    $("#stock-camera-status").textContent = error.message;
+  } finally {
+    state.barcodeBusy = false;
+  }
+}
+
+async function startBarcodeCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    $("#stock-camera-status").textContent = "This browser cannot open a camera. Use Scan photo instead.";
+    $("#stock-camera-box").classList.remove("hidden");
+    return;
+  }
+  stopBarcodeCamera();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
+    state.barcodeStream = stream;
+    const video = $("#stock-barcode-video");
+    video.srcObject = stream;
+    await video.play();
+
+    const Detector = window.BarcodeDetector;
+    if (Detector) {
+      try {
+        const supported = typeof Detector.getSupportedFormats === "function"
+          ? await Detector.getSupportedFormats()
+          : [];
+        const desired = [
+          "ean_13", "ean_8", "upc_a", "upc_e", "code_128", "qr_code",
+        ].filter((format) => !supported.length || supported.includes(format));
+        state.barcodeDetector = desired.length
+          ? new Detector({ formats: desired })
+          : new Detector();
+      } catch {
+        state.barcodeDetector = null;
+      }
+    }
+    $("#stock-camera-box").classList.remove("hidden");
+    $("#stock-start-camera").classList.add("hidden");
+    $("#stock-stop-camera").classList.remove("hidden");
+    $("#stock-camera-status").textContent = state.barcodeDetector
+      ? "Camera ready. Native detection is active with server fallback."
+      : "Camera ready. Frames are decoded securely by the dashboard.";
+    state.barcodeTimer = window.setInterval(barcodeCameraTick, 450);
+  } catch (error) {
+    $("#stock-camera-box").classList.remove("hidden");
+    $("#stock-camera-status").textContent = "Could not open the camera: " + error.message;
+  }
+}
+
+async function createScannedStockBatch() {
+  if (!state.stockIntakeQueue.length) return;
+  const missing = state.stockIntakeQueue.find((row) => !String(row.title || "").trim());
+  if (missing) {
+    flash("Every scanned item needs a title before creating stock.", true);
+    return;
+  }
+  const button = $("#stock-create-batch");
+  button.disabled = true;
+  const items = state.stockIntakeQueue.map((row) => ({
+    barcode: row.barcode || null,
+    barcode_format: row.barcode_format || null,
+    title: String(row.title || "").trim(),
+    category: row.category || "general",
+    condition: String(row.condition || "").trim() || null,
+    cost_cents: String(row.cost || "").trim() === ""
+      ? null
+      : Math.round(Number(row.cost) * 100),
+    price_cents: String(row.price || "").trim() === ""
+      ? null
+      : Math.round(Number(row.price) * 100),
+    currency: String(row.currency || "EUR").trim().toUpperCase(),
+    location: String(row.location || "").trim() || null,
+    author: row.author || null,
+    isbn: row.isbn || null,
+    publisher: row.publisher || null,
+    edition: row.edition || null,
+    publication_year: row.publication_year || null,
+    cover_url: row.cover_url || null,
+    source_url: row.source_url || null,
+  }));
+  try {
+    const result = await api("/api/app/stock-intake/items", {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    });
+    const count = Number(result.count || 0);
+    state.stockIntakeQueue = [];
+    renderStockIntakeQueue();
+    closeStockIntake();
+    await inventory();
+    flash("Created " + count + " stock item" + (count === 1 ? "." : "s."));
+  } catch (error) {
+    flash(error.message, true);
+    updateStockQueueButtons();
+  }
+}
+
 function clearQuickPhotoUrls() {
   state.quickPhotoUrls.forEach((url) => URL.revokeObjectURL(url));
   state.quickPhotoUrls = [];
@@ -883,7 +1255,62 @@ function closeQuickListing() {
   clearQuickPhotoUrls();
 }
 
-$("#quick-listing").onclick = openQuickListing;
+$("#add-stock").onclick = () => openStockIntake();
+$("#close-stock-intake").onclick = closeStockIntake;
+$("#stock-choice-scan").onclick = showStockScanner;
+$("#stock-back-choices").onclick = showStockChoices;
+$("#stock-choice-photo").onclick = () => {
+  closeStockIntake();
+  openQuickListing();
+};
+$("#stock-choice-import").onclick = async () => {
+  closeStockIntake();
+  await selectView("imports");
+};
+$("#stock-choice-connect").onclick = async () => {
+  closeStockIntake();
+  await selectView("connections");
+};
+$("#stock-choice-manual").onclick = () => {
+  closeStockIntake();
+  openItemForm(null);
+};
+$("#stock-barcode-submit").onclick = () => addScannedBarcode($("#stock-barcode-input").value);
+$("#stock-barcode-input").onkeydown = (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  addScannedBarcode(event.currentTarget.value);
+};
+$("#stock-start-camera").onclick = startBarcodeCamera;
+$("#stock-stop-camera").onclick = stopBarcodeCamera;
+$("#stock-barcode-image").onchange = async (event) => {
+  const file = event.currentTarget.files?.[0];
+  if (!file) return;
+  $("#stock-scan-status").textContent = "Reading barcode photo…";
+  try {
+    const decoded = await decodeBarcodeImage(file);
+    if (!decoded.length) {
+      $("#stock-scan-status").textContent = "No barcode found in that photo.";
+      return;
+    }
+    for (const row of decoded) {
+      await addScannedBarcode(row.code, row.format || "photo");
+    }
+  } catch (error) {
+    $("#stock-scan-status").textContent = error.message;
+    flash(error.message, true);
+  } finally {
+    event.currentTarget.value = "";
+  }
+};
+$("#stock-clear-batch").onclick = () => {
+  if (state.stockIntakeQueue.length && !window.confirm("Clear the scanned batch?")) return;
+  state.stockIntakeQueue = [];
+  renderStockIntakeQueue();
+  $("#stock-barcode-input").focus();
+};
+$("#stock-create-batch").onclick = createScannedStockBatch;
+
 $("#cancel-quick-listing").onclick = closeQuickListing;
 $("#quick-photos").onchange = renderQuickPhotos;
 $("#quick-category").onchange = renderQuickRequired;
@@ -1000,7 +1427,6 @@ $("#quick-open-inventory").onclick = () => {
   $("#inventory-table").scrollIntoView({ behavior: "smooth", block: "start" });
 };
 
-$("#add-item").onclick = () => openItemForm(null);
 $("#cancel-item").onclick = closeItemForm;
 
 function categoryFields() {
