@@ -225,6 +225,11 @@ class QuickListingCreateRequest(BaseModel):
 
 class BiblioPublishRequest(BaseModel):
     source_listing_id: uuid.UUID | None = None
+    title: str | None = None
+    author: str | None = None
+    description: str | None = None
+    isbn: str | None = None
+    price_cents: int | None = Field(default=None, ge=0)
 
 
 class BarcodeLookupRequest(BaseModel):
@@ -1166,6 +1171,10 @@ def biblio_publish(
                 source_listing_id=payload.source_listing_id,
                 enrich_isbn=True,
             )
+            overrides = payload.model_dump(exclude_none=True)
+            overrides.pop("source_listing_id", None)
+            if overrides:
+                candidate = publishing.apply_biblio_overrides(candidate, overrides)
             if candidate.get("missing"):
                 raise ValueError(
                     "BIBLIO listing is missing: "
