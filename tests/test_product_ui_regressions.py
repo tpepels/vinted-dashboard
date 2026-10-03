@@ -286,7 +286,7 @@ def test_biblio_cross_listing_is_available_from_inventory_and_vinted_listings():
     assert 'id="biblio-publish-submit"' in html
     assert "function openBiblioPublish(itemId, sourceListingId = null)" in APP_JS
     assert "List on BIBLIO" in APP_JS
-    assert 'row.channel === "vinted" && row.inventory_item_id' in APP_JS
+    assert 'row.channel === "vinted" && row.inventory_item_id && row.inventory_category === "book"' in APP_JS
     assert 'api("/api/app/inventory/" + encodeURIComponent(itemId) + "/publish/biblio"' in APP_JS
 
 
