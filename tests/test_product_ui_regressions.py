@@ -275,3 +275,30 @@ def test_stock_scan_ui_exposes_throughput_controls():
     assert "Scan continuously" in html
     assert "Ctrl/Cmd+Z to undo" in html
     assert "Create ready items" in html
+
+
+
+def test_biblio_cross_listing_is_available_from_inventory_and_vinted_listings():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="biblio-publish-panel"' in html
+    assert 'id="biblio-publish-submit"' in html
+    assert "function openBiblioPublish(itemId, sourceListingId = null)" in APP_JS
+    assert "List on BIBLIO" in APP_JS
+    assert 'row.channel === "vinted" && row.inventory_item_id' in APP_JS
+    assert 'api("/api/app/inventory/" + encodeURIComponent(itemId) + "/publish/biblio"' in APP_JS
+
+
+def test_biblio_preflight_shows_source_and_only_inline_missing_fields():
+    assert "Using the linked <strong>Vinted listing</strong> as the source" in APP_JS
+    assert 'const editableMissing = new Set(["title", "author", "description", "price_cents"]);' in APP_JS
+    assert 'class="biblio-missing-input"' in APP_JS
+    assert 'field_sources' in APP_JS
+    assert "ISBN lookup" in APP_JS
+
+
+def test_biblio_publish_posts_source_listing_and_inline_repairs():
+    assert 'const payload = { source_listing_id: current.sourceListingId || null };' in APP_JS
+    assert 'payload.price_cents = Math.round(Number(value) * 100);' in APP_JS
+    assert 'BIBLIO listing queued for FTP publication.' in APP_JS
