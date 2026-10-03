@@ -812,22 +812,31 @@ function renderBiblioPublish(data) {
   const fields = data.fields || {};
   const sources = data.field_sources || {};
   const rows = [
-    ["Title", fields.title, sources.title],
-    ["Author", fields.author, sources.author],
-    ["Description", fields.description, sources.description],
-    ["ISBN", fields.isbn || "Optional", sources.isbn],
-    ["Price", fields.price_cents == null ? null : money(fields.price_cents, fields.currency), sources.price_cents],
-    ["Book ID", fields.sku, sources.sku],
-    ["Quantity", fields.quantity, sources.quantity],
+    ["title", "Title", fields.title, sources.title],
+    ["author", "Author", fields.author, sources.author],
+    ["description", "Description", fields.description, sources.description],
+    ["isbn", "ISBN", fields.isbn || "Optional", sources.isbn],
+    ["price_cents", "Price", fields.price_cents == null ? null : money(fields.price_cents, fields.currency), sources.price_cents],
+    ["sku", "Book ID", fields.sku, sources.sku],
+    ["quantity", "Quantity", fields.quantity, sources.quantity],
   ];
-  $("#biblio-publish-fields").innerHTML = rows.map(([label, value, sourceName]) => {
+  const editableMissing = new Set(["title", "author", "description", "price_cents"]);
+  $("#biblio-publish-fields").innerHTML = rows.map(([key, label, value, sourceName]) => {
     const missing = value == null || value === "";
     const display = label === "Description" && value
       ? (String(value).length > 240 ? String(value).slice(0, 240) + "…" : String(value))
       : value;
+    let valueHtml = '<strong>' + esc(missing ? "Missing" : display) + '</strong>';
+    if (missing && editableMissing.has(key)) {
+      valueHtml = key === "description"
+        ? '<textarea class="biblio-missing-input" data-field="description" rows="3" placeholder="Description required by BIBLIO"></textarea>'
+        : '<input class="biblio-missing-input" data-field="' + esc(key) + '"'
+          + (key === "price_cents" ? ' type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"' : ' type="text"')
+          + ' placeholder="' + esc(label) + '">';
+    }
     return '<div class="biblio-field ' + (missing ? "missing" : "") + '">'
       + '<span class="biblio-field-label">' + esc(label) + '</span>'
-      + '<strong>' + esc(missing ? "Missing" : display) + '</strong>'
+      + valueHtml
       + (missing ? "" : biblioSourceBadge(sourceName))
       + '</div>';
   }).join("");
@@ -844,7 +853,15 @@ function renderBiblioPublish(data) {
 
   $("#biblio-open-connections").classList.toggle("hidden", Boolean(data.configured));
   const publish = $("#biblio-publish-submit");
-  publish.disabled = !data.publish_ready;
+  const hardMissing = missing.filter((value) => !["author", "title", "description", "price"].includes(value));
+  const refreshPublishState = () => {
+    const unresolvedEditable = $(".biblio-missing-input").some((field) => !String(field.value || "").trim());
+    publish.disabled = !data.configured || hardMissing.length > 0 || unresolvedEditable;
+  };
+  $(".biblio-missing-input").forEach((field) => {
+    field.oninput = refreshPublishState;
+  });
+  refreshPublishState();
   publish.textContent = data.action === "update" ? "Update on BIBLIO" : "Publish to BIBLIO";
 }
 
@@ -953,14 +970,22 @@ $("#close-biblio-publish").onclick = () => {
 $("#biblio-open-connections").onclick = () => selectView("connections");
 $("#biblio-publish-submit").onclick = async () => {
   const current = state.biblioPublish;
-  if (!current?.itemId || !current.data?.publish_ready) return;
+  if (!current?.itemId) return;
   const button = $("#biblio-publish-submit");
+  if (button.disabled) return;
+  const payload = { source_listing_id: current.sourceListingId || null };
+  $(".biblio-missing-input").forEach((field) => {
+    const value = String(field.value || "").trim();
+    if (!value) return;
+    if (field.dataset.field === "price_cents") payload.price_cents = Math.round(Number(value) * 100);
+    else payload[field.dataset.field] = value;
+  });
   button.disabled = true;
   button.textContent = "Queueing BIBLIO…";
   try {
     const result = await api("/api/app/inventory/" + encodeURIComponent(current.itemId) + "/publish/biblio", {
       method: "POST",
-      body: JSON.stringify({ source_listing_id: current.sourceListingId || null }),
+      body: JSON.stringify(payload),
     });
     flash("BIBLIO listing queued for FTP publication.");
     $("#biblio-publish-panel").classList.add("hidden");
