@@ -946,7 +946,7 @@ function updateStockQueueButtons() {
 }
 
 function bindStockQueueInputs() {
-  $(".stock-row-input").forEach((field) => {
+  $$(".stock-row-input").forEach((field) => {
     field.oninput = () => {
       const index = Number(field.dataset.index);
       const key = field.dataset.field;
@@ -955,7 +955,7 @@ function bindStockQueueInputs() {
       updateStockQueueButtons();
     };
   });
-  $(".stock-row-remove").forEach((button) => {
+  $$(".stock-row-remove").forEach((button) => {
     button.onclick = () => {
       const index = Number(button.dataset.index);
       if (!Number.isInteger(index)) return;
