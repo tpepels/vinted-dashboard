@@ -1630,23 +1630,32 @@ $("#close-stock-intake").onclick = closeStockIntake;
 $("#stock-choice-scan").onclick = showStockScanner;
 $("#stock-back-choices").onclick = showStockChoices;
 $("#stock-choice-photo").onclick = () => {
+  persistStockIntakeMode("photo");
   closeStockIntake();
   openQuickListing();
 };
 $("#stock-choice-import").onclick = async () => {
+  persistStockIntakeMode("import");
   closeStockIntake();
   await selectView("imports");
 };
 $("#stock-choice-connect").onclick = async () => {
+  persistStockIntakeMode("connect");
   closeStockIntake();
   await selectView("connections");
 };
 $("#stock-choice-manual").onclick = () => {
+  persistStockIntakeMode("manual");
   closeStockIntake();
   openItemForm(null);
 };
 $("#stock-barcode-submit").onclick = () => addScannedBarcode($("#stock-barcode-input").value);
 $("#stock-barcode-input").onkeydown = (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    undoLastStockScan();
+    return;
+  }
   if (event.key !== "Enter") return;
   event.preventDefault();
   addScannedBarcode(event.currentTarget.value);
@@ -1664,7 +1673,7 @@ $("#stock-barcode-image").onchange = async (event) => {
       return;
     }
     for (const row of decoded) {
-      await addScannedBarcode(row.code, row.format || "photo");
+      addScannedBarcode(row.code, row.format || "photo");
     }
   } catch (error) {
     $("#stock-scan-status").textContent = error.message;
@@ -1673,12 +1682,20 @@ $("#stock-barcode-image").onchange = async (event) => {
     event.currentTarget.value = "";
   }
 };
+$("#stock-undo-last").onclick = undoLastStockScan;
 $("#stock-clear-batch").onclick = () => {
   if (state.stockIntakeQueue.length && !window.confirm("Clear the scanned batch?")) return;
   state.stockIntakeQueue = [];
+  state.stockEnrichmentQueue = [];
+  state.stockEnrichmentQueued.clear();
+  persistStockIntakeSession();
   renderStockIntakeQueue();
   $("#stock-barcode-input").focus();
 };
+["stock-default-location", "stock-default-condition", "stock-default-cost", "stock-default-price", "stock-default-currency"]
+  .forEach((id) => {
+    $("#" + id).oninput = persistStockIntakeSession;
+  });
 $("#stock-create-batch").onclick = createScannedStockBatch;
 
 $("#cancel-quick-listing").onclick = closeQuickListing;
