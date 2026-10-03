@@ -24,6 +24,7 @@ const state = {
   todayShowAll: false,
   stockIntakeQueue: [],
   stockIntakeRestored: false,
+  stockWorkspaceKey: null,
   stockEnrichmentQueue: [],
   stockEnrichmentQueued: new Set(),
   stockEnrichmentActive: 0,
@@ -369,6 +370,11 @@ function renderBillingLock(info) {
 async function init() {
   try {
     state.me = await api("/api/auth/me");
+    const workspaceKey = state.me?.workspace?.id || state.me?.workspace?.slug || "default";
+    if (state.stockWorkspaceKey !== workspaceKey) {
+      resetStockIntakeRuntime();
+      state.stockWorkspaceKey = workspaceKey;
+    }
     appScreen();
     $("#app-name").textContent = state.me.app_name;
     $("#auth-name").textContent = state.me.app_name;
@@ -421,6 +427,8 @@ $("#register").onsubmit = async (event) => {
 
 $("#logout").onclick = async () => {
   try { await api("/api/auth/logout", { method: "POST" }); } catch {}
+  resetStockIntakeRuntime();
+  state.stockWorkspaceKey = null;
   state.me = null;
   authScreen("login");
 };
@@ -881,6 +889,15 @@ $("#inventory-reset").onclick = () => {
   $("#inventory-cost").value = "";
   inventory().catch((error) => flash(error.message, true));
 };
+function resetStockIntakeRuntime() {
+  stopBarcodeCamera();
+  state.stockIntakeQueue = [];
+  state.stockIntakeRestored = false;
+  state.stockEnrichmentQueue = [];
+  state.stockEnrichmentQueued.clear();
+  state.stockEnrichmentActive = 0;
+}
+
 function stockIntakeDefaults() {
   return {
     location: String($("#stock-default-location")?.value || "").trim(),
@@ -994,10 +1011,10 @@ function bindStockQueueInputs() {
       const key = field.dataset.field;
       if (!Number.isInteger(index) || !state.stockIntakeQueue[index] || !key) return;
       state.stockIntakeQueue[index][key] = field.value;
-      if (key === "title" && String(field.value || "").trim()) {
-        if (state.stockIntakeQueue[index].enrichment_state !== "pending") {
-          state.stockIntakeQueue[index].enrichment_state = "ready";
-        }
+      if (key === "title") {
+        state.stockIntakeQueue[index].enrichment_state = String(field.value || "").trim()
+          ? "ready"
+          : (state.stockIntakeQueue[index].enrichment_state === "pending" ? "pending" : "needs_review");
       }
       persistStockIntakeSession();
       updateStockQueueButtons();
