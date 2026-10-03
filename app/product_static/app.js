@@ -27,6 +27,7 @@ const state = {
   stockEnrichmentQueue: [],
   stockEnrichmentQueued: new Set(),
   stockEnrichmentActive: 0,
+  stockAudioContext: null,
   barcodeStream: null,
   barcodeTimer: null,
   barcodeDetector: null,
@@ -1074,7 +1075,9 @@ function playStockScanTone() {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
-    const context = new AudioContext();
+    if (!state.stockAudioContext) state.stockAudioContext = new AudioContext();
+    const context = state.stockAudioContext;
+    if (context.state === "suspended") context.resume().catch(() => {});
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     oscillator.frequency.value = 880;
@@ -1084,7 +1087,6 @@ function playStockScanTone() {
     gain.connect(context.destination);
     oscillator.start();
     oscillator.stop(context.currentTime + 0.07);
-    oscillator.onended = () => context.close().catch(() => {});
   } catch {}
 }
 
@@ -1189,6 +1191,12 @@ function addScannedBarcode(code, format = "manual") {
     return true;
   }
 
+  if (state.stockIntakeQueue.length >= 100) {
+    $("#stock-scan-status").textContent = "This batch already has 100 items. Create ready stock or clear the batch before scanning more.";
+    flash("The scan batch is full at 100 items.", true);
+    return false;
+  }
+
   const defaults = stockIntakeDefaults();
   const kind = fastStockBarcodeKind(raw);
   const row = {
@@ -1214,7 +1222,6 @@ function addScannedBarcode(code, format = "manual") {
   };
 
   state.stockIntakeQueue.push(row);
-  if (state.stockIntakeQueue.length > 100) state.stockIntakeQueue.shift();
   persistStockIntakeSession();
   renderStockIntakeQueue();
   acknowledgeStockScan();
