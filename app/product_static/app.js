@@ -542,14 +542,30 @@ function relativeTimestamp(value) {
 
 function renderTodaySourceStatus(connectors) {
   const rows = (connectors || [])
+    .filter((row) => row.group !== "files" && row.channel !== "manual")
     .filter((row) => row.configured || row.operational)
     .sort((a, b) => String(a.display_name || a.channel).localeCompare(String(b.display_name || b.channel)));
 
   $("#today-source-status").innerHTML = rows.length
     ? rows.map((row) => {
       const synced = relativeTimestamp(row.last_synced_at);
-      const status = row.operational ? (synced ? "synced" : "ready") : "attention";
-      const dot = row.operational ? (synced ? "ok" : "warn") : "error";
+      const syncTime = row.last_synced_at ? new Date(row.last_synced_at).getTime() : null;
+      const ageHours = Number.isFinite(syncTime) ? Math.max(0, (Date.now() - syncTime) / 3600000) : null;
+      let status = "ready";
+      let dot = "warn";
+      if (!row.operational) {
+        status = "attention";
+        dot = "error";
+      } else if (ageHours != null && ageHours <= 24) {
+        status = "fresh";
+        dot = "ok";
+      } else if (ageHours != null && ageHours <= 168) {
+        status = "stale";
+        dot = "warn";
+      } else if (ageHours != null) {
+        status = "old";
+        dot = "error";
+      }
       const detail = row.operational
         ? (synced ? "Last sync " + synced : "Connected - no sync recorded yet")
         : (row.note || "Connection needs attention");
@@ -586,10 +602,11 @@ function renderTodayWorkQueue(rows, total) {
       ["opportunity", "Opportunities"],
     ];
     let html = definitions.map(([band, label]) => {
+      const fullGroup = queue.filter((row) => todayPriorityBand(row) === band);
       const group = visible.filter((row) => todayPriorityBand(row) === band);
       if (!group.length) return "";
       return '<div class="work-group"><div class="work-group-title"><span>' + esc(label)
-        + '</span><span>' + group.length + '</span></div>'
+        + '</span><span>' + fullGroup.length + '</span></div>'
         + group.map(todayWorkRow).join("") + "</div>";
     }).join("");
     if (!state.todayShowAll && queue.length > visible.length) {
