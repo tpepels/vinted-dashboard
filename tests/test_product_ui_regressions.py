@@ -182,3 +182,39 @@ def test_expanded_resale_categories_are_available_in_inventory_ui():
         "art_crafts",
     ):
         assert f'<option value="{value}">' in html
+
+
+
+def test_stock_intake_is_first_class_in_inventory_ui():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="add-stock"' in html
+    assert 'data-action="add-stock">Add stock</button>' in html
+    assert 'id="stock-choice-scan"' in html
+    assert 'id="stock-choice-photo"' in html
+    assert 'id="stock-choice-import"' in html
+    assert 'id="stock-choice-connect"' in html
+    assert 'id="stock-choice-manual"' in html
+    assert 'id="stock-barcode-input"' in html
+    assert 'id="stock-barcode-video"' in html
+    assert 'capture="environment"' in html
+    assert "RDLOC:BOX-17" in html
+
+
+def test_barcode_camera_has_native_detection_and_server_fallback():
+    assert "window.BarcodeDetector" in APP_JS
+    assert "navigator.mediaDevices.getUserMedia" in APP_JS
+    assert 'api("/api/app/stock-intake/barcode/decode"' in APP_JS
+    assert 'api("/api/app/stock-intake/barcode/lookup"' in APP_JS
+    assert "captureBarcodeFrame()" in APP_JS
+    assert "const fallbackAfter = state.barcodeDetector ? 3 : 2;" in APP_JS
+    assert 'if (view !== "inventory" && state.barcodeStream) stopBarcodeCamera();' in APP_JS
+
+
+def test_scanned_batch_keeps_each_physical_copy_separate():
+    assert "state.stockIntakeQueue.push({" in APP_JS
+    assert 'api("/api/app/stock-intake/items"' in APP_JS
+    assert "existing_copy_count" in APP_JS
+    assert "Every scanned item needs a title" in APP_JS
+    assert "stockLocalId()" in APP_JS
