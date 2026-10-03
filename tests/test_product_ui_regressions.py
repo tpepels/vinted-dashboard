@@ -227,3 +227,49 @@ def test_stock_intake_dynamic_rows_use_multi_element_selectors():
     assert '$$(".stock-row-remove").forEach((button) => {' in lines
     assert '$(".stock-row-input").forEach((field) => {' not in lines
     assert '$(".stock-row-remove").forEach((button) => {' not in lines
+
+
+
+def test_scanner_enqueue_is_non_blocking_and_enrichment_runs_separately():
+    assert "function addScannedBarcode(code, format = \"manual\")" in APP_JS
+    assert "state.stockIntakeQueue.push(row);" in APP_JS
+    assert "queueStockEnrichment(row.local_id);" in APP_JS
+    add_start = APP_JS.index('function addScannedBarcode(code, format = "manual")')
+    add_end = APP_JS.index("async function decodeBarcodeImage", add_start)
+    add_block = APP_JS[add_start:add_end]
+    assert 'await api("/api/app/stock-intake/barcode/lookup"' not in add_block
+    assert "function pumpStockEnrichment()" in APP_JS
+    assert "state.stockEnrichmentActive < 2" in APP_JS
+
+
+def test_scanner_session_is_persistent_and_reopens_in_scan_mode():
+    assert "localStorage.setItem(stockSessionKey()" in APP_JS
+    assert "localStorage.getItem(stockSessionKey())" in APP_JS
+    assert "lastStockIntakeMode() === \"scan\"" in APP_JS
+    assert "restoreStockIntakeSession();" in APP_JS
+    assert "persistStockIntakeSession();" in APP_JS
+
+
+def test_ready_items_can_be_created_without_blocking_on_review_rows():
+    assert "const readyRows = state.stockIntakeQueue.filter(stockRowReady);" in APP_JS
+    assert "No ready items yet. Keep scanning or review unidentified rows." in APP_JS
+    assert "Unresolved scans remain in the batch." in APP_JS
+    assert 'row?.enrichment_state !== "pending"' in APP_JS
+
+
+def test_camera_duplicate_suppression_requires_barcode_to_leave_frame():
+    assert "barcodeCameraLatch" in APP_JS
+    assert "function acceptCameraBarcode(code, format)" in APP_JS
+    assert "if (state.barcodeCameraLatch === raw) return false;" in APP_JS
+    assert "function noteCameraBarcodeMiss()" in APP_JS
+    assert "state.barcodeCameraClearFrames >= 2" in APP_JS
+
+
+def test_stock_scan_ui_exposes_throughput_controls():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="stock-undo-last"' in html
+    assert "Scan continuously" in html
+    assert "Ctrl/Cmd+Z to undo" in html
+    assert "Create ready items" in html
