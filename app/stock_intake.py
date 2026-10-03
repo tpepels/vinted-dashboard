@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 import zxingcpp
 
 
@@ -90,6 +90,7 @@ def decode_barcode_image(content_type: str, body: bytes) -> list[dict[str, str]]
     try:
         with Image.open(BytesIO(body)) as image:
             image.load()
+            image = ImageOps.exif_transpose(image)
             decoded = zxingcpp.read_barcodes(image.convert("RGB"))
     except (UnidentifiedImageError, OSError, ValueError, TypeError) as exc:
         raise ValueError("Could not read the barcode image") from exc
