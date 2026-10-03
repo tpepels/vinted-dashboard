@@ -855,10 +855,10 @@ function renderBiblioPublish(data) {
   const publish = $("#biblio-publish-submit");
   const hardMissing = missing.filter((value) => !["author", "title", "description", "price"].includes(value));
   const refreshPublishState = () => {
-    const unresolvedEditable = $(".biblio-missing-input").some((field) => !String(field.value || "").trim());
+    const unresolvedEditable = Array.from(document.querySelectorAll(".biblio-missing-input")).some((field) => !String(field.value || "").trim());
     publish.disabled = !data.configured || hardMissing.length > 0 || unresolvedEditable;
   };
-  $(".biblio-missing-input").forEach((field) => {
+  document.querySelectorAll(".biblio-missing-input").forEach((field) => {
     field.oninput = refreshPublishState;
   });
   refreshPublishState();
@@ -888,7 +888,7 @@ async function openBiblioPublish(itemId, sourceListingId = null) {
 }
 
 function bindBiblioPublishButtons() {
-  $(".biblio-publish").forEach((button) => {
+  document.querySelectorAll(".biblio-publish").forEach((button) => {
     button.onclick = async () => {
       const itemId = button.dataset.itemId;
       const sourceListingId = button.dataset.sourceListingId || null;
@@ -948,7 +948,7 @@ async function inventory() {
       + "</tbody></table>"
     : '<div class="empty">No inventory yet. Add an item or import a file.</div>';
 
-  $(".edit-item").forEach((button) => {
+  document.querySelectorAll(".edit-item").forEach((button) => {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
   });
   bindBiblioPublishButtons();
@@ -974,7 +974,7 @@ $("#biblio-publish-submit").onclick = async () => {
   const button = $("#biblio-publish-submit");
   if (button.disabled) return;
   const payload = { source_listing_id: current.sourceListingId || null };
-  $(".biblio-missing-input").forEach((field) => {
+  document.querySelectorAll(".biblio-missing-input").forEach((field) => {
     const value = String(field.value || "").trim();
     if (!value) return;
     if (field.dataset.field === "price_cents") payload.price_cents = Math.round(Number(value) * 100);
