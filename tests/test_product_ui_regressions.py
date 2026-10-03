@@ -218,3 +218,11 @@ def test_scanned_batch_keeps_each_physical_copy_separate():
     assert "existing_copy_count" in APP_JS
     assert "Every scanned item needs a title" in APP_JS
     assert "stockLocalId()" in APP_JS
+
+
+
+def test_stock_intake_dynamic_rows_use_multi_element_selectors():
+    assert '$$(".stock-row-input").forEach' in APP_JS
+    assert '$$(".stock-row-remove").forEach' in APP_JS
+    assert '$(".stock-row-input").forEach' not in APP_JS
+    assert '$(".stock-row-remove").forEach' not in APP_JS
