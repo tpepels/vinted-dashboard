@@ -618,7 +618,7 @@ function renderTodayWorkQueue(rows, total) {
     $("#today-actions").innerHTML = html;
   }
 
-  $(".today-nav").forEach((button) => {
+  $$(".today-nav").forEach((button) => {
     button.onclick = async () => {
       const view = button.dataset.view;
       await selectView(view);
@@ -700,7 +700,7 @@ $("#onboarding-import").onclick = () => selectView("imports");
 $("#onboarding-connect").onclick = () => selectView("connections");
 $("#onboarding-reconcile").onclick = () => selectView("reconcile");
 
-$(".today-shortcut").forEach((button) => {
+$$(".today-shortcut").forEach((button) => {
   button.onclick = async () => {
     await selectView(button.dataset.view);
     if (button.dataset.action === "quick-listing") {
