@@ -23,7 +23,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
-from app import billing, db, jobs, listing_assistant, models, stock_intake
+from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake
 from app.channels import parse_biblio_inventory
 from app.auth import (
     RequestContext,
@@ -121,6 +121,18 @@ def _etsy_oauth_redirect_uri() -> str | None:
     return f"{origin}{ETSY_OAUTH_CALLBACK_PATH}" if origin else None
 
 
+def _biblio_configured_for_workspace(workspace: models.Workspace) -> bool:
+    if has_workspace_connector_credentials(workspace.id, Channel.BIBLIO):
+        return True
+    bootstrap_slug = os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
+    if workspace.slug != bootstrap_slug:
+        return False
+    return bool(
+        os.getenv("BIBLIO_FTP_USERNAME", "").strip()
+        and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
+    )
+
+
 def _etsy_oauth_authorized(values: dict[str, Any]) -> bool:
     return bool(
         str(values.get("oauth_token") or "").strip()
@@ -209,6 +221,10 @@ class QuickListingCreateRequest(BaseModel):
     notes: str | None = None
     photo_count: int = 0
     analysis_used: bool = False
+
+
+class BiblioPublishRequest(BaseModel):
+    source_listing_id: uuid.UUID | None = None
 
 
 class BarcodeLookupRequest(BaseModel):
@@ -1102,6 +1118,79 @@ def update_inventory_item(
         ).scalars().all()
         result = _serialize_item(item, listings)
     return {"ok": True, "item": result}
+
+
+@router.get("/api/app/inventory/{item_id}/publish/biblio")
+def biblio_publish_preview(
+    item_id: uuid.UUID,
+    source_listing_id: uuid.UUID | None = None,
+    context: RequestContext = Depends(require_context),
+):
+    try:
+        with db.session_scope() as session:
+            candidate = publishing.build_biblio_candidate(
+                session,
+                context.workspace.id,
+                item_id,
+                source_listing_id=source_listing_id,
+                enrich_isbn=True,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    configured = _biblio_configured_for_workspace(context.workspace)
+    return {
+        **candidate,
+        "configured": configured,
+        "publish_ready": configured and bool(candidate.get("ready")),
+        "action": "update" if candidate.get("already_listed") else "publish",
+    }
+
+
+@router.post("/api/app/inventory/{item_id}/publish/biblio")
+def biblio_publish(
+    item_id: uuid.UUID,
+    payload: BiblioPublishRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    if not _biblio_configured_for_workspace(context.workspace):
+        raise HTTPException(
+            status_code=400,
+            detail="Connect BIBLIO in Connections before publishing.",
+        )
+    try:
+        with db.session_scope() as session:
+            candidate = publishing.build_biblio_candidate(
+                session,
+                context.workspace.id,
+                item_id,
+                source_listing_id=payload.source_listing_id,
+                enrich_isbn=True,
+            )
+            if candidate.get("missing"):
+                raise ValueError(
+                    "BIBLIO listing is missing: "
+                    + ", ".join(str(value) for value in candidate["missing"])
+                )
+            workspace = session.get(models.Workspace, context.workspace.id)
+            if workspace is None:
+                raise ValueError("Workspace does not exist")
+            listing = publishing.upsert_biblio_listing(
+                session,
+                workspace,
+                item_id,
+                candidate,
+            )
+            listing_id = str(listing.id)
+        job_id = jobs.enqueue("biblio_sync", {"listing_id": listing_id}, context.workspace.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "listing_id": listing_id,
+        "job_id": str(job_id),
+        "queued": True,
+        "candidate": candidate,
+    }
 
 
 @router.post("/api/app/inventory/{item_id}/link")
