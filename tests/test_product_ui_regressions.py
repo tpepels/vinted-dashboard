@@ -214,11 +214,12 @@ def test_barcode_camera_has_native_detection_and_server_fallback():
 
 
 def test_scanned_batch_keeps_each_physical_copy_separate():
-    assert "state.stockIntakeQueue.push({" in APP_JS
+    assert "const row = {" in APP_JS
+    assert "local_id: stockLocalId()," in APP_JS
+    assert "state.stockIntakeQueue.push(row);" in APP_JS
     assert 'api("/api/app/stock-intake/items"' in APP_JS
     assert "existing_copy_count" in APP_JS
     assert "const readyRows = state.stockIntakeQueue.filter(stockRowReady);" in APP_JS
-    assert "stockLocalId()" in APP_JS
 
 
 
