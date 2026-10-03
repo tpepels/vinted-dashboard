@@ -223,7 +223,7 @@ def test_scanned_batch_keeps_each_physical_copy_separate():
 
 def test_stock_intake_dynamic_rows_use_multi_element_selectors():
     lines = [line.strip() for line in APP_JS.splitlines()]
-    assert '$(".stock-row-input").forEach((field) => {' in lines
-    assert '$(".stock-row-remove").forEach((button) => {' in lines
+    assert '$$(".stock-row-input").forEach((field) => {' in lines
+    assert '$$(".stock-row-remove").forEach((button) => {' in lines
     assert '$(".stock-row-input").forEach((field) => {' not in lines
     assert '$(".stock-row-remove").forEach((button) => {' not in lines
