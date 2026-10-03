@@ -231,13 +231,36 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
     incoming_metadata = _clean_vinted_metadata(row.get("metadata"))
     existing_metadata = _clean_vinted_metadata(existing_extra.get("metadata"))
     metadata = {**existing_metadata, **incoming_metadata}
+    image_urls = [
+        str(value).strip()
+        for value in (row.get("image_urls") or [])
+        if str(value or "").strip()
+    ][:20]
+    if not image_urls and row.get("image_url"):
+        image_urls = [str(row.get("image_url")).strip()]
+    if not image_urls:
+        image_urls = [
+            str(value).strip()
+            for value in (existing_extra.get("image_urls") or [])
+            if str(value or "").strip()
+        ][:20]
     listing.extra = {
         **existing_extra,
         "listed_at": listed_at,
         "listed_at_source": listed_at_source,
         "metadata": metadata,
+        "image_url": image_urls[0] if image_urls else existing_extra.get("image_url"),
+        "image_urls": image_urls,
     }
     _apply_vinted_metadata(item, metadata, captured_at)
+    if image_urls:
+        attrs = dict(item.attributes or {})
+        if not attrs.get("image_urls"):
+            attrs["image_urls"] = image_urls
+            attrs["image_source"] = "vinted"
+        if not attrs.get("image_url"):
+            attrs["image_url"] = image_urls[0]
+        item.attributes = attrs
     session.flush()
 
     snap_exists = session.execute(
