@@ -18,6 +18,7 @@ function notificationRow(raw){let body=first(raw,"body","text","message","descri
 
 async function fetchJson(path,params={}){const url=new URL(path,location.origin);for(const[k,v]of Object.entries(params))url.searchParams.set(k,String(v));const r=await fetch(url,{headers:{"Accept":"application/json, text/plain, */*","X-Platform":"web"}});if(r.status===404)return null;if(!r.ok)throw new Error(`Vinted returned HTTP ${r.status} for ${url.pathname}`);return await r.json()}
 const LISTED_AT_CACHE_KEY="vintedListedAtCacheV2";
+const LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV1";
 async function enrichListingDates(listings){
   let stored={};try{stored=await chrome.storage.local.get([LISTED_AT_CACHE_KEY])}catch{}
   const cache=(stored&&typeof stored[LISTED_AT_CACHE_KEY]==="object"&&stored[LISTED_AT_CACHE_KEY])||{};
@@ -52,6 +53,48 @@ async function enrichListingDates(listings){
   await Promise.all([worker(),worker(),worker(),worker()]);
   if(changed){try{await chrome.storage.local.set({[LISTED_AT_CACHE_KEY]:cache})}catch{}}
 }
+async function enrichListingDetails(listings){
+  let stored={};try{stored=await chrome.storage.local.get([LISTING_DETAIL_CACHE_KEY])}catch{}
+  const cache=(stored&&typeof stored[LISTING_DETAIL_CACHE_KEY]==="object"&&stored[LISTING_DETAIL_CACHE_KEY])||{};
+  const eligible=[...listings.values()].filter(row=>row?.id&&["active","reserved","hidden","draft"].includes(String(row.status||"active")));
+  const missing=[];let changed=false;
+  for(const row of eligible){
+    const cached=cache[row.id];
+    if(cached&&typeof cached==="object"){
+      row.metadata={...(cached.metadata||{}),...(row.metadata||{})};
+      const images=Array.isArray(cached.image_urls)?cached.image_urls.filter(Boolean):[];
+      if(images.length){row.image_urls=images;row.image_url=images[0]}
+      if(!row.listed_at&&cached.listed_at){const exact=exactStamp(cached.listed_at);if(exact){row.listed_at=exact;row.listed_at_source="vinted_detail_cache"}}
+      continue
+    }
+    missing.push(row);
+  }
+  let cursor=0,rateLimited=false;
+  async function worker(){
+    while(!rateLimited&&cursor<missing.length){
+      const row=missing[cursor++];
+      try{
+        const payload=await fetchJson(`/api/v2/items/${row.id}`,{localize:"false"});
+        const raw=payload?.item||payload?.data?.item||payload?.data||payload||{};
+        const metadata=listingMetadata(raw);
+        const images=imageUrls(raw);
+        const created=exactStamp(first(raw,"created_at_ts","created_timestamp_ts","created_at","uploaded_at","uploaded_ts","posted_at","upload_date_dte"));
+        row.metadata={...metadata,...(row.metadata||{})};
+        if(images.length){row.image_urls=images;row.image_url=images[0]}
+        if(created&&!row.listed_at){row.listed_at=created;row.listed_at_source="vinted_detail"}
+        cache[row.id]={metadata,image_urls:images,listed_at:created||null};
+        changed=true;
+      }catch(error){
+        if(String(error?.message||error).includes("HTTP 429"))rateLimited=true;
+      }
+    }
+  }
+  await Promise.all([worker(),worker()]);
+  const eligibleIds=new Set(eligible.map(row=>String(row.id)));
+  for(const key of Object.keys(cache)){if(!eligibleIds.has(String(key))){delete cache[key];changed=true}}
+  if(changed){try{await chrome.storage.local.set({[LISTING_DETAIL_CACHE_KEY]:cache})}catch{}}
+}
+
 async function paged(path,keys,params={},perPage=96){const rows=[];for(let page=1;page<=10;page++){const payload=await fetchJson(path,{...params,page,per_page:perPage});if(payload===null)return null;const chunk=listFrom(payload,keys);rows.push(...chunk);if(!chunk.length)break;const p=payload?.pagination;if(p&&typeof p==="object"){if(Number.isInteger(p.total_pages)&&page>=p.total_pages)break;if(p.next_page==null&&chunk.length<perPage)break}else if(chunk.length<perPage)break}return rows}
 
 async function collectVintedData(researchJobs=[]){
@@ -84,6 +127,7 @@ async function collectVintedData(researchJobs=[]){
     try{const rows=await paged(`/api/v2/users/${userId}/items`,["items","user_items"],{status,order:"newest_first"});for(const raw of rows||[]){const row=listingRow(raw,status);if(row.id)listings.set(row.id,row)}}catch{}
   }
   try{const rows=await paged(`/api/v2/wardrobe/${userId}/items`,["items","user_items"],{order:"newest_first"});for(const raw of rows||[]){const row=listingRow(raw,null);if(!row.id)continue;const old=listings.get(row.id);if(!old||row.status==="hidden")listings.set(row.id,row)}}catch{}
+  await enrichListingDetails(listings);
   await enrichListingDates(listings);
 
   let notifications=[];
