@@ -895,7 +895,6 @@ function resetStockIntakeRuntime() {
   state.stockIntakeRestored = false;
   state.stockEnrichmentQueue = [];
   state.stockEnrichmentQueued.clear();
-  state.stockEnrichmentActive = 0;
 }
 
 function stockIntakeDefaults() {
