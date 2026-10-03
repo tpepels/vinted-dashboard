@@ -2491,7 +2491,7 @@ function renderListings() {
           + (showViews ? "<td>" + esc(row.views == null ? "—" : row.views) + "</td>" : "")
           + "<td>" + money(row.price_cents, row.currency) + "</td>"
           + '<td class="row-actions">'
-          + (row.channel === "vinted" && row.inventory_item_id
+          + (row.channel === "vinted" && row.inventory_item_id && row.inventory_category === "book"
             ? '<button class="btn biblio-publish" data-item-id="' + esc(row.inventory_item_id)
               + '" data-source-listing-id="' + esc(row.id) + '">List on BIBLIO</button>'
             : "")
