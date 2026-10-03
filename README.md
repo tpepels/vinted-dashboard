@@ -157,6 +157,13 @@ markets rather than being tied to the original Portuguese account. On its
 first sync it uses an already-open signed-in Vinted tab and remembers that
 origin for later periodic syncs.
 
+For active/reserved/hidden/draft listings, bridge 2.5.0 also keeps a local
+detail cache with the richer Vinted item payload. This preserves source
+description, ISBN/author/publisher metadata and reusable image URLs without
+re-fetching every item on every periodic sync. Workspace ingestion keeps those
+source fields linked to the same master physical item.
+
+
 ### Personal legacy extension
 
 \`app/legacy_extension\` preserves the previous self-hosted extension,
@@ -190,6 +197,15 @@ inventory or a channel-specific view with marketplace listing IDs, prices,
 statuses and URLs. Workspace account-data export is also available under
 Settings.
 
+For books, Vinted can act as the source listing for BIBLIO. From Inventory or
+a Vinted row in Listings, **List on BIBLIO** runs a compact preflight using
+Vinted title/description/ISBN/author/price first, then master data, then ISBN
+lookup for missing bibliographic facts. Complete books require no re-entry:
+publishing creates or updates a BIBLIO ChannelListing linked to the same
+physical InventoryItem and queues the existing BIBLIO FTP sync. If a required
+field is still missing, only that field is requested inline.
+
+
 The product Analytics page reads Vinted listing snapshots directly from the
 workspace schema, including view/favourite gains, follower history, sales
 revenue and per-listing history. Listings, purchases/sales, inventory,
@@ -206,7 +222,8 @@ Current scope:
 - **CSV / TSV** - generic import/export.
 - **Excel** - generic import/export.
 - **BIBLIO** - optional book connector with workspace-scoped inventory import,
-  FTP connection testing and inventory/delete synchronization.
+  FTP connection testing, inventory/delete synchronization, and one-click
+  cross-listing from a linked Vinted/master book.
 - **eBay** - workspace-scoped active seller inventory synchronization through
   the official Trading API.
 
