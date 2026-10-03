@@ -186,9 +186,6 @@ def build_biblio_candidate(
     if conflict is not None:
         missing.append("unique BIBLIO Book ID")
 
-    if enrichment and attrs != dict(item.attributes or {}):
-        item.attributes = attrs
-
     return {
         "item_id": str(item.id),
         "item_title": item.title,
