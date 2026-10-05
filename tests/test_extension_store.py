@@ -187,11 +187,13 @@ def test_source_extension_version_is_bumped_for_local_download():
 
 
 
-def test_content_script_enriches_missing_listing_dates_from_item_detail_and_caches_them():
+def test_content_script_reads_uploaded_age_from_item_page_and_caches_it():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
-    assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV2"' in content
-    assert "/api/v2/items/" in content
-    assert '"created_at_ts"' in content
+    assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV3"' in content
+    assert 'LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV1"' in content
+    assert "function relativeAgeFromPageHtml(html)" in content
+    assert "function fetchItemPageHtml(row)" in content
+    assert '"vinted_page_uploaded"' in content
     assert "await enrichListingDates(listings);" in content
     assert "HTTP 429" in content
 
@@ -205,7 +207,7 @@ def test_ci_does_not_commit_a_static_fernet_key():
 
 def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
-    assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV2"' in content
+    assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV3"' in content
     assert "function enrichListingDetails(listings)" in content
     assert "image_urls:images" in content
     assert "await enrichListingDetails(listings);" in content
@@ -213,14 +215,13 @@ def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
 
 
 
-def test_content_script_captures_vinted_relative_upload_age_without_faking_exact_date():
+def test_content_script_does_not_trust_generic_api_dates_for_posting_age():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     assert "function relativeAgeSeconds(v)" in content
-    assert '"upload_date"' in content
-    assert 'listed_age_source:relative?"vinted_relative":null' in content
-    assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV2"' in content
-    assert "cachedRelativeAge(cached)" in content
-    assert "if(row.listed_age_seconds!=null)continue;" in content
+    assert "relativeAgeFromRaw" not in content
+    assert 'first(raw,"created_at_ts","created_timestamp_ts","uploaded_ts","upload_date_dte")' in content
+    assert '"created_at","uploaded_at","posted_at"' not in content
+    assert 'listed_age_seconds:null,listed_age_source:null,listed_age_text:null' in content
 
 
 
