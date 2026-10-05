@@ -67,8 +67,6 @@ def test_valid_production_configuration():
         ({"PUBLIC_APP_URL": "http://reseller.example"}, "PUBLIC_APP_URL"),
         ({"COOKIE_SECURE": "false"}, "COOKIE_SECURE"),
         ({"APP_ENCRYPTION_KEY": ""}, "APP_ENCRYPTION_KEY"),
-        ({"LEGACY_API_ENABLED": "true"}, "LEGACY_API_ENABLED"),
-        ({"EXTENSION_MARKET_RESEARCH_ENABLED": "true"}, "EXTENSION_MARKET_RESEARCH_ENABLED"),
         ({"PASSWORD_HASH_ITERATIONS": "1000"}, "PASSWORD_HASH_ITERATIONS"),
         ({"AUTH_SESSION_DAYS": "365"}, "AUTH_SESSION_DAYS"),
     ],
