@@ -1356,7 +1356,7 @@ def _cross_list_destination_status(
         "display_name": info["display_name"],
         "status": "not_writable",
         "reason": reason,
-        "action": "connect" if not configured else None,
+        "action": None,
         "configured": configured,
         "writable": False,
     }
