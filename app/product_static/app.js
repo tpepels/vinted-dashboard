@@ -2441,6 +2441,10 @@ function listingDisplayDate(row) {
 function listingAgeSeconds(row) {
   const exact = timeValue(listingDisplayDate(row));
   if (exact > 0) return Math.max(0, Math.floor((Date.now() - exact) / 1000));
+  if (
+    row?.channel === "vinted"
+    && !String(row?.listed_age_source || "").startsWith("vinted_page")
+  ) return null;
   const relative = Number(row?.listed_age_seconds);
   return Number.isFinite(relative) && relative >= 0 ? relative : null;
 }
@@ -2541,8 +2545,8 @@ function renderListingStats(rows, duplicates) {
 
   $("#listing-stat-age-known").textContent = agedVinted.length + "/" + vinted.length;
   $("#listing-stat-age-unknown").textContent = unknownVinted
-    ? unknownVinted + " unknown - never substituted with first seen"
-    : (vinted.length ? "Exact or Vinted-provided relative age" : "No Vinted rows in this view");
+    ? unknownVinted + " pending Vinted Uploaded scan"
+    : (vinted.length ? "Exact or Vinted Uploaded age" : "No Vinted rows in this view");
 
   const renderEdge = (entry, ageSelector, detailSelector) => {
     if (!entry) {

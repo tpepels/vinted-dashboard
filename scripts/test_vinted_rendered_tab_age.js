@@ -26,7 +26,7 @@ const chrome = {
     getManifest() {
       return {
         content_scripts: [{ matches: ["https://www.vinted.pt/*"] }],
-        version: "2.9.0",
+        version: "3.0.0",
       };
     },
     onInstalled: { addListener() {} },
@@ -104,7 +104,7 @@ function assert(condition, message) {
     { id: "1000000003", url: "https://www.vinted.pt/items/1000000003-three" },
   ];
 
-  const ages = await context.renderedUploadedAges(items);
+  const ages = await context.renderedUploadedAges(items, 2);
 
   assert(ages["9826364597"].text === "5 weeks ago", "Destination India age was not returned");
   assert(ages["9826364597"].seconds === 5 * 7 * 86400, "5 weeks converted incorrectly");

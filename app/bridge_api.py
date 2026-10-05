@@ -51,6 +51,17 @@ class WorkspaceBrowserSyncPayload(BaseModel):
     extension_version: str | None = None
 
 
+class ListingAgeUpdate(BaseModel):
+    external_id: str
+    listed_age_seconds: int = Field(ge=0)
+    listed_age_text: str | None = None
+    observed_at: float | None = None
+
+
+class ListingAgeBatchRequest(BaseModel):
+    ages: list[ListingAgeUpdate] = Field(default_factory=list, max_length=100)
+
+
 def _serialize_workspace(workspace: models.Workspace) -> dict[str, Any]:
     return {
         "id": str(workspace.id),
@@ -161,6 +172,62 @@ def complete_pairing(payload: PairingCompleteRequest, request: Request):
         "token": raw_token,
         "workspace": workspace_name,
         "app_name": APP_NAME,
+    }
+
+
+@router.post("/api/extension/listing-ages")
+def extension_listing_ages(
+    payload: ListingAgeBatchRequest,
+    context: RequestContext = Depends(extension_context),
+):
+    if not billing.workspace_can_write(context.workspace):
+        raise HTTPException(
+            status_code=402,
+            detail="Workspace is read-only until the subscription is active or trialing",
+        )
+
+    updates = {
+        str(row.external_id).strip(): row
+        for row in payload.ages
+        if str(row.external_id).strip()
+    }
+    if not updates:
+        return {"ok": True, "updated": 0, "missing": []}
+
+    with db.session_scope() as session:
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.channel == "vinted",
+                models.ChannelListing.external_id.in_(list(updates)),
+            )
+        ).scalars().all()
+        seen: set[str] = set()
+        now = utcnow()
+        for listing in listings:
+            row = updates.get(str(listing.external_id))
+            if row is None:
+                continue
+            extra = dict(listing.extra or {})
+            extra["listed_age_seconds"] = int(row.listed_age_seconds)
+            extra["listed_age_source"] = "vinted_page_uploaded"
+            extra["listed_age_text"] = (
+                str(row.listed_age_text or "").strip()[:200] or None
+            )
+            extra["listed_age_observed_at"] = now.isoformat()
+            listing.extra = extra
+            listing.last_seen_at = max(listing.last_seen_at, now)
+            seen.add(str(listing.external_id))
+
+        if context.extension is not None:
+            extension = session.get(ExtensionCredential, context.extension.id)
+            if extension is not None:
+                extension.last_seen_at = now
+
+    return {
+        "ok": True,
+        "updated": len(seen),
+        "missing": sorted(set(updates) - seen),
     }
 
 

@@ -267,6 +267,12 @@ def _listing_item(
     )
     incoming_age_seconds = _relative_vinted_age_seconds(row.get("listed_age_seconds"))
     incoming_age_source = str(row.get("listed_age_source") or "").strip() or None
+    if page_age_bridge and not (
+        incoming_age_source
+        and incoming_age_source.startswith("vinted_page")
+    ):
+        incoming_age_seconds = None
+        incoming_age_source = None
     existing_age_seconds = _relative_vinted_age_seconds(existing_extra.get("listed_age_seconds"))
     existing_age_source = str(existing_extra.get("listed_age_source") or "").strip() or None
     keep_existing_age = (
