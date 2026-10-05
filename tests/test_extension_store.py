@@ -187,16 +187,19 @@ def test_source_extension_version_is_bumped_for_local_download():
 
 
 
-def test_content_script_reads_uploaded_age_from_item_page_and_caches_it():
+def test_content_script_reads_uploaded_age_from_rendered_item_page_and_caches_it():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
     assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV3"' in content
-    assert 'LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV1"' in content
-    assert "function relativeAgeFromPageHtml(html)" in content
-    assert "function fetchItemPageHtml(row)" in content
-    assert "document.documentElement.outerHTML" in content
+    assert 'LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV2"' in content
+    assert "function relativeAgeFromRenderedDocument()" in content
+    assert 'type:"rendered-uploaded-age"' in content
+    assert 'type:"read-vinted-uploaded-age"' in background
+    assert "async function renderedUploadedAge(url,itemId)" in background
+    assert "chrome.tabs.create({url:target.href,active:false})" in background
+    assert "await chrome.tabs.remove(tab.id)" in background
     assert '"vinted_page_uploaded"' in content
     assert "await enrichListingDates(listings);" in content
-    assert "HTTP 429" in content
 
 
 def test_ci_does_not_commit_a_static_fernet_key():
@@ -263,3 +266,10 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
+
+
+
+def test_product_api_refuses_legacy_generic_vinted_relative_age():
+    api = (ROOT / "app" / "product_api.py").read_text(encoding="utf-8")
+    assert 'age_source.startswith("vinted_page")' in api
+    assert "trusted_relative_age" in api
