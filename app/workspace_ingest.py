@@ -249,13 +249,18 @@ def _listing_item(
     existing_extra = dict(listing.extra or {})
     incoming_listed_at = _exact_vinted_iso(row.get("listed_at"))
     existing_listed_at = _exact_vinted_iso(existing_extra.get("listed_at"))
-    listed_at = incoming_listed_at or existing_listed_at
+    page_age_bridge = _version_at_least(extension_version, (2, 7, 0))
+    listed_at = (
+        incoming_listed_at
+        if page_age_bridge
+        else (incoming_listed_at or existing_listed_at)
+    )
     listed_at_source = (
         str(row.get("listed_at_source") or "vinted")
         if incoming_listed_at
         else (
             str(existing_extra.get("listed_at_source") or "vinted")
-            if existing_listed_at
+            if existing_listed_at and not page_age_bridge
             else None
         )
     )
@@ -263,7 +268,6 @@ def _listing_item(
     incoming_age_source = str(row.get("listed_age_source") or "").strip() or None
     existing_age_seconds = _relative_vinted_age_seconds(existing_extra.get("listed_age_seconds"))
     existing_age_source = str(existing_extra.get("listed_age_source") or "").strip() or None
-    page_age_bridge = _version_at_least(extension_version, (2, 7, 0))
     keep_existing_age = (
         not page_age_bridge
         or bool(existing_age_source and existing_age_source.startswith("vinted_page"))
