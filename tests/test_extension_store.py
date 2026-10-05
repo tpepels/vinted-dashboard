@@ -187,12 +187,21 @@ def test_source_extension_version_is_bumped_for_local_download():
 
 
 
-def test_content_script_reads_uploaded_age_from_rendered_item_page_and_caches_it():
+def test_content_script_uses_isolated_uploaded_age_parser_and_rendered_page_collector():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    age = (ROOT / "app" / "extension" / "vinted_age.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
+    manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest["content_scripts"][0]["js"][:2] == ["vinted_age.js", "content.js"]
     assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV3"' in content
     assert 'LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV2"' in content
-    assert "function relativeAgeFromRenderedDocument()" in content
+    assert "globalThis.VintedAge" in age
+    assert "function fromUploadedText(value)" in age
+    assert "function fromRenderedDocument(doc = document)" in age
+    assert "VintedAge.fromRenderedDocument(document)" in content
+    assert "VintedAge.advanceCached(cached)" in content
+    assert "function relativeAgeFromPageHtml" not in content
     assert 'type:"rendered-uploaded-ages"' in content
     assert 'type:"read-vinted-uploaded-age"' in background
     assert "async function renderedUploadedAges(items)" in background
@@ -222,7 +231,8 @@ def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
 
 def test_content_script_does_not_trust_generic_api_dates_for_posting_age():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
-    assert "function relativeAgeSeconds(v)" in content
+    age = (ROOT / "app" / "extension" / "vinted_age.js").read_text(encoding="utf-8")
+    assert "function secondsFromRelative(value)" in age
     assert "relativeAgeFromRaw" not in content
     assert 'first(raw,"created_at_ts","created_timestamp_ts","uploaded_ts","upload_date_dte")' in content
     assert '"created_at","uploaded_at","posted_at"' not in content
