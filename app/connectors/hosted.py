@@ -615,6 +615,82 @@ def _woo_get(
     return response.json()
 
 
+def _woo_post(
+    values: dict[str, str],
+    path: str,
+    *,
+    body: dict[str, Any],
+) -> Any:
+    response = requests.post(
+        _woocommerce_base(values) + "/wp-json/wc/v3/" + path.lstrip("/"),
+        headers={
+            **_woocommerce_headers(values),
+            "Content-Type": "application/json",
+        },
+        json=body,
+        timeout=45,
+    )
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            detail = str((response.json() or {}).get("message") or "")
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            f"WooCommerce create product failed ({response.status_code})"
+            + (f": {detail}" if detail else "")
+        )
+    return response.json()
+
+
+def create_woocommerce_workspace_listing(
+    workspace_id: uuid.UUID,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.WOOCOMMERCE)
+    fields = dict(candidate.get("fields") or {})
+    image_urls = list((candidate.get("source") or {}).get("image_urls") or [])[:5]
+    body: dict[str, Any] = {
+        "name": str(fields.get("title") or "").strip(),
+        "type": "simple",
+        "status": "publish",
+        "sku": str(fields.get("sku") or "").strip(),
+        "regular_price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+        "description": str(fields.get("description") or ""),
+        "manage_stock": True,
+        "stock_quantity": max(0, int(fields.get("quantity") or 0)),
+        "stock_status": "instock" if int(fields.get("quantity") or 0) > 0 else "outofstock",
+    }
+    if image_urls:
+        body["images"] = [{"src": str(url)} for url in image_urls]
+    raw = _woo_post(values, "products", body=body)
+    product_id = raw.get("id")
+    if product_id in (None, ""):
+        raise RuntimeError("WooCommerce created a product without returning an ID")
+    return {
+        "source_id": str(product_id),
+        "sku": raw.get("sku") or fields.get("sku"),
+        "title": raw.get("name") or fields.get("title"),
+        "status": ListingStatus.ACTIVE,
+        "quantity": _woo_quantity(raw),
+        "price_cents": _money(raw.get("price") or raw.get("regular_price"))
+        or int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": raw.get("permalink"),
+        "listed_at": (
+            _remote_datetime(raw.get("date_created_gmt") or raw.get("date_created")).isoformat()
+            if _remote_datetime(raw.get("date_created_gmt") or raw.get("date_created"))
+            else None
+        ),
+        "description": raw.get("description") or fields.get("description"),
+        "image_url": (
+            (raw.get("images") or [{}])[0].get("src")
+            if raw.get("images")
+            else (image_urls[0] if image_urls else None)
+        ),
+    }
+
+
 def _woo_quantity(raw: dict[str, Any]) -> int:
     quantity = _int(raw.get("stock_quantity"))
     if quantity is not None:
@@ -1848,6 +1924,66 @@ def _wix_post(
         raise RuntimeError(f"Wix API request failed ({response.status_code})")
     payload = response.json() or {}
     return payload if isinstance(payload, dict) else {}
+
+
+def create_wix_workspace_listing(
+    workspace_id: uuid.UUID,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.WIX)
+    fields = dict(candidate.get("fields") or {})
+    quantity = max(0, int(fields.get("quantity") or 0))
+    amount = f"{int(fields.get('price_cents') or 0) / 100:.2f}"
+    body = {
+        "product": {
+            "name": str(fields.get("title") or "").strip(),
+            "visible": True,
+            "productType": "PHYSICAL",
+            "physicalProperties": {},
+            "variantsInfo": {
+                "variants": [
+                    {
+                        "sku": str(fields.get("sku") or "").strip(),
+                        "choices": [],
+                        "price": {"actualPrice": {"amount": amount}},
+                        "inventoryItem": {"quantity": quantity},
+                        "physicalProperties": {},
+                    }
+                ]
+            },
+        },
+        "returnEntity": True,
+    }
+    payload = _wix_post(values, "stores/v3/products-with-inventory", body=body)
+    product = payload.get("product") or {}
+    product_id = str(product.get("id") or "").strip()
+    variants = ((product.get("variantsInfo") or {}).get("variants") or [])
+    variant = variants[0] if variants and isinstance(variants[0], dict) else {}
+    variant_id = str(variant.get("id") or "").strip()
+    if not product_id:
+        raise RuntimeError("Wix created a product without returning an ID")
+    source_id = f"{product_id}:{variant_id}" if variant_id else product_id
+    return {
+        "source_id": source_id,
+        "sku": variant.get("sku") or fields.get("sku"),
+        "title": product.get("name") or fields.get("title"),
+        "status": ListingStatus.ACTIVE if quantity > 0 else ListingStatus.INACTIVE,
+        "quantity": quantity,
+        "price_cents": int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": None,
+        "listed_at": (
+            _remote_datetime(product.get("createdDate")).isoformat()
+            if _remote_datetime(product.get("createdDate"))
+            else None
+        ),
+        "description": fields.get("description"),
+        "image_url": None,
+        "attributes": {
+            "product_id": product_id,
+            "variant_id": variant_id or None,
+        },
+    }
 
 
 def _wix_next_cursor(payload: dict[str, Any]) -> str | None:
