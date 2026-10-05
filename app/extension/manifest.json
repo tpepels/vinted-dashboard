@@ -39,6 +39,7 @@
         "https://www.vinted.pl/*"
       ],
       "js": [
+        "vinted_age.js",
         "content.js"
       ],
       "run_at": "document_idle"
