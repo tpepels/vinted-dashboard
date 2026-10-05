@@ -326,8 +326,8 @@ def test_vinted_youngest_and_oldest_ignore_only_rows_without_any_vinted_age():
     assert 'const vinted = rows.filter((row) => row.channel === "vinted");' in APP_JS
     assert ".filter((entry) => entry.ageSeconds != null)" in APP_JS
     assert "const unknownVinted = vinted.length - agedVinted.length;" in APP_JS
-    assert '" unknown - never substituted with first seen"' in APP_JS
-    assert '"Exact or Vinted-provided relative age"' in APP_JS
+    assert '" pending Vinted Uploaded scan"' in APP_JS
+    assert '"Exact or Vinted Uploaded age"' in APP_JS
 
 
 def test_vinted_age_cards_sort_by_exact_or_vinted_relative_age():
@@ -425,3 +425,10 @@ def test_inventory_general_vinted_books_are_not_silently_hidden_from_biblio():
     assert "function inventoryBiblioAction(item)" in APP_JS
     assert 'itemHasVintedSource(item) && item.category === "general"' in APP_JS
     assert "Review BIBLIO" in APP_JS
+
+
+
+def test_generic_vinted_relative_age_is_rejected_client_side():
+    assert 'row?.channel === "vinted"' in APP_JS
+    assert '!String(row?.listed_age_source || "").startsWith("vinted_page")' in APP_JS
+    assert '" pending Vinted Uploaded scan"' in APP_JS
