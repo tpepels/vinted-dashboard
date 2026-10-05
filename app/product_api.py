@@ -359,7 +359,7 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
             row
             for row in rows
             if row.channel == Channel.VINTED
-            and row.status in {ListingStatus.ACTIVE, ListingStatus.RESERVED, ListingStatus.HIDDEN, ListingStatus.DRAFT}
+            and row.status == ListingStatus.ACTIVE
         ),
         None,
     ) or next((row for row in rows if row.channel == Channel.VINTED), None)
