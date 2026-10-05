@@ -383,54 +383,27 @@ def live_connector_checks(workspace_slug: str | None = None) -> list[dict[str, A
     )
 
     from app.connectors.hosted import (
-        has_credentials,
+        biblio_configured,
+        ebay_configured,
         sync_ebay_workspace,
         test_biblio_workspace,
     )
 
-    # BIBLIO - workspace credential first, personal .env fallback second.
-    biblio_configured = has_credentials(workspace_id, Channel.BIBLIO)
-    if biblio_configured:
+    if biblio_configured(workspace_id):
         try:
             detail = test_biblio_workspace(workspace_id)
             results.append({"channel": Channel.BIBLIO, "ok": True, "mode": "FTP login", **detail})
         except Exception as exc:
             results.append({"channel": Channel.BIBLIO, "ok": False, "mode": "FTP login", "error": str(exc)})
     else:
-        from app.channels import biblio_ftp_status, test_biblio_ftp
-        status = biblio_ftp_status()
-        if status.get("configured"):
-            try:
-                detail = test_biblio_ftp()
-                results.append({"channel": Channel.BIBLIO, "ok": True, "mode": "FTP login (.env)", **detail})
-            except Exception as exc:
-                results.append({"channel": Channel.BIBLIO, "ok": False, "mode": "FTP login (.env)", "error": str(exc)})
-        else:
-            results.append({"channel": Channel.BIBLIO, "ok": True, "skipped": True, "reason": "not configured"})
+        results.append({"channel": Channel.BIBLIO, "ok": True, "skipped": True, "reason": "not configured"})
 
-    # eBay - read seller inventory, then update local snapshot only.
-    ebay_configured = has_credentials(workspace_id, Channel.EBAY)
-    env_ebay = bool(
-        os.getenv("EBAY_OAUTH_TOKEN", "").strip()
-        or (
-            os.getenv("EBAY_CLIENT_ID", "").strip()
-            and os.getenv("EBAY_CLIENT_SECRET", "").strip()
-            and os.getenv("EBAY_REFRESH_TOKEN", "").strip()
-        )
-    )
-    if ebay_configured:
+    if ebay_configured(workspace_id):
         try:
             detail = sync_ebay_workspace(workspace_id)
             results.append({"channel": Channel.EBAY, "ok": True, "mode": "read inventory", **detail})
         except Exception as exc:
             results.append({"channel": Channel.EBAY, "ok": False, "mode": "read inventory", "error": str(exc)})
-    elif env_ebay:
-        from app.channels import sync_ebay_inventory
-        try:
-            detail = sync_ebay_inventory()
-            results.append({"channel": Channel.EBAY, "ok": True, "mode": "read inventory (.env)", **detail})
-        except Exception as exc:
-            results.append({"channel": Channel.EBAY, "ok": False, "mode": "read inventory (.env)", "error": str(exc)})
     else:
         results.append({"channel": Channel.EBAY, "ok": True, "skipped": True, "reason": "not configured"})
 
