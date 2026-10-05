@@ -36,8 +36,7 @@ under the same top-level `services:` key:
 ```
 
 The worker deliberately has no port and no `container_name`. It shares the
-same application database/data volume as the web service. Only the web service
-runs Alembic migrations and the legacy backfill.
+same application database/data volume as the web service. Only the web service runs Alembic migrations and, when enabled for an upgraded installation, the one-way legacy data backfill.
 
 Validate:
 
