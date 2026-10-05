@@ -474,7 +474,7 @@ def test_listings_api_hides_legacy_relative_age_but_keeps_page_uploaded_age(monk
     }
     assert rows["LEGACY-AGE"]["listed_age_seconds"] is None
     assert rows["LEGACY-AGE"]["listed_age_source"] is None
-    assert rows["LEGACY-AGE"]["listed_age_text"] == "Today"
+    assert rows["LEGACY-AGE"]["listed_age_text"] is None
 
     assert rows["PAGE-AGE"]["listed_age_seconds"] >= 5 * 7 * 86400
     assert rows["PAGE-AGE"]["listed_age_source"] == "vinted_page_uploaded"
