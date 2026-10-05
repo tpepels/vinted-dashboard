@@ -934,6 +934,7 @@ async function publishCrossDestination(channel, button) {
 }
 
 async function openCrossListConnection(channel) {
+  if (state.crossList) state.crossList.connectChannel = channel;
   await selectView("connections");
   const connector = (state.connectors || []).find((row) => row.channel === channel);
   if (!connector || !connectorSchemas[channel]) {
@@ -3513,6 +3514,12 @@ $("#connector-config").onsubmit = async (event) => {
     const data = await connections();
     if (state.connectorChannel === channel) {
       renderEtsyOAuthTools(data.connectors.find((row) => row.channel === channel));
+    }
+    if (state.crossList?.connectChannel === channel && state.crossList?.itemId) {
+      const { itemId, sourceListingId } = state.crossList;
+      state.crossList.connectChannel = null;
+      await selectView("inventory");
+      await openCrossList(itemId, sourceListingId || null);
     }
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
