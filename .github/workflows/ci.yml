@@ -36,9 +36,9 @@ jobs:
           BACKUP_PROVIDER: ci-managed-snapshot
           BACKUP_RESTORE_DRILL_AT: 2026-10-01
       - run: python -m pytest -q
-      - run: node --check app/static/app.js
       - run: node --check app/product_static/app.js
       - run: node --check app/extension/background.js
+      - run: node --check app/extension/vinted_age.js
       - run: node --check app/extension/content.js
       - run: node scripts/test_vinted_page_age.js
       - run: node scripts/test_vinted_rendered_tab_age.js
