@@ -119,6 +119,93 @@ def _existing_biblio(
     return rows[0]
 
 
+def _source_image_urls(
+    item: models.InventoryItem,
+    source_listing: models.ChannelListing | None,
+) -> list[str]:
+    urls: list[str] = []
+    if source_listing is not None:
+        extra = dict(source_listing.extra or {})
+        raw_urls = extra.get("image_urls")
+        if isinstance(raw_urls, list):
+            urls.extend(str(value).strip() for value in raw_urls if str(value or "").strip())
+        elif extra.get("image_url"):
+            urls.append(str(extra["image_url"]).strip())
+    if not urls:
+        attrs = dict(item.attributes or {})
+        raw_urls = attrs.get("image_urls")
+        if isinstance(raw_urls, list):
+            urls.extend(str(value).strip() for value in raw_urls if str(value or "").strip())
+    return list(dict.fromkeys(urls))[:5]
+
+
+def _book_id_conflict(
+    session: Session,
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    book_id: str | None,
+) -> models.ChannelListing | None:
+    value = str(book_id or "").strip()
+    if not value:
+        return None
+    return session.execute(
+        select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == workspace_id,
+            models.ChannelListing.channel == Channel.BIBLIO,
+            models.ChannelListing.external_id == value,
+            models.ChannelListing.inventory_item_id != item_id,
+        )
+    ).scalar_one_or_none()
+
+
+def validate_biblio_candidate(
+    session: Session,
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    fields = dict(candidate.get("fields") or {})
+    missing: list[str] = []
+    for key, label in (
+        ("book_id", "Book ID"),
+        ("author", "author"),
+        ("title", "title"),
+        ("description", "description"),
+        ("price_cents", "price"),
+    ):
+        if fields.get(key) in (None, ""):
+            missing.append(label)
+    if int(fields.get("quantity") or 0) <= 0:
+        missing.append("available stock")
+
+    conflict = _book_id_conflict(
+        session,
+        workspace_id,
+        item_id,
+        fields.get("book_id"),
+    )
+    suggestion = candidate.get("book_id_suggestion")
+    if conflict is not None:
+        base = str(fields.get("book_id") or candidate.get("book_id_suggestion") or "BOOK").strip() or "BOOK"
+        suggestion = None
+        for number in range(2, 1000):
+            proposed = f"{base}-{number}"
+            if _book_id_conflict(session, workspace_id, item_id, proposed) is None:
+                suggestion = proposed
+                break
+        fields["book_id"] = None
+        if "unique BIBLIO Book ID" not in missing:
+            missing.append("unique BIBLIO Book ID")
+
+    return {
+        **candidate,
+        "fields": fields,
+        "book_id_suggestion": suggestion,
+        "missing": missing,
+        "ready": not missing,
+    }
+
+
 def build_biblio_candidate(
     session: Session,
     workspace_id: uuid.UUID,
@@ -189,8 +276,13 @@ def build_biblio_candidate(
                 attrs["edition"] = enrichment["edition"]
                 attrs["edition_source"] = "isbn"
 
+    existing = _existing_biblio(session, workspace_id, item.id)
+    book_id = existing.external_id if existing else item.sku
+    image_urls = _source_image_urls(item, vinted)
+
     fields = {
         "sku": item.sku,
+        "book_id": book_id,
         "title": title,
         "author": author,
         "description": description,
@@ -201,6 +293,7 @@ def build_biblio_candidate(
     }
     sources = {
         "sku": "master",
+        "book_id": "biblio" if existing else "master",
         "title": title_source,
         "author": author_source,
         "description": description_source,
@@ -210,39 +303,14 @@ def build_biblio_candidate(
         "quantity": "master",
     }
 
-    missing: list[str] = []
-    for key, label in (
-        ("sku", "SKU"),
-        ("author", "author"),
-        ("title", "title"),
-        ("description", "description"),
-        ("price_cents", "price"),
-    ):
-        if fields.get(key) in (None, ""):
-            missing.append(label)
-    if fields["quantity"] <= 0:
-        missing.append("available stock")
-
-    existing = _existing_biblio(session, workspace_id, item.id)
-    conflict = session.execute(
-        select(models.ChannelListing).where(
-            models.ChannelListing.workspace_id == workspace_id,
-            models.ChannelListing.channel == Channel.BIBLIO,
-            models.ChannelListing.external_id == item.sku,
-            models.ChannelListing.inventory_item_id != item.id,
-        )
-    ).scalar_one_or_none()
-    if conflict is not None:
-        missing.append("unique BIBLIO Book ID")
-
-    return {
+    candidate = {
         "item_id": str(item.id),
         "item_title": item.title,
         "category": item.category,
         "fields": fields,
         "field_sources": sources,
-        "missing": missing,
-        "ready": not missing,
+        "missing": [],
+        "ready": False,
         "existing_biblio_listing_id": str(existing.id) if existing else None,
         "already_listed": bool(existing and existing.status == ListingStatus.ACTIVE),
         "source": {
@@ -250,9 +318,18 @@ def build_biblio_candidate(
             "listing_id": str(vinted.id) if vinted else None,
             "external_id": vinted.external_id if vinted else None,
             "url": vinted.url if vinted else None,
+            "image_urls": image_urls,
+            "photo_count": len(image_urls),
         },
+        "book_id_suggestion": book_id,
         "enrichment_warning": enrichment_warning,
     }
+    return validate_biblio_candidate(
+        session,
+        workspace_id,
+        item.id,
+        candidate,
+    )
 
 
 def apply_biblio_overrides(
@@ -261,7 +338,7 @@ def apply_biblio_overrides(
 ) -> dict[str, Any]:
     fields = dict(candidate.get("fields") or {})
     sources = dict(candidate.get("field_sources") or {})
-    for key in ("title", "author", "description", "isbn"):
+    for key in ("title", "author", "description", "isbn", "book_id"):
         if key not in overrides or overrides[key] is None:
             continue
         value = str(overrides[key]).strip()
@@ -275,9 +352,13 @@ def apply_biblio_overrides(
         fields["price_cents"] = price
         sources["price_cents"] = "review"
 
+    if not fields.get("book_id") and fields.get("sku"):
+        fields["book_id"] = fields["sku"]
+        sources.setdefault("book_id", sources.get("sku") or "master")
+
     missing: list[str] = []
     for key, label in (
-        ("sku", "SKU"),
+        ("book_id", "Book ID"),
         ("author", "author"),
         ("title", "title"),
         ("description", "description"),
@@ -313,7 +394,10 @@ def upsert_biblio_listing(
         raise ValueError("Inventory item not found")
 
     existing = _existing_biblio(session, workspace.id, item.id)
-    external_id = existing.external_id if existing else item.sku
+    fields = dict(candidate["fields"])
+    external_id = str(fields.get("book_id") or "").strip()
+    if not external_id:
+        raise ValueError("BIBLIO Book ID is required")
     collision = session.execute(
         select(models.ChannelListing).where(
             models.ChannelListing.workspace_id == workspace.id,
@@ -327,7 +411,6 @@ def upsert_biblio_listing(
 
     account, _ = get_or_create_channel_account(session, workspace, Channel.BIBLIO, {})
     now = datetime.now(timezone.utc)
-    fields = dict(candidate["fields"])
     source = dict(candidate.get("source") or {})
 
     if existing is None:
@@ -344,7 +427,8 @@ def upsert_biblio_listing(
 
     existing.inventory_item_id = item.id
     existing.channel_account_id = account.id
-    existing.external_sku = item.sku
+    existing.external_id = external_id
+    existing.external_sku = external_id
     existing.title = str(fields["title"])
     existing.price_cents = int(fields["price_cents"])
     existing.currency = str(fields.get("currency") or item.currency or "EUR")
@@ -360,6 +444,8 @@ def upsert_biblio_listing(
         "source_listing_id": source.get("listing_id"),
         "source_listing_external_id": source.get("external_id"),
         "field_sources": dict(candidate.get("field_sources") or {}),
+        "image_urls": list(source.get("image_urls") or [])[:5],
+        "image_source": source.get("channel") if source.get("image_urls") else None,
         "cross_listed_at": now.isoformat(),
     }
 

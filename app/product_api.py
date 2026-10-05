@@ -215,6 +215,7 @@ class QuickListingCreateRequest(BaseModel):
 
 class BiblioPublishRequest(BaseModel):
     source_listing_id: uuid.UUID | None = None
+    book_id: str | None = None
     title: str | None = None
     author: str | None = None
     description: str | None = None
@@ -775,6 +776,25 @@ def listings(
                     if listing.inventory_item_id in item_by_id
                     else False
                 ),
+                "biblio_gate": (
+                    "link_required"
+                    if listing.channel == Channel.VINTED and not listing.inventory_item_id
+                    else (
+                        "ready"
+                        if listing.channel == Channel.VINTED
+                        and listing.inventory_item_id in item_by_id
+                        and publishing.is_biblio_book_candidate(
+                            item_by_id[listing.inventory_item_id],
+                            listing,
+                        )
+                        else (
+                            "book_review"
+                            if listing.channel == Channel.VINTED
+                            and listing.inventory_item_id in item_by_id
+                            else None
+                        )
+                    )
+                ),
                 "channel": listing.channel,
                 "external_id": listing.external_id,
                 "external_sku": listing.external_sku,
@@ -1231,6 +1251,12 @@ def biblio_publish(
             overrides.pop("source_listing_id", None)
             if overrides:
                 candidate = publishing.apply_biblio_overrides(candidate, overrides)
+            candidate = publishing.validate_biblio_candidate(
+                session,
+                context.workspace.id,
+                item_id,
+                candidate,
+            )
             if candidate.get("missing"):
                 raise ValueError(
                     "BIBLIO listing is missing: "

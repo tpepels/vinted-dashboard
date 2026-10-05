@@ -203,6 +203,20 @@ ChannelListing linked to the same physical InventoryItem and queues the
 existing BIBLIO FTP sync. If a required field is still missing, only that field
 is requested inline.
 
+BIBLIO actions are not silently hidden for Vinted rows. Unlinked Vinted
+listings show **Link for BIBLIO** and jump directly to reconciliation; sparse
+general-category books show **Review BIBLIO** so category/author/ISBN can be
+fixed. Zero stock exposes an **Edit stock** repair action. A conflicting
+BIBLIO Book ID can be replaced inline with a server-validated unique ID.
+
+When the Vinted source carries photos, up to five are copied automatically to
+BIBLIO during the FTP sync. The server downloads only trusted Vinted HTTPS
+image URLs, converts them to JPG, enforces BIBLIO's basic image requirements,
+and uploads them as `BookID.jpg`, `BookID_1.jpg`, etc. Successful photo
+sets are fingerprinted so unchanged photos are not re-uploaded on every sync;
+partial failures remain pending for retry.
+
+
 
 The product Analytics page reads Vinted listing snapshots directly from the
 workspace schema, including view/favourite gains, follower history, sales

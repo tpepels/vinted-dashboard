@@ -49,7 +49,7 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Optional book connector. Import your current BIBLIO inventory once, then use FTP for updates and deletes.",
+    help: "Book connector. Inventory and Vinted source photos are sent by FTP. Photos are converted to JPG and named from the BIBLIO Book ID automatically. Multiple photos use BookID_1.jpg, BookID_2.jpg, etc.; BIBLIO may need that multi-photo convention enabled on your seller account.",
     fields: [
       ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
@@ -791,6 +791,40 @@ function itemCanPublishToBiblio(item) {
   return Boolean(item?.biblio_publishable);
 }
 
+function itemHasVintedSource(item) {
+  return Boolean((item?.listings || []).some((listing) => listing.channel === "vinted"));
+}
+
+function inventoryBiblioAction(item) {
+  if (itemCanPublishToBiblio(item)) {
+    const update = (item.listings || []).some((listing) => listing.channel === "biblio" && listing.status === "active");
+    return '<button class="btn biblio-publish" data-item-id="' + esc(item.id) + '">'
+      + (update ? "Update BIBLIO" : "List on BIBLIO") + '</button>';
+  }
+  if (itemHasVintedSource(item) && item.category === "general") {
+    return '<button class="btn biblio-review" data-item-id="' + esc(item.id)
+      + '" title="Book evidence is missing. Review category, author or ISBN.">Review BIBLIO</button>';
+  }
+  return "";
+}
+
+function listingBiblioAction(row) {
+  if (row.channel !== "vinted") return "";
+  if (row.biblio_gate === "link_required") {
+    return '<button class="btn biblio-link" data-listing-id="' + esc(row.id)
+      + '">Link for BIBLIO</button>';
+  }
+  if (row.biblio_gate === "book_review" && row.inventory_item_id) {
+    return '<button class="btn biblio-review" data-item-id="' + esc(row.inventory_item_id)
+      + '" title="Review this item as a book before publishing.">Review BIBLIO</button>';
+  }
+  if (row.inventory_item_id && row.biblio_publishable) {
+    return '<button class="btn biblio-publish" data-item-id="' + esc(row.inventory_item_id)
+      + '" data-source-listing-id="' + esc(row.id) + '">List on BIBLIO</button>';
+  }
+  return "";
+}
+
 function biblioSourceBadge(source) {
   if (!source) return "";
   const label = source === "vinted" ? "Vinted" : source === "isbn" ? "ISBN lookup" : source === "master" ? "Master" : source;
@@ -814,10 +848,11 @@ function renderBiblioPublish(data) {
     ["description", "Description", fields.description, sources.description],
     ["isbn", "ISBN", fields.isbn || "Optional", sources.isbn],
     ["price_cents", "Price", fields.price_cents == null ? null : money(fields.price_cents, fields.currency), sources.price_cents],
-    ["sku", "Book ID", fields.sku, sources.sku],
+    ["book_id", "Book ID", fields.book_id, sources.book_id],
     ["quantity", "Quantity", fields.quantity, sources.quantity],
+    ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - upload automatically" : "No Vinted photos", source.photo_count ? "vinted" : null],
   ];
-  const editableMissing = new Set(["title", "author", "description", "price_cents"]);
+  const editableMissing = new Set(["title", "author", "description", "price_cents", "book_id"]);
   $("#biblio-publish-fields").innerHTML = rows.map(([key, label, value, sourceName]) => {
     const missing = value == null || value === "";
     const display = label === "Description" && value
@@ -829,7 +864,7 @@ function renderBiblioPublish(data) {
         ? '<textarea class="biblio-missing-input" data-field="description" rows="3" placeholder="Description required by BIBLIO"></textarea>'
         : '<input class="biblio-missing-input" data-field="' + esc(key) + '"'
           + (key === "price_cents" ? ' type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"' : ' type="text"')
-          + ' placeholder="' + esc(label) + '">';
+          + ' placeholder="' + esc(key === "book_id" ? (data.book_id_suggestion || "Unique BIBLIO Book ID") : label) + '">';
     }
     return '<div class="biblio-field ' + (missing ? "missing" : "") + '">'
       + '<span class="biblio-field-label">' + esc(label) + '</span>'
@@ -849,8 +884,12 @@ function renderBiblioPublish(data) {
   $("#biblio-publish-warning").textContent = warning;
 
   $("#biblio-open-connections").classList.toggle("hidden", Boolean(data.configured));
+  $("#biblio-edit-stock").classList.toggle("hidden", !missing.includes("available stock"));
+  $("#biblio-edit-book").classList.add("hidden");
   const publish = $("#biblio-publish-submit");
-  const hardMissing = missing.filter((value) => !["author", "title", "description", "price"].includes(value));
+  const hardMissing = missing.filter((value) => ![
+    "author", "title", "description", "price", "Book ID", "unique BIBLIO Book ID",
+  ].includes(value));
   const refreshPublishState = () => {
     const unresolvedEditable = Array.from(document.querySelectorAll(".biblio-missing-input")).some((field) => !String(field.value || "").trim());
     publish.disabled = !data.configured || hardMissing.length > 0 || unresolvedEditable;
@@ -872,6 +911,8 @@ async function openBiblioPublish(itemId, sourceListingId = null) {
   $("#biblio-publish-warning").textContent = "";
   $("#biblio-publish-submit").disabled = true;
   $("#biblio-open-connections").classList.add("hidden");
+  $("#biblio-edit-stock").classList.add("hidden");
+  $("#biblio-edit-book").classList.add("hidden");
   $("#biblio-publish-panel").scrollIntoView({ behavior: "smooth", block: "start" });
   try {
     const suffix = sourceListingId ? "?source_listing_id=" + encodeURIComponent(sourceListingId) : "";
@@ -884,6 +925,25 @@ async function openBiblioPublish(itemId, sourceListingId = null) {
   }
 }
 
+async function reviewBiblioItem(itemId) {
+  if (state.view !== "inventory") await selectView("inventory");
+  const item = state.inventoryItems.find((row) => row.id === itemId);
+  if (!item) return flash("Inventory item could not be found.", true);
+  openItemForm(item);
+  flash("Review category, author or ISBN. Mark the item as Book if needed.");
+}
+
+async function linkListingForBiblio(listingId) {
+  await selectView("reconcile");
+  const select = $("#reconcile-listing");
+  if (!select || !Array.from(select.options).some((option) => option.value === listingId)) {
+    return flash("Listing could not be found in reconciliation.", true);
+  }
+  select.value = listingId;
+  select.scrollIntoView({ behavior: "smooth", block: "center" });
+  flash("Choose the physical inventory item, then click Link to master item.");
+}
+
 function bindBiblioPublishButtons() {
   document.querySelectorAll(".biblio-publish").forEach((button) => {
     button.onclick = async () => {
@@ -892,6 +952,12 @@ function bindBiblioPublishButtons() {
       if (state.view !== "inventory") await selectView("inventory");
       await openBiblioPublish(itemId, sourceListingId);
     };
+  });
+  document.querySelectorAll(".biblio-review").forEach((button) => {
+    button.onclick = () => reviewBiblioItem(button.dataset.itemId);
+  });
+  document.querySelectorAll(".biblio-link").forEach((button) => {
+    button.onclick = () => linkListingForBiblio(button.dataset.listingId);
   });
 }
 
@@ -935,11 +1001,7 @@ async function inventory() {
           '<span class="pill ' + esc(listing.channel) + '">' + esc(listing.channel) + "</span>"
         ).join(" ") || "—")
         + "</td><td>" + esc(item.status) + '</td><td class="row-actions">'
-        + (itemCanPublishToBiblio(item)
-          ? '<button class="btn biblio-publish" data-item-id="' + esc(item.id) + '">'
-            + ((item.listings || []).some((listing) => listing.channel === "biblio" && listing.status === "active")
-              ? "Update BIBLIO" : "List on BIBLIO") + '</button>'
-          : "")
+        + inventoryBiblioAction(item)
         + '<button class="btn edit-item" data-id="' + item.id + '">Edit</button></td></tr>'
       ).join("")
       + "</tbody></table>"
@@ -965,6 +1027,18 @@ $("#close-biblio-publish").onclick = () => {
   $("#biblio-publish-panel").classList.add("hidden");
 };
 $("#biblio-open-connections").onclick = () => selectView("connections");
+$("#biblio-edit-stock").onclick = () => {
+  const itemId = state.biblioPublish?.itemId;
+  const item = state.inventoryItems.find((row) => row.id === itemId);
+  if (!item) return flash("Inventory item could not be found.", true);
+  $("#biblio-publish-panel").classList.add("hidden");
+  openItemForm(item);
+  flash("Set the physical stock quantity, save, then publish to BIBLIO.");
+};
+$("#biblio-edit-book").onclick = () => {
+  const itemId = state.biblioPublish?.itemId;
+  if (itemId) reviewBiblioItem(itemId);
+};
 $("#biblio-publish-submit").onclick = async () => {
   const current = state.biblioPublish;
   if (!current?.itemId) return;
@@ -984,7 +1058,7 @@ $("#biblio-publish-submit").onclick = async () => {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    flash("BIBLIO listing queued for FTP publication.");
+    flash("BIBLIO listing and available Vinted photos queued for FTP publication.");
     $("#biblio-publish-panel").classList.add("hidden");
     state.biblioPublish = null;
     await inventory();
@@ -2558,10 +2632,7 @@ function renderListings() {
           + (showViews ? "<td>" + esc(row.views == null ? "—" : row.views) + "</td>" : "")
           + "<td>" + money(row.price_cents, row.currency) + "</td>"
           + '<td class="row-actions">'
-          + (row.channel === "vinted" && row.inventory_item_id && row.biblio_publishable
-            ? '<button class="btn biblio-publish" data-item-id="' + esc(row.inventory_item_id)
-              + '" data-source-listing-id="' + esc(row.id) + '">List on BIBLIO</button>'
-            : "")
+          + listingBiblioAction(row)
           + "</td></tr>";
       }).join("")
       + "</tbody></table>"
