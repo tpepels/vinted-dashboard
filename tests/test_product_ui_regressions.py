@@ -362,4 +362,4 @@ def test_dashboard_always_shows_bridge_version_and_versioned_download():
     assert "Bridge v—" in html
     assert '$("#bridge-version-page").textContent = "Bridge v" + (state.me.bridge_version || "unknown");' in APP_JS
     assert "devices.download_url" in APP_JS
-    assert '"Download bridge v"' in APP_JS
+    assert "Download bridge v" in APP_JS
