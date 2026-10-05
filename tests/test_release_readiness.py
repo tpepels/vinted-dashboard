@@ -25,7 +25,7 @@ def release_env() -> dict[str, str]:
         "AUTH_SESSION_DAYS": "30",
         "PASSWORD_HASH_ITERATIONS": "310000",
         "BILLING_ENABLED": "false",
-        "EXTENSION_LATEST_VERSION": "2.7.0",
+        "EXTENSION_LATEST_VERSION": "2.8.0",
         "BACKUP_PROVIDER": "managed-postgres-snapshots",
         "BACKUP_RESTORE_DRILL_AT": "2026-10-01",
     }
