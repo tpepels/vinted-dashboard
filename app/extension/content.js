@@ -1,3 +1,4 @@
+const BRIDGE_CONTENT_PROTOCOL=3;
 function first(obj,...keys){if(!obj||typeof obj!=="object")return null;for(const key of keys){const v=obj[key];if(v!==undefined&&v!==null&&v!=="")return v}return null}
 function idOf(v){if(v&&typeof v==="object")v=first(v,"id","user_id");return v==null||v===""?null:String(v)}
 function nameOf(v){if(v&&typeof v==="object")v=first(v,"login","username","name","display_name");return v==null||v===""?null:String(v)}
@@ -167,6 +168,10 @@ async function collectVintedData(researchJobs=[]){
 
 
 chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
+  if(message?.type==="bridge-content-protocol"){
+    sendResponse({ok:true,protocol:BRIDGE_CONTENT_PROTOCOL});
+    return;
+  }
   if(message?.type==="collect-vinted-data"){
     collectVintedData().then(snapshot=>sendResponse({ok:true,snapshot})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
     return true;
