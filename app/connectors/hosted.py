@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import csv
 import ftplib
+import hashlib
 import io
 import ipaddress
 import os
@@ -25,6 +26,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from curl_cffi import requests
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 
 from app import db, models
@@ -2581,6 +2583,13 @@ def _biblio_rows(workspace_id: uuid.UUID) -> tuple[list[dict[str, Any]], list[di
                 "currency": listing.currency or item.currency or "EUR",
                 "quantity": listing.quantity if listing.quantity is not None else item.quantity,
                 "status": listing.status,
+                "listing_id": str(listing.id),
+                "image_urls": [
+                    str(value).strip()
+                    for value in (extra.get("image_urls") or [])
+                    if str(value or "").strip()
+                ][:5],
+                "photo_sync_signature": extra.get("photo_sync_signature"),
             }
             if listing.status == ListingStatus.ACTIVE and int(row["quantity"] or 0) > 0:
                 active.append(row)
@@ -2628,6 +2637,115 @@ def _biblio_tsv(rows: list[dict[str, Any]], *, sold: bool) -> bytes:
             ]
         )
     return output.getvalue().encode("utf-8")
+
+
+BIBLIO_MAX_PHOTOS = 5
+BIBLIO_MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
+
+
+def _biblio_photo_signature(urls: list[str]) -> str | None:
+    clean = [str(value).strip() for value in urls if str(value or "").strip()][:BIBLIO_MAX_PHOTOS]
+    if not clean:
+        return None
+    return hashlib.sha256("\n".join(clean).encode("utf-8")).hexdigest()
+
+
+def _biblio_photo_filename(book_id: str, index: int) -> str:
+    value = str(book_id or "").strip()
+    if not value:
+        raise ValueError("BIBLIO Book ID is empty")
+    if any(char in value for char in ("/", "\\", "'", "\x00")):
+        raise ValueError("BIBLIO Book ID contains characters that cannot be used in photo filenames")
+    suffix = "" if index == 0 else f"_{index}"
+    return f"{value}{suffix}.jpg"
+
+
+def _trusted_vinted_image_url(url: str) -> bool:
+    parsed = urlparse(str(url or "").strip())
+    host = (parsed.hostname or "").lower()
+    return (
+        parsed.scheme == "https"
+        and (
+            host.endswith(".vinted.net")
+            or host == "vinted.net"
+            or host.endswith(".vinted.com")
+            or host == "vinted.com"
+        )
+    )
+
+
+def _download_biblio_jpeg(url: str) -> bytes:
+    if not _trusted_vinted_image_url(url):
+        raise ValueError("Photo URL is not a trusted Vinted HTTPS image URL")
+    response = requests.get(
+        url,
+        timeout=20,
+        impersonate="chrome",
+        headers={"Accept": "image/avif,image/webp,image/apng,image/jpeg,*/*;q=0.8"},
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Photo download returned HTTP {response.status_code}")
+    body = bytes(response.content or b"")
+    if not body:
+        raise RuntimeError("Photo download returned no data")
+    if len(body) > BIBLIO_MAX_SOURCE_IMAGE_BYTES:
+        raise RuntimeError("Photo is larger than the 25 MB safety limit")
+
+    try:
+        with Image.open(io.BytesIO(body)) as image:
+            image = ImageOps.exif_transpose(image)
+            width, height = image.size
+            if width < 80 or height < 1:
+                raise ValueError("Photo is below BIBLIO's 80 px minimum width")
+            ratio = width / height
+            if ratio < 0.33 or ratio > 3:
+                raise ValueError("Photo aspect ratio is outside BIBLIO's supported range")
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=92, optimize=True)
+            return output.getvalue()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("Photo could not be converted to JPG") from exc
+
+
+def _pending_biblio_photo_rows(active: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pending: list[dict[str, Any]] = []
+    for row in active:
+        urls = [
+            str(value).strip()
+            for value in (row.get("image_urls") or [])
+            if str(value or "").strip()
+        ][:BIBLIO_MAX_PHOTOS]
+        signature = _biblio_photo_signature(urls)
+        if not signature or signature == row.get("photo_sync_signature"):
+            continue
+        pending.append({**row, "image_urls": urls, "photo_signature": signature})
+    return pending
+
+
+def _mark_biblio_photo_sync(
+    workspace_id: uuid.UUID,
+    synced: list[tuple[str, str, int]],
+) -> None:
+    if not synced:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    by_id = {uuid.UUID(listing_id): (signature, count) for listing_id, signature, count in synced}
+    with db.session_scope() as session:
+        rows = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.id.in_(list(by_id)),
+            )
+        ).scalars().all()
+        for listing in rows:
+            signature, count = by_id[listing.id]
+            extra = dict(listing.extra or {})
+            extra["photo_sync_signature"] = signature
+            extra["photo_synced_at"] = now
+            extra["photo_count"] = count
+            listing.extra = extra
 
 
 def _record_biblio_run(
@@ -2711,8 +2829,9 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     ).strip("-")
     inventory_filename = f"{prefix}-{stamp}.txt" if active else None
     deletes_filename = f"{prefix}-{stamp}-deletes.txt" if deletes else None
+    photo_rows = _pending_biblio_photo_rows(active)
     started = datetime.now(timezone.utc)
-    if not inventory_filename and not deletes_filename:
+    if not inventory_filename and not deletes_filename and not photo_rows:
         _record_biblio_run(
             workspace_id,
             status=SyncRunStatus.SUCCESS,
@@ -2729,6 +2848,8 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     if not username or not password:
         raise RuntimeError("BIBLIO needs username and password")
 
+    photo_synced: list[tuple[str, str, int]] = []
+    photo_errors: list[str] = []
     try:
         ftp = ftplib.FTP()
         ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
@@ -2741,6 +2862,22 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
             ftp.storbinary(f"STOR {inventory_filename}", io.BytesIO(_biblio_tsv(active, sold=False)))
         if deletes_filename:
             ftp.storbinary(f"STOR {deletes_filename}", io.BytesIO(_biblio_tsv(deletes, sold=True)))
+
+        for row in photo_rows:
+            uploaded = 0
+            book_id = str(row.get("sku") or row.get("source_id") or "").strip()
+            for index, url in enumerate(row.get("image_urls") or []):
+                try:
+                    filename = _biblio_photo_filename(book_id, index)
+                    jpeg = _download_biblio_jpeg(url)
+                    ftp.storbinary(f"STOR {filename}", io.BytesIO(jpeg))
+                    uploaded += 1
+                except Exception as exc:
+                    photo_errors.append(f"{book_id} photo {index + 1}: {exc}")
+            if uploaded:
+                photo_synced.append(
+                    (str(row["listing_id"]), str(row["photo_signature"]), uploaded)
+                )
         try:
             ftp.quit()
         except Exception:
@@ -2755,10 +2892,15 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
             detail={
                 "inventory_filename": inventory_filename,
                 "deletes_filename": deletes_filename,
+                "photos_pending": len(photo_rows),
+                "photos_uploaded": sum(count for _listing_id, _signature, count in photo_synced),
+                "photo_errors": photo_errors[:20],
             },
             error=str(exc),
         )
         raise RuntimeError("BIBLIO FTP sync failed") from exc
+
+    _mark_biblio_photo_sync(workspace_id, photo_synced)
 
     _record_biblio_run(
         workspace_id,
@@ -2769,6 +2911,9 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
         detail={
             "inventory_filename": inventory_filename,
             "deletes_filename": deletes_filename,
+            "photos_pending": len(photo_rows),
+            "photos_uploaded": sum(count for _listing_id, _signature, count in photo_synced),
+            "photo_errors": photo_errors[:20],
         },
     )
     return {
@@ -2777,6 +2922,8 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
         "deletes": len(deletes),
         "inventory_filename": inventory_filename,
         "deletes_filename": deletes_filename,
+        "photos_uploaded": sum(count for _listing_id, _signature, count in photo_synced),
+        "photo_errors": photo_errors,
     }
 
 
