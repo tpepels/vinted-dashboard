@@ -557,6 +557,7 @@ def me(request: Request, context: RequestContext = Depends(require_context)):
         ],
         "csrf_token": _csrf_from_request(request),
         "app_name": APP_NAME,
+        "bridge_version": os.getenv("EXTENSION_LATEST_VERSION", "").strip() or extension_source_version(),
         "billing": {
             "enabled": billing.BILLING_ENABLED,
             **billing.write_access(context.workspace),
@@ -2921,7 +2922,10 @@ def extension_devices(context: RequestContext = Depends(require_context)):
             .where(ExtensionCredential.workspace_id == context.workspace.id)
             .order_by(ExtensionCredential.created_at.desc())
         ).scalars().all()
+    latest = os.getenv("EXTENSION_LATEST_VERSION", "").strip() or extension_source_version()
     return {
+        "latest_version": latest,
+        "download_url": f"/downloads/reseller-chrome-bridge-v{latest}.zip",
         "devices": [
             {
                 "id": str(row.id),
