@@ -30,6 +30,8 @@ const state = {
   stockEnrichmentActive: 0,
   stockAudioContext: null,
   biblioPublish: null,
+  crossList: null,
+  connectors: [],
   barcodeStream: null,
   barcodeTimer: null,
   barcodeDetector: null,
@@ -86,7 +88,7 @@ const connectorSchemas = {
   },
   woocommerce: {
     title: "WooCommerce",
-    help: "WooCommerce REST API v3. Create a read-only API key under WooCommerce > Settings > Advanced > REST API.",
+    help: "WooCommerce REST API v3. For cross-listing, use a REST API key with read/write Products permission; orders remain read-only in the dashboard.",
     test: true,
     fields: [
       ["store_url", "Store URL", "https://shop.example.com", "url"],
@@ -98,7 +100,7 @@ const connectorSchemas = {
   },
   shopify: {
     title: "Shopify",
-    help: "GraphQL Admin API. Use a store access token with read_products, read_inventory and read_orders. Order history is limited by the scopes granted to the Shopify app.",
+    help: "GraphQL Admin API. Cross-listing needs write_products plus inventory/location access; imports and orders use read_products, read_inventory, read_locations and read_orders.",
     test: true,
     fields: [
       ["store_domain", "Store domain", "your-store.myshopify.com", "text"],
@@ -131,7 +133,7 @@ const connectorSchemas = {
   },
   wix: {
     title: "Wix",
-    help: "Wix REST APIs. Create an API key with read-only Catalog V3, Inventory V3 and Orders permissions, restrict it to the target site, and enter that site's ID.",
+    help: "Wix REST APIs. Cross-listing needs Product write and Inventory write for the target site; catalog, inventory and order imports also need their read permissions.",
     test: true,
     fields: [
       ["site_id", "Site ID", "00000000-0000-0000-0000-000000000000", "text"],
@@ -795,34 +797,19 @@ function itemHasVintedSource(item) {
   return Boolean((item?.listings || []).some((listing) => listing.channel === "vinted"));
 }
 
-function inventoryBiblioAction(item) {
-  if (itemCanPublishToBiblio(item)) {
-    const update = (item.listings || []).some((listing) => listing.channel === "biblio" && listing.status === "active");
-    return '<button class="btn biblio-publish" data-item-id="' + esc(item.id) + '">'
-      + (update ? "Update BIBLIO" : "List on BIBLIO") + '</button>';
-  }
-  if (itemHasVintedSource(item) && item.category === "general") {
-    return '<button class="btn biblio-review" data-item-id="' + esc(item.id)
-      + '" title="Book evidence is missing. Review category, author or ISBN.">Review BIBLIO</button>';
-  }
-  return "";
+function inventoryCrossListAction(item) {
+  if (!item?.id) return "";
+  return '<button class="btn cross-list" data-item-id="' + esc(item.id) + '">Cross-list</button>';
 }
 
-function listingBiblioAction(row) {
+function listingCrossListAction(row) {
   if (row.channel !== "vinted") return "";
-  if (row.biblio_gate === "link_required") {
-    return '<button class="btn biblio-link" data-listing-id="' + esc(row.id)
-      + '">Link for BIBLIO</button>';
+  if (!row.inventory_item_id) {
+    return '<button class="btn cross-list-link" data-listing-id="' + esc(row.id)
+      + '">Link to inventory</button>';
   }
-  if (row.biblio_gate === "book_review" && row.inventory_item_id) {
-    return '<button class="btn biblio-review" data-item-id="' + esc(row.inventory_item_id)
-      + '" title="Review this item as a book before publishing.">Review BIBLIO</button>';
-  }
-  if (row.inventory_item_id && row.biblio_publishable) {
-    return '<button class="btn biblio-publish" data-item-id="' + esc(row.inventory_item_id)
-      + '" data-source-listing-id="' + esc(row.id) + '">List on BIBLIO</button>';
-  }
-  return "";
+  return '<button class="btn cross-list" data-item-id="' + esc(row.inventory_item_id)
+    + '" data-source-listing-id="' + esc(row.id) + '">Cross-list</button>';
 }
 
 function biblioSourceBadge(source) {
@@ -1001,7 +988,7 @@ async function inventory() {
           '<span class="pill ' + esc(listing.channel) + '">' + esc(listing.channel) + "</span>"
         ).join(" ") || "—")
         + "</td><td>" + esc(item.status) + '</td><td class="row-actions">'
-        + inventoryBiblioAction(item)
+        + inventoryCrossListAction(item)
         + '<button class="btn edit-item" data-id="' + item.id + '">Edit</button></td></tr>'
       ).join("")
       + "</tbody></table>"
@@ -1011,6 +998,7 @@ async function inventory() {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
   });
   bindBiblioPublishButtons();
+  bindCrossListButtons();
   $$(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
   const selectAll = $("#inventory-select-all");
   if (selectAll) {
@@ -2636,12 +2624,13 @@ function renderListings() {
           + (showViews ? "<td>" + esc(row.views == null ? "—" : row.views) + "</td>" : "")
           + "<td>" + money(row.price_cents, row.currency) + "</td>"
           + '<td class="row-actions">'
-          + listingBiblioAction(row)
+          + listingCrossListAction(row)
           + "</td></tr>";
       }).join("")
       + "</tbody></table>"
     : '<div class="empty">No matching listings.</div>';
   bindBiblioPublishButtons();
+  bindCrossListButtons();
 }
 
 [
