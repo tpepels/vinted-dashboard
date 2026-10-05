@@ -41,6 +41,7 @@ jobs:
       - run: node --check app/extension/background.js
       - run: node --check app/extension/content.js
       - run: node scripts/test_vinted_page_age.js
+      - run: node scripts/test_vinted_rendered_tab_age.js
       - run: alembic upgrade head
         env:
           DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
