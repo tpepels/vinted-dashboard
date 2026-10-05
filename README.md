@@ -163,6 +163,8 @@ description, ISBN/author/publisher metadata and reusable image URLs without
 re-fetching every item on every periodic sync. Workspace ingestion keeps those
 source fields linked to the same master physical item.
 
+Bridge releases follow a visible-version invariant: the downloaded ZIP filename contains the manifest version (for example `reseller-dashboard-chrome-bridge-v2.6.0.zip`), the extension popup displays `Chrome Bridge vX.Y.Z`, and the dashboard displays the current bridge version next to the workspace identity. The manifest is authoritative for these user-visible values.
+
 
 ### Personal legacy extension
 

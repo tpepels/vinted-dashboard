@@ -351,3 +351,15 @@ def test_relative_vinted_age_never_replaces_exact_listed_at():
     assert "const relative = Number(row?.listed_age_seconds);" in APP_JS
     assert 'text: "≈ " + dateOnly(new Date(Date.now() - seconds * 1000).toISOString())' in APP_JS
     assert "from Vinted relative age" in APP_JS
+
+
+
+def test_dashboard_always_shows_bridge_version_and_versioned_download():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="bridge-version-page"' in html
+    assert "Bridge v—" in html
+    assert '$("#bridge-version-page").textContent = "Bridge v" + (state.me.bridge_version || "unknown");' in APP_JS
+    assert "devices.download_url" in APP_JS
+    assert "Download bridge v" in APP_JS

@@ -221,3 +221,43 @@ def test_content_script_captures_vinted_relative_upload_age_without_faking_exact
     assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV2"' in content
     assert "cachedRelativeAge(cached)" in content
     assert "if(row.listed_age_seconds!=null)continue;" in content
+
+
+
+def test_bridge_artifact_filename_always_includes_version():
+    target = Path("/tmp/reseller-chrome-bridge.zip")
+    assert build_extension.versioned_output_path(target, "2.6.0").name == (
+        "reseller-chrome-bridge-v2.6.0.zip"
+    )
+    already = Path("/tmp/reseller-chrome-bridge-v2.6.0.zip")
+    assert build_extension.versioned_output_path(already, "2.6.0") == already
+
+
+def test_bridge_popup_always_shows_manifest_version():
+    html = (ROOT / "app" / "extension" / "popup.html").read_text(encoding="utf-8")
+    js = (ROOT / "app" / "extension" / "popup.js").read_text(encoding="utf-8")
+    assert 'id="bridge-version"' in html
+    assert 'chrome.runtime.getManifest().version' in js
+    assert '"Chrome Bridge v"+version' in js
+
+
+def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import entry
+
+    monkeypatch.delenv("PUBLIC_APP_URL", raising=False)
+    client = TestClient(entry.app)
+    response = client.get("/downloads/reseller-chrome-bridge.zip")
+    assert response.status_code == 200
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v2.6.0.zip"'
+    )
+    assert response.headers["x-bridge-version"] == "2.6.0"
+
+    versioned = client.get("/downloads/reseller-chrome-bridge-v2.6.0.zip")
+    assert versioned.status_code == 200
+    assert "v2.6.0.zip" in versioned.headers["content-disposition"]
+
+    wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
+    assert wrong.status_code == 404

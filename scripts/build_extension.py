@@ -151,6 +151,13 @@ def build(mode: str, api_origin: str, output: Path, version: str | None) -> Path
     return output
 
 
+def versioned_output_path(output: Path, version: str) -> Path:
+    marker = f"v{version}"
+    if marker.lower() in output.stem.lower():
+        return output
+    return output.with_name(f"{output.stem}-{marker}{output.suffix}")
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -170,7 +177,13 @@ def main() -> None:
     )
     parser.add_argument("--version")
     args = parser.parse_args()
-    output = build(args.mode, args.api_origin, args.output, args.version)
+    source_manifest = json.loads((SOURCE / "manifest.json").read_text(encoding="utf-8"))
+    effective_version = str(args.version or source_manifest.get("version") or "").strip()
+    if not effective_version:
+        raise ValueError("Extension version is missing")
+    validate_version(effective_version)
+    output_path = versioned_output_path(args.output, effective_version)
+    output = build(args.mode, args.api_origin, output_path, effective_version)
     print(output)
     print(f"sha256={sha256(output)}")
 

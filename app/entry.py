@@ -13,7 +13,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app import main as main_module
-from app.product_api import router as product_router
+from app.product_api import extension_source_version, router as product_router
 from app.runtime_config import (
     is_production,
     public_app_origin,
@@ -368,16 +368,34 @@ def download_legacy_extension(request: Request):
     )
 
 
-@app.get("/downloads/reseller-chrome-bridge.zip")
-def download_paired_extension(request: Request):
+def _bridge_download_response(request: Request) -> Response:
     dashboard_url = public_app_origin() or str(request.base_url).rstrip("/")
+    version = extension_source_version()
+    filename = f"reseller-dashboard-chrome-bridge-v{version}.zip"
     return Response(
         content=_paired_extension_zip(dashboard_url),
         media_type="application/zip",
         headers={
-            "Content-Disposition": 'attachment; filename="reseller-dashboard-chrome-bridge.zip"'
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Bridge-Version": version,
         },
     )
+
+
+@app.get("/downloads/reseller-chrome-bridge.zip")
+def download_paired_extension(request: Request):
+    return _bridge_download_response(request)
+
+
+@app.get("/downloads/reseller-chrome-bridge-v{version}.zip")
+def download_versioned_paired_extension(version: str, request: Request):
+    current = extension_source_version()
+    if version != current:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Bridge v{version} is not the installed bridge; current is v{current}.",
+        )
+    return _bridge_download_response(request)
 
 
 @app.get("/api/runtime")

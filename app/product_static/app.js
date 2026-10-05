@@ -380,6 +380,7 @@ async function init() {
     $("#app-name").textContent = state.me.app_name;
     $("#auth-name").textContent = state.me.app_name;
     $("#workspace-name").textContent = state.me.workspace.name;
+    $("#bridge-version-page").textContent = "Bridge v" + (state.me.bridge_version || "unknown");
     renderBillingLock(state.me.billing);
     const params = new URLSearchParams(window.location.search);
     if (params.get("connector") === "etsy" && params.get("oauth")) {
@@ -3174,7 +3175,9 @@ async function connections() {
       + (connector.last_synced_at ? " · " + esc(when(connector.last_synced_at)) : "")
       + '</div><div class="actions">'
       + (connector.channel === "vinted"
-        ? '<button class="btn primary pair">Pair Chrome</button><a class="btn" href="/downloads/reseller-chrome-bridge.zip">Download dev bridge</a>'
+        ? '<button class="btn primary pair">Pair Chrome</button><a class="btn" href="'
+          + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
+          + '">Download bridge v' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</a>'
         : "")
       + (connectorSchemas[connector.channel]
         ? '<button class="btn configure" data-c="' + esc(connector.channel) + '">Configure</button>'
