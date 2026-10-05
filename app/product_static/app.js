@@ -2378,6 +2378,9 @@ function listingAgeSeconds(row) {
 function listingAgeLabel(row) {
   const seconds = listingAgeSeconds(row);
   if (seconds == null) return "—";
+  if (!row.listed_at && row.listed_age_text && String(row.listed_age_source || "").startsWith("vinted_page")) {
+    return String(row.listed_age_text);
+  }
   const approximate = !row.listed_at && row.listed_age_seconds != null;
   if (seconds < 3600) {
     const minutes = Math.max(0, Math.floor(seconds / 60));
