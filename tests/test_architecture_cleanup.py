@@ -32,6 +32,7 @@ def test_obsolete_runtime_modules_and_assets_are_removed():
         "app/legacy_extension/popup.html",
         "app/legacy_extension/popup.js",
         "app/legacy_extension/popup.css",
+        "app/legacy_extension/README.txt",
     ):
         assert not (ROOT / relative).exists(), relative
 
