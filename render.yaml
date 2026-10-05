@@ -23,12 +23,6 @@ services:
         value: "2.8.0"
       - key: COOKIE_SECURE
         value: "true"
-      - key: LEGACY_UI_ENABLED
-        value: "false"
-      - key: LEGACY_API_ENABLED
-        value: "false"
-      - key: LEGACY_COMPAT_SYNC
-        value: "false"
       - key: RUN_LEGACY_BACKFILL
         value: "false"
       - key: LISTING_ASSISTANT_ENABLED
@@ -60,12 +54,6 @@ services:
         value: "2.8.0"
       - key: COOKIE_SECURE
         value: "true"
-      - key: LEGACY_UI_ENABLED
-        value: "false"
-      - key: LEGACY_API_ENABLED
-        value: "false"
-      - key: LEGACY_COMPAT_SYNC
-        value: "false"
       - key: LISTING_ASSISTANT_ENABLED
         value: "false"
       - key: BILLING_ENABLED
