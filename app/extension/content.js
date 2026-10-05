@@ -100,21 +100,28 @@ async function fetchJson(path,params={}){const url=new URL(path,location.origin)
 const LISTED_AT_CACHE_KEY="vintedListedAtCacheV3";
 const LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV3";
 const LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
-async function renderedUploadedAge(row){
-  const currentId=location.pathname.match(/\/items\/(\d+)/)?.[1]||null;
-  if(currentId&&String(currentId)===String(row.id)){
-    const direct=relativeAgeFromRenderedDocument();
-    if(direct)return direct;
+async function renderedUploadedAges(rows){
+  const ages={};
+  const pending=[];
+  for(const row of rows){
+    const currentId=location.pathname.match(/\/items\/(\d+)/)?.[1]||null;
+    if(currentId&&String(currentId)===String(row.id)){
+      const direct=relativeAgeFromRenderedDocument();
+      if(direct){ages[String(row.id)]=direct;continue}
+    }
+    const url=new URL(row.vinted_url||`/items/${row.id}`,location.origin);
+    if(url.origin!==location.origin)continue;
+    pending.push({id:String(row.id),url:url.href});
   }
-  const url=new URL(row.vinted_url||`/items/${row.id}`,location.origin);
-  if(url.origin!==location.origin)throw new Error("Listing page origin does not match the signed-in Vinted tab.");
-  const result=await chrome.runtime.sendMessage({
-    type:"rendered-uploaded-age",
-    item_id:String(row.id),
-    url:url.href,
-  });
-  if(!result?.ok)throw new Error(result?.error||"Could not read rendered Vinted item page.");
-  return result.age||null;
+  if(pending.length){
+    const result=await chrome.runtime.sendMessage({
+      type:"rendered-uploaded-ages",
+      items:pending,
+    });
+    if(!result?.ok)throw new Error(result?.error||"Could not read rendered Vinted item pages.");
+    Object.assign(ages,result.ages||{});
+  }
+  return ages;
 }
 
 
@@ -146,34 +153,29 @@ async function enrichListingDates(listings){
       row.listed_age_seconds=cachedAge;
       row.listed_age_source="vinted_page_cache";
       row.listed_age_text=cached?.listed_age_text||null;
-    }else{
+    }else if(["active","reserved","hidden","draft"].includes(String(row.status||"active"))){
       missing.push(row);
     }
   }
 
-  let cursor=0,rateLimited=false;
-  async function worker(){
-    while(!rateLimited&&cursor<missing.length){
-      const row=missing[cursor++];
-      try{
-        const relative=await renderedUploadedAge(row);
-        if(relative){
-          row.listed_age_seconds=relative.seconds;
-          row.listed_age_source="vinted_page_uploaded";
-          row.listed_age_text=relative.text;
-          ageCache[row.id]={
-            listed_age_seconds:relative.seconds,
-            listed_age_text:relative.text,
-            age_observed_at:Date.now()/1000,
-          };
-          ageChanged=true;
-        }
-      }catch(error){
-        if(String(error?.message||error).includes("HTTP 429"))rateLimited=true;
+  if(missing.length){
+    try{
+      const ages=await renderedUploadedAges(missing);
+      for(const row of missing){
+        const relative=ages[String(row.id)]||null;
+        if(!relative)continue;
+        row.listed_age_seconds=relative.seconds;
+        row.listed_age_source="vinted_page_uploaded";
+        row.listed_age_text=relative.text;
+        ageCache[row.id]={
+          listed_age_seconds:relative.seconds,
+          listed_age_text:relative.text,
+          age_observed_at:Date.now()/1000,
+        };
+        ageChanged=true;
       }
-    }
+    }catch{}
   }
-  await Promise.all([worker(),worker()]);
 
   const ids=new Set([...listings.keys()].map(String));
   for(const key of Object.keys(ageCache)){if(!ids.has(String(key))){delete ageCache[key];ageChanged=true}}
