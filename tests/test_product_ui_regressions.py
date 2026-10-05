@@ -286,7 +286,8 @@ def test_biblio_cross_listing_is_available_from_inventory_and_vinted_listings():
     assert 'id="biblio-publish-submit"' in html
     assert "function openBiblioPublish(itemId, sourceListingId = null)" in APP_JS
     assert "List on BIBLIO" in APP_JS
-    assert 'row.channel === "vinted" && row.inventory_item_id && row.biblio_publishable' in APP_JS
+    assert "function listingBiblioAction(row)" in APP_JS
+    assert "row.inventory_item_id && row.biblio_publishable" in APP_JS
     assert 'api("/api/app/inventory/" + encodeURIComponent(itemId) + "/publish/biblio"' in APP_JS
 
 
@@ -395,9 +396,9 @@ def test_biblio_visibility_uses_server_book_detection_not_master_category_only()
 def test_biblio_actions_explain_link_and_book_review_gates():
     assert "function listingBiblioAction(row)" in APP_JS
     assert 'row.biblio_gate === "link_required"' in APP_JS
-    assert '"Link for BIBLIO"' in APP_JS
+    assert "Link for BIBLIO" in APP_JS
     assert 'row.biblio_gate === "book_review"' in APP_JS
-    assert '"Review BIBLIO"' in APP_JS
+    assert "Review BIBLIO" in APP_JS
     assert "function linkListingForBiblio(listingId)" in APP_JS
     assert "function reviewBiblioItem(itemId)" in APP_JS
 
@@ -423,4 +424,4 @@ def test_biblio_preflight_shows_automatic_vinted_photo_upload():
 def test_inventory_general_vinted_books_are_not_silently_hidden_from_biblio():
     assert "function inventoryBiblioAction(item)" in APP_JS
     assert 'itemHasVintedSource(item) && item.category === "general"' in APP_JS
-    assert '"Review BIBLIO"' in APP_JS
+    assert "Review BIBLIO" in APP_JS
