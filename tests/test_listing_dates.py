@@ -377,3 +377,37 @@ def test_bridge_27_replaces_bad_today_age_with_item_page_uploaded_age():
         assert listing.extra["listed_age_seconds"] == 5 * 7 * 86400
         assert listing.extra["listed_age_source"] == "vinted_page_uploaded"
         assert listing.extra["listed_age_text"] == "5 weeks ago"
+
+
+
+def test_bridge_27_clears_unconfirmed_pre_27_exact_today_date_and_uses_page_age():
+    workspace_id = _workspace("listing-date-clear-bad-exact")
+    old = _snapshot(listed_at=NOW.isoformat(), collected_at=NOW - timedelta(minutes=10))
+    record_workspace_snapshot(
+        workspace_id,
+        old,
+        extension_version="2.6.0",
+    )
+
+    fresh = _snapshot(listed_at=None, collected_at=NOW)
+    fresh["listings"][0]["listed_age_seconds"] = 5 * 7 * 86400
+    fresh["listings"][0]["listed_age_source"] = "vinted_page_uploaded"
+    fresh["listings"][0]["listed_age_text"] = "5 weeks ago"
+    record_workspace_snapshot(
+        workspace_id,
+        fresh,
+        extension_version="2.7.0",
+    )
+
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-DATE-1",
+            )
+        ).scalar_one()
+        assert listing.extra["listed_at"] is None
+        assert listing.extra["listed_at_source"] is None
+        assert listing.extra["listed_age_seconds"] == 5 * 7 * 86400
+        assert listing.extra["listed_age_source"] == "vinted_page_uploaded"
+        assert listing.extra["listed_age_text"] == "5 weeks ago"
