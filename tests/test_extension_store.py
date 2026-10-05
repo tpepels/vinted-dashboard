@@ -208,6 +208,7 @@ def test_content_script_uses_isolated_uploaded_age_parser_and_rendered_page_coll
     assert "await chrome.tabs.create({url:first.url,active:false})" in background
     assert "await chrome.tabs.update(tab.id,{url:target.href,active:false})" in background
     assert "await chrome.tabs.remove(tab.id)" in background
+    assert 'files:["vinted_age.js","content.js"]' in background
     assert '"vinted_page_uploaded"' in content
     assert "await enrichListingDates(listings);" in content
 
