@@ -20,36 +20,12 @@ async function fetchJson(path,params={}){const url=new URL(path,location.origin)
 const LISTED_AT_CACHE_KEY="vintedListedAtCacheV3";
 const LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV3";
 const LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
-async function renderedUploadedAges(rows){
-  const ages={};
-  const pending=[];
-  for(const row of rows){
-    const currentId=location.pathname.match(/\/items\/(\d+)/)?.[1]||null;
-    if(currentId&&String(currentId)===String(row.id)){
-      const direct=VintedAge.fromRenderedDocument(document);
-      if(direct){ages[String(row.id)]=direct;continue}
-    }
-    const url=new URL(row.vinted_url||`/items/${row.id}`,location.origin);
-    if(url.origin!==location.origin)continue;
-    pending.push({id:String(row.id),url:url.href});
-  }
-  if(pending.length){
-    const result=await chrome.runtime.sendMessage({
-      type:"rendered-uploaded-ages",
-      items:pending,
-    });
-    if(!result?.ok)throw new Error(result?.error||"Could not read rendered Vinted item pages.");
-    Object.assign(ages,result.ages||{});
-  }
-  return ages;
-}
-
-
 async function enrichListingDates(listings){
   let stored={};try{stored=await chrome.storage.local.get([LISTED_AT_CACHE_KEY,LISTING_PAGE_AGE_CACHE_KEY])}catch{}
   const exactCache=(stored&&typeof stored[LISTED_AT_CACHE_KEY]==="object"&&stored[LISTED_AT_CACHE_KEY])||{};
   const ageCache=(stored&&typeof stored[LISTING_PAGE_AGE_CACHE_KEY]==="object"&&stored[LISTING_PAGE_AGE_CACHE_KEY])||{};
   const missing=[];let exactChanged=false,ageChanged=false;
+
   for(const row of listings.values()){
     if(!row?.id)continue;
     const direct=exactStamp(row.listed_at);
@@ -58,6 +34,7 @@ async function enrichListingDates(listings){
       if(exactCache[row.id]!==direct){exactCache[row.id]=direct;exactChanged=true}
       continue;
     }
+
     const cachedExact=exactStamp(exactCache[row.id]);
     if(cachedExact){
       row.listed_at=cachedExact;
@@ -73,32 +50,24 @@ async function enrichListingDates(listings){
       row.listed_age_seconds=cachedAge;
       row.listed_age_source="vinted_page_cache";
       row.listed_age_text=cached?.listed_age_text||null;
-    }else if(["active","reserved","hidden","draft"].includes(String(row.status||"active"))){
-      missing.push(row);
+      continue;
+    }
+
+    row.listed_age_seconds=null;
+    row.listed_age_source=null;
+    row.listed_age_text=null;
+    if(["active","reserved","hidden","draft"].includes(String(row.status||"active"))){
+      const url=new URL(row.vinted_url||`/items/${row.id}`,location.origin);
+      if(url.origin===location.origin){
+        missing.push({id:String(row.id),url:url.href});
+      }
     }
   }
 
-  if(missing.length){
-    try{
-      const ages=await renderedUploadedAges(missing);
-      for(const row of missing){
-        const relative=ages[String(row.id)]||null;
-        if(!relative)continue;
-        row.listed_age_seconds=relative.seconds;
-        row.listed_age_source="vinted_page_uploaded";
-        row.listed_age_text=relative.text;
-        ageCache[row.id]={
-          listed_age_seconds:relative.seconds,
-          listed_age_text:relative.text,
-          age_observed_at:Date.now()/1000,
-        };
-        ageChanged=true;
-      }
-    }catch{}
-  }
-
   const ids=new Set([...listings.keys()].map(String));
-  for(const key of Object.keys(ageCache)){if(!ids.has(String(key))){delete ageCache[key];ageChanged=true}}
+  for(const key of Object.keys(ageCache)){
+    if(!ids.has(String(key))){delete ageCache[key];ageChanged=true}
+  }
   if(exactChanged||ageChanged){
     try{
       const payload={};
@@ -107,6 +76,7 @@ async function enrichListingDates(listings){
       await chrome.storage.local.set(payload);
     }catch{}
   }
+  return missing;
 }
 
 async function enrichListingDetails(listings){
@@ -184,7 +154,7 @@ async function collectVintedData(researchJobs=[]){
   }
   try{const rows=await paged(`/api/v2/wardrobe/${userId}/items`,["items","user_items"],{order:"newest_first"});for(const raw of rows||[]){const row=listingRow(raw,null);if(!row.id)continue;const old=listings.get(row.id);if(!old||row.status==="hidden")listings.set(row.id,row)}}catch{}
   await enrichListingDetails(listings);
-  await enrichListingDates(listings);
+  const ageScanItems=await enrichListingDates(listings);
 
   let notifications=[];
   for(const path of["/api/v2/notifications","/web/api/notifications/notifications"]){try{const payload=await fetchJson(path,{page:1,per_page:100});if(payload!==null){notifications=listFrom(payload,["notifications","items","entries"]).map(notificationRow).filter(row=>row.category==="favorite").map(row=>({id:row.id,category:row.category,item_id:row.item_id,item_title:row.item_title,actor:row.actor,occurred_at:row.occurred_at}));break}}catch{}}
@@ -192,7 +162,7 @@ async function collectVintedData(researchJobs=[]){
   const orders=[];
   for(const[type,direction]of[["sold","sell"],["purchased","buy"]]){try{const rows=await paged("/api/v2/my_orders",["my_orders","orders","items"],{type,status:"all"},100);for(const raw of rows||[])orders.push(orderRow(raw,direction))}catch{}}
 
-  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[]};
+  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems};
 }
 
 
