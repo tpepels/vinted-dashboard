@@ -2067,15 +2067,16 @@ def create_wix_workspace_listing(
 ) -> dict[str, Any]:
     values = _credentials(workspace_id, Channel.WIX)
     fields = dict(candidate.get("fields") or {})
+    source = dict(candidate.get("source") or {})
+    image_urls = list(source.get("image_urls") or [])[:5]
     quantity = max(0, int(fields.get("quantity") or 0))
     amount = f"{int(fields.get('price_cents') or 0) / 100:.2f}"
-    body = {
-        "product": {
-            "name": str(fields.get("title") or "").strip(),
-            "visible": True,
-            "productType": "PHYSICAL",
-            "physicalProperties": {},
-            "variantsInfo": {
+    product: dict[str, Any] = {
+        "name": str(fields.get("title") or "").strip(),
+        "visible": True,
+        "productType": "PHYSICAL",
+        "physicalProperties": {},
+        "variantsInfo": {
                 "variants": [
                     {
                         "sku": str(fields.get("sku") or "").strip(),
@@ -2084,11 +2085,16 @@ def create_wix_workspace_listing(
                         "inventoryItem": {"quantity": quantity},
                         "physicalProperties": {},
                     }
-                ]
-            },
+            ]
         },
-        "returnEntity": True,
     }
+    if image_urls:
+        product["media"] = {
+            "itemsInfo": {
+                "items": [{"url": str(url)} for url in image_urls]
+            }
+        }
+    body = {"product": product, "returnEntity": True}
     payload = _wix_post(values, "stores/v3/products-with-inventory", body=body)
     product = payload.get("product") or {}
     product_id = str(product.get("id") or "").strip()
@@ -2113,7 +2119,7 @@ def create_wix_workspace_listing(
             else None
         ),
         "description": fields.get("description"),
-        "image_url": None,
+        "image_url": image_urls[0] if image_urls else None,
         "attributes": {
             "product_id": product_id,
             "variant_id": variant_id or None,
