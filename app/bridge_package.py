@@ -13,8 +13,6 @@ import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import HTTPException
-
 EXTENSION_DIR = Path(__file__).resolve().parent / "extension"
 _TEXT_SUFFIXES = {".js", ".json", ".html", ".txt", ".css"}
 
@@ -39,7 +37,7 @@ def _zip_directory(
     replacements: dict[str, str] | None = None,
 ) -> bytes:
     if not directory.exists():
-        raise HTTPException(status_code=404, detail="Extension files are not installed")
+        raise FileNotFoundError(f"Extension files are not installed: {directory}")
     replacements = replacements or {}
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
