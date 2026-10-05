@@ -1,7 +1,7 @@
 """BIBLIO inventory file parsing.
 
 Pure format logic lives here so product/API code does not depend on connector
-transport or any legacy persistence layer.
+transport or database persistence.
 """
 
 from __future__ import annotations
