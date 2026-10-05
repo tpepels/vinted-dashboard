@@ -1,5 +1,4 @@
-"""Backfill the workspace/inventory ORM schema from the legacy ``sqlite3``
-database(s) used by :mod:`app.intelligence` and :mod:`app.channels`.
+"""Backfill the workspace/inventory ORM schema from pre-workspace SQLite data.
 
 This script is purely additive: it reads the legacy tables (``channel_items``,
 ``channel_sync_runs``, ``biblio_ftp_runs``, ``sync_runs``,
@@ -59,9 +58,8 @@ from app.workspace_bootstrap import (
 
 logger = logging.getLogger(__name__)
 
-#: Falls back to the same env var the legacy code already reads, so a
-#: deployment that never sets ``LEGACY_SQLITE_PATH`` explicitly still finds
-#: its existing data.
+#: ``VINTED_HISTORY_DB`` is accepted only as an upgrade-time alias so an
+#: older self-hosted installation can locate its existing migration source.
 DEFAULT_LEGACY_SQLITE_PATH = Path(
     os.getenv("LEGACY_SQLITE_PATH", os.getenv("VINTED_HISTORY_DB", "/app/data/vinted-history.sqlite3"))
 )
