@@ -149,10 +149,11 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert '"/api/app/connectors/etsy/oauth/start"' in APP_JS
     assert "oauth_redirect_uri" in APP_JS
     assert "WooCommerce REST API v3" in APP_JS
-    assert "read_products, read_inventory and read_orders" in APP_JS
+    assert "write_products" in APP_JS
+    assert "read_locations" in APP_JS
     assert "BigCommerce" in APP_JS
     assert "Squarespace Commerce APIs" in APP_JS
-    assert "Catalog V3, Inventory V3 and Orders" in APP_JS
+    assert "Product write and Inventory write" in APP_JS
     assert "Private Depop Selling API" in APP_JS
     assert '<span class="nav-label">Work</span>' in html
     assert '<span class="nav-label">Operations</span>' in html
@@ -278,17 +279,20 @@ def test_stock_scan_ui_exposes_throughput_controls():
 
 
 
-def test_biblio_cross_listing_is_available_from_inventory_and_vinted_listings():
+def test_universal_cross_listing_is_available_from_inventory_and_vinted_listings():
     html = (
         Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
     ).read_text(encoding="utf-8")
+    assert 'id="cross-list-panel"' in html
+    assert 'id="cross-list-destinations"' in html
+    assert "function openCrossList(itemId, sourceListingId = null)" in APP_JS
+    assert "function inventoryCrossListAction(item)" in APP_JS
+    assert "function listingCrossListAction(row)" in APP_JS
+    assert ">Cross-list</button>" in APP_JS
+    assert '"/cross-list" + suffix' in APP_JS
+    assert '"/cross-list/" + encodeURIComponent(channel)' in APP_JS
     assert 'id="biblio-publish-panel"' in html
-    assert 'id="biblio-publish-submit"' in html
     assert "function openBiblioPublish(itemId, sourceListingId = null)" in APP_JS
-    assert "List on BIBLIO" in APP_JS
-    assert "function listingBiblioAction(row)" in APP_JS
-    assert "row.inventory_item_id && row.biblio_publishable" in APP_JS
-    assert 'api("/api/app/inventory/" + encodeURIComponent(itemId) + "/publish/biblio"' in APP_JS
 
 
 def test_biblio_preflight_shows_source_and_only_inline_missing_fields():
@@ -385,22 +389,22 @@ def test_page_uploaded_text_is_preserved_in_age_column():
 
 
 
-def test_biblio_visibility_uses_server_book_detection_not_master_category_only():
-    assert "function itemCanPublishToBiblio(item)" in APP_JS
-    assert "return Boolean(item?.biblio_publishable);" in APP_JS
-    assert 'row.biblio_publishable' in APP_JS
+def test_cross_list_visibility_is_not_gated_by_book_category():
+    assert "function inventoryCrossListAction(item)" in APP_JS
+    assert "function listingCrossListAction(row)" in APP_JS
     assert 'row.inventory_category === "book"' not in APP_JS
+    assert "Cross-list" in APP_JS
 
 
 
-def test_biblio_actions_explain_link_and_book_review_gates():
-    assert "function listingBiblioAction(row)" in APP_JS
-    assert 'row.biblio_gate === "link_required"' in APP_JS
-    assert "Link for BIBLIO" in APP_JS
-    assert 'row.biblio_gate === "book_review"' in APP_JS
-    assert "Review BIBLIO" in APP_JS
-    assert "function linkListingForBiblio(listingId)" in APP_JS
-    assert "function reviewBiblioItem(itemId)" in APP_JS
+def test_cross_list_actions_explain_link_and_destination_gates():
+    assert "function listingCrossListAction(row)" in APP_JS
+    assert "Link to inventory" in APP_JS
+    assert "function linkListingToInventory(listingId)" in APP_JS
+    assert "function crossListStatusLabel(status)" in APP_JS
+    assert "Needs connection" in APP_JS
+    assert "Needs fields" in APP_JS
+    assert "Not writable yet" in APP_JS
 
 
 def test_biblio_preflight_has_direct_stock_repair_and_book_id_override():
@@ -421,10 +425,10 @@ def test_biblio_preflight_shows_automatic_vinted_photo_upload():
     assert '" - upload automatically"' in APP_JS
 
 
-def test_inventory_general_vinted_books_are_not_silently_hidden_from_biblio():
-    assert "function inventoryBiblioAction(item)" in APP_JS
-    assert 'itemHasVintedSource(item) && item.category === "general"' in APP_JS
-    assert "Review BIBLIO" in APP_JS
+def test_inventory_items_always_surface_cross_list_action():
+    assert "function inventoryCrossListAction(item)" in APP_JS
+    assert 'class="btn cross-list"' in APP_JS
+    assert "return \"\";" in APP_JS
 
 
 
@@ -432,3 +436,19 @@ def test_generic_vinted_relative_age_is_rejected_client_side():
     assert 'row?.channel === "vinted"' in APP_JS
     assert '!String(row?.listed_age_source || "").startsWith("vinted_page")' in APP_JS
     assert '" pending Vinted Uploaded scan"' in APP_JS
+
+
+
+def test_cross_list_panel_shows_all_destination_states_and_actions():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="cross-list-panel"' in html
+    assert "Already listed" in APP_JS
+    assert "Needs connection" in APP_JS
+    assert "Needs fields" in APP_JS
+    assert "Not writable yet" in APP_JS
+    assert "cross-destination-publish" in APP_JS
+    assert "cross-destination-connect" in APP_JS
+    assert "cross-destination-biblio" in APP_JS
+    assert "openCrossListConnection(channel)" in APP_JS
