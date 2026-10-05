@@ -1041,7 +1041,7 @@ def create_shopify_workspace_listing(
             {
                 "locationId": location_id,
                 "name": "available",
-                "quantity": max(0, _int(variant.get("inventoryQuantity"), int(fields.get("quantity") or 0)) or 0),
+                "quantity": max(0, int(fields.get("quantity") or 0)),
             }
         ],
     }
@@ -1105,7 +1105,10 @@ def create_shopify_workspace_listing(
             if str(product.get("status") or "").upper() == "ACTIVE"
             else ListingStatus.INACTIVE
         ),
-        "quantity": max(0, int(fields.get("quantity") or 0)),
+        "quantity": max(
+            0,
+            _int(variant.get("inventoryQuantity"), int(fields.get("quantity") or 0)) or 0,
+        ),
         "price_cents": _money(variant.get("price")) or int(fields.get("price_cents") or 0),
         "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
         "url": product.get("onlineStoreUrl"),
