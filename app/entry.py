@@ -104,8 +104,12 @@ def ready():
 def _bridge_download_response(request: Request) -> Response:
     dashboard_url = public_app_origin() or str(request.base_url).rstrip("/")
     version = extension_source_version()
+    try:
+        content = paired_extension_zip(dashboard_url)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Extension files are not installed") from exc
     return Response(
-        content=paired_extension_zip(dashboard_url),
+        content=content,
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{bridge_filename(version)}"',
