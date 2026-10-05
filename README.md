@@ -155,14 +155,22 @@ later periodic syncs.
 For active/reserved/hidden/draft listings, bridge 3.0.0 keeps a local detail
 cache for richer Vinted item metadata. When Vinted does not expose a trustworthy
 absolute posting timestamp, the bridge reads the visible `Uploaded` value from
-the **rendered** Vinted item page, for example `5 weeks ago`. A two-tab inactive
-worker pool is reused across the enrichment queue and the result is cached by
-Vinted item ID. Generic API date fields and `first_seen_at` are never used as a
-substitute for posting age.
+the **rendered** Vinted item page, for example `5 weeks ago`. Posting-age
+collection is decoupled from the normal browser snapshot: the snapshot completes
+first, then a persisted background queue scans rendered item pages in bounded
+multi-tab batches and writes each trusted age back incrementally. This avoids
+Manifest V3 service-worker timeouts on large inventories and survives browser or
+service-worker restarts. Failed item pages are retried in later sweep windows.
+
+The dashboard and server accept Vinted relative age only when it came from the
+rendered page collector (`vinted_page_*`). Generic API-relative ages,
+`first_seen_at`, and old `Today` fallbacks are never treated as posting age.
+Bridge 3.0.0 also performs a content-script protocol handshake and reloads an
+already-open Vinted tab once when it is still running code from an older bridge.
 
 Age parsing is isolated in `app/extension/vinted_age.js`; tab navigation and
-rendered-page orchestration stay in `background.js`; Vinted snapshot collection
-stays in `content.js`.
+the persisted rendered-page sweep stay in `background.js`; normal Vinted
+snapshot collection stays in `content.js`.
 
 Bridge releases follow a visible-version invariant: the downloaded ZIP filename
 contains the manifest version, the extension popup displays
