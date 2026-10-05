@@ -190,7 +190,10 @@ async function processAgeSweepWindow(){
       return{ok:true,remaining,updated};
     }catch(error){
       const data=await chrome.storage.local.get([AGE_SWEEP_QUEUE_KEY]);
-      const remaining=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY].length:0;
+      const pending=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
+      const combined=[...pending,...deferred];
+      await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:combined});
+      const remaining=combined.length;
       if(remaining)chrome.alarms.create(AGE_SWEEP_ALARM,{when:Date.now()+30000});
       await updateAgeSweepStatus(remaining,updated,error instanceof Error?error.message:String(error));
       return{ok:false,remaining,updated,error:error instanceof Error?error.message:String(error)};
