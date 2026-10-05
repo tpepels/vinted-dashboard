@@ -2367,6 +2367,39 @@ function listingDisplayDate(row) {
   return row.listed_at || null;
 }
 
+function listingAgeSeconds(row) {
+  const exact = timeValue(listingDisplayDate(row));
+  if (exact > 0) return Math.max(0, Math.floor((Date.now() - exact) / 1000));
+  const relative = Number(row?.listed_age_seconds);
+  return Number.isFinite(relative) && relative >= 0 ? relative : null;
+}
+
+function listingAgeLabel(row) {
+  const seconds = listingAgeSeconds(row);
+  if (seconds == null) return "—";
+  const approximate = !row.listed_at && row.listed_age_seconds != null;
+  if (seconds < 3600) {
+    const minutes = Math.max(0, Math.floor(seconds / 60));
+    return (approximate ? "≈ " : "") + (minutes < 1 ? "<1 min" : minutes + " min");
+  }
+  if (seconds < 86400) {
+    const hours = Math.max(1, Math.floor(seconds / 3600));
+    return (approximate ? "≈ " : "") + hours + " h";
+  }
+  const days = Math.max(0, Math.floor(seconds / 86400));
+  return (approximate ? "≈ " : "") + days + " day" + (days === 1 ? "" : "s");
+}
+
+function listingShownDate(row) {
+  if (row.listed_at) return { text: dateOnly(row.listed_at), approximate: false };
+  const seconds = listingAgeSeconds(row);
+  if (seconds == null) return { text: "—", approximate: false };
+  return {
+    text: "≈ " + dateOnly(new Date(Date.now() - seconds * 1000).toISOString()),
+    approximate: true,
+  };
+}
+
 function listingComparator(sort) {
   const number = (value, fallback = -1) => {
     const parsed = Number(value);
@@ -2374,11 +2407,11 @@ function listingComparator(sort) {
   };
   if (sort === "oldest") {
     return (a, b) => {
-      const ad = timeValue(listingDisplayDate(a));
-      const bd = timeValue(listingDisplayDate(b));
-      if (ad && bd) return ad - bd;
-      if (ad) return -1;
-      if (bd) return 1;
+      const aa = listingAgeSeconds(a);
+      const ba = listingAgeSeconds(b);
+      if (aa != null && ba != null) return ba - aa;
+      if (aa != null) return -1;
+      if (ba != null) return 1;
       return b._index - a._index;
     };
   }
@@ -2390,11 +2423,11 @@ function listingComparator(sort) {
     return (a, b) => String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base" });
   }
   return (a, b) => {
-    const ad = timeValue(listingDisplayDate(a));
-    const bd = timeValue(listingDisplayDate(b));
-    if (ad && bd) return bd - ad;
-    if (ad) return -1;
-    if (bd) return 1;
+    const aa = listingAgeSeconds(a);
+    const ba = listingAgeSeconds(b);
+    if (aa != null && ba != null) return aa - ba;
+    if (aa != null) return -1;
+    if (ba != null) return 1;
     return a._index - b._index;
   };
 }
@@ -2415,13 +2448,13 @@ function renderListingStats(rows, duplicates) {
   const zeroFavourites = rows.filter((row) => Number(row.favourites || 0) === 0).length;
 
   const vinted = rows.filter((row) => row.channel === "vinted");
-  const datedVinted = vinted
-    .map((row) => ({ row, timestamp: timeValue(listingDisplayDate(row)) }))
-    .filter((entry) => entry.timestamp > 0)
-    .sort((a, b) => a.timestamp - b.timestamp);
-  const oldest = datedVinted[0] || null;
-  const youngest = datedVinted.length ? datedVinted[datedVinted.length - 1] : null;
-  const unknownVinted = vinted.length - datedVinted.length;
+  const agedVinted = vinted
+    .map((row) => ({ row, ageSeconds: listingAgeSeconds(row) }))
+    .filter((entry) => entry.ageSeconds != null)
+    .sort((a, b) => a.ageSeconds - b.ageSeconds);
+  const youngest = agedVinted[0] || null;
+  const oldest = agedVinted.length ? agedVinted[agedVinted.length - 1] : null;
+  const unknownVinted = vinted.length - agedVinted.length;
 
   $("#listing-stat-count").textContent = String(rows.length);
   $("#listing-stat-value").textContent = money(total, currency);
@@ -2432,19 +2465,20 @@ function renderListingStats(rows, duplicates) {
   $("#listing-stat-duplicate-groups").textContent = String(duplicates.duplicateGroups.length);
   $("#listing-stat-duplicates").classList.toggle("has-duplicates", duplicates.duplicateGroups.length > 0);
 
-  $("#listing-stat-age-known").textContent = datedVinted.length + "/" + vinted.length;
+  $("#listing-stat-age-known").textContent = agedVinted.length + "/" + vinted.length;
   $("#listing-stat-age-unknown").textContent = unknownVinted
     ? unknownVinted + " unknown - never substituted with first seen"
-    : (vinted.length ? "All use actual Vinted timestamps" : "No Vinted rows in this view");
+    : (vinted.length ? "Exact or Vinted-provided relative age" : "No Vinted rows in this view");
 
   const renderEdge = (entry, ageSelector, detailSelector) => {
     if (!entry) {
       $(ageSelector).textContent = "—";
-      $(detailSelector).textContent = "No exact Vinted date";
+      $(detailSelector).textContent = "No Vinted age available";
       return;
     }
-    $(ageSelector).textContent = age(entry.row.listed_at);
-    $(detailSelector).textContent = dateOnly(entry.row.listed_at) + " · " + entry.row.title;
+    const shown = listingShownDate(entry.row);
+    $(ageSelector).textContent = listingAgeLabel(entry.row);
+    $(detailSelector).textContent = shown.text + " · " + entry.row.title;
   };
   renderEdge(youngest, "#listing-stat-youngest-age", "#listing-stat-youngest-detail");
   renderEdge(oldest, "#listing-stat-oldest-age", "#listing-stat-oldest-detail");
@@ -2508,8 +2542,14 @@ function renderListings() {
           + '</div><div class="sub">' + esc(row.external_sku || row.external_id || "") + "</div></td>"
           + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + "</span></td>"
           + "<td>" + esc(row.status) + "</td>"
-          + (showDate ? '<td>' + dateOnly(listingDisplayDate(row))
-            + '</td><td>' + age(listingDisplayDate(row)) + '</td>' : "")
+          + (showDate ? (() => {
+            const shown = listingShownDate(row);
+            const approximate = shown.approximate
+              ? '<div class="sub">from Vinted relative age</div>'
+              : "";
+            return '<td>' + shown.text + approximate
+              + '</td><td>' + listingAgeLabel(row) + approximate + '</td>';
+          })() : "")
           + (showFavourites ? "<td>" + esc(row.favourites == null ? "—" : row.favourites) + "</td>" : "")
           + (showViews ? "<td>" + esc(row.views == null ? "—" : row.views) + "</td>" : "")
           + "<td>" + money(row.price_cents, row.currency) + "</td>"
