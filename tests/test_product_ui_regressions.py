@@ -292,7 +292,7 @@ def test_biblio_cross_listing_is_available_from_inventory_and_vinted_listings():
 
 def test_biblio_preflight_shows_source_and_only_inline_missing_fields():
     assert "Using the linked <strong>Vinted listing</strong> as the source" in APP_JS
-    assert 'const editableMissing = new Set(["title", "author", "description", "price_cents"]);' in APP_JS
+    assert 'const editableMissing = new Set(["title", "author", "description", "price_cents", "book_id"]);' in APP_JS
     assert 'class="biblio-missing-input"' in APP_JS
     assert 'field_sources' in APP_JS
     assert "ISBN lookup" in APP_JS
@@ -389,3 +389,38 @@ def test_biblio_visibility_uses_server_book_detection_not_master_category_only()
     assert "return Boolean(item?.biblio_publishable);" in APP_JS
     assert 'row.biblio_publishable' in APP_JS
     assert 'row.inventory_category === "book"' not in APP_JS
+
+
+
+def test_biblio_actions_explain_link_and_book_review_gates():
+    assert "function listingBiblioAction(row)" in APP_JS
+    assert 'row.biblio_gate === "link_required"' in APP_JS
+    assert '"Link for BIBLIO"' in APP_JS
+    assert 'row.biblio_gate === "book_review"' in APP_JS
+    assert '"Review BIBLIO"' in APP_JS
+    assert "function linkListingForBiblio(listingId)" in APP_JS
+    assert "function reviewBiblioItem(itemId)" in APP_JS
+
+
+def test_biblio_preflight_has_direct_stock_repair_and_book_id_override():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="biblio-edit-stock"' in html
+    assert 'id="biblio-edit-book"' in html
+    assert '["book_id", "Book ID", fields.book_id, sources.book_id]' in APP_JS
+    assert '"unique BIBLIO Book ID"' in APP_JS
+    assert 'data.book_id_suggestion' in APP_JS
+    assert 'missing.includes("available stock")' in APP_JS
+
+
+def test_biblio_preflight_shows_automatic_vinted_photo_upload():
+    assert '["photos", "Photos"' in APP_JS
+    assert '" Vinted photo"' in APP_JS
+    assert '" - upload automatically"' in APP_JS
+
+
+def test_inventory_general_vinted_books_are_not_silently_hidden_from_biblio():
+    assert "function inventoryBiblioAction(item)" in APP_JS
+    assert 'itemHasVintedSource(item) && item.category === "general"' in APP_JS
+    assert '"Review BIBLIO"' in APP_JS
