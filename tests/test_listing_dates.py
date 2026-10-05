@@ -411,3 +411,71 @@ def test_bridge_27_clears_unconfirmed_pre_27_exact_today_date_and_uses_page_age(
         assert listing.extra["listed_age_seconds"] == 5 * 7 * 86400
         assert listing.extra["listed_age_source"] == "vinted_page_uploaded"
         assert listing.extra["listed_age_text"] == "5 weeks ago"
+
+
+
+def test_listings_api_hides_legacy_relative_age_but_keeps_page_uploaded_age(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "listing-date-trusted-source@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Trusted Vinted Age",
+        },
+    )
+    assert registered.status_code == 200, registered.text
+
+    observed = datetime.now(timezone.utc)
+    with db.session_scope() as session:
+        workspace = session.query(models.Workspace).one()
+        for external_id, source, text, seconds in [
+            ("LEGACY-AGE", "vinted_relative", "Today", 0),
+            ("PAGE-AGE", "vinted_page_uploaded", "5 weeks ago", 5 * 7 * 86400),
+        ]:
+            item = models.InventoryItem(
+                workspace_id=workspace.id,
+                sku=external_id,
+                title=external_id,
+                category="book",
+                quantity=1,
+                status="active",
+                currency="EUR",
+                attributes={},
+            )
+            session.add(item)
+            session.flush()
+            session.add(
+                models.ChannelListing(
+                    workspace_id=workspace.id,
+                    inventory_item_id=item.id,
+                    channel="vinted",
+                    external_id=external_id,
+                    title=item.title,
+                    price_cents=1000,
+                    currency="EUR",
+                    status="active",
+                    quantity=1,
+                    first_seen_at=observed,
+                    last_seen_at=observed,
+                    extra={
+                        "listed_age_seconds": seconds,
+                        "listed_age_source": source,
+                        "listed_age_text": text,
+                        "listed_age_observed_at": observed.isoformat(),
+                    },
+                )
+            )
+
+    rows = {
+        row["external_id"]: row
+        for row in client.get("/api/app/listings").json()["listings"]
+    }
+    assert rows["LEGACY-AGE"]["listed_age_seconds"] is None
+    assert rows["LEGACY-AGE"]["listed_age_source"] is None
+    assert rows["LEGACY-AGE"]["listed_age_text"] == "Today"
+
+    assert rows["PAGE-AGE"]["listed_age_seconds"] >= 5 * 7 * 86400
+    assert rows["PAGE-AGE"]["listed_age_source"] == "vinted_page_uploaded"
+    assert rows["PAGE-AGE"]["listed_age_text"] == "5 weeks ago"
