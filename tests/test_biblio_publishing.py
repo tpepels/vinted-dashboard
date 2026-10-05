@@ -46,7 +46,11 @@ def _source_book(workspace_id, *, author: str | None = "Franz Kafka"):
                     "description": "English paperback in very good condition.",
                     "isbn": "9780099428640",
                     **({"author": author} if author else {}),
-                }
+                },
+                "image_urls": [
+                    "https://images1.vinted.net/t/01_one.jpg",
+                    "https://images1.vinted.net/t/02_two.webp",
+                ],
             },
         )
         session.add(listing)
@@ -87,7 +91,10 @@ def test_biblio_candidate_prefers_vinted_source_and_uses_isbn_for_missing_author
     assert candidate["field_sources"]["price_cents"] == "vinted"
     assert candidate["fields"]["author"] == "Franz Kafka"
     assert candidate["field_sources"]["author"] == "isbn"
+    assert candidate["fields"]["book_id"] == "BK-0001"
     assert candidate["source"]["channel"] == "vinted"
+    assert candidate["source"]["photo_count"] == 2
+    assert candidate["source"]["image_urls"][0].startswith("https://images1.vinted.net/")
 
 
 def test_biblio_upsert_links_listing_to_same_physical_item():
@@ -124,12 +131,15 @@ def test_biblio_upsert_links_listing_to_same_physical_item():
         assert biblio.extra["isbn"] == "9780099428640"
         assert biblio.extra["source_channel"] == Channel.VINTED
         assert biblio.extra["source_listing_id"] == str(listing_id)
+        assert biblio.extra["image_source"] == Channel.VINTED
+        assert len(biblio.extra["image_urls"]) == 2
 
 
 def test_biblio_override_repairs_only_missing_preflight_field():
     candidate = {
         "fields": {
             "sku": "BK-1",
+            "book_id": "BK-1",
             "title": "Book",
             "author": None,
             "description": "Description",
@@ -487,3 +497,125 @@ def test_vinted_ingest_promotes_general_item_to_book_from_isbn_without_category(
         assert item.category == ItemCategory.BOOK
         assert item.attributes["isbn"] == "9780263923698"
         assert item.attributes["author"] == "Katy Colins"
+
+
+
+def test_biblio_conflicting_book_id_is_repairable_inline():
+    workspace_id = _workspace()
+    item_id, listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        other = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="OTHER",
+            title="Other book",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            currency="EUR",
+            attributes={},
+        )
+        session.add(other)
+        session.flush()
+        session.add(
+            models.ChannelListing(
+                workspace_id=workspace_id,
+                inventory_item_id=other.id,
+                channel=Channel.BIBLIO,
+                external_id="BK-0001",
+                external_sku="BK-0001",
+                title="Other BIBLIO listing",
+                price_cents=500,
+                currency="EUR",
+                status=ListingStatus.ACTIVE,
+                quantity=1,
+            )
+        )
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=listing_id,
+            enrich_isbn=False,
+        )
+        assert candidate["fields"]["book_id"] is None
+        assert "unique BIBLIO Book ID" in candidate["missing"]
+        assert candidate["book_id_suggestion"].startswith("BK-0001-")
+
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {"book_id": candidate["book_id_suggestion"]},
+        )
+        candidate = publishing.validate_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            candidate,
+        )
+        assert candidate["ready"] is True
+        repaired = candidate["fields"]["book_id"]
+
+        workspace = session.get(models.Workspace, workspace_id)
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        assert listing.external_id == repaired
+        assert listing.external_sku == repaired
+
+
+def test_listing_api_exposes_biblio_gate_instead_of_hiding_vinted_actions(monkeypatch):
+    client, _csrf = _registered_client(monkeypatch)
+    with db.session_scope() as session:
+        membership = session.execute(select(models.Membership)).scalar_one()
+        workspace_id = membership.workspace_id
+
+        linked_general = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="GENERAL-VINTED",
+            title="Sparse vintage book",
+            category=ItemCategory.GENERAL,
+            quantity=1,
+            currency="EUR",
+            attributes={},
+        )
+        session.add(linked_general)
+        session.flush()
+        session.add(
+            models.ChannelListing(
+                workspace_id=workspace_id,
+                inventory_item_id=linked_general.id,
+                channel=Channel.VINTED,
+                external_id="SPARSE-1",
+                title="Sparse vintage book",
+                price_cents=400,
+                currency="EUR",
+                status=ListingStatus.ACTIVE,
+                quantity=1,
+                extra={"metadata": {}},
+            )
+        )
+
+        unlinked = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=None,
+            channel=Channel.VINTED,
+            external_id="UNLINKED-1",
+            title="Unlinked book",
+            price_cents=300,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+            extra={"metadata": {"author": "Unknown"}},
+        )
+        session.add(unlinked)
+
+    rows = {
+        row["external_id"]: row
+        for row in client.get("/api/app/listings").json()["listings"]
+    }
+    assert rows["SPARSE-1"]["biblio_gate"] == "book_review"
+    assert rows["UNLINKED-1"]["biblio_gate"] == "link_required"
