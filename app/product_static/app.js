@@ -2545,8 +2545,8 @@ function renderListingStats(rows, duplicates) {
 
   $("#listing-stat-age-known").textContent = agedVinted.length + "/" + vinted.length;
   $("#listing-stat-age-unknown").textContent = unknownVinted
-    ? unknownVinted + " unknown - never substituted with first seen"
-    : (vinted.length ? "Exact or Vinted-provided relative age" : "No Vinted rows in this view");
+    ? unknownVinted + " pending Vinted Uploaded scan"
+    : (vinted.length ? "Exact or Vinted Uploaded age" : "No Vinted rows in this view");
 
   const renderEdge = (entry, ageSelector, detailSelector) => {
     if (!entry) {
