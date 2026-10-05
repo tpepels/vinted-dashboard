@@ -53,6 +53,7 @@ from app.connectors.base import Capability, connector_catalog
 from app.connectors.hosted import (
     biblio_configured,
     exchange_etsy_authorization_code,
+    ebay_configured,
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
     test_biblio_workspace,
@@ -1293,7 +1294,11 @@ def _cross_list_destination_status(
             "writable": Capability.CREATE_LISTING in set(info.get("capabilities") or []),
         }
 
-    configured = has_workspace_connector_credentials(workspace.id, channel)
+    configured = (
+        ebay_configured(workspace.id)
+        if channel == Channel.EBAY
+        else has_workspace_connector_credentials(workspace.id, channel)
+    )
     writable = Capability.CREATE_LISTING in set(info.get("capabilities") or [])
     if writable:
         if not configured:
