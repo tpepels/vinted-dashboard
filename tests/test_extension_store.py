@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "2.6.0"
+    assert manifest["version"] == "2.7.0"
 
 
 
@@ -226,11 +226,11 @@ def test_content_script_captures_vinted_relative_upload_age_without_faking_exact
 
 def test_bridge_artifact_filename_always_includes_version():
     target = Path("/tmp/reseller-chrome-bridge.zip")
-    assert build_extension.versioned_output_path(target, "2.6.0").name == (
-        "reseller-chrome-bridge-v2.6.0.zip"
+    assert build_extension.versioned_output_path(target, "2.7.0").name == (
+        "reseller-chrome-bridge-v2.7.0.zip"
     )
-    already = Path("/tmp/reseller-chrome-bridge-v2.6.0.zip")
-    assert build_extension.versioned_output_path(already, "2.6.0") == already
+    already = Path("/tmp/reseller-chrome-bridge-v2.7.0.zip")
+    assert build_extension.versioned_output_path(already, "2.7.0") == already
 
 
 def test_bridge_popup_always_shows_manifest_version():
@@ -251,13 +251,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v2.6.0.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v2.7.0.zip"'
     )
-    assert response.headers["x-bridge-version"] == "2.6.0"
+    assert response.headers["x-bridge-version"] == "2.7.0"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v2.6.0.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v2.7.0.zip")
     assert versioned.status_code == 200
-    assert "v2.6.0.zip" in versioned.headers["content-disposition"]
+    assert "v2.7.0.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
