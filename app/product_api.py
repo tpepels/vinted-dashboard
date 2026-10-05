@@ -1,7 +1,7 @@
 """Workspace-scoped product API.
 
-This router is the commercial/hosted surface.  Legacy personal-dashboard
-routes remain available separately for backwards compatibility.
+Inventory, sales, analytics, connector and account endpoints live here.
+Chrome bridge pairing/sync endpoints are owned by :mod:`app.bridge_api`.
 """
 
 from __future__ import annotations
