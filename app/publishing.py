@@ -184,7 +184,15 @@ def validate_biblio_candidate(
         item_id,
         fields.get("book_id"),
     )
+    suggestion = candidate.get("book_id_suggestion")
     if conflict is not None:
+        base = str(fields.get("book_id") or candidate.get("book_id_suggestion") or "BOOK").strip() or "BOOK"
+        suggestion = None
+        for number in range(2, 1000):
+            proposed = f"{base}-{number}"
+            if _book_id_conflict(session, workspace_id, item_id, proposed) is None:
+                suggestion = proposed
+                break
         fields["book_id"] = None
         if "unique BIBLIO Book ID" not in missing:
             missing.append("unique BIBLIO Book ID")
@@ -192,6 +200,7 @@ def validate_biblio_candidate(
     return {
         **candidate,
         "fields": fields,
+        "book_id_suggestion": suggestion,
         "missing": missing,
         "ready": not missing,
     }
