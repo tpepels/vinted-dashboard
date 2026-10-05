@@ -1221,18 +1221,6 @@ def _cross_list_destination_status(
         item_id,
         channel,
     )
-    if existing is not None:
-        return {
-            "channel": channel,
-            "display_name": info["display_name"],
-            "status": "listed",
-            "reason": "This physical item is already linked to a listing on this destination.",
-            "action": "open" if existing.url else None,
-            "listing_id": str(existing.id),
-            "url": existing.url,
-            "configured": True,
-            "writable": Capability.CREATE_LISTING in set(info.get("capabilities") or []),
-        }
 
     if channel == Channel.BIBLIO:
         configured = _biblio_configured_for_workspace(workspace)
@@ -1258,7 +1246,13 @@ def _cross_list_destination_status(
                 "configured": configured,
                 "writable": True,
             }
-        if not configured:
+        if existing is not None:
+            status, reason, action = (
+                "listed",
+                "Already listed on BIBLIO. Open the book preflight to update it from the current Vinted/master data.",
+                "biblio",
+            )
+        elif not configured:
             status, reason, action = (
                 "connect",
                 "Connect BIBLIO before publishing.",
@@ -1284,6 +1278,19 @@ def _cross_list_destination_status(
             "action": action,
             "configured": configured,
             "writable": True,
+        }
+
+    if existing is not None:
+        return {
+            "channel": channel,
+            "display_name": info["display_name"],
+            "status": "listed",
+            "reason": "This physical item is already linked to a listing on this destination.",
+            "action": "open" if existing.url else None,
+            "listing_id": str(existing.id),
+            "url": existing.url,
+            "configured": True,
+            "writable": Capability.CREATE_LISTING in set(info.get("capabilities") or []),
         }
 
     configured = has_workspace_connector_credentials(workspace.id, channel)
