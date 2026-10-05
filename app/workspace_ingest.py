@@ -157,7 +157,11 @@ def _apply_vinted_metadata(
         return
     if not item.condition and metadata.get("condition"):
         item.condition = metadata["condition"]
-    if item.category == ItemCategory.GENERAL and _looks_like_book_category(metadata.get("category")):
+    if item.category == ItemCategory.GENERAL and (
+        metadata.get("isbn")
+        or metadata.get("author")
+        or _looks_like_book_category(metadata.get("category"))
+    ):
         item.category = ItemCategory.BOOK
 
     attributes = dict(item.attributes or {})

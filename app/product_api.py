@@ -350,9 +350,20 @@ def _effective_item_ask(
 
 
 def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelListing] | None = None) -> dict[str, Any]:
+    rows = list(listings or [])
     attributes = dict(item.attributes or {})
     default_price = attributes.get("default_price_cents")
-    effective_ask, effective_ask_source = _effective_item_ask(item, listings)
+    effective_ask, effective_ask_source = _effective_item_ask(item, rows)
+    vinted_source = next(
+        (
+            row
+            for row in rows
+            if row.channel == Channel.VINTED
+            and row.status == ListingStatus.ACTIVE
+        ),
+        None,
+    ) or next((row for row in rows if row.channel == Channel.VINTED), None)
+    biblio_publishable = publishing.is_biblio_book_candidate(item, vinted_source)
     potential_margin = (
         int(effective_ask) - int(item.cost_cents)
         if effective_ask is not None and item.cost_cents is not None
@@ -375,6 +386,8 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
         "notes": item.notes,
         "status": item.status,
         "attributes": attributes,
+        "biblio_publishable": biblio_publishable,
+        "biblio_source_listing_id": str(vinted_source.id) if vinted_source else None,
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "listings": [
@@ -391,7 +404,7 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
                 "quantity": row.quantity,
                 "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
             }
-            for row in (listings or [])
+            for row in rows
         ],
     }
 
@@ -707,6 +720,7 @@ def listings(
             if linked_item_ids
             else []
         )
+        item_by_id = {item.id: item for item in linked_items}
         item_category_by_id = {item.id: item.category for item in linked_items}
 
     result = []
@@ -752,6 +766,14 @@ def listings(
                     item_category_by_id.get(listing.inventory_item_id)
                     if listing.inventory_item_id
                     else None
+                ),
+                "biblio_publishable": (
+                    publishing.is_biblio_book_candidate(
+                        item_by_id[listing.inventory_item_id],
+                        listing if listing.channel == Channel.VINTED else None,
+                    )
+                    if listing.inventory_item_id in item_by_id
+                    else False
                 ),
                 "channel": listing.channel,
                 "external_id": listing.external_id,

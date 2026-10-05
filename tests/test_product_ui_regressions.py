@@ -286,7 +286,7 @@ def test_biblio_cross_listing_is_available_from_inventory_and_vinted_listings():
     assert 'id="biblio-publish-submit"' in html
     assert "function openBiblioPublish(itemId, sourceListingId = null)" in APP_JS
     assert "List on BIBLIO" in APP_JS
-    assert 'row.channel === "vinted" && row.inventory_item_id && row.inventory_category === "book"' in APP_JS
+    assert 'row.channel === "vinted" && row.inventory_item_id && row.biblio_publishable' in APP_JS
     assert 'api("/api/app/inventory/" + encodeURIComponent(itemId) + "/publish/biblio"' in APP_JS
 
 
@@ -381,3 +381,11 @@ def test_chrome_pair_code_renders_inside_vinted_connector():
 def test_page_uploaded_text_is_preserved_in_age_column():
     assert 'String(row.listed_age_source || "").startsWith("vinted_page")' in APP_JS
     assert "return String(row.listed_age_text);" in APP_JS
+
+
+
+def test_biblio_visibility_uses_server_book_detection_not_master_category_only():
+    assert "function itemCanPublishToBiblio(item)" in APP_JS
+    assert "return Boolean(item?.biblio_publishable);" in APP_JS
+    assert 'row.biblio_publishable' in APP_JS
+    assert 'row.inventory_category === "book"' not in APP_JS
