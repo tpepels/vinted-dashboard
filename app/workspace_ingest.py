@@ -88,6 +88,18 @@ def _relative_vinted_age_seconds(value: Any) -> int | None:
     return seconds
 
 
+def _version_at_least(value: str | None, minimum: tuple[int, ...]) -> bool:
+    if not value:
+        return False
+    try:
+        parts = tuple(int(part) for part in str(value).split("."))
+    except ValueError:
+        return False
+    padded = parts + (0,) * max(0, len(minimum) - len(parts))
+    target = minimum + (0,) * max(0, len(parts) - len(minimum))
+    return padded >= target
+
+
 _VINTED_METADATA_KEYS = {
     "condition",
     "category",
@@ -164,7 +176,14 @@ def _apply_vinted_metadata(
     item.attributes = attributes
 
 
-def _listing_item(session, workspace, account, row: dict[str, Any], captured_at: datetime):
+def _listing_item(
+    session,
+    workspace,
+    account,
+    row: dict[str, Any],
+    captured_at: datetime,
+    extension_version: str | None = None,
+):
     external_id = str(row.get("id") or row.get("source_id") or "").strip()
     if not external_id:
         return None
@@ -230,41 +249,56 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
     existing_extra = dict(listing.extra or {})
     incoming_listed_at = _exact_vinted_iso(row.get("listed_at"))
     existing_listed_at = _exact_vinted_iso(existing_extra.get("listed_at"))
-    listed_at = incoming_listed_at or existing_listed_at
+    page_age_bridge = _version_at_least(extension_version, (2, 7, 0))
+    listed_at = (
+        incoming_listed_at
+        if page_age_bridge
+        else (incoming_listed_at or existing_listed_at)
+    )
     listed_at_source = (
         str(row.get("listed_at_source") or "vinted")
         if incoming_listed_at
         else (
             str(existing_extra.get("listed_at_source") or "vinted")
-            if existing_listed_at
+            if existing_listed_at and not page_age_bridge
             else None
         )
     )
     incoming_age_seconds = _relative_vinted_age_seconds(row.get("listed_age_seconds"))
+    incoming_age_source = str(row.get("listed_age_source") or "").strip() or None
     existing_age_seconds = _relative_vinted_age_seconds(existing_extra.get("listed_age_seconds"))
+    existing_age_source = str(existing_extra.get("listed_age_source") or "").strip() or None
+    keep_existing_age = (
+        not page_age_bridge
+        or bool(existing_age_source and existing_age_source.startswith("vinted_page"))
+    )
     listed_age_seconds = (
         incoming_age_seconds
         if incoming_age_seconds is not None
-        else existing_age_seconds
+        else (existing_age_seconds if keep_existing_age else None)
     )
     listed_age_source = (
-        str(row.get("listed_age_source") or "vinted_relative")
+        incoming_age_source or "vinted_relative"
         if incoming_age_seconds is not None
-        else (
-            str(existing_extra.get("listed_age_source") or "vinted_relative")
-            if existing_age_seconds is not None
-            else None
-        )
+        else (existing_age_source if keep_existing_age and existing_age_seconds is not None else None)
     )
     listed_age_text = (
         str(row.get("listed_age_text") or "").strip()[:200]
         if incoming_age_seconds is not None
-        else str(existing_extra.get("listed_age_text") or "").strip()[:200] or None
+        else (
+            str(existing_extra.get("listed_age_text") or "").strip()[:200] or None
+            if keep_existing_age and existing_age_seconds is not None
+            else None
+        )
     )
     listed_age_observed_at = (
         captured_at.isoformat()
         if incoming_age_seconds is not None
-        else existing_extra.get("listed_age_observed_at")
+        else (
+            existing_extra.get("listed_age_observed_at")
+            if keep_existing_age and existing_age_seconds is not None
+            else None
+        )
     )
     incoming_metadata = _clean_vinted_metadata(row.get("metadata"))
     existing_metadata = _clean_vinted_metadata(existing_extra.get("metadata"))
@@ -365,7 +399,14 @@ def record_workspace_snapshot(
         seen: set[str] = set()
         listing_by_external: dict[str, models.ChannelListing] = {}
         for row in listings:
-            listing = _listing_item(session, workspace, account, row, captured_at)
+            listing = _listing_item(
+                session,
+                workspace,
+                account,
+                row,
+                captured_at,
+                extension_version=extension_version,
+            )
             if listing is not None:
                 seen.add(listing.external_id)
                 listing_by_external[listing.external_id] = listing

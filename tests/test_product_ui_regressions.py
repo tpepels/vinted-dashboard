@@ -363,3 +363,21 @@ def test_dashboard_always_shows_bridge_version_and_versioned_download():
     assert '$("#bridge-version-page").textContent = "Bridge v" + (state.me.bridge_version || "unknown");' in APP_JS
     assert "devices.download_url" in APP_JS
     assert "Download bridge v" in APP_JS
+
+
+
+def test_chrome_pair_code_renders_inside_vinted_connector():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="pairing"' not in html
+    assert 'id="pair-code"' not in html
+    assert 'class="pairing-inline hidden"' in APP_JS
+    assert 'document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });' in APP_JS
+    assert 'button?.closest(".connector")' in APP_JS
+    assert 'connector?.querySelector(".pair-code-inline")' in APP_JS
+
+
+def test_page_uploaded_text_is_preserved_in_age_column():
+    assert 'String(row.listed_age_source || "").startsWith("vinted_page")' in APP_JS
+    assert "return String(row.listed_age_text);" in APP_JS

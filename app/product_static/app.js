@@ -2378,6 +2378,9 @@ function listingAgeSeconds(row) {
 function listingAgeLabel(row) {
   const seconds = listingAgeSeconds(row);
   if (seconds == null) return "—";
+  if (!row.listed_at && row.listed_age_text && String(row.listed_age_source || "").startsWith("vinted_page")) {
+    return String(row.listed_age_text);
+  }
   const approximate = !row.listed_at && row.listed_age_seconds != null;
   if (seconds < 3600) {
     const minutes = Math.max(0, Math.floor(seconds / 60));
@@ -2546,7 +2549,11 @@ function renderListings() {
           + (showDate ? (() => {
             const shown = listingShownDate(row);
             const approximate = shown.approximate
-              ? '<div class="sub">from Vinted relative age</div>'
+              ? '<div class="sub">'
+                + (String(row.listed_age_source || "").startsWith("vinted_page")
+                  ? "from Vinted Uploaded field"
+                  : "from Vinted relative age")
+                + "</div>"
               : "";
             return '<td>' + shown.text + approximate
               + '</td><td>' + listingAgeLabel(row) + approximate + '</td>';
@@ -3178,6 +3185,9 @@ async function connections() {
         ? '<button class="btn primary pair">Pair Chrome</button><a class="btn" href="'
           + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
           + '">Download bridge v' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</a>'
+          + '<div class="pairing-inline hidden"><span class="eyebrow">PAIR CODE</span>'
+          + '<strong class="pair-code pair-code-inline"></strong>'
+          + '<small>Enter this in Chrome Bridge. Expires in 10 minutes.</small></div>'
         : "")
       + (connectorSchemas[connector.channel]
         ? '<button class="btn configure" data-c="' + esc(connector.channel) + '">Configure</button>'
@@ -3190,7 +3200,7 @@ async function connections() {
       + "</div>";
   }).join("");
 
-  $$(".pair").forEach((button) => { button.onclick = pair; });
+  document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
   $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
@@ -3361,11 +3371,16 @@ $("#import-biblio").onclick = async () => {
   }
 };
 
-async function pair() {
+async function pair(button) {
   try {
     const result = await api("/api/app/extension/pairings", { method: "POST" });
-    $("#pair-code").textContent = result.code;
-    $("#pairing").classList.remove("hidden");
+    const connector = button?.closest(".connector");
+    const panel = connector?.querySelector(".pairing-inline");
+    const code = connector?.querySelector(".pair-code-inline");
+    if (!panel || !code) return flash("Pair code could not be displayed.", true);
+    code.textContent = result.code;
+    panel.classList.remove("hidden");
+    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     flash(error.message, true);
   }
