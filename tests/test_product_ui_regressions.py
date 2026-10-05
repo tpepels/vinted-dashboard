@@ -373,7 +373,7 @@ def test_chrome_pair_code_renders_inside_vinted_connector():
     assert 'id="pairing"' not in html
     assert 'id="pair-code"' not in html
     assert 'class="pairing-inline hidden"' in APP_JS
-    assert 'button.onclick = () => pair(button);' in APP_JS
+    assert 'document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });' in APP_JS
     assert 'button?.closest(".connector")' in APP_JS
     assert 'connector?.querySelector(".pair-code-inline")' in APP_JS
 
