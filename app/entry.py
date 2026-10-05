@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app.bridge_api import router as bridge_router
 from app.bridge_package import (
     bridge_filename,
     extension_source_version,
@@ -40,6 +41,7 @@ app.mount(
     name="app-static",
 )
 app.include_router(product_router)
+app.include_router(bridge_router)
 
 
 @app.middleware("http")
