@@ -49,7 +49,7 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. Inventory and Vinted source photos are sent by FTP. Vinted photos are converted to JPG and named from the BIBLIO Book ID automatically.",
+    help: "Book connector. Inventory and Vinted source photos are sent by FTP. Photos are converted to JPG and named from the BIBLIO Book ID automatically. Multiple photos use BookID_1.jpg, BookID_2.jpg, etc.; BIBLIO may need that multi-photo convention enabled on your seller account.",
     fields: [
       ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
