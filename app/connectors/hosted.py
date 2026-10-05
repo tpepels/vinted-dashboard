@@ -987,6 +987,98 @@ def _shopify_graphql(
     return data if isinstance(data, dict) else {}
 
 
+SHOPIFY_CROSS_LIST_MUTATION = """
+mutation ResellerCrossList($input: ProductSetInput!) {
+  productSet(input: $input, synchronous: true) {
+    product {
+      id
+      title
+      handle
+      status
+      onlineStoreUrl
+      variants(first: 1) {
+        nodes { id sku price }
+      }
+    }
+    userErrors { field message }
+  }
+}
+"""
+
+
+def create_shopify_workspace_listing(
+    workspace_id: uuid.UUID,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.SHOPIFY)
+    fields = dict(candidate.get("fields") or {})
+    source = dict(candidate.get("source") or {})
+    image_urls = list(source.get("image_urls") or [])[:5]
+    product_input: dict[str, Any] = {
+        "title": str(fields.get("title") or "").strip(),
+        "descriptionHtml": str(fields.get("description") or ""),
+        "status": "ACTIVE",
+        "variants": [
+            {
+                "sku": str(fields.get("sku") or "").strip(),
+                "price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+            }
+        ],
+    }
+    if image_urls:
+        product_input["files"] = [
+            {
+                "originalSource": str(url),
+                "contentType": "IMAGE",
+                "alt": str(fields.get("title") or "")[:255],
+            }
+            for url in image_urls
+        ]
+
+    data = _shopify_graphql(
+        values,
+        SHOPIFY_CROSS_LIST_MUTATION,
+        variables={"input": product_input},
+    )
+    result = data.get("productSet") or {}
+    errors = result.get("userErrors") or []
+    if errors:
+        detail = "; ".join(
+            str(row.get("message") or "Shopify validation error")
+            for row in errors
+            if isinstance(row, dict)
+        )
+        raise RuntimeError(f"Shopify product creation failed: {detail}")
+    product = result.get("product") or {}
+    product_id = str(product.get("id") or "").strip()
+    variants = ((product.get("variants") or {}).get("nodes") or [])
+    variant = variants[0] if variants and isinstance(variants[0], dict) else {}
+    variant_id = str(variant.get("id") or "").strip()
+    if not product_id or not variant_id:
+        raise RuntimeError("Shopify created a product without returning its default variant")
+    return {
+        "source_id": variant_id,
+        "sku": variant.get("sku") or fields.get("sku"),
+        "title": product.get("title") or fields.get("title"),
+        "status": (
+            ListingStatus.ACTIVE
+            if str(product.get("status") or "").upper() == "ACTIVE"
+            else ListingStatus.INACTIVE
+        ),
+        "quantity": max(0, int(fields.get("quantity") or 0)),
+        "price_cents": _money(variant.get("price")) or int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": product.get("onlineStoreUrl"),
+        "description": fields.get("description"),
+        "image_url": image_urls[0] if image_urls else None,
+        "attributes": {
+            "product_id": product_id,
+            "handle": product.get("handle"),
+            "inventory_tracking": "not_managed_by_cross_list_create",
+        },
+    }
+
+
 SHOPIFY_VARIANTS_QUERY = """
 query ResellerVariants($cursor: String) {
   productVariants(first: 100, after: $cursor) {
