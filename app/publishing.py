@@ -58,14 +58,33 @@ def _vinted_source(
     return rows[0]
 
 
-def _bookish(item: models.InventoryItem, metadata: dict[str, Any]) -> bool:
+def is_biblio_book_candidate(
+    item: models.InventoryItem,
+    source_listing: models.ChannelListing | None = None,
+) -> bool:
+    """Return whether a master item has enough book evidence for BIBLIO.
+
+    The master category is not authoritative for older Vinted imports: many
+    historical books were created as GENERAL before rich Vinted metadata was
+    available. Source-listing ISBN/author/category evidence therefore counts
+    too, matching the actual publish preflight.
+    """
     if item.category == ItemCategory.BOOK:
         return True
     attrs = dict(item.attributes or {})
+    metadata: dict[str, Any] = {}
+    if source_listing is not None:
+        extra = dict(source_listing.extra or {})
+        raw = extra.get("metadata")
+        if isinstance(raw, dict):
+            metadata = raw
     if attrs.get("isbn") or attrs.get("author") or metadata.get("isbn") or metadata.get("author"):
         return True
     category = str(metadata.get("category") or attrs.get("vinted_category") or "").casefold()
-    return any(token in category for token in ("book", "livro", "livre", "libro", "buch", "książ"))
+    return any(
+        token in category
+        for token in ("book", "books", "livro", "livros", "livre", "livres", "libro", "libros", "buch", "bücher", "ksiaz", "książ")
+    )
 
 
 def _existing_biblio(
@@ -119,7 +138,7 @@ def build_biblio_candidate(
     attrs = dict(item.attributes or {})
     vextra = dict(vinted.extra or {}) if vinted else {}
     vmeta = dict(vextra.get("metadata") or {}) if isinstance(vextra.get("metadata"), dict) else {}
-    if not _bookish(item, vmeta):
+    if not is_biblio_book_candidate(item, vinted):
         raise ValueError("Only book inventory can be published to BIBLIO")
 
     title, title_source = _value(
