@@ -193,10 +193,11 @@ def test_content_script_reads_uploaded_age_from_rendered_item_page_and_caches_it
     assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV3"' in content
     assert 'LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV2"' in content
     assert "function relativeAgeFromRenderedDocument()" in content
-    assert 'type:"rendered-uploaded-age"' in content
+    assert 'type:"rendered-uploaded-ages"' in content
     assert 'type:"read-vinted-uploaded-age"' in background
-    assert "async function renderedUploadedAge(url,itemId)" in background
-    assert "chrome.tabs.create({url:target.href,active:false})" in background
+    assert "async function renderedUploadedAges(items)" in background
+    assert "await chrome.tabs.create({url:first.url,active:false})" in background
+    assert "await chrome.tabs.update(tab.id,{url:target.href,active:false})" in background
     assert "await chrome.tabs.remove(tab.id)" in background
     assert '"vinted_page_uploaded"' in content
     assert "await enrichListingDates(listings);" in content
