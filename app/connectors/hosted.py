@@ -2874,7 +2874,7 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
                     uploaded += 1
                 except Exception as exc:
                     photo_errors.append(f"{book_id} photo {index + 1}: {exc}")
-            if uploaded:
+            if uploaded == len(row.get("image_urls") or []) and uploaded > 0:
                 photo_synced.append(
                     (str(row["listing_id"]), str(row["photo_signature"]), uploaded)
                 )
