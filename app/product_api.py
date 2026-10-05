@@ -1376,6 +1376,29 @@ def cross_list_preview(
                 item_id,
                 source_listing_id=source_listing_id,
             )
+            destination_order = {
+                Channel.BIBLIO: 0,
+                Channel.WOOCOMMERCE: 1,
+                Channel.SHOPIFY: 2,
+                Channel.WIX: 3,
+                Channel.EBAY: 4,
+                Channel.ETSY: 5,
+                Channel.BIGCOMMERCE: 6,
+                Channel.SQUARESPACE: 7,
+                Channel.DEPOP: 8,
+            }
+            destination_infos = [
+                info
+                for info in connector_catalog()
+                if info["channel"] not in {
+                    Channel.VINTED,
+                    Channel.CSV,
+                    Channel.EXCEL,
+                }
+            ]
+            destination_infos.sort(
+                key=lambda info: destination_order.get(info["channel"], 99)
+            )
             destinations = [
                 _cross_list_destination_status(
                     session,
@@ -1384,12 +1407,7 @@ def cross_list_preview(
                     candidate,
                     info,
                 )
-                for info in connector_catalog()
-                if info["channel"] not in {
-                    Channel.VINTED,
-                    Channel.CSV,
-                    Channel.EXCEL,
-                }
+                for info in destination_infos
             ]
     except ValueError as exc:
         detail = str(exc)
