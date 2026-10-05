@@ -2549,7 +2549,11 @@ function renderListings() {
           + (showDate ? (() => {
             const shown = listingShownDate(row);
             const approximate = shown.approximate
-              ? '<div class="sub">from Vinted relative age</div>'
+              ? '<div class="sub">'
+                + (String(row.listed_age_source || "").startsWith("vinted_page")
+                  ? "from Vinted Uploaded field"
+                  : "from Vinted relative age")
+                + "</div>"
               : "";
             return '<td>' + shown.text + approximate
               + '</td><td>' + listingAgeLabel(row) + approximate + '</td>';
