@@ -746,9 +746,14 @@ def listings(
             else None
         )
         listed_age_seconds = None
+        age_source = str(extra.get("listed_age_source") or "").strip()
         raw_age = extra.get("listed_age_seconds")
+        trusted_relative_age = (
+            listing.channel != Channel.VINTED
+            or age_source.startswith("vinted_page")
+        )
         try:
-            if raw_age not in (None, ""):
+            if trusted_relative_age and raw_age not in (None, ""):
                 listed_age_seconds = max(0, int(float(raw_age)))
                 observed_raw = extra.get("listed_age_observed_at")
                 if observed_raw:
@@ -787,11 +792,15 @@ def listings(
                 "listed_at_source": listed_at_source,
                 "listed_age_seconds": listed_age_seconds,
                 "listed_age_source": (
-                    str(extra.get("listed_age_source") or "vinted_relative")
+                    age_source
+                    if listed_age_seconds is not None and age_source
+                    else None
+                ),
+                "listed_age_text": (
+                    extra.get("listed_age_text")
                     if listed_age_seconds is not None
                     else None
                 ),
-                "listed_age_text": extra.get("listed_age_text"),
                 "first_seen_at": (
                     listing.first_seen_at.isoformat() if listing.first_seen_at else None
                 ),

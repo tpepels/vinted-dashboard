@@ -264,7 +264,7 @@ def test_relative_vinted_age_is_persisted_separately_from_exact_listed_at(monkey
     record_workspace_snapshot(
         workspace_id,
         snapshot,
-        extension_version="2.7.0",
+        extension_version="2.8.0",
     )
 
     with db.session_scope() as session:
@@ -297,7 +297,7 @@ def test_exact_vinted_date_stays_distinct_from_relative_age():
     record_workspace_snapshot(
         workspace_id,
         snapshot,
-        extension_version="2.7.0",
+        extension_version="2.8.0",
     )
 
     with db.session_scope() as session:
@@ -313,7 +313,7 @@ def test_exact_vinted_date_stays_distinct_from_relative_age():
 
 
 
-def test_bridge_27_clears_stale_pre_page_relative_age_when_page_age_is_missing():
+def test_page_age_bridge_clears_stale_relative_age_when_page_age_is_missing():
     workspace_id = _workspace("listing-date-clear-stale-relative")
     old = _snapshot(listed_at=None, collected_at=NOW - timedelta(minutes=10))
     old["listings"][0]["listed_age_seconds"] = 0
@@ -329,7 +329,7 @@ def test_bridge_27_clears_stale_pre_page_relative_age_when_page_age_is_missing()
     record_workspace_snapshot(
         workspace_id,
         fresh,
-        extension_version="2.7.0",
+        extension_version="2.8.0",
     )
 
     with db.session_scope() as session:
@@ -345,7 +345,7 @@ def test_bridge_27_clears_stale_pre_page_relative_age_when_page_age_is_missing()
         assert listing.extra["listed_age_observed_at"] is None
 
 
-def test_bridge_27_replaces_bad_today_age_with_item_page_uploaded_age():
+def test_page_age_bridge_replaces_bad_today_age_with_item_page_uploaded_age():
     workspace_id = _workspace("listing-date-replace-today")
     old = _snapshot(listed_at=None, collected_at=NOW - timedelta(minutes=10))
     old["listings"][0]["listed_age_seconds"] = 0
@@ -364,7 +364,7 @@ def test_bridge_27_replaces_bad_today_age_with_item_page_uploaded_age():
     record_workspace_snapshot(
         workspace_id,
         fresh,
-        extension_version="2.7.0",
+        extension_version="2.8.0",
     )
 
     with db.session_scope() as session:
@@ -380,7 +380,7 @@ def test_bridge_27_replaces_bad_today_age_with_item_page_uploaded_age():
 
 
 
-def test_bridge_27_clears_unconfirmed_pre_27_exact_today_date_and_uses_page_age():
+def test_page_age_bridge_clears_unconfirmed_exact_today_date_and_uses_page_age():
     workspace_id = _workspace("listing-date-clear-bad-exact")
     old = _snapshot(listed_at=NOW.isoformat(), collected_at=NOW - timedelta(minutes=10))
     record_workspace_snapshot(
@@ -396,7 +396,7 @@ def test_bridge_27_clears_unconfirmed_pre_27_exact_today_date_and_uses_page_age(
     record_workspace_snapshot(
         workspace_id,
         fresh,
-        extension_version="2.7.0",
+        extension_version="2.8.0",
     )
 
     with db.session_scope() as session:
@@ -411,3 +411,71 @@ def test_bridge_27_clears_unconfirmed_pre_27_exact_today_date_and_uses_page_age(
         assert listing.extra["listed_age_seconds"] == 5 * 7 * 86400
         assert listing.extra["listed_age_source"] == "vinted_page_uploaded"
         assert listing.extra["listed_age_text"] == "5 weeks ago"
+
+
+
+def test_listings_api_hides_legacy_relative_age_but_keeps_page_uploaded_age(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "listing-date-trusted-source@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Trusted Vinted Age",
+        },
+    )
+    assert registered.status_code == 200, registered.text
+
+    observed = datetime.now(timezone.utc)
+    with db.session_scope() as session:
+        workspace = session.query(models.Workspace).one()
+        for external_id, source, text, seconds in [
+            ("LEGACY-AGE", "vinted_relative", "Today", 0),
+            ("PAGE-AGE", "vinted_page_uploaded", "5 weeks ago", 5 * 7 * 86400),
+        ]:
+            item = models.InventoryItem(
+                workspace_id=workspace.id,
+                sku=external_id,
+                title=external_id,
+                category="book",
+                quantity=1,
+                status="active",
+                currency="EUR",
+                attributes={},
+            )
+            session.add(item)
+            session.flush()
+            session.add(
+                models.ChannelListing(
+                    workspace_id=workspace.id,
+                    inventory_item_id=item.id,
+                    channel="vinted",
+                    external_id=external_id,
+                    title=item.title,
+                    price_cents=1000,
+                    currency="EUR",
+                    status="active",
+                    quantity=1,
+                    first_seen_at=observed,
+                    last_seen_at=observed,
+                    extra={
+                        "listed_age_seconds": seconds,
+                        "listed_age_source": source,
+                        "listed_age_text": text,
+                        "listed_age_observed_at": observed.isoformat(),
+                    },
+                )
+            )
+
+    rows = {
+        row["external_id"]: row
+        for row in client.get("/api/app/listings").json()["listings"]
+    }
+    assert rows["LEGACY-AGE"]["listed_age_seconds"] is None
+    assert rows["LEGACY-AGE"]["listed_age_source"] is None
+    assert rows["LEGACY-AGE"]["listed_age_text"] is None
+
+    assert rows["PAGE-AGE"]["listed_age_seconds"] >= 5 * 7 * 86400
+    assert rows["PAGE-AGE"]["listed_age_source"] == "vinted_page_uploaded"
+    assert rows["PAGE-AGE"]["listed_age_text"] == "5 weeks ago"

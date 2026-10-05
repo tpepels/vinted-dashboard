@@ -157,13 +157,13 @@ markets rather than being tied to the original Portuguese account. On its
 first sync it uses an already-open signed-in Vinted tab and remembers that
 origin for later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 2.7.0 keeps a local
-detail cache with the richer Vinted item payload. When Vinted omits an absolute posting timestamp, bridge 2.7.0 reads the visible `Uploaded` value from each Vinted item page (for example `5 weeks ago`) and preserves it separately; the dashboard can then show an approximate age/date without ever treating it as an exact `listed_at` value. This preserves source
+For active/reserved/hidden/draft listings, bridge 2.8.0 keeps a local
+detail cache with the richer Vinted item payload. When Vinted omits an absolute posting timestamp, bridge 2.8.0 reads the visible `Uploaded` value from the rendered Vinted item page (for example `5 weeks ago`) and preserves it separately. The first enrichment pass reuses a two-inactive-tab worker pool and caches the result by Vinted item ID, rather than trusting raw fetched HTML or generic API date fields; the dashboard can then show an approximate age/date without ever treating it as an exact `listed_at` value. This preserves source
 description, ISBN/author/publisher metadata and reusable image URLs without
 re-fetching every item on every periodic sync. Workspace ingestion keeps those
 source fields linked to the same master physical item.
 
-Bridge releases follow a visible-version invariant: the downloaded ZIP filename contains the manifest version (for example `reseller-dashboard-chrome-bridge-v2.7.0.zip`), the extension popup displays `Chrome Bridge vX.Y.Z`, and the dashboard displays the current bridge version next to the workspace identity. The manifest is authoritative for these user-visible values.
+Bridge releases follow a visible-version invariant: the downloaded ZIP filename contains the manifest version (for example `reseller-dashboard-chrome-bridge-v2.8.0.zip`), the extension popup displays `Chrome Bridge vX.Y.Z`, and the dashboard displays the current bridge version next to the workspace identity. The manifest is authoritative for these user-visible values.
 
 
 ### Personal legacy extension
