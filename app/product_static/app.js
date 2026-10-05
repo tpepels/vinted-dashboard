@@ -812,6 +812,148 @@ function listingCrossListAction(row) {
     + '" data-source-listing-id="' + esc(row.id) + '">Cross-list</button>';
 }
 
+function crossListStatusLabel(status) {
+  return {
+    ready: "Ready",
+    listed: "Already listed",
+    connect: "Needs connection",
+    needs_fields: "Needs fields",
+    review: "Needs review",
+    not_writable: "Not writable yet",
+  }[status] || status || "Unavailable";
+}
+
+function renderCrossList(data) {
+  if (!state.crossList) return;
+  state.crossList.data = data;
+  const fields = data.fields || {};
+  const source = data.source || {};
+  $("#cross-list-title").textContent = "Cross-list " + (data.item_title || "item");
+  $("#cross-list-source").innerHTML = source.channel === "vinted"
+    ? 'Using <strong>Vinted</strong> as the listing source'
+      + (source.url ? ' · <a href="' + esc(source.url) + '" target="_blank" rel="noreferrer">open source</a>' : "")
+    : "Using master inventory data; no linked Vinted source was selected.";
+  $("#cross-list-summary").innerHTML = [
+    "<span><strong>Title:</strong> " + esc(fields.title || "Missing") + "</span>",
+    "<span><strong>Price:</strong> " + esc(fields.price_cents == null ? "Missing" : money(fields.price_cents, fields.currency)) + "</span>",
+    "<span><strong>Stock:</strong> " + esc(fields.quantity == null ? "—" : fields.quantity) + "</span>",
+    "<span><strong>Photos:</strong> " + esc(source.photo_count || 0) + "</span>",
+  ].join("");
+
+  const destinations = Array.isArray(data.destinations) ? data.destinations : [];
+  $("#cross-list-destinations").innerHTML = destinations.length
+    ? destinations.map((destination) => {
+      let action = "";
+      if (destination.action === "publish") {
+        action = '<button class="btn primary cross-destination-publish" data-channel="' + esc(destination.channel) + '">Publish</button>';
+      } else if (destination.action === "biblio") {
+        action = '<button class="btn primary cross-destination-biblio">Review / publish</button>';
+      } else if (destination.action === "connect") {
+        action = '<button class="btn cross-destination-connect" data-channel="' + esc(destination.channel) + '">Connect</button>';
+      } else if (destination.action === "edit" || destination.action === "review") {
+        action = '<button class="btn cross-destination-edit">Edit item</button>';
+      } else if (destination.action === "open" && destination.url) {
+        action = '<a class="btn" href="' + esc(destination.url) + '" target="_blank" rel="noreferrer">Open listing</a>';
+      }
+      return '<div class="cross-list-destination ' + esc(destination.status) + '">'
+        + '<div class="cross-list-destination-name"><span>' + esc(destination.display_name) + '</span>'
+        + '<span class="cross-list-state">' + esc(crossListStatusLabel(destination.status)) + "</span></div>"
+        + '<div class="cross-list-destination-copy">' + esc(destination.reason || "") + "</div>"
+        + '<div class="actions">' + action + "</div></div>";
+    }).join("")
+    : '<div class="empty">No cross-list destinations are available.</div>';
+
+  document.querySelectorAll(".cross-destination-publish").forEach((button) => {
+    button.onclick = () => publishCrossDestination(button.dataset.channel, button);
+  });
+  document.querySelectorAll(".cross-destination-connect").forEach((button) => {
+    button.onclick = () => openCrossListConnection(button.dataset.channel);
+  });
+  document.querySelectorAll(".cross-destination-biblio").forEach((button) => {
+    button.onclick = async () => {
+      const current = state.crossList;
+      if (!current?.itemId) return;
+      $("#cross-list-panel").classList.add("hidden");
+      await openBiblioPublish(current.itemId, current.sourceListingId);
+    };
+  });
+  document.querySelectorAll(".cross-destination-edit").forEach((button) => {
+    button.onclick = () => {
+      const current = state.crossList;
+      const item = state.inventoryItems.find((row) => row.id === current?.itemId);
+      if (!item) return flash("Inventory item could not be found.", true);
+      $("#cross-list-panel").classList.add("hidden");
+      openItemForm(item);
+    };
+  });
+}
+
+async function openCrossList(itemId, sourceListingId = null) {
+  if (!itemId) return flash("Link this listing to a physical inventory item first.", true);
+  if (state.view !== "inventory") await selectView("inventory");
+  state.crossList = { itemId, sourceListingId, data: null };
+  $("#cross-list-panel").classList.remove("hidden");
+  $("#cross-list-title").textContent = "Checking destinations…";
+  $("#cross-list-source").textContent = "";
+  $("#cross-list-summary").innerHTML = "";
+  $("#cross-list-destinations").innerHTML = '<div class="empty">Checking connected platforms and listing requirements…</div>';
+  $("#cross-list-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    const suffix = sourceListingId ? "?source_listing_id=" + encodeURIComponent(sourceListingId) : "";
+    const data = await api("/api/app/inventory/" + encodeURIComponent(itemId) + "/cross-list" + suffix);
+    renderCrossList(data);
+  } catch (error) {
+    $("#cross-list-destinations").innerHTML = '<div class="empty">' + esc(error.message) + "</div>";
+    flash(error.message, true);
+  }
+}
+
+async function publishCrossDestination(channel, button) {
+  const current = state.crossList;
+  if (!current?.itemId || !channel) return;
+  button.disabled = true;
+  const old = button.textContent;
+  button.textContent = "Publishing…";
+  try {
+    const result = await api(
+      "/api/app/inventory/" + encodeURIComponent(current.itemId) + "/cross-list/" + encodeURIComponent(channel),
+      {
+        method: "POST",
+        body: JSON.stringify({ source_listing_id: current.sourceListingId || null }),
+      },
+    );
+    flash("Published to " + (connectorSchemas[channel]?.title || channel) + ".");
+    await inventory();
+    await openCrossList(current.itemId, current.sourceListingId);
+    if (result.url) window.open(result.url, "_blank", "noopener,noreferrer");
+  } catch (error) {
+    flash(error.message, true);
+    button.disabled = false;
+    button.textContent = old;
+  }
+}
+
+async function openCrossListConnection(channel) {
+  await selectView("connections");
+  const connector = (state.connectors || []).find((row) => row.channel === channel);
+  if (!connector || !connectorSchemas[channel]) {
+    return flash("This destination has no connection form yet.", true);
+  }
+  openConnectorConfig(channel, connector);
+}
+
+function bindCrossListButtons() {
+  document.querySelectorAll(".cross-list").forEach((button) => {
+    button.onclick = () => openCrossList(
+      button.dataset.itemId,
+      button.dataset.sourceListingId || null,
+    );
+  });
+  document.querySelectorAll(".cross-list-link").forEach((button) => {
+    button.onclick = () => linkListingToInventory(button.dataset.listingId);
+  });
+}
+
 function biblioSourceBadge(source) {
   if (!source) return "";
   const label = source === "vinted" ? "Vinted" : source === "isbn" ? "ISBN lookup" : source === "master" ? "Master" : source;
@@ -920,7 +1062,7 @@ async function reviewBiblioItem(itemId) {
   flash("Review category, author or ISBN. Mark the item as Book if needed.");
 }
 
-async function linkListingForBiblio(listingId) {
+async function linkListingToInventory(listingId) {
   await selectView("reconcile");
   const select = $("#reconcile-listing");
   if (!select || !Array.from(select.options).some((option) => option.value === listingId)) {
@@ -928,7 +1070,7 @@ async function linkListingForBiblio(listingId) {
   }
   select.value = listingId;
   select.scrollIntoView({ behavior: "smooth", block: "center" });
-  flash("Choose the physical inventory item, then click Link to master item.");
+  flash("Choose the physical inventory item, then click Link to master item. Cross-listing will become available after linking.");
 }
 
 function bindBiblioPublishButtons() {
@@ -944,7 +1086,7 @@ function bindBiblioPublishButtons() {
     button.onclick = () => reviewBiblioItem(button.dataset.itemId);
   });
   document.querySelectorAll(".biblio-link").forEach((button) => {
-    button.onclick = () => linkListingForBiblio(button.dataset.listingId);
+    button.onclick = () => linkListingToInventory(button.dataset.listingId);
   });
 }
 
