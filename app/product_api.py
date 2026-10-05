@@ -796,7 +796,11 @@ def listings(
                     if listed_age_seconds is not None and age_source
                     else None
                 ),
-                "listed_age_text": extra.get("listed_age_text"),
+                "listed_age_text": (
+                    extra.get("listed_age_text")
+                    if listed_age_seconds is not None
+                    else None
+                ),
                 "first_seen_at": (
                     listing.first_seen_at.isoformat() if listing.first_seen_at else None
                 ),
