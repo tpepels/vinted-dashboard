@@ -3196,7 +3196,7 @@ async function connections() {
       + "</div>";
   }).join("");
 
-  $(".pair").forEach((button) => { button.onclick = () => pair(button); });
+  document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
   $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
