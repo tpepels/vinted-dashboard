@@ -292,3 +292,97 @@ def test_publish_endpoint_creates_linked_biblio_listing_and_queues_ftp(monkeypat
         ).scalar_one()
         assert job.workspace_id == workspace_id
         assert job.status == "queued"
+
+
+
+def test_biblio_preflight_tolerates_multiple_historical_biblio_rows():
+    workspace_id = _workspace()
+    item_id, listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        old = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item_id,
+            channel=Channel.BIBLIO,
+            external_id="OLD-BIBLIO-ID",
+            title="Old BIBLIO row",
+            price_cents=500,
+            currency="EUR",
+            status=ListingStatus.INACTIVE,
+            quantity=0,
+        )
+        current = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item_id,
+            channel=Channel.BIBLIO,
+            external_id="CURRENT-BIBLIO-ID",
+            title="Current BIBLIO row",
+            price_cents=700,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+        )
+        session.add_all([old, current])
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=listing_id,
+            enrich_isbn=False,
+        )
+
+    assert candidate["ready"] is True
+    assert candidate["already_listed"] is True
+    assert candidate["existing_biblio_listing_id"] is not None
+
+
+def test_biblio_upsert_prefers_active_row_when_historical_duplicates_exist():
+    workspace_id = _workspace()
+    item_id, listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        old = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item_id,
+            channel=Channel.BIBLIO,
+            external_id="OLD-BIBLIO-ID",
+            title="Old BIBLIO row",
+            price_cents=500,
+            currency="EUR",
+            status=ListingStatus.INACTIVE,
+            quantity=0,
+        )
+        current = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item_id,
+            channel=Channel.BIBLIO,
+            external_id="CURRENT-BIBLIO-ID",
+            title="Current BIBLIO row",
+            price_cents=700,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+        )
+        session.add_all([old, current])
+        session.flush()
+
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=listing_id,
+            enrich_isbn=False,
+        )
+        updated = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        updated_id = updated.id
+        current_id = current.id
+
+    assert updated_id == current_id
