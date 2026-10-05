@@ -2308,21 +2308,17 @@ function dateOnly(value) {
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
 }
 
+function ageDays(value) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return null;
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
+}
+
 function age(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  const timestamp = date.getTime();
-  if (Number.isNaN(timestamp)) return "—";
-  const days = Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
-  if (days === 0) return "Today";
-  if (days === 1) return "1 day";
-  if (days < 30) return days + " days";
-  if (days < 365) {
-    const months = Math.max(1, Math.floor(days / 30.44));
-    return months + " month" + (months === 1 ? "" : "s");
-  }
-  const years = Math.max(1, Math.floor(days / 365.25));
-  return years + " year" + (years === 1 ? "" : "s");
+  const days = ageDays(value);
+  if (days == null) return "—";
+  return days + " day" + (days === 1 ? "" : "s");
 }
 
 function timeValue(value) {
@@ -2418,6 +2414,15 @@ function renderListingStats(rows, duplicates) {
   const favourites = rows.reduce((sum, row) => sum + (Number(row.favourites) || 0), 0);
   const zeroFavourites = rows.filter((row) => Number(row.favourites || 0) === 0).length;
 
+  const vinted = rows.filter((row) => row.channel === "vinted");
+  const datedVinted = vinted
+    .map((row) => ({ row, timestamp: timeValue(listingDisplayDate(row)) }))
+    .filter((entry) => entry.timestamp > 0)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const oldest = datedVinted[0] || null;
+  const youngest = datedVinted.length ? datedVinted[datedVinted.length - 1] : null;
+  const unknownVinted = vinted.length - datedVinted.length;
+
   $("#listing-stat-count").textContent = String(rows.length);
   $("#listing-stat-value").textContent = money(total, currency);
   $("#listing-stat-average").textContent = money(average, currency);
@@ -2426,6 +2431,23 @@ function renderListingStats(rows, duplicates) {
   $("#listing-stat-zero-favourites").textContent = String(zeroFavourites);
   $("#listing-stat-duplicate-groups").textContent = String(duplicates.duplicateGroups.length);
   $("#listing-stat-duplicates").classList.toggle("has-duplicates", duplicates.duplicateGroups.length > 0);
+
+  $("#listing-stat-age-known").textContent = datedVinted.length + "/" + vinted.length;
+  $("#listing-stat-age-unknown").textContent = unknownVinted
+    ? unknownVinted + " unknown - never substituted with first seen"
+    : (vinted.length ? "All use actual Vinted timestamps" : "No Vinted rows in this view");
+
+  const renderEdge = (entry, ageSelector, detailSelector) => {
+    if (!entry) {
+      $(ageSelector).textContent = "—";
+      $(detailSelector).textContent = "No exact Vinted date";
+      return;
+    }
+    $(ageSelector).textContent = age(entry.row.listed_at);
+    $(detailSelector).textContent = dateOnly(entry.row.listed_at) + " · " + entry.row.title;
+  };
+  renderEdge(youngest, "#listing-stat-youngest-age", "#listing-stat-youngest-detail");
+  renderEdge(oldest, "#listing-stat-oldest-age", "#listing-stat-oldest-detail");
 }
 
 function renderListings() {
@@ -2466,7 +2488,8 @@ function renderListings() {
 
   const showFavourites = filtered.some((row) => row.favourites != null);
   const showViews = filtered.some((row) => row.views != null);
-  const showDate = filtered.some((row) => timeValue(listingDisplayDate(row)) > 0);
+  const showDate = filtered.some((row) => row.channel === "vinted")
+    || filtered.some((row) => timeValue(listingDisplayDate(row)) > 0);
 
   $("#listings-table").innerHTML = filtered.length
     ? '<table><thead><tr><th>Listing</th><th>Marketplace</th><th>Status</th>'
@@ -2521,6 +2544,18 @@ function renderListings() {
 
 $("#listing-stat-duplicates").onclick = () => {
   $("#listing-duplicate").value = "duplicates";
+  renderListings();
+};
+
+$("#listing-stat-youngest").onclick = () => {
+  $("#listing-channel").value = "vinted";
+  $("#listing-sort").value = "newest";
+  renderListings();
+};
+
+$("#listing-stat-oldest").onclick = () => {
+  $("#listing-channel").value = "vinted";
+  $("#listing-sort").value = "oldest";
   renderListings();
 };
 
