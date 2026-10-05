@@ -386,3 +386,104 @@ def test_biblio_upsert_prefers_active_row_when_historical_duplicates_exist():
         current_id = current.id
 
     assert updated_id == current_id
+
+
+
+def test_general_vinted_book_metadata_is_publishable_in_inventory_and_listings(monkeypatch):
+    client, _csrf = _registered_client(monkeypatch)
+    with db.session_scope() as session:
+        membership = session.execute(select(models.Membership)).scalar_one()
+        workspace_id = membership.workspace_id
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="VINTED-GENERAL-BOOK",
+            title="Destination India",
+            category=ItemCategory.GENERAL,
+            quantity=1,
+            currency="EUR",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        source = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item.id,
+            channel=Channel.VINTED,
+            external_id="9826364597",
+            title="Destination India - The Lonely Hearts Travel Club #2 - Katy Colins",
+            price_cents=100,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+            url="https://www.vinted.pt/items/9826364597",
+            extra={
+                "metadata": {
+                    "author": "Katy Colins",
+                    "isbn": "9780263923698",
+                    "description": "Very good English paperback.",
+                }
+            },
+        )
+        session.add(source)
+        session.flush()
+        item_id = str(item.id)
+
+    inventory = client.get("/api/app/inventory").json()["items"]
+    row = next(row for row in inventory if row["id"] == item_id)
+    assert row["category"] == ItemCategory.GENERAL
+    assert row["biblio_publishable"] is True
+    assert row["biblio_source_listing_id"] is not None
+
+    listings = client.get("/api/app/listings").json()["listings"]
+    listing = next(row for row in listings if row["external_id"] == "9826364597")
+    assert listing["inventory_category"] == ItemCategory.GENERAL
+    assert listing["biblio_publishable"] is True
+
+    preview = client.get(
+        f"/api/app/inventory/{item_id}/publish/biblio",
+        params={"source_listing_id": listing["id"]},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["ready"] is True
+    assert preview.json()["fields"]["isbn"] == "9780263923698"
+    assert preview.json()["fields"]["author"] == "Katy Colins"
+
+
+def test_vinted_ingest_promotes_general_item_to_book_from_isbn_without_category():
+    workspace_id = _workspace()
+    record_workspace_snapshot(
+        workspace_id,
+        {
+            "collected_at": 1_799_100_000,
+            "current_user": {},
+            "notifications": [],
+            "orders": [],
+            "listings": [
+                {
+                    "id": "BOOK-BY-ISBN",
+                    "title": "Destination India",
+                    "price_cents": 100,
+                    "currency": "EUR",
+                    "status": "active",
+                    "vinted_url": "https://www.vinted.pt/items/BOOK-BY-ISBN",
+                    "metadata": {
+                        "isbn": "9780263923698",
+                        "author": "Katy Colins",
+                        "description": "Very good English paperback.",
+                    },
+                }
+            ],
+        },
+        extension_version="2.8.0",
+    )
+
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.external_id == "BOOK-BY-ISBN"
+            )
+        ).scalar_one()
+        item = session.get(models.InventoryItem, listing.inventory_item_id)
+        assert item.category == ItemCategory.BOOK
+        assert item.attributes["isbn"] == "9780263923698"
+        assert item.attributes["author"] == "Katy Colins"
