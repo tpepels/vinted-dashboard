@@ -925,7 +925,6 @@ async function publishCrossDestination(channel, button) {
     flash("Published to " + (connectorSchemas[channel]?.title || channel) + ".");
     await inventory();
     await openCrossList(current.itemId, current.sourceListingId);
-    if (result.url) window.open(result.url, "_blank", "noopener,noreferrer");
   } catch (error) {
     flash(error.message, true);
     button.disabled = false;
