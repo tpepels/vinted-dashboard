@@ -352,10 +352,29 @@ def apply_biblio_overrides(
         fields["price_cents"] = price
         sources["price_cents"] = "review"
 
+    if not fields.get("book_id") and fields.get("sku"):
+        fields["book_id"] = fields["sku"]
+        sources.setdefault("book_id", sources.get("sku") or "master")
+
+    missing: list[str] = []
+    for key, label in (
+        ("book_id", "Book ID"),
+        ("author", "author"),
+        ("title", "title"),
+        ("description", "description"),
+        ("price_cents", "price"),
+    ):
+        if fields.get(key) in (None, ""):
+            missing.append(label)
+    if int(fields.get("quantity") or 0) <= 0:
+        missing.append("available stock")
+
     candidate = {
         **candidate,
         "fields": fields,
         "field_sources": sources,
+        "missing": missing,
+        "ready": not missing,
     }
     return candidate
 
