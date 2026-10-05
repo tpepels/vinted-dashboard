@@ -490,21 +490,11 @@ def backup(output_root: Path = DEFAULT_BACKUP_ROOT) -> dict[str, Any]:
         }
     }
 
-    legacy_path = DEFAULT_LEGACY_SQLITE_PATH
-    if legacy_path.exists() and legacy_path.resolve() != source.resolve():
-        legacy_copy = destination / "vinted-history.sqlite3"
-        _sqlite_backup(legacy_path, legacy_copy)
-        files[legacy_copy.name] = {
-            "sha256": _sha256(legacy_copy),
-            "size_bytes": legacy_copy.stat().st_size,
-        }
-
     current_revision, head_revision = _alembic_revisions()
     manifest = {
         "created_at": utcnow().isoformat(),
         "database_url_backend": "sqlite",
         "source_database": str(source),
-        "legacy_database": str(legacy_path),
         "alembic_revision": current_revision,
         "alembic_head": head_revision,
         "files": files,
@@ -539,27 +529,9 @@ def restore(backup_dir: Path, *, confirmed: bool = False) -> dict[str, Any]:
     _sqlite_backup(app_backup, temp)
     os.replace(temp, destination)
 
-    legacy_backup = backup_dir / "vinted-history.sqlite3"
-    legacy_restored = False
-    if legacy_backup.exists():
-        expected_legacy = (
-            ((manifest.get("files") or {}).get("vinted-history.sqlite3") or {}).get("sha256")
-        )
-        if expected_legacy and _sha256(legacy_backup) != expected_legacy:
-            raise RuntimeError("vinted-history.sqlite3 checksum does not match backup manifest")
-        legacy_destination = DEFAULT_LEGACY_SQLITE_PATH
-        legacy_destination.parent.mkdir(parents=True, exist_ok=True)
-        legacy_temp = legacy_destination.with_suffix(legacy_destination.suffix + ".restore")
-        if legacy_temp.exists():
-            legacy_temp.unlink()
-        _sqlite_backup(legacy_backup, legacy_temp)
-        os.replace(legacy_temp, legacy_destination)
-        legacy_restored = True
-
     return {
         "ok": True,
         "restored_database": str(destination),
-        "legacy_restored": legacy_restored,
         "backup_created_at": manifest.get("created_at"),
     }
 
