@@ -73,13 +73,31 @@ def _existing_biblio(
     workspace_id: uuid.UUID,
     item_id: uuid.UUID,
 ) -> models.ChannelListing | None:
-    return session.execute(
+    """Return the best existing BIBLIO row for a physical item.
+
+    Older/reconciled workspaces can contain more than one historical BIBLIO
+    row linked to the same master item. That is a data-cleanup issue, but it
+    must not turn a publish preflight into a 500 via scalar_one_or_none().
+    Prefer an active row, then the most recently observed row.
+    """
+    rows = session.execute(
         select(models.ChannelListing).where(
             models.ChannelListing.workspace_id == workspace_id,
             models.ChannelListing.inventory_item_id == item_id,
             models.ChannelListing.channel == Channel.BIBLIO,
         )
-    ).scalar_one_or_none()
+    ).scalars().all()
+    if not rows:
+        return None
+    rows.sort(
+        key=lambda row: (
+            row.status == ListingStatus.ACTIVE,
+            row.last_seen_at or row.first_seen_at,
+            row.first_seen_at,
+        ),
+        reverse=True,
+    )
+    return rows[0]
 
 
 def build_biblio_candidate(
