@@ -105,10 +105,12 @@ workspaces; API access checks membership before exposing or mutating inventory.
 Older Vinted/BIBLIO/eBay SQLite files are supported only as **read-only migration
 input**. They are not part of the runtime application.
 
-At startup, `python -m app.legacy_migration` can perform an additive,
-idempotent backfill into the workspace/master-inventory schema. Existing legacy
-files are never modified. `RUN_LEGACY_BACKFILL=false` disables this startup
-migration once an installation no longer needs it.
+`python -m app.legacy_migration` performs an additive, idempotent backfill into
+the workspace/master-inventory schema. Existing legacy files are never modified.
+Runtime startup does not run this by default; `scripts/upgrade.sh` performs an
+explicit idempotent backfill check for upgraded self-hosted installations.
+`RUN_LEGACY_BACKFILL=true` is available only when an installation explicitly
+needs the import to happen during startup.
 
 On an upgraded personal installation, the first real account registration
 claims the unclaimed bootstrap owner, so migrated history stays attached to
