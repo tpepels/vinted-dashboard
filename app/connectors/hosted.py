@@ -997,10 +997,18 @@ mutation ResellerCrossList($input: ProductSetInput!) {
       status
       onlineStoreUrl
       variants(first: 1) {
-        nodes { id sku price }
+        nodes { id sku price inventoryQuantity }
       }
     }
     userErrors { field message }
+  }
+}
+"""
+
+SHOPIFY_PRIMARY_LOCATION_QUERY = """
+query ResellerPrimaryLocation {
+  locations(first: 1, includeInactive: false) {
+    nodes { id name }
   }
 }
 """
@@ -1014,16 +1022,48 @@ def create_shopify_workspace_listing(
     fields = dict(candidate.get("fields") or {})
     source = dict(candidate.get("source") or {})
     image_urls = list(source.get("image_urls") or [])[:5]
+    location_data = _shopify_graphql(values, SHOPIFY_PRIMARY_LOCATION_QUERY)
+    locations = ((location_data.get("locations") or {}).get("nodes") or [])
+    location_id = (
+        str(locations[0].get("id") or "").strip()
+        if locations and isinstance(locations[0], dict)
+        else ""
+    )
+    if not location_id:
+        raise RuntimeError("Shopify has no active inventory location available for cross-listing")
+
+    default_option = "Default"
+    variant_input: dict[str, Any] = {
+        "optionValues": [{"optionName": "Title", "name": default_option}],
+        "sku": str(fields.get("sku") or "").strip(),
+        "price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+        "inventoryQuantities": [
+            {
+                "locationId": location_id,
+                "name": "available",
+                "quantity": max(0, _int(variant.get("inventoryQuantity"), int(fields.get("quantity") or 0)) or 0),
+            }
+        ],
+    }
+    if image_urls:
+        variant_input["file"] = {
+            "originalSource": str(image_urls[0]),
+            "contentType": "IMAGE",
+            "alt": str(fields.get("title") or "")[:255],
+        }
+
     product_input: dict[str, Any] = {
         "title": str(fields.get("title") or "").strip(),
         "descriptionHtml": str(fields.get("description") or ""),
         "status": "ACTIVE",
-        "variants": [
+        "productOptions": [
             {
-                "sku": str(fields.get("sku") or "").strip(),
-                "price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+                "name": "Title",
+                "position": 1,
+                "values": [{"name": default_option}],
             }
         ],
+        "variants": [variant_input],
     }
     if image_urls:
         product_input["files"] = [
@@ -1074,7 +1114,7 @@ def create_shopify_workspace_listing(
         "attributes": {
             "product_id": product_id,
             "handle": product.get("handle"),
-            "inventory_tracking": "not_managed_by_cross_list_create",
+            "inventory_location_id": location_id,
         },
     }
 
