@@ -52,6 +52,7 @@ from app.constants import (
 )
 from app.connectors.base import connector_catalog
 from app.connectors.hosted import (
+    biblio_configured,
     exchange_etsy_authorization_code,
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
@@ -122,15 +123,7 @@ def _etsy_oauth_redirect_uri() -> str | None:
 
 
 def _biblio_configured_for_workspace(workspace: models.Workspace) -> bool:
-    if has_workspace_connector_credentials(workspace.id, Channel.BIBLIO):
-        return True
-    bootstrap_slug = os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
-    if workspace.slug != bootstrap_slug:
-        return False
-    return bool(
-        os.getenv("BIBLIO_FTP_USERNAME", "").strip()
-        and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
-    )
+    return biblio_configured(workspace.id)
 
 
 def _etsy_oauth_authorized(values: dict[str, Any]) -> bool:
@@ -2894,18 +2887,10 @@ def generic_connector_test(
 def biblio_workspace_test(
     context: RequestContext = Depends(require_write_context),
 ):
-    if has_workspace_connector_credentials(context.workspace.id, Channel.BIBLIO):
-        try:
-            return test_biblio_workspace(context.workspace.id)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal"):
-        from app.channels import test_biblio_ftp
-        try:
-            return test_biblio_ftp()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
+    try:
+        return test_biblio_workspace(context.workspace.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/app/extension/pairings")
