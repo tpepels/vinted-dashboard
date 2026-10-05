@@ -264,7 +264,7 @@ def test_relative_vinted_age_is_persisted_separately_from_exact_listed_at(monkey
     record_workspace_snapshot(
         workspace_id,
         snapshot,
-        extension_version="2.6.0",
+        extension_version="2.7.0",
     )
 
     with db.session_scope() as session:
@@ -297,7 +297,7 @@ def test_exact_vinted_date_stays_distinct_from_relative_age():
     record_workspace_snapshot(
         workspace_id,
         snapshot,
-        extension_version="2.6.0",
+        extension_version="2.7.0",
     )
 
     with db.session_scope() as session:
