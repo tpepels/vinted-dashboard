@@ -318,7 +318,7 @@ def test_vinted_age_is_first_class_and_supports_relative_vinted_age():
     assert '<option value="oldest">Oldest posting first</option>' in html
     assert "function listingAgeSeconds(row)" in APP_JS
     assert "function listingAgeLabel(row)" in APP_JS
-    assert '"≈ " + days + " day"' in APP_JS
+    assert 'return (approximate ? "≈ " : "") + days + " day"' in APP_JS
 
 
 def test_vinted_youngest_and_oldest_ignore_only_rows_without_any_vinted_age():
