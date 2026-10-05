@@ -81,10 +81,17 @@ async function enqueueAgeSweep(items){
   const existing=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
   const merged=new Map();
   for(const item of existing){
-    if(item?.id&&item?.url)merged.set(String(item.id),{id:String(item.id),url:String(item.url)});
+    if(item?.id&&item?.url)merged.set(String(item.id),{id:String(item.id),url:String(item.url),attempts:Number(item.attempts)||0});
   }
   for(const item of(Array.isArray(items)?items:[])){
-    if(item?.id&&item?.url)merged.set(String(item.id),{id:String(item.id),url:String(item.url)});
+    if(item?.id&&item?.url){
+      const existingItem=merged.get(String(item.id));
+      merged.set(String(item.id),{
+        id:String(item.id),
+        url:String(item.url),
+        attempts:Number(existingItem?.attempts)||0,
+      });
+    }
   }
   const queue=[...merged.values()];
   await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:queue});
@@ -126,11 +133,18 @@ async function processAgeSweepWindow(){
   ageSweepInFlight=(async()=>{
     const started=Date.now();
     let updated=0;
+    const deferred=[];
     try{
       while(Date.now()-started<AGE_SWEEP_WINDOW_MS){
         const data=await chrome.storage.local.get([AGE_SWEEP_QUEUE_KEY]);
         const queue=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
         if(!queue.length){
+          if(deferred.length){
+            await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:deferred});
+            chrome.alarms.create(AGE_SWEEP_ALARM,{when:Date.now()+30000});
+            await updateAgeSweepStatus(deferred.length,updated);
+            return{ok:true,remaining:deferred.length,updated};
+          }
           await updateAgeSweepStatus(0,updated);
           return{ok:true,remaining:0,updated};
         }
@@ -155,14 +169,22 @@ async function processAgeSweepWindow(){
             });
             updated+=Number(result.updated||0);
           }catch(error){
-            await updateAgeSweepStatus(remaining.length,updated,error instanceof Error?error.message:String(error));
+            await updateAgeSweepStatus(remaining.length+deferred.length,updated,error instanceof Error?error.message:String(error));
           }
         }
-        await updateAgeSweepStatus(remaining.length,updated);
+        for(const item of batch){
+          if(ages[String(item.id)])continue;
+          const attempts=(Number(item.attempts)||0)+1;
+          if(attempts<3)deferred.push({...item,attempts});
+        }
+        await updateAgeSweepStatus(remaining.length+deferred.length,updated);
       }
 
       const data=await chrome.storage.local.get([AGE_SWEEP_QUEUE_KEY]);
-      const remaining=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY].length:0;
+      const pending=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
+      const combined=[...pending,...deferred];
+      await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:combined});
+      const remaining=combined.length;
       if(remaining)chrome.alarms.create(AGE_SWEEP_ALARM,{when:Date.now()+30000});
       await updateAgeSweepStatus(remaining,updated);
       return{ok:true,remaining,updated};
