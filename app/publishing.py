@@ -427,6 +427,7 @@ def upsert_biblio_listing(
 
     existing.inventory_item_id = item.id
     existing.channel_account_id = account.id
+    existing.external_id = external_id
     existing.external_sku = external_id
     existing.title = str(fields["title"])
     existing.price_cents = int(fields["price_cents"])
