@@ -1152,6 +1152,11 @@ async function inventory() {
   updateInventorySelection();
 }
 
+$("#close-cross-list").onclick = () => {
+  state.crossList = null;
+  $("#cross-list-panel").classList.add("hidden");
+};
+
 $("#close-biblio-publish").onclick = () => {
   state.biblioPublish = null;
   $("#biblio-publish-panel").classList.add("hidden");
@@ -3370,6 +3375,7 @@ async function connections() {
     api("/api/app/connectors"),
     api("/api/app/extension/devices"),
   ]);
+  state.connectors = data.connectors || [];
   $("#connector-grid").innerHTML = data.connectors.map((connector) => {
     const connected = connector.status === "connected";
     const statusClass = connected ? "status-ok" : (connector.configured ? "status-warn" : "");
