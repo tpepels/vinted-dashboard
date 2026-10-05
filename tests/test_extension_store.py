@@ -193,6 +193,7 @@ def test_content_script_reads_uploaded_age_from_item_page_and_caches_it():
     assert 'LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV1"' in content
     assert "function relativeAgeFromPageHtml(html)" in content
     assert "function fetchItemPageHtml(row)" in content
+    assert "document.documentElement.outerHTML" in content
     assert '"vinted_page_uploaded"' in content
     assert "await enrichListingDates(listings);" in content
     assert "HTTP 429" in content
