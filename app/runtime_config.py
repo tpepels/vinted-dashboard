@@ -108,13 +108,6 @@ def validate_configuration(
         except (ValueError, TypeError, UnicodeError):
             errors.append("APP_ENCRYPTION_KEY must be a valid Fernet key")
 
-    for name in ("LEGACY_UI_ENABLED", "LEGACY_API_ENABLED", "LEGACY_COMPAT_SYNC"):
-        if _truthy(values.get(name)):
-            errors.append(f"{name} must be false")
-
-    if _truthy(values.get("EXTENSION_MARKET_RESEARCH_ENABLED")):
-        errors.append("EXTENSION_MARKET_RESEARCH_ENABLED must be false")
-
     if _truthy(values.get("LISTING_ASSISTANT_ENABLED")):
         if not str(values.get("OPENAI_API_KEY", "")).strip():
             errors.append(
@@ -217,14 +210,6 @@ def safe_runtime_summary() -> dict[str, object]:
         "billing_enabled": _truthy(os.getenv("BILLING_ENABLED")),
         "listing_assistant_enabled": _truthy(
             os.getenv("LISTING_ASSISTANT_ENABLED")
-        ),
-        "legacy_enabled": any(
-            _truthy(os.getenv(name))
-            for name in (
-                "LEGACY_UI_ENABLED",
-                "LEGACY_API_ENABLED",
-                "LEGACY_COMPAT_SYNC",
-            )
         ),
     }
 
