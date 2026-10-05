@@ -301,7 +301,7 @@ def test_biblio_preflight_shows_source_and_only_inline_missing_fields():
 def test_biblio_publish_posts_source_listing_and_inline_repairs():
     assert 'const payload = { source_listing_id: current.sourceListingId || null };' in APP_JS
     assert 'payload.price_cents = Math.round(Number(value) * 100);' in APP_JS
-    assert 'BIBLIO listing queued for FTP publication.' in APP_JS
+    assert 'BIBLIO listing and available Vinted photos queued for FTP publication.' in APP_JS
 
 
 
