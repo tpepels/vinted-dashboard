@@ -236,3 +236,77 @@ def test_relative_or_invalid_vinted_dates_are_not_accepted():
         )
         assert data["listings"][0]["listed_at"] is None
         assert data["listings"][0]["age_days"] is None
+
+
+
+def test_relative_vinted_age_is_persisted_separately_from_exact_listed_at(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "listing-relative-age@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Relative Age",
+        },
+    )
+    assert registered.status_code == 200, registered.text
+
+    with db.session_scope() as session:
+        workspace = session.query(models.Workspace).one()
+        workspace_id = workspace.id
+
+    captured = datetime.now(timezone.utc)
+    snapshot = _snapshot(listed_at=None, collected_at=captured)
+    snapshot["listings"][0]["listed_age_seconds"] = 17 * 86400
+    snapshot["listings"][0]["listed_age_source"] = "vinted_relative"
+    snapshot["listings"][0]["listed_age_text"] = "17 days ago"
+    record_workspace_snapshot(
+        workspace_id,
+        snapshot,
+        extension_version="2.6.0",
+    )
+
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-DATE-1",
+            )
+        ).scalar_one()
+        assert listing.extra.get("listed_at") is None
+        assert listing.extra["listed_age_seconds"] == 17 * 86400
+        assert listing.extra["listed_age_source"] == "vinted_relative"
+        assert listing.extra["listed_age_text"] == "17 days ago"
+        assert listing.extra["listed_age_observed_at"] == captured.isoformat()
+
+    row = client.get("/api/app/listings").json()["listings"][0]
+    assert row["listed_at"] is None
+    assert row["listed_at_source"] is None
+    assert row["listed_age_source"] == "vinted_relative"
+    assert row["listed_age_text"] == "17 days ago"
+    assert 17 * 86400 <= row["listed_age_seconds"] < 18 * 86400
+
+
+def test_exact_vinted_date_stays_distinct_from_relative_age():
+    workspace_id = _workspace("listing-date-exact-plus-relative")
+    exact = NOW - timedelta(days=40)
+    snapshot = _snapshot(listed_at=exact.isoformat(), collected_at=NOW)
+    snapshot["listings"][0]["listed_age_seconds"] = 39 * 86400
+    snapshot["listings"][0]["listed_age_source"] = "vinted_relative"
+    record_workspace_snapshot(
+        workspace_id,
+        snapshot,
+        extension_version="2.6.0",
+    )
+
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-DATE-1",
+            )
+        ).scalar_one()
+        assert listing.extra["listed_at"] == exact.isoformat()
+        assert listing.extra["listed_at_source"] == "vinted"
+        assert listing.extra["listed_age_seconds"] == 39 * 86400
