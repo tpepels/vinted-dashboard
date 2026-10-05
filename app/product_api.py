@@ -25,7 +25,7 @@ from sqlalchemy import and_, func, select
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake
 from app.bridge_package import extension_source_version
-from app.channels import parse_biblio_inventory
+from app.connectors.biblio_format import parse_biblio_inventory
 from app.auth import (
     RequestContext,
     clear_session_cookies,
