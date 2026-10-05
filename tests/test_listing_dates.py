@@ -313,7 +313,7 @@ def test_exact_vinted_date_stays_distinct_from_relative_age():
 
 
 
-def test_bridge_27_clears_stale_pre_page_relative_age_when_page_age_is_missing():
+def test_page_age_bridge_clears_stale_relative_age_when_page_age_is_missing():
     workspace_id = _workspace("listing-date-clear-stale-relative")
     old = _snapshot(listed_at=None, collected_at=NOW - timedelta(minutes=10))
     old["listings"][0]["listed_age_seconds"] = 0
@@ -345,7 +345,7 @@ def test_bridge_27_clears_stale_pre_page_relative_age_when_page_age_is_missing()
         assert listing.extra["listed_age_observed_at"] is None
 
 
-def test_bridge_27_replaces_bad_today_age_with_item_page_uploaded_age():
+def test_page_age_bridge_replaces_bad_today_age_with_item_page_uploaded_age():
     workspace_id = _workspace("listing-date-replace-today")
     old = _snapshot(listed_at=None, collected_at=NOW - timedelta(minutes=10))
     old["listings"][0]["listed_age_seconds"] = 0
@@ -380,7 +380,7 @@ def test_bridge_27_replaces_bad_today_age_with_item_page_uploaded_age():
 
 
 
-def test_bridge_27_clears_unconfirmed_pre_27_exact_today_date_and_uses_page_age():
+def test_page_age_bridge_clears_unconfirmed_exact_today_date_and_uses_page_age():
     workspace_id = _workspace("listing-date-clear-bad-exact")
     old = _snapshot(listed_at=NOW.isoformat(), collected_at=NOW - timedelta(minutes=10))
     record_workspace_snapshot(
