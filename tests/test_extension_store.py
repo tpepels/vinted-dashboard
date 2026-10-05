@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "2.5.0"
+    assert manifest["version"] == "2.6.0"
 
 
 
@@ -205,8 +205,19 @@ def test_ci_does_not_commit_a_static_fernet_key():
 
 def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
-    assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV1"' in content
+    assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV2"' in content
     assert "function enrichListingDetails(listings)" in content
     assert "image_urls:images" in content
     assert "await enrichListingDetails(listings);" in content
     assert '["active","reserved","hidden","draft"]' in content
+
+
+
+def test_content_script_captures_vinted_relative_upload_age_without_faking_exact_date():
+    content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    assert "function relativeAgeSeconds(v)" in content
+    assert '"upload_date"' in content
+    assert 'listed_age_source:relative?"vinted_relative":null' in content
+    assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV2"' in content
+    assert "cachedRelativeAge(cached)" in content
+    assert "if(row.listed_age_seconds!=null)continue;" in content

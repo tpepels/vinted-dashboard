@@ -735,13 +735,33 @@ def listings(
         item_category_by_id = {item.id: item.category for item in linked_items}
 
     result = []
+    now = datetime.now(timezone.utc)
     for listing, snapshot in rows:
-        listed_at = (listing.extra or {}).get("listed_at")
+        extra = dict(listing.extra or {})
+        listed_at = extra.get("listed_at")
         listed_at_source = (
-            str((listing.extra or {}).get("listed_at_source") or "vinted")
+            str(extra.get("listed_at_source") or "vinted")
             if listed_at
             else None
         )
+        listed_age_seconds = None
+        raw_age = extra.get("listed_age_seconds")
+        try:
+            if raw_age not in (None, ""):
+                listed_age_seconds = max(0, int(float(raw_age)))
+                observed_raw = extra.get("listed_age_observed_at")
+                if observed_raw:
+                    observed = datetime.fromisoformat(
+                        str(observed_raw).replace("Z", "+00:00")
+                    )
+                    if observed.tzinfo is None:
+                        observed = observed.replace(tzinfo=timezone.utc)
+                    listed_age_seconds += max(
+                        0,
+                        int((now - observed.astimezone(timezone.utc)).total_seconds()),
+                    )
+        except (TypeError, ValueError, OverflowError):
+            listed_age_seconds = None
         result.append(
             {
                 "id": str(listing.id),
@@ -764,6 +784,13 @@ def listings(
                 "url": listing.url,
                 "listed_at": listed_at,
                 "listed_at_source": listed_at_source,
+                "listed_age_seconds": listed_age_seconds,
+                "listed_age_source": (
+                    str(extra.get("listed_age_source") or "vinted_relative")
+                    if listed_age_seconds is not None
+                    else None
+                ),
+                "listed_age_text": extra.get("listed_age_text"),
                 "first_seen_at": (
                     listing.first_seen_at.isoformat() if listing.first_seen_at else None
                 ),

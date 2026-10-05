@@ -76,6 +76,18 @@ def _int(value: Any) -> int | None:
         return None
 
 
+def _relative_vinted_age_seconds(value: Any) -> int | None:
+    try:
+        if value in (None, ""):
+            return None
+        seconds = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    if seconds < 0 or seconds > int(365.25 * 86400 * 100):
+        return None
+    return seconds
+
+
 _VINTED_METADATA_KEYS = {
     "condition",
     "category",
@@ -228,6 +240,32 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
             else None
         )
     )
+    incoming_age_seconds = _relative_vinted_age_seconds(row.get("listed_age_seconds"))
+    existing_age_seconds = _relative_vinted_age_seconds(existing_extra.get("listed_age_seconds"))
+    listed_age_seconds = (
+        incoming_age_seconds
+        if incoming_age_seconds is not None
+        else existing_age_seconds
+    )
+    listed_age_source = (
+        str(row.get("listed_age_source") or "vinted_relative")
+        if incoming_age_seconds is not None
+        else (
+            str(existing_extra.get("listed_age_source") or "vinted_relative")
+            if existing_age_seconds is not None
+            else None
+        )
+    )
+    listed_age_text = (
+        str(row.get("listed_age_text") or "").strip()[:200]
+        if incoming_age_seconds is not None
+        else str(existing_extra.get("listed_age_text") or "").strip()[:200] or None
+    )
+    listed_age_observed_at = (
+        captured_at.isoformat()
+        if incoming_age_seconds is not None
+        else existing_extra.get("listed_age_observed_at")
+    )
     incoming_metadata = _clean_vinted_metadata(row.get("metadata"))
     existing_metadata = _clean_vinted_metadata(existing_extra.get("metadata"))
     metadata = {**existing_metadata, **incoming_metadata}
@@ -248,6 +286,10 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
         **existing_extra,
         "listed_at": listed_at,
         "listed_at_source": listed_at_source,
+        "listed_age_seconds": listed_age_seconds,
+        "listed_age_source": listed_age_source,
+        "listed_age_text": listed_age_text,
+        "listed_age_observed_at": listed_age_observed_at,
         "metadata": metadata,
         "image_url": image_urls[0] if image_urls else existing_extra.get("image_url"),
         "image_urls": image_urls,
@@ -281,6 +323,9 @@ def _listing_item(session, workspace, account, row: dict[str, Any], captured_at:
                 raw={
                     "listed_at": incoming_listed_at,
                     "listed_at_source": listed_at_source,
+                    "listed_age_seconds": incoming_age_seconds,
+                    "listed_age_source": listed_age_source,
+                    "listed_age_text": listed_age_text,
                     "url": row.get("vinted_url") or row.get("url"),
                     "metadata": metadata,
                 },
