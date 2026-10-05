@@ -28,7 +28,7 @@ jobs:
           COOKIE_SECURE: "true"
 
           DATABASE_URL: postgresql+psycopg2://user:pass@example.invalid/db
-          EXTENSION_LATEST_VERSION: 2.9.0
+          EXTENSION_LATEST_VERSION: 3.0.0
           BACKUP_PROVIDER: ci-managed-snapshot
           BACKUP_RESTORE_DRILL_AT: 2026-10-01
       - run: python -m pytest -q
@@ -41,5 +41,5 @@ jobs:
       - run: alembic upgrade head
         env:
           DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
-      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 2.9.0 --output /tmp/chrome-bridge.zip
+      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.0.0 --output /tmp/chrome-bridge.zip
       - run: docker build -t vinted-dashboard:test .
