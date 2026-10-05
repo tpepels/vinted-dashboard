@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sqlite3
 import sys
 import threading
 import time
@@ -179,3 +180,28 @@ def test_restore_requires_explicit_confirmation(tmp_path):
         assert "--confirm-restore" in str(exc)
     else:
         raise AssertionError("restore should require explicit confirmation")
+
+
+
+def test_runtime_backup_excludes_legacy_migration_source(tmp_path, monkeypatch):
+    database_path = tmp_path / "app.sqlite3"
+    db.init_engine(f"sqlite:///{database_path}")
+    db.create_all()
+    _workspace("backup-source")
+
+    legacy_path = tmp_path / "vinted-history.sqlite3"
+    connection = sqlite3.connect(legacy_path)
+    try:
+        connection.execute("CREATE TABLE old_data (id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+    monkeypatch.setattr(ops, "DEFAULT_LEGACY_SQLITE_PATH", legacy_path)
+
+    result = ops.backup(tmp_path / "backups")
+    backup_dir = Path(result["backup_dir"])
+
+    assert (backup_dir / "app.sqlite3").exists()
+    assert not (backup_dir / "vinted-history.sqlite3").exists()
+    assert "legacy_database" not in result["manifest"]
+    assert set(result["manifest"]["files"]) == {"app.sqlite3"}

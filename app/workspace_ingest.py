@@ -1,14 +1,12 @@
 """Workspace-scoped ingestion for the paired Chrome bridge.
 
-Unlike the legacy personal-dashboard snapshot writer, this module never
-assumes a single user.  Every row is written directly to the ORM schema under
-the credential's workspace.  The bootstrap workspace can optionally keep the
-legacy sqlite history in sync for backwards-compatible personal use.
+Every incoming row is written directly to the ORM schema under the paired
+credential's workspace. The workspace database is the only runtime source of
+truth for Vinted inventory, history and sales.
 """
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -28,7 +26,6 @@ from app.constants import (
     SyncRunStatus,
 )
 from app.workspace_bootstrap import (
-    BOOTSTRAP_WORKSPACE_SLUG,
     get_or_create_channel_account,
     normalize_sku,
 )
@@ -558,17 +555,3 @@ def record_workspace_snapshot(
         "sales_remaining_unlinked": auto_link_result["remaining"],
         "cross_channel_actions_created": auto_link_result["actions_created"],
     }
-
-
-def maybe_record_legacy_snapshot(workspace_slug: str, snapshot: dict[str, Any]) -> None:
-    enabled = os.getenv("LEGACY_COMPAT_SYNC", "false").strip().lower() in {"1", "true", "yes", "on"}
-    if not enabled or workspace_slug != BOOTSTRAP_WORKSPACE_SLUG:
-        return
-    from app.intelligence import record_snapshot
-    from app.channels import record_vinted_items
-
-    record_snapshot(snapshot)
-    record_vinted_items(
-        list(snapshot.get("listings") or []),
-        float(snapshot.get("collected_at") or time.time()),
-    )

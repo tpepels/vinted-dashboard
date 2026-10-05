@@ -102,81 +102,73 @@ workspaces; API access checks membership before exposing or mutating inventory.
 
 ## Existing installations and migration
 
-The legacy Vinted/BIBLIO/eBay SQLite data is not discarded.
+Older Vinted/BIBLIO/eBay SQLite files are supported only as **read-only migration
+input**. They are not part of the runtime application.
 
-At startup, \`python -m app.legacy_migration\` performs an additive,
-idempotent backfill into the workspace/master-inventory schema. Existing
-legacy files remain untouched.
+`python -m app.legacy_migration` performs an additive, idempotent backfill into
+the workspace/master-inventory schema. Existing legacy files are never modified.
+Runtime startup does not run this by default; `scripts/upgrade.sh` performs an
+explicit idempotent backfill check for upgraded self-hosted installations.
+`RUN_LEGACY_BACKFILL=true` is available only when an installation explicitly
+needs the import to happen during startup.
 
 On an upgraded personal installation, the first real account registration
 claims the unclaimed bootstrap owner, so migrated history stays attached to
 that account.
 
-The legacy personal UI is compatibility-only and disabled by default. Existing
-self-hosted installations may temporarily opt in to `/classic` while checking
-a migration. Public hosted deployments must keep the classic UI/API disabled:
-
-\`\`\`env
-LEGACY_UI_ENABLED=false
-LEGACY_API_ENABLED=false
-LEGACY_COMPAT_SYNC=false
-\`\`\`
+There is no classic UI, legacy API, legacy browser-sync store or legacy Chrome
+extension in the runtime. The workspace database is the single source of truth.
 
 ## Chrome bridge
 
-There are deliberately two extension variants.
-
-### Commercial / paired bridge
-
-\`app/extension\` is the thin Manifest V3 companion intended for Chrome Web
-Store distribution. It:
+`app/extension` is the single Manifest V3 Chrome bridge. It:
 
 - pairs with a workspace using a short-lived one-time code;
 - stores only a revocable dashboard bridge token;
 - reads the inventory/order/analytics data needed by the product from the
   user's signed-in Vinted tab;
-- sends that snapshot to the paired workspace;
+- sends snapshots directly to the paired workspace;
 - supports manual and periodic sync;
 - does not export the user's Vinted password or raw cookie values;
-- contains no dashboard business logic;
-- contains no rendered-market-research module or unattended destructive Vinted
-  actions.
+- contains no unattended destructive Vinted actions.
 
-For local beta testing, download the development build directly from the
-running dashboard:
+For local beta testing, download the bridge from the running dashboard. The
+stable route is:
 
-\`\`\`text
+```text
 /downloads/reseller-chrome-bridge.zip
-\`\`\`
+```
 
-Extract it, open \`chrome://extensions\`, enable Developer mode, choose **Load
+The downloaded artifact itself is always versioned, for example:
+
+```text
+reseller-dashboard-chrome-bridge-v2.9.0.zip
+```
+
+Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
 unpacked**, then use **Connections -> Vinted -> Pair Chrome** in the web app.
 
-The bridge supports explicit Vinted web origins for the principal European
-markets rather than being tied to the original Portuguese account. On its
-first sync it uses an already-open signed-in Vinted tab and remembers that
-origin for later periodic syncs.
+The bridge supports the principal European Vinted web origins. On its first
+sync it uses an already-open signed-in Vinted tab and remembers that origin for
+later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 2.8.0 keeps a local
-detail cache with the richer Vinted item payload. When Vinted omits an absolute posting timestamp, bridge 2.8.0 reads the visible `Uploaded` value from the rendered Vinted item page (for example `5 weeks ago`) and preserves it separately. The first enrichment pass reuses a two-inactive-tab worker pool and caches the result by Vinted item ID, rather than trusting raw fetched HTML or generic API date fields; the dashboard can then show an approximate age/date without ever treating it as an exact `listed_at` value. This preserves source
-description, ISBN/author/publisher metadata and reusable image URLs without
-re-fetching every item on every periodic sync. Workspace ingestion keeps those
-source fields linked to the same master physical item.
+For active/reserved/hidden/draft listings, bridge 2.9.0 keeps a local detail
+cache for richer Vinted item metadata. When Vinted does not expose a trustworthy
+absolute posting timestamp, the bridge reads the visible `Uploaded` value from
+the **rendered** Vinted item page, for example `5 weeks ago`. A two-tab inactive
+worker pool is reused across the enrichment queue and the result is cached by
+Vinted item ID. Generic API date fields and `first_seen_at` are never used as a
+substitute for posting age.
 
-Bridge releases follow a visible-version invariant: the downloaded ZIP filename contains the manifest version (for example `reseller-dashboard-chrome-bridge-v2.8.0.zip`), the extension popup displays `Chrome Bridge vX.Y.Z`, and the dashboard displays the current bridge version next to the workspace identity. The manifest is authoritative for these user-visible values.
+Age parsing is isolated in `app/extension/vinted_age.js`; tab navigation and
+rendered-page orchestration stay in `background.js`; Vinted snapshot collection
+stays in `content.js`.
 
+Bridge releases follow a visible-version invariant: the downloaded ZIP filename
+contains the manifest version, the extension popup displays
+`Chrome Bridge vX.Y.Z`, and the dashboard displays the current bridge version.
+The manifest is authoritative for these user-visible values.
 
-### Personal legacy extension
-
-\`app/legacy_extension\` preserves the previous self-hosted extension,
-including the opt-in rendered market-research workflow used by the classic
-dashboard.
-
-The classic download remains:
-
-\`\`\`text
-/downloads/vinted-session-sync.zip
-\`\`\`
 
 ## Import / export
 

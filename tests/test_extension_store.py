@@ -183,22 +183,32 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "2.8.0"
+    assert manifest["version"] == "2.9.0"
 
 
 
-def test_content_script_reads_uploaded_age_from_rendered_item_page_and_caches_it():
+def test_content_script_uses_isolated_uploaded_age_parser_and_rendered_page_collector():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    age = (ROOT / "app" / "extension" / "vinted_age.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
+    manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest["content_scripts"][0]["js"][:2] == ["vinted_age.js", "content.js"]
     assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV3"' in content
     assert 'LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV2"' in content
-    assert "function relativeAgeFromRenderedDocument()" in content
+    assert "globalThis.VintedAge" in age
+    assert "function fromUploadedText(value)" in age
+    assert "function fromRenderedDocument(doc = document)" in age
+    assert "VintedAge.fromRenderedDocument(document)" in content
+    assert "VintedAge.advanceCached(cached)" in content
+    assert "function relativeAgeFromPageHtml" not in content
     assert 'type:"rendered-uploaded-ages"' in content
     assert 'type:"read-vinted-uploaded-age"' in background
     assert "async function renderedUploadedAges(items)" in background
     assert "await chrome.tabs.create({url:first.url,active:false})" in background
     assert "await chrome.tabs.update(tab.id,{url:target.href,active:false})" in background
     assert "await chrome.tabs.remove(tab.id)" in background
+    assert 'files:["vinted_age.js","content.js"]' in background
     assert '"vinted_page_uploaded"' in content
     assert "await enrichListingDates(listings);" in content
 
@@ -222,7 +232,8 @@ def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
 
 def test_content_script_does_not_trust_generic_api_dates_for_posting_age():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
-    assert "function relativeAgeSeconds(v)" in content
+    age = (ROOT / "app" / "extension" / "vinted_age.js").read_text(encoding="utf-8")
+    assert "function secondsFromRelative(value)" in age
     assert "relativeAgeFromRaw" not in content
     assert 'first(raw,"created_at_ts","created_timestamp_ts","uploaded_ts","upload_date_dte")' in content
     assert '"created_at","uploaded_at","posted_at"' not in content
@@ -232,11 +243,11 @@ def test_content_script_does_not_trust_generic_api_dates_for_posting_age():
 
 def test_bridge_artifact_filename_always_includes_version():
     target = Path("/tmp/reseller-chrome-bridge.zip")
-    assert build_extension.versioned_output_path(target, "2.8.0").name == (
-        "reseller-chrome-bridge-v2.8.0.zip"
+    assert build_extension.versioned_output_path(target, "2.9.0").name == (
+        "reseller-chrome-bridge-v2.9.0.zip"
     )
-    already = Path("/tmp/reseller-chrome-bridge-v2.8.0.zip")
-    assert build_extension.versioned_output_path(already, "2.8.0") == already
+    already = Path("/tmp/reseller-chrome-bridge-v2.9.0.zip")
+    assert build_extension.versioned_output_path(already, "2.9.0") == already
 
 
 def test_bridge_popup_always_shows_manifest_version():
@@ -257,13 +268,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v2.8.0.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v2.9.0.zip"'
     )
-    assert response.headers["x-bridge-version"] == "2.8.0"
+    assert response.headers["x-bridge-version"] == "2.9.0"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v2.8.0.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v2.9.0.zip")
     assert versioned.status_code == 200
-    assert "v2.8.0.zip" in versioned.headers["content-disposition"]
+    assert "v2.9.0.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404

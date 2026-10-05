@@ -105,7 +105,6 @@ def run(origin: str) -> dict[str, object]:
         "public_origin_configured": True,
         "database_backend": "postgresql",
         "cookie_secure": True,
-        "legacy_enabled": False,
     }
     for key, expected in expected_runtime.items():
         if runtime.get(key) != expected:

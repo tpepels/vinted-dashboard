@@ -21,10 +21,10 @@ if [[ "${RUN_MIGRATIONS:-true}" == "true" ]]; then
   echo "entrypoint: migrations up to date."
 fi
 
-if [[ "${RUN_LEGACY_BACKFILL:-true}" == "true" ]]; then
-  echo "entrypoint: running legacy data backfill (best-effort)..."
+if [[ "${RUN_LEGACY_BACKFILL:-false}" == "true" ]]; then
+  echo "entrypoint: running one-way pre-workspace data backfill (best-effort)..."
   if ! python -m app.legacy_migration; then
-    echo "entrypoint: legacy backfill failed or was skipped; continuing startup" >&2
+    echo "entrypoint: pre-workspace backfill failed or was skipped; continuing startup" >&2
   fi
 fi
 

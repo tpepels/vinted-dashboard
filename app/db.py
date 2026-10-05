@@ -1,10 +1,7 @@
-"""Database engine/session management for the workspace/inventory schema.
+"""Database engine/session management for the workspace data model.
 
-This is a separate, ORM-backed database from the legacy ``sqlite3`` files
-used by :mod:`app.intelligence` and :mod:`app.channels` (``VINTED_HISTORY_DB``).
-Keeping them separate lets Phase 1 add the new schema without touching the
-still-operational legacy code paths. ``app.legacy_migration`` copies data
-from the legacy database(s) into this one.
+The ORM database is the runtime source of truth. Pre-workspace SQLite files are
+supported only as read-only input to :mod:`app.legacy_migration`.
 
 ``DATABASE_URL`` controls which database/engine is used:
 

@@ -1,10 +1,9 @@
-"""Commercial/product-layer ORM models.
+"""Product-layer ORM models.
 
-These tables build on the workspace/inventory schema in :mod:`app.models`
-without changing the legacy personal-dashboard tables.  They cover hosted
-authentication, Chrome-extension pairing, reusable file mappings, import /
-export audit records, encrypted connector credentials and a deliberately
-small background-job queue.
+These tables extend the workspace/inventory schema in :mod:`app.models` with
+authentication, Chrome-bridge pairing, reusable file mappings, import/export
+audit records, encrypted connector credentials and a deliberately small
+background-job queue.
 """
 
 from __future__ import annotations

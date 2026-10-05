@@ -100,8 +100,9 @@ def _sale_title_candidates(
         ]
         return _without_other_consuming_sales(session, sale, candidates)
 
-    # A legacy sale may outlive the marketplace listing record. In that case
-    # only consider a non-active historical master item with the exact title.
+    # An imported or otherwise historical sale may outlive its marketplace
+    # listing record. In that case only consider a non-active historical
+    # master item with the exact title.
     # Never attach an old sale to a newer active copy merely because its title
     # happens to be the same.
     items = session.execute(
@@ -138,8 +139,8 @@ def resolve_sale_item(
     """Resolve a sale to stock using only exact identifiers.
 
     Existing explicit linkage wins. Otherwise an exact marketplace listing id
-    is used. As a backwards-compatible fallback for historical Vinted orders
-    that lacked an item id, an exact normalized title is accepted only when it
+    is used. For historical Vinted orders that lack an item id, an exact
+    normalized title is accepted only when it
     identifies exactly one listing in that workspace/channel.
     """
     if sale.inventory_item_id:

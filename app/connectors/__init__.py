@@ -1,10 +1,12 @@
-"""Connector architecture.
+"""Marketplace connector package.
 
-This package holds per-channel connector metadata (:mod:`app.connectors.base`)
-and the live dual-write layer (:mod:`app.connectors.workspace_sync`) that
-keeps the workspace/inventory ORM schema (``app.models``) continuously up to
-date as real Vinted/BIBLIO/eBay syncs run, rather than relying solely on the
-one-time legacy backfill (:mod:`app.legacy_migration`).
+`base` defines channel metadata, `hosted` contains remote marketplace
+adapters, `workspace_sync` is the strict persistence boundary into the shared
+workspace data model, and format-specific parsing lives in focused modules such
+as `biblio_format`.
+
+Pre-workspace migration is intentionally outside this package in
+:mod:`app.legacy_migration`.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Workspace-scoped product API.
 
-This router is the commercial/hosted surface.  Legacy personal-dashboard
-routes remain available separately for backwards compatibility.
+Inventory, sales, analytics, connector and account endpoints live here.
+Chrome bridge pairing/sync endpoints are owned by :mod:`app.bridge_api`.
 """
 
 from __future__ import annotations
@@ -24,12 +24,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake
-from app.channels import parse_biblio_inventory
+from app.bridge_package import extension_source_version
+from app.connectors.biblio_format import parse_biblio_inventory
 from app.auth import (
     RequestContext,
     clear_session_cookies,
     create_session,
-    extension_context,
     hash_password,
     rate_limiter,
     require_context,
@@ -51,6 +51,7 @@ from app.constants import (
 )
 from app.connectors.base import connector_catalog
 from app.connectors.hosted import (
+    biblio_configured,
     exchange_etsy_authorization_code,
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
@@ -87,7 +88,6 @@ from app.product_models import (
     ConnectorCredential,
     ExportJob,
     ExtensionCredential,
-    ExtensionPairing,
     ImportJob,
     MappingPreset,
     BackgroundJob,
@@ -98,13 +98,11 @@ from app.runtime_config import public_app_origin
 from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
 from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
-from pathlib import Path
 import json
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
     get_or_create_channel_account,
 )
-from app.workspace_ingest import maybe_record_legacy_snapshot, record_workspace_snapshot
 
 
 router = APIRouter()
@@ -122,15 +120,7 @@ def _etsy_oauth_redirect_uri() -> str | None:
 
 
 def _biblio_configured_for_workspace(workspace: models.Workspace) -> bool:
-    if has_workspace_connector_credentials(workspace.id, Channel.BIBLIO):
-        return True
-    bootstrap_slug = os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
-    if workspace.slug != bootstrap_slug:
-        return False
-    return bool(
-        os.getenv("BIBLIO_FTP_USERNAME", "").strip()
-        and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
-    )
+    return biblio_configured(workspace.id)
 
 
 def _etsy_oauth_authorized(values: dict[str, Any]) -> bool:
@@ -296,12 +286,6 @@ class MappingPresetRequest(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
-class PairingCompleteRequest(BaseModel):
-    code: str
-    extension_version: str | None = None
-    device_name: str = "Chrome"
-
-
 class ConnectorCredentialsRequest(BaseModel):
     values: dict[str, str]
 
@@ -309,16 +293,6 @@ class ConnectorCredentialsRequest(BaseModel):
 class SettingsRequest(BaseModel):
     name: str | None = None
     settings: dict[str, Any] | None = None
-
-
-class WorkspaceBrowserSyncPayload(BaseModel):
-    collected_at: float
-    current_user: dict[str, Any]
-    listings: list[dict[str, Any]]
-    notifications: list[dict[str, Any]]
-    orders: list[dict[str, Any]]
-    market_results: list[dict[str, Any]] = Field(default_factory=list)
-    extension_version: str | None = None
 
 
 class DeleteWorkspaceRequest(BaseModel):
@@ -2894,173 +2868,11 @@ def generic_connector_test(
 def biblio_workspace_test(
     context: RequestContext = Depends(require_write_context),
 ):
-    if has_workspace_connector_credentials(context.workspace.id, Channel.BIBLIO):
-        try:
-            return test_biblio_workspace(context.workspace.id)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if context.workspace.slug == os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal"):
-        from app.channels import test_biblio_ftp
-        try:
-            return test_biblio_ftp()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
-
-
-@router.post("/api/app/extension/pairings")
-def start_pairing(context: RequestContext = Depends(require_write_context)):
-    raw = "-".join((secrets.token_hex(2).upper(), secrets.token_hex(2).upper()))
-    with db.session_scope() as session:
-        session.add(
-            ExtensionPairing(
-                workspace_id=context.workspace.id,
-                user_id=context.user.id,
-                code_hash=token_hash(raw),
-                expires_at=utcnow() + timedelta(minutes=10),
-            )
-        )
-    return {"code": raw, "expires_in_seconds": 600}
-
-
-@router.get("/api/app/extension/devices")
-def extension_devices(context: RequestContext = Depends(require_context)):
-    with db.session_scope() as session:
-        rows = session.execute(
-            select(ExtensionCredential)
-            .where(ExtensionCredential.workspace_id == context.workspace.id)
-            .order_by(ExtensionCredential.created_at.desc())
-        ).scalars().all()
-    latest = extension_source_version()
-    return {
-        "latest_version": latest,
-        "download_url": f"/downloads/reseller-chrome-bridge-v{latest}.zip",
-        "devices": [
-            {
-                "id": str(row.id),
-                "name": row.name,
-                "extension_version": row.extension_version,
-                "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
-                "revoked": row.revoked_at is not None,
-                "created_at": row.created_at.isoformat(),
-            }
-            for row in rows
-        ]
-    }
-
-
-@router.delete("/api/app/extension/devices/{credential_id}")
-def revoke_extension(
-    credential_id: uuid.UUID,
-    context: RequestContext = Depends(require_write_context),
-):
-    with db.session_scope() as session:
-        row = session.get(ExtensionCredential, credential_id)
-        if row is None or row.workspace_id != context.workspace.id:
-            raise HTTPException(status_code=404, detail="Extension device not found")
-        row.revoked_at = utcnow()
-    return {"ok": True}
-
-
-@router.post("/api/extension/pair")
-def complete_pairing(payload: PairingCompleteRequest, request: Request):
-    ip = request.client.host if request.client else "unknown"
-    rate_limiter.check(f"extension-pair:{ip}", limit=20, window_seconds=900)
-    code = payload.code.strip().upper()
-    now = utcnow()
-    with db.session_scope() as session:
-        pairing = session.execute(
-            select(ExtensionPairing).where(
-                ExtensionPairing.code_hash == token_hash(code),
-                ExtensionPairing.claimed_at.is_(None),
-                ExtensionPairing.expires_at > now,
-            )
-        ).scalar_one_or_none()
-        if pairing is None:
-            raise HTTPException(status_code=400, detail="Pairing code is invalid or expired")
-        workspace = session.get(models.Workspace, pairing.workspace_id)
-        if workspace is None or not billing.workspace_can_write(workspace):
-            raise HTTPException(
-                status_code=402,
-                detail="Workspace is read-only until the subscription is active or trialing",
-            )
-        raw_token = secrets.token_urlsafe(42)
-        credential = ExtensionCredential(
-            workspace_id=pairing.workspace_id,
-            user_id=pairing.user_id,
-            name=(payload.device_name or "Chrome")[:200],
-            token_hash=token_hash(raw_token),
-            extension_version=payload.extension_version,
-            last_seen_at=now,
-        )
-        session.add(credential)
-        pairing.claimed_at = now
-        workspace = session.get(models.Workspace, pairing.workspace_id)
-        session.flush()
-        workspace_name = workspace.name if workspace else "Workspace"
-    return {
-        "ok": True,
-        "token": raw_token,
-        "workspace": workspace_name,
-        "app_name": APP_NAME,
-    }
-
-
-def extension_source_version() -> str:
-    manifest_path = Path(__file__).resolve().parent / "extension" / "manifest.json"
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        version = str(manifest.get("version") or "").strip()
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        version = ""
-    return version or "0.0.0"
+        return test_biblio_workspace(context.workspace.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-
-@router.get("/api/extension/status")
-def extension_status(context: RequestContext = Depends(extension_context)):
-    latest = extension_source_version()
-    return {
-        "ok": True,
-        "workspace": _serialize_workspace(context.workspace),
-        "app_name": APP_NAME,
-        "latest_version": latest,
-        "installed_version": context.extension.extension_version if context.extension else None,
-    }
-
-
-@router.post("/api/extension/browser-sync")
-def extension_browser_sync(
-    payload: WorkspaceBrowserSyncPayload,
-    context: RequestContext = Depends(extension_context),
-):
-    if not billing.workspace_can_write(context.workspace):
-        raise HTTPException(
-            status_code=402,
-            detail="Workspace is read-only until the subscription is active or trialing",
-        )
-    data = payload.model_dump()
-    version = payload.extension_version or (
-        context.extension.extension_version if context.extension else None
-    )
-    result = record_workspace_snapshot(context.workspace.id, data, extension_version=version)
-    maybe_record_legacy_snapshot(context.workspace.slug, data)
-    if context.extension is not None and version:
-        with db.session_scope() as session:
-            row = session.get(ExtensionCredential, context.extension.id)
-            if row is not None:
-                row.extension_version = version
-                row.last_seen_at = utcnow()
-    return {"ok": True, **result}
-
-
-@router.get("/api/extension/market-research/queue")
-def extension_market_queue(context: RequestContext = Depends(extension_context)):
-    # Store builds keep unattended scraping disabled.  The legacy development
-    # extension still has its old explicit endpoint for the personal setup.
-    enabled = os.getenv("EXTENSION_MARKET_RESEARCH_ENABLED", "false").lower() in {
-        "1", "true", "yes", "on"
-    }
-    return {"jobs": [], "enabled": enabled}
 
 
 @router.get("/api/app/settings")

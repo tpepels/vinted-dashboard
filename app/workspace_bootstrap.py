@@ -1,13 +1,9 @@
-"""Shared helpers for resolving the bootstrap workspace/owner/channel-account
-rows in the workspace/inventory ORM schema (``app.models``).
+"""Helpers for bootstrap workspace, owner and channel-account resolution.
 
-Both the one-time legacy data backfill (:mod:`app.legacy_migration`) and live
-connector syncs (:mod:`app.connectors`) need to resolve the *same* bootstrap
-workspace, owner and per-channel account rows - keeping that logic here
-(rather than duplicated, or imported from one into the other) avoids the two
-code paths ever disagreeing about which rows those are. This module is
-intentionally dependency-free of ``app.channels``/``app.legacy_migration``/
-``app.connectors`` so none of them create an import cycle by depending on it.
+The one-way migration path and current connector/product code must resolve the
+same bootstrap rows. Keeping that identity logic here avoids duplicate
+configuration and keeps this module independent of migration and connector
+implementations.
 """
 
 from __future__ import annotations
@@ -22,9 +18,9 @@ from sqlalchemy.orm import Session
 from app import models
 from app.constants import BillingStatus, Channel, ChannelAccountStatus, MembershipRole
 
-#: One-time bootstrap workspace created on first use (legacy backfill or
-#: first live sync, whichever happens first) and reused afterwards. A
-#: deployment with no multi-tenant needs can leave these at their defaults.
+#: Bootstrap workspace reused by single-user/self-hosted installations and
+#: by one-way migration imports. Multi-tenant deployments may use it only for
+#: initial setup.
 BOOTSTRAP_WORKSPACE_NAME = os.getenv("BOOTSTRAP_WORKSPACE_NAME", "Personal Workspace")
 BOOTSTRAP_WORKSPACE_SLUG = os.getenv("BOOTSTRAP_WORKSPACE_SLUG", "personal")
 BOOTSTRAP_OWNER_EMAIL = os.getenv("BOOTSTRAP_OWNER_EMAIL", "owner@example.com")

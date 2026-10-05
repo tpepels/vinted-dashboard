@@ -1,9 +1,8 @@
 """Workspace-native marketplace connector adapters.
 
-The legacy personal installation still has env-backed helpers in app.channels.
-This module is the hosted/multi-tenant equivalent: credentials are loaded from
-the encrypted ConnectorCredential row for one workspace and all resulting
-inventory is written directly to the workspace/master-inventory schema.
+All connector reads and writes use the workspace/master-inventory schema.
+Encrypted workspace credentials are preferred. The bootstrap personal workspace
+may additionally use server environment credentials as a self-hosted fallback.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ from app import db, models
 from app.constants import Channel, ChannelAccountStatus, ListingStatus, SyncRunStatus
 from app.crypto import decrypt_json
 from app.product_models import ConnectorCredential
-from app.workspace_bootstrap import get_or_create_channel_account
+from app.workspace_bootstrap import BOOTSTRAP_WORKSPACE_SLUG, get_or_create_channel_account
 from app.connectors.workspace_sync import (
     record_workspace_channel_orders,
     record_workspace_channel_snapshot,
@@ -61,6 +60,37 @@ def has_credentials(workspace_id: uuid.UUID, channel: str) -> bool:
                 ConnectorCredential.channel == channel,
             )
         ).scalar_one_or_none() is not None
+
+
+def _is_bootstrap_workspace(workspace_id: uuid.UUID) -> bool:
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        return bool(workspace and workspace.slug == BOOTSTRAP_WORKSPACE_SLUG)
+
+
+def biblio_configured(workspace_id: uuid.UUID) -> bool:
+    if has_credentials(workspace_id, Channel.BIBLIO):
+        return True
+    if not _is_bootstrap_workspace(workspace_id):
+        return False
+    return bool(
+        os.getenv("BIBLIO_FTP_USERNAME", "").strip()
+        and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
+    )
+
+
+def ebay_configured(workspace_id: uuid.UUID) -> bool:
+    if has_credentials(workspace_id, Channel.EBAY):
+        return True
+    if not _is_bootstrap_workspace(workspace_id):
+        return False
+    direct = os.getenv("EBAY_OAUTH_TOKEN", "").strip()
+    refreshable = (
+        os.getenv("EBAY_CLIENT_ID", "").strip()
+        and os.getenv("EBAY_CLIENT_SECRET", "").strip()
+        and os.getenv("EBAY_REFRESH_TOKEN", "").strip()
+    )
+    return bool(direct or refreshable)
 
 
 def _money(value: Any) -> int | None:
@@ -186,7 +216,7 @@ def _fetch_ebay_active(values: dict[str, str]) -> list[dict[str, Any]]:
 
 
 def sync_ebay_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
-    values = _credentials(workspace_id, Channel.EBAY)
+    values = _workspace_or_env_ebay_values(workspace_id)
     items = _fetch_ebay_active(values)
     synced_at = datetime.now(timezone.utc)
     record_workspace_channel_snapshot(
@@ -2639,7 +2669,7 @@ def _record_biblio_run(
 
 
 def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
-    values = _credentials(workspace_id, Channel.BIBLIO)
+    values = _workspace_or_env_biblio_values(workspace_id)
     host = values.get("host", "ftp.biblio.com").strip() or "ftp.biblio.com"
     username = values.get("username", "").strip()
     password = values.get("password", "").strip()
@@ -2753,6 +2783,8 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
 def _workspace_or_env_ebay_values(workspace_id: uuid.UUID) -> dict[str, str]:
     if has_credentials(workspace_id, Channel.EBAY):
         return _credentials(workspace_id, Channel.EBAY)
+    if not _is_bootstrap_workspace(workspace_id):
+        raise RuntimeError("eBay credentials are not configured for this workspace")
     values = {
         "oauth_token": os.getenv("EBAY_OAUTH_TOKEN", "").strip(),
         "client_id": os.getenv("EBAY_CLIENT_ID", "").strip(),
@@ -2771,6 +2803,8 @@ def _workspace_or_env_ebay_values(workspace_id: uuid.UUID) -> dict[str, str]:
 def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
     if has_credentials(workspace_id, Channel.BIBLIO):
         return _credentials(workspace_id, Channel.BIBLIO)
+    if not _is_bootstrap_workspace(workspace_id):
+        raise RuntimeError("BIBLIO credentials are not configured for this workspace")
     username = os.getenv("BIBLIO_FTP_USERNAME", "").strip()
     password = os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
     if not username or not password:

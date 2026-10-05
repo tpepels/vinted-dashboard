@@ -14,8 +14,8 @@ Upgrades a self-hosted installation safely:
   2. validate Compose and require web + worker services
   3. build the new images without starting them
   4. create a consistent SQLite backup with the new image
-  5. start web + worker (migrations/backfill run on web startup)
-  6. run migration/backfill/worker smoke checks
+  5. start web + worker (database migrations run on web startup)
+  6. run explicit legacy-backfill + worker smoke checks
 
 --live-connectors additionally tests BIBLIO FTP login and reads current eBay
 inventory. It does not upload to BIBLIO or modify eBay listings.

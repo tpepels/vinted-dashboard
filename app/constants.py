@@ -116,8 +116,7 @@ class BillingStatus:
 
 
 class OrderDirection:
-    """Matches the legacy Vinted order direction values ("sell"/"buy") so the
-    backfill does not need to translate between vocabularies."""
+    """Canonical order direction values used across marketplace adapters."""
 
     SELL = "sell"
     BUY = "buy"

@@ -1,9 +1,8 @@
-"""ORM models for the workspace/master-inventory schema (Phase 1).
+"""ORM models for the workspace/master-inventory data model.
 
-These models are additive: the legacy ``sqlite3`` tables in
-:mod:`app.intelligence` and :mod:`app.channels` keep working unchanged so the
-current UI stays operational. ``app.legacy_migration`` backfills this schema
-from the legacy database(s) under a bootstrap "personal" workspace.
+The workspace database is the runtime source of truth. Pre-workspace data can
+be imported additively by :mod:`app.legacy_migration` into a bootstrap
+personal workspace.
 
 Design notes:
 
@@ -14,8 +13,8 @@ Design notes:
   live in ``InventoryItem.attributes`` (JSON) rather than as dozens of
   nullable columns, per the product direction to keep the core schema
   category-neutral.
-- Money is stored as integer minor units (``*_cents``) to match the existing
-  convention used throughout the legacy code.
+- Money is stored as integer minor units (``*_cents``) throughout the
+  application.
 """
 
 from __future__ import annotations
@@ -91,8 +90,8 @@ class User(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
-    #: Nullable until Phase 4 wires real authentication; a bootstrap/dev user
-    #: created by the legacy backfill has no password yet.
+    #: Nullable so an imported bootstrap owner can exist before that person
+    #: claims the workspace by registering a real account.
     hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -249,9 +248,7 @@ class ListingSnapshot(Base):
 
 
 class ConnectorSyncRun(Base):
-    """A log entry for one connector sync/import/export execution. Unifies
-    the legacy ``sync_runs``, ``channel_sync_runs`` and ``biblio_ftp_runs``
-    tables behind a single, channel-neutral concept."""
+    """A channel-neutral log entry for one connector sync/import/export run."""
 
     __tablename__ = "connector_sync_runs"
     __table_args__ = (
@@ -326,8 +323,7 @@ class FavoriteEvent(Base):
 
     __tablename__ = "favorite_events"
 
-    #: Keeps the legacy natural key (the marketplace notification id) as the
-    #: primary key instead of introducing a surrogate UUID.
+    #: The marketplace notification id is the stable natural key.
     notification_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True

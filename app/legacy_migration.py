@@ -1,14 +1,12 @@
-"""Backfill the workspace/inventory ORM schema from the legacy ``sqlite3``
-database(s) used by :mod:`app.intelligence` and :mod:`app.channels`.
+"""Backfill the workspace/inventory ORM schema from pre-workspace SQLite data.
 
 This script is purely additive: it reads the legacy tables (``channel_items``,
 ``channel_sync_runs``, ``biblio_ftp_runs``, ``sync_runs``,
 ``listing_observations``, ``profile_observations``, ``favorite_events``,
-``orders_history``, ``market_research``) and copies their data into the new
-ORM-backed schema (``DATABASE_URL``) under a single bootstrap "personal"
-workspace. The legacy tables/files are never modified, so the existing UI
-keeps working unchanged against them while the new schema is populated
-alongside it.
+``orders_history``, ``market_research``) and copies their data into the
+ORM-backed workspace schema (``DATABASE_URL``) under a bootstrap "personal"
+workspace. Legacy files are treated as read-only migration input and are never
+part of the runtime application.
 
 Inventory matching is intentionally conservative: legacy ``channel_items``
 rows are grouped into a single :class:`app.models.InventoryItem` only when
@@ -46,7 +44,6 @@ from app.constants import (
     ListingStatus,
     SyncRunStatus,
 )
-from app.intelligence import _parse_time
 from app.cross_channel import auto_link_unlinked_sales
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
@@ -61,9 +58,8 @@ from app.workspace_bootstrap import (
 
 logger = logging.getLogger(__name__)
 
-#: Falls back to the same env var the legacy code already reads, so a
-#: deployment that never sets ``LEGACY_SQLITE_PATH`` explicitly still finds
-#: its existing data.
+#: ``VINTED_HISTORY_DB`` is accepted only as an upgrade-time alias so an
+#: older self-hosted installation can locate its existing migration source.
 DEFAULT_LEGACY_SQLITE_PATH = Path(
     os.getenv("LEGACY_SQLITE_PATH", os.getenv("VINTED_HISTORY_DB", "/app/data/vinted-history.sqlite3"))
 )
@@ -104,14 +100,28 @@ def _epoch_to_dt(value: Any) -> Optional[datetime]:
         return None
 
 
+def _parse_legacy_time(value: Any) -> float | None:
+    """Parse the timestamp shapes written by pre-workspace releases."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    raw = str(value).strip()
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+
 def _text_to_dt(value: Any) -> Optional[datetime]:
     """Legacy free-text timestamp (ISO string or numeric-as-string, as
     produced by ``app.vinted._timestamp``) -> aware UTC ``datetime``.
 
-    Reuses :func:`app.intelligence._parse_time`, the existing normalizer for
-    these exact values, instead of reimplementing its fallback handling.
     """
-    return _epoch_to_dt(_parse_time(value))
+    return _epoch_to_dt(_parse_legacy_time(value))
 
 
 def _file_signature(path: Path) -> str:

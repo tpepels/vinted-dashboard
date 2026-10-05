@@ -1,35 +1,22 @@
-"""Live dual-write: keeps the workspace/inventory ORM schema (``app.models``)
-continuously up to date as each real connector sync runs, so it is never
-solely dependent on the one-time legacy batch backfill
-(:mod:`app.legacy_migration`).
+"""Workspace-native connector persistence services.
 
-:func:`record_channel_snapshot` is called from
-:func:`app.channels.upsert_channel_snapshot` - the single chokepoint all
-three inbound connectors (Vinted browser-sync, BIBLIO file import, eBay
-``GetMyeBaySelling`` pull) already funnel through - and mirrors its
-``channel_items``/``channel_sync_runs`` writes into
-``InventoryItem``/``ChannelListing``/``ConnectorSyncRun``.
+This module is the strict write boundary from marketplace adapters into the
+shared workspace data model. Connector snapshots update InventoryItem,
+ChannelListing and ConnectorSyncRun rows; connector orders update the shared
+Sale ledger.
 
-:func:`record_biblio_ftp_run` is called from
-:func:`app.channels._record_biblio_ftp_run` - the outbound BIBLIO FTP
-test/sync bookkeeping hook - and mirrors its ``biblio_ftp_runs`` writes into
-``ConnectorSyncRun``.
+Runtime connector writes are workspace-scoped and failures propagate to the
+caller so job/connector health reflects real persistence failures. Legacy
+SQLite migration is handled separately by :mod:`app.legacy_migration`.
 
-Both entry points match the matching/field conventions of
-:mod:`app.legacy_migration` (synthesized ``CHANNEL-external_id`` SKUs for
-items with no real SKU, ``ftp_{action}`` run types, etc.) so a workspace
-populated by live syncs and one populated by the batch backfill end up with
-equivalent data. Unlike the batch backfill, live matching only merges
-items by exact SKU (never by ISBN) - see the module docstring note below.
-
-Both entry points are best-effort: any failure is logged and swallowed so a
-dual-write bug can never break the legacy sync path that remains the
-authoritative data store for this phase.
+Matching is conservative: live connector snapshots merge physical inventory by
+exact SKU. A listing without a SKU receives a stable synthesized
+`CHANNEL-external_id` SKU. Explicit reconciliation links are preserved across
+later syncs.
 """
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import Any, Optional
 
@@ -41,19 +28,13 @@ from app.constants import Channel, ItemCategory, ItemStatus, ListingStatus, Sync
 from app.stock_policy import sale_counts_as_sold
 from app.workspace_bootstrap import (
     clean_isbn,
-    get_or_create_bootstrap_workspace,
     get_or_create_channel_account,
     normalize_sku,
 )
 
-logger = logging.getLogger(__name__)
-
 
 def _effective_sku(channel: str, external_id: str, raw_sku: Any) -> str:
-    """The real SKU if the item has one, otherwise a synthesized
-    per-listing SKU - identical convention to the one
-    :mod:`app.legacy_migration` uses for ``channel_items`` rows with no SKU
-    and no ISBN, so both paths treat a no-SKU item the same way."""
+    """Return a real SKU or a stable per-listing synthesized SKU."""
     sku = normalize_sku(raw_sku)
     return sku if sku is not None else f"{channel.upper()}-{external_id}"
 
@@ -255,11 +236,7 @@ def item_has_remaining_stock_on_sale_channel(
     )
 
 def recompute_inventory_item(session: Session, item: models.InventoryItem) -> None:
-    """Re-derives an ``InventoryItem``'s aggregate quantity/status/category
-    from *all* of its current listings (not just the one just touched),
-    since items with a real SKU can be shared across channels. Mirrors
-    ``app.legacy_migration``'s ``_group_quantity``/``_group_status``/
-    ``_summarize_group`` semantics."""
+    """Re-derive aggregate item state from all current marketplace listings."""
     listings = (
         session.execute(
             select(models.ChannelListing)
@@ -336,9 +313,7 @@ def _deactivate_missing_listings(
     seen_external_ids: set[str],
     seen_at: datetime,
 ) -> None:
-    """Mirrors ``upsert_channel_snapshot``'s full-snapshot behavior: any
-    listing for this channel that was active but is absent from this sync
-    is now inactive (sold/removed/delisted elsewhere)."""
+    """Deactivate active channel listings omitted from a full snapshot."""
     query = select(models.ChannelListing).where(
         models.ChannelListing.workspace_id == workspace.id,
         models.ChannelListing.channel == channel,
@@ -380,10 +355,7 @@ def _upsert_connector_sync_run(
     detail: Optional[dict[str, Any]] = None,
     error: Optional[str] = None,
 ) -> None:
-    """Inserts a ``ConnectorSyncRun`` audit row, guarding against the table's
-    ``(workspace_id, channel, run_type, started_at)`` unique constraint so a
-    retried call with an identical timestamp is a safe no-op instead of
-    failing the whole dual-write transaction."""
+    """Insert one connector audit row, idempotently for an identical timestamp."""
     exists = session.execute(
         select(models.ConnectorSyncRun.id).where(
             models.ConnectorSyncRun.workspace_id == workspace.id,
@@ -413,51 +385,6 @@ def _upsert_connector_sync_run(
     account.last_synced_at = started_at
 
 
-def record_channel_snapshot(
-    channel: str,
-    items: list[dict[str, Any]],
-    *,
-    synced_at: datetime,
-    full_snapshot: bool,
-    active_count: int,
-    note: Optional[str] = None,
-) -> None:
-    """Best-effort dual-write for an inbound connector snapshot (Vinted
-    browser-sync, BIBLIO file import, or eBay pull) - call after the legacy
-    ``channel_items``/``channel_sync_runs`` write already succeeded, mirroring
-    the same data into the workspace/inventory ORM schema. Never raises."""
-    try:
-        with db.session_scope() as session:
-            workspace = get_or_create_bootstrap_workspace(session)
-            account, _created = get_or_create_channel_account(session, workspace, channel, {})
-
-            seen_external_ids: set[str] = set()
-            for item in items:
-                external_id = str(item.get("source_id") or item.get("id") or "").strip()
-                if not external_id:
-                    continue
-                seen_external_ids.add(external_id)
-                _apply_item(session, workspace, account, channel, external_id, item, seen_at=synced_at)
-
-            if full_snapshot:
-                _deactivate_missing_listings(session, workspace, channel, seen_external_ids, synced_at)
-
-            _upsert_connector_sync_run(
-                session,
-                workspace,
-                account,
-                channel=channel,
-                run_type="snapshot",
-                status=SyncRunStatus.SUCCESS,
-                started_at=synced_at,
-                item_count=len(seen_external_ids),
-                active_count=active_count,
-                detail={"note": note} if note else {},
-            )
-    except Exception:
-        logger.exception("workspace_sync: failed to record %s channel snapshot", channel)
-
-
 def record_workspace_channel_snapshot(
     workspace_id,
     channel: str,
@@ -467,11 +394,10 @@ def record_workspace_channel_snapshot(
     full_snapshot: bool,
     note: Optional[str] = None,
 ) -> dict[str, int]:
-    """Strict workspace-scoped snapshot writer for hosted connector adapters.
+    """Persist one connector inventory snapshot for a workspace.
 
-    Unlike :func:`record_channel_snapshot`, this does not fall back to the
-    bootstrap workspace and does not swallow errors. Hosted jobs need failures
-    to propagate so the background queue and connector status can report them.
+    Failures intentionally propagate so the job queue and connector status can
+    report the real sync outcome.
     """
     with db.session_scope() as session:
         workspace = session.get(models.Workspace, workspace_id)
@@ -650,41 +576,3 @@ def record_workspace_channel_orders(
         for item in touched.values():
             recompute_inventory_item(session, item)
     return {"orders": written, "linked": linked}
-
-
-def record_biblio_ftp_run(
-    action: str,
-    status: str,
-    *,
-    attempted_at: datetime,
-    inventory_filename: Optional[str] = None,
-    deletes_filename: Optional[str] = None,
-    active_count: int = 0,
-    delete_count: int = 0,
-    detail: Optional[str] = None,
-) -> None:
-    """Best-effort dual-write for a BIBLIO FTP test/sync run - call after the
-    legacy ``biblio_ftp_runs`` write already succeeded. Never raises."""
-    try:
-        run_status = SyncRunStatus.SUCCESS if status == "success" else SyncRunStatus.ERROR
-        with db.session_scope() as session:
-            workspace = get_or_create_bootstrap_workspace(session)
-            account, _created = get_or_create_channel_account(session, workspace, Channel.BIBLIO, {})
-            _upsert_connector_sync_run(
-                session,
-                workspace,
-                account,
-                channel=Channel.BIBLIO,
-                run_type=f"ftp_{action}",
-                status=run_status,
-                started_at=attempted_at,
-                active_count=active_count,
-                delete_count=delete_count,
-                detail={
-                    "inventory_filename": inventory_filename,
-                    "deletes_filename": deletes_filename,
-                },
-                error=detail if run_status == SyncRunStatus.ERROR else None,
-            )
-    except Exception:
-        logger.exception("workspace_sync: failed to record BIBLIO ftp_%s run", action)
