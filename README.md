@@ -199,23 +199,28 @@ inventory or a channel-specific view with marketplace listing IDs, prices,
 statuses and URLs. Workspace account-data export is also available under
 Settings.
 
-For books, Vinted can act as the source listing for BIBLIO. From Inventory or
-a Vinted row in Listings, **List on BIBLIO** runs a compact preflight using
-Vinted title/description/ISBN/author/price first, then master data, then ISBN
-lookup for missing bibliographic facts. Eligibility is source-aware: older
-Vinted books that are still classified as `general` are still offered the
-BIBLIO action when their linked Vinted metadata contains ISBN, author or a
-book category, and later syncs normalize those master items to `book`.
-Complete books require no re-entry: publishing creates or updates a BIBLIO
-ChannelListing linked to the same physical InventoryItem and queues the
-existing BIBLIO FTP sync. If a required field is still missing, only that field
-is requested inline.
+Vinted can act as the source listing for cross-listing. Inventory and linked
+Vinted rows expose a single **Cross-list** action. Its destination panel always
+shows BIBLIO, eBay, Etsy, WooCommerce, Shopify, BigCommerce, Squarespace, Wix
+and Depop rather than hiding destinations behind eligibility checks. Each row
+reports **Ready**, **Needs connection**, **Needs fields**, **Already listed** or
+**Not writable yet**, with the relevant repair action.
 
-BIBLIO actions are not silently hidden for Vinted rows. Unlinked Vinted
-listings show **Link for BIBLIO** and jump directly to reconciliation; sparse
-general-category books show **Review BIBLIO** so category/author/ISBN can be
-fixed. Zero stock exposes an **Edit stock** repair action. A conflicting
-BIBLIO Book ID can be replaced inline with a server-validated unique ID.
+The shared cross-list candidate takes title, description, price and photos from
+Vinted when available, while SKU and physical stock remain authoritative on the
+master InventoryItem. WooCommerce, Shopify and Wix can create remote products
+directly from this preflight, including Vinted source images. The created
+ChannelListing is then linked back to the same physical InventoryItem so later
+sales and stock reconciliation operate on one copy of the item.
+
+BIBLIO keeps its book-specific preflight inside the same destination panel. It
+uses Vinted title/description/ISBN/author/price first, then master data, then
+ISBN lookup for missing bibliographic facts. Older Vinted books still classified
+as `general` qualify from linked ISBN/author/book-category evidence. Zero stock
+exposes **Edit stock**, and a conflicting BIBLIO Book ID can be replaced inline
+with a server-validated unique ID. Unlinked Vinted listings show **Link to
+inventory** and jump directly to reconciliation before any destination can be
+published.
 
 When the Vinted source carries photos, up to five are copied automatically to
 BIBLIO during the FTP sync. The server downloads only trusted Vinted HTTPS
@@ -245,7 +250,10 @@ Current scope:
   FTP connection testing, inventory/delete synchronization, and one-click
   cross-listing from a linked Vinted/master book.
 - **eBay** - workspace-scoped active seller inventory synchronization through
-  the official Trading API.
+  the official Trading API; direct-create remains visible in Cross-list but is
+  blocked until category and seller-policy preflight is implemented.
+- **WooCommerce / Shopify / Wix** - inventory and order import plus direct
+  product creation from the shared Cross-list panel.
 
 BIBLIO and eBay can be configured per workspace in **Connections**. The
 existing environment-variable configuration remains supported as a fallback
@@ -417,12 +425,13 @@ BigCommerce, Squarespace, Wix and Depop in addition to Vinted, eBay and BIBLIO.
   lines. Save the app keystring, shared secret and Shop ID, then use the
   dashboard OAuth/PKCE flow for `listings_r` and `transactions_r`; manual
   access/refresh tokens remain available as a fallback.
-- WooCommerce uses the WC REST API v3 over HTTPS. Generate a read-only REST API
-  key under WooCommerce > Settings > Advanced > REST API and configure the
-  store URL, consumer key and consumer secret.
-- Shopify uses the GraphQL Admin API and imports product variants plus order
-  lines. Configure the `.myshopify.com` store domain and an Admin API access
-  token with read-only product/inventory/order scopes.
+- WooCommerce uses the WC REST API v3 over HTTPS. Cross-listing requires a
+  read/write REST API key; Vinted title, description, price, stock, SKU and up
+  to five image URLs are carried into the created simple product.
+- Shopify uses the GraphQL Admin API. Cross-listing uses `productSet` with
+  `write_products`, the store's active inventory location, Vinted image files,
+  SKU, price and physical quantity. Import/order access still uses the
+  corresponding read scopes.
 - BigCommerce uses the REST Management API through
   `api.bigcommerce.com/stores/{store_hash}`. Configure a store hash and OAuth
   access token with read-only Products and Orders permissions.
@@ -430,16 +439,18 @@ BigCommerce, Squarespace, Wix and Depop in addition to Vinted, eBay and BIBLIO.
   an API key with read-only Products, Inventory and Orders permissions, or an
   OAuth access token. Variant IDs remain the remote listing identity while SKU
   drives deterministic master-inventory matching.
-- Wix uses Catalog V3 read-only variants, Inventory V3 and eCommerce Orders.
-  Configure a Wix account API key restricted to the target site plus that
-  site's UUID. Product ID + variant ID is the remote listing identity because
-  Wix does not guarantee variant IDs are globally unique.
+- Wix uses Catalog V3, Inventory V3 and eCommerce Orders. Cross-listing calls
+  Create Product With Inventory with Product/Inventory write permissions and
+  carries Vinted images as external product media. Product ID + variant ID is
+  the remote listing identity.
 - Depop uses the private Selling API for approved partners. Direct seller
   integrations use a static per-shop API key; production and staging use
   separate keys and fixed API origins. The connector imports all products and
   orders read-only, uses Depop product ID as the stable listing identity, and
   never stores buyer address details. OAuth is intentionally not exposed until
   a Depop OAuth client has actually been issued.
-- All seven integrations are read-only toward the remote store in this release.
-  Synced listings and order lines feed the shared inventory, reconciliation,
-  sales and profitability workflows.
+- BigCommerce and Squarespace remain import-only until their create adapters
+  are implemented. Etsy remains import/order-only until the product collects
+  its required taxonomy/maker/creation-era fields and requests `listings_w`.
+  Depop remains read-only under the current approved-partner contract. These
+  destinations still appear in Cross-list with the blocker shown explicitly.

@@ -49,10 +49,11 @@ from app.constants import (
     MembershipRole,
     KNOWN_ITEM_CATEGORIES,
 )
-from app.connectors.base import connector_catalog
+from app.connectors.base import Capability, connector_catalog
 from app.connectors.hosted import (
     biblio_configured,
     exchange_etsy_authorization_code,
+    ebay_configured,
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
     test_biblio_workspace,
@@ -65,6 +66,7 @@ from app.connectors.hosted import (
     test_woocommerce_workspace,
 )
 from app.connectors.workspace_sync import recompute_inventory_item
+from app import cross_listing
 from app.cross_channel import (
     acknowledge_manual_action,
     reconcile_sale_state,
@@ -220,6 +222,13 @@ class BiblioPublishRequest(BaseModel):
     author: str | None = None
     description: str | None = None
     isbn: str | None = None
+    price_cents: int | None = Field(default=None, ge=0)
+
+
+class CrossListPublishRequest(BaseModel):
+    source_listing_id: uuid.UUID | None = None
+    title: str | None = None
+    description: str | None = None
     price_cents: int | None = Field(default=None, ge=0)
 
 
@@ -1197,6 +1206,264 @@ def update_inventory_item(
         ).scalars().all()
         result = _serialize_item(item, listings)
     return {"ok": True, "item": result}
+
+
+def _cross_list_destination_status(
+    session,
+    workspace: models.Workspace,
+    item_id: uuid.UUID,
+    candidate: dict[str, Any],
+    info: dict[str, Any],
+) -> dict[str, Any]:
+    channel = str(info["channel"])
+    existing = cross_listing.existing_channel_listing(
+        session,
+        workspace.id,
+        item_id,
+        channel,
+    )
+
+    if channel == Channel.BIBLIO:
+        configured = _biblio_configured_for_workspace(workspace)
+        try:
+            biblio = publishing.build_biblio_candidate(
+                session,
+                workspace.id,
+                item_id,
+                source_listing_id=(
+                    uuid.UUID(candidate["source"]["listing_id"])
+                    if candidate.get("source", {}).get("listing_id")
+                    else None
+                ),
+                enrich_isbn=False,
+            )
+        except ValueError as exc:
+            return {
+                "channel": channel,
+                "display_name": info["display_name"],
+                "status": "review",
+                "reason": str(exc),
+                "action": "review",
+                "configured": configured,
+                "writable": True,
+            }
+        if existing is not None:
+            status, reason, action = (
+                "listed",
+                "Already listed on BIBLIO. Open the book preflight to update it from the current Vinted/master data.",
+                "biblio",
+            )
+        elif not configured:
+            status, reason, action = (
+                "connect",
+                "Connect BIBLIO before publishing.",
+                "connect",
+            )
+        elif biblio.get("missing"):
+            status, reason, action = (
+                "needs_fields",
+                "Missing: " + ", ".join(str(value) for value in biblio["missing"]),
+                "biblio",
+            )
+        else:
+            status, reason, action = (
+                "ready",
+                "Ready to publish from the linked Vinted/master data.",
+                "biblio",
+            )
+        return {
+            "channel": channel,
+            "display_name": info["display_name"],
+            "status": status,
+            "reason": reason,
+            "action": action,
+            "configured": configured,
+            "writable": True,
+        }
+
+    if existing is not None:
+        return {
+            "channel": channel,
+            "display_name": info["display_name"],
+            "status": "listed",
+            "reason": "This physical item is already linked to a listing on this destination.",
+            "action": "open" if existing.url else None,
+            "listing_id": str(existing.id),
+            "url": existing.url,
+            "configured": True,
+            "writable": Capability.CREATE_LISTING in set(info.get("capabilities") or []),
+        }
+
+    configured = (
+        ebay_configured(workspace.id)
+        if channel == Channel.EBAY
+        else has_workspace_connector_credentials(workspace.id, channel)
+    )
+    writable = Capability.CREATE_LISTING in set(info.get("capabilities") or [])
+    if writable:
+        if not configured:
+            return {
+                "channel": channel,
+                "display_name": info["display_name"],
+                "status": "connect",
+                "reason": f"Connect {info['display_name']} with write-capable credentials first.",
+                "action": "connect",
+                "configured": False,
+                "writable": True,
+            }
+        if candidate.get("missing"):
+            return {
+                "channel": channel,
+                "display_name": info["display_name"],
+                "status": "needs_fields",
+                "reason": "Missing: " + ", ".join(str(value) for value in candidate["missing"]),
+                "action": "edit",
+                "configured": True,
+                "writable": True,
+            }
+        return {
+            "channel": channel,
+            "display_name": info["display_name"],
+            "status": "ready",
+            "reason": "Ready to create a new listing from the Vinted/master data.",
+            "action": "publish",
+            "configured": True,
+            "writable": True,
+        }
+
+    if channel == Channel.EBAY:
+        reason = (
+            "Direct create needs an eBay category and seller listing policies "
+            "(shipping, returns and payment) before it can be published safely."
+        )
+    elif channel == Channel.ETSY:
+        reason = (
+            "Direct create needs Etsy listings_w permission plus taxonomy, "
+            "maker and creation-era fields."
+        )
+    elif channel == Channel.DEPOP:
+        reason = (
+            "This connector currently has approved-partner read access only; "
+            "a supported product-create contract is not configured."
+        )
+    else:
+        reason = (
+            "This connector currently imports catalog data but its product-create "
+            "adapter has not been implemented yet."
+        )
+    return {
+        "channel": channel,
+        "display_name": info["display_name"],
+        "status": "not_writable",
+        "reason": reason,
+        "action": None,
+        "configured": configured,
+        "writable": False,
+    }
+
+
+@router.get("/api/app/inventory/{item_id}/cross-list")
+def cross_list_preview(
+    item_id: uuid.UUID,
+    source_listing_id: uuid.UUID | None = None,
+    context: RequestContext = Depends(require_context),
+):
+    try:
+        with db.session_scope() as session:
+            candidate = cross_listing.build_candidate(
+                session,
+                context.workspace.id,
+                item_id,
+                source_listing_id=source_listing_id,
+            )
+            destination_order = {
+                Channel.BIBLIO: 0,
+                Channel.WOOCOMMERCE: 1,
+                Channel.SHOPIFY: 2,
+                Channel.WIX: 3,
+                Channel.EBAY: 4,
+                Channel.ETSY: 5,
+                Channel.BIGCOMMERCE: 6,
+                Channel.SQUARESPACE: 7,
+                Channel.DEPOP: 8,
+            }
+            destination_infos = [
+                info
+                for info in connector_catalog()
+                if info["channel"] not in {
+                    Channel.VINTED,
+                    Channel.CSV,
+                    Channel.EXCEL,
+                }
+            ]
+            destination_infos.sort(
+                key=lambda info: destination_order.get(info["channel"], 99)
+            )
+            destinations = [
+                _cross_list_destination_status(
+                    session,
+                    context.workspace,
+                    item_id,
+                    candidate,
+                    info,
+                )
+                for info in destination_infos
+            ]
+    except ValueError as exc:
+        detail = str(exc)
+        raise HTTPException(
+            status_code=404 if detail == "Inventory item not found" else 400,
+            detail=detail,
+        ) from exc
+    return {
+        **candidate,
+        "destinations": destinations,
+    }
+
+
+@router.post("/api/app/inventory/{item_id}/cross-list/{channel}")
+def cross_list_publish(
+    item_id: uuid.UUID,
+    channel: str,
+    payload: CrossListPublishRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    channel = channel.strip().lower()
+    if channel == Channel.BIBLIO:
+        raise HTTPException(
+            status_code=400,
+            detail="Use the BIBLIO book preflight for BIBLIO publishing.",
+        )
+    if channel not in cross_listing.DIRECT_CREATE_CHANNELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{channel} direct publishing is not implemented yet.",
+        )
+    if not has_workspace_connector_credentials(context.workspace.id, channel):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Connect {channel} with write-capable credentials before publishing.",
+        )
+    try:
+        with db.session_scope() as session:
+            candidate = cross_listing.build_candidate(
+                session,
+                context.workspace.id,
+                item_id,
+                source_listing_id=payload.source_listing_id,
+            )
+        overrides = payload.model_dump(exclude_none=True)
+        overrides.pop("source_listing_id", None)
+        if overrides:
+            candidate = cross_listing.apply_overrides(candidate, overrides)
+        return cross_listing.publish(
+            context.workspace.id,
+            item_id,
+            channel,
+            candidate,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/api/app/inventory/{item_id}/publish/biblio")

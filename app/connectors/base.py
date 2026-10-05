@@ -110,6 +110,7 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         group="store",
         description="WooCommerce products, variations and orders through the WC REST API v3.",
         capabilities=frozenset({
+            Capability.CREATE_LISTING,
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
             Capability.FETCH_ORDERS,
@@ -121,6 +122,7 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         group="store",
         description="Shopify product variants and orders through the GraphQL Admin API.",
         capabilities=frozenset({
+            Capability.CREATE_LISTING,
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
             Capability.FETCH_ORDERS,
@@ -154,6 +156,7 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         group="store",
         description="Wix Stores variants, inventory and orders through the current Wix REST APIs.",
         capabilities=frozenset({
+            Capability.CREATE_LISTING,
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
             Capability.FETCH_ORDERS,

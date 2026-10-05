@@ -615,6 +615,82 @@ def _woo_get(
     return response.json()
 
 
+def _woo_post(
+    values: dict[str, str],
+    path: str,
+    *,
+    body: dict[str, Any],
+) -> Any:
+    response = requests.post(
+        _woocommerce_base(values) + "/wp-json/wc/v3/" + path.lstrip("/"),
+        headers={
+            **_woocommerce_headers(values),
+            "Content-Type": "application/json",
+        },
+        json=body,
+        timeout=45,
+    )
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            detail = str((response.json() or {}).get("message") or "")
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            f"WooCommerce create product failed ({response.status_code})"
+            + (f": {detail}" if detail else "")
+        )
+    return response.json()
+
+
+def create_woocommerce_workspace_listing(
+    workspace_id: uuid.UUID,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.WOOCOMMERCE)
+    fields = dict(candidate.get("fields") or {})
+    image_urls = list((candidate.get("source") or {}).get("image_urls") or [])[:5]
+    body: dict[str, Any] = {
+        "name": str(fields.get("title") or "").strip(),
+        "type": "simple",
+        "status": "publish",
+        "sku": str(fields.get("sku") or "").strip(),
+        "regular_price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+        "description": str(fields.get("description") or ""),
+        "manage_stock": True,
+        "stock_quantity": max(0, int(fields.get("quantity") or 0)),
+        "stock_status": "instock" if int(fields.get("quantity") or 0) > 0 else "outofstock",
+    }
+    if image_urls:
+        body["images"] = [{"src": str(url)} for url in image_urls]
+    raw = _woo_post(values, "products", body=body)
+    product_id = raw.get("id")
+    if product_id in (None, ""):
+        raise RuntimeError("WooCommerce created a product without returning an ID")
+    return {
+        "source_id": str(product_id),
+        "sku": raw.get("sku") or fields.get("sku"),
+        "title": raw.get("name") or fields.get("title"),
+        "status": ListingStatus.ACTIVE,
+        "quantity": _woo_quantity(raw),
+        "price_cents": _money(raw.get("price") or raw.get("regular_price"))
+        or int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": raw.get("permalink"),
+        "listed_at": (
+            _remote_datetime(raw.get("date_created_gmt") or raw.get("date_created")).isoformat()
+            if _remote_datetime(raw.get("date_created_gmt") or raw.get("date_created"))
+            else None
+        ),
+        "description": raw.get("description") or fields.get("description"),
+        "image_url": (
+            (raw.get("images") or [{}])[0].get("src")
+            if raw.get("images")
+            else (image_urls[0] if image_urls else None)
+        ),
+    }
+
+
 def _woo_quantity(raw: dict[str, Any]) -> int:
     quantity = _int(raw.get("stock_quantity"))
     if quantity is not None:
@@ -909,6 +985,141 @@ def _shopify_graphql(
         raise RuntimeError(f"Shopify Admin API error: {detail}")
     data = payload.get("data")
     return data if isinstance(data, dict) else {}
+
+
+SHOPIFY_CROSS_LIST_MUTATION = """
+mutation ResellerCrossList($input: ProductSetInput!) {
+  productSet(input: $input, synchronous: true) {
+    product {
+      id
+      title
+      handle
+      status
+      onlineStoreUrl
+      variants(first: 1) {
+        nodes { id sku price inventoryQuantity }
+      }
+    }
+    userErrors { field message }
+  }
+}
+"""
+
+SHOPIFY_PRIMARY_LOCATION_QUERY = """
+query ResellerPrimaryLocation {
+  locations(first: 1, includeInactive: false) {
+    nodes { id name }
+  }
+}
+"""
+
+
+def create_shopify_workspace_listing(
+    workspace_id: uuid.UUID,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.SHOPIFY)
+    fields = dict(candidate.get("fields") or {})
+    source = dict(candidate.get("source") or {})
+    image_urls = list(source.get("image_urls") or [])[:5]
+    location_data = _shopify_graphql(values, SHOPIFY_PRIMARY_LOCATION_QUERY)
+    locations = ((location_data.get("locations") or {}).get("nodes") or [])
+    location_id = (
+        str(locations[0].get("id") or "").strip()
+        if locations and isinstance(locations[0], dict)
+        else ""
+    )
+    if not location_id:
+        raise RuntimeError("Shopify has no active inventory location available for cross-listing")
+
+    default_option = "Default"
+    variant_input: dict[str, Any] = {
+        "optionValues": [{"optionName": "Title", "name": default_option}],
+        "sku": str(fields.get("sku") or "").strip(),
+        "price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+        "inventoryQuantities": [
+            {
+                "locationId": location_id,
+                "name": "available",
+                "quantity": max(0, int(fields.get("quantity") or 0)),
+            }
+        ],
+    }
+    if image_urls:
+        variant_input["file"] = {
+            "originalSource": str(image_urls[0]),
+            "contentType": "IMAGE",
+            "alt": str(fields.get("title") or "")[:255],
+        }
+
+    product_input: dict[str, Any] = {
+        "title": str(fields.get("title") or "").strip(),
+        "descriptionHtml": str(fields.get("description") or ""),
+        "status": "ACTIVE",
+        "productOptions": [
+            {
+                "name": "Title",
+                "position": 1,
+                "values": [{"name": default_option}],
+            }
+        ],
+        "variants": [variant_input],
+    }
+    if image_urls:
+        product_input["files"] = [
+            {
+                "originalSource": str(url),
+                "contentType": "IMAGE",
+                "alt": str(fields.get("title") or "")[:255],
+            }
+            for url in image_urls
+        ]
+
+    data = _shopify_graphql(
+        values,
+        SHOPIFY_CROSS_LIST_MUTATION,
+        variables={"input": product_input},
+    )
+    result = data.get("productSet") or {}
+    errors = result.get("userErrors") or []
+    if errors:
+        detail = "; ".join(
+            str(row.get("message") or "Shopify validation error")
+            for row in errors
+            if isinstance(row, dict)
+        )
+        raise RuntimeError(f"Shopify product creation failed: {detail}")
+    product = result.get("product") or {}
+    product_id = str(product.get("id") or "").strip()
+    variants = ((product.get("variants") or {}).get("nodes") or [])
+    variant = variants[0] if variants and isinstance(variants[0], dict) else {}
+    variant_id = str(variant.get("id") or "").strip()
+    if not product_id or not variant_id:
+        raise RuntimeError("Shopify created a product without returning its default variant")
+    return {
+        "source_id": variant_id,
+        "sku": variant.get("sku") or fields.get("sku"),
+        "title": product.get("title") or fields.get("title"),
+        "status": (
+            ListingStatus.ACTIVE
+            if str(product.get("status") or "").upper() == "ACTIVE"
+            else ListingStatus.INACTIVE
+        ),
+        "quantity": max(
+            0,
+            _int(variant.get("inventoryQuantity"), int(fields.get("quantity") or 0)) or 0,
+        ),
+        "price_cents": _money(variant.get("price")) or int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": product.get("onlineStoreUrl"),
+        "description": fields.get("description"),
+        "image_url": image_urls[0] if image_urls else None,
+        "attributes": {
+            "product_id": product_id,
+            "handle": product.get("handle"),
+            "inventory_location_id": location_id,
+        },
+    }
 
 
 SHOPIFY_VARIANTS_QUERY = """
@@ -1848,6 +2059,72 @@ def _wix_post(
         raise RuntimeError(f"Wix API request failed ({response.status_code})")
     payload = response.json() or {}
     return payload if isinstance(payload, dict) else {}
+
+
+def create_wix_workspace_listing(
+    workspace_id: uuid.UUID,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    values = _credentials(workspace_id, Channel.WIX)
+    fields = dict(candidate.get("fields") or {})
+    source = dict(candidate.get("source") or {})
+    image_urls = list(source.get("image_urls") or [])[:5]
+    quantity = max(0, int(fields.get("quantity") or 0))
+    amount = f"{int(fields.get('price_cents') or 0) / 100:.2f}"
+    product: dict[str, Any] = {
+        "name": str(fields.get("title") or "").strip(),
+        "visible": True,
+        "productType": "PHYSICAL",
+        "physicalProperties": {},
+        "variantsInfo": {
+                "variants": [
+                    {
+                        "sku": str(fields.get("sku") or "").strip(),
+                        "choices": [],
+                        "price": {"actualPrice": {"amount": amount}},
+                        "inventoryItem": {"quantity": quantity},
+                        "physicalProperties": {},
+                    }
+            ]
+        },
+    }
+    if image_urls:
+        product["media"] = {
+            "itemsInfo": {
+                "items": [{"url": str(url)} for url in image_urls]
+            }
+        }
+    body = {"product": product, "returnEntity": True}
+    payload = _wix_post(values, "stores/v3/products-with-inventory", body=body)
+    product = payload.get("product") or {}
+    product_id = str(product.get("id") or "").strip()
+    variants = ((product.get("variantsInfo") or {}).get("variants") or [])
+    variant = variants[0] if variants and isinstance(variants[0], dict) else {}
+    variant_id = str(variant.get("id") or "").strip()
+    if not product_id:
+        raise RuntimeError("Wix created a product without returning an ID")
+    source_id = f"{product_id}:{variant_id}" if variant_id else product_id
+    return {
+        "source_id": source_id,
+        "sku": variant.get("sku") or fields.get("sku"),
+        "title": product.get("name") or fields.get("title"),
+        "status": ListingStatus.ACTIVE if quantity > 0 else ListingStatus.INACTIVE,
+        "quantity": quantity,
+        "price_cents": int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": None,
+        "listed_at": (
+            _remote_datetime(product.get("createdDate")).isoformat()
+            if _remote_datetime(product.get("createdDate"))
+            else None
+        ),
+        "description": fields.get("description"),
+        "image_url": image_urls[0] if image_urls else None,
+        "attributes": {
+            "product_id": product_id,
+            "variant_id": variant_id or None,
+        },
+    }
 
 
 def _wix_next_cursor(payload: dict[str, Any]) -> str | None:
