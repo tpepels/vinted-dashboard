@@ -142,7 +142,7 @@ stable route is:
 The downloaded artifact itself is always versioned, for example:
 
 ```text
-reseller-dashboard-chrome-bridge-v2.9.0.zip
+reseller-dashboard-chrome-bridge-v3.0.0.zip
 ```
 
 Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
@@ -152,7 +152,7 @@ The bridge supports the principal European Vinted web origins. On its first
 sync it uses an already-open signed-in Vinted tab and remembers that origin for
 later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 2.9.0 keeps a local detail
+For active/reserved/hidden/draft listings, bridge 3.0.0 keeps a local detail
 cache for richer Vinted item metadata. When Vinted does not expose a trustworthy
 absolute posting timestamp, the bridge reads the visible `Uploaded` value from
 the **rendered** Vinted item page, for example `5 weeks ago`. A two-tab inactive
