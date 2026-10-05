@@ -194,10 +194,14 @@ Settings.
 For books, Vinted can act as the source listing for BIBLIO. From Inventory or
 a Vinted row in Listings, **List on BIBLIO** runs a compact preflight using
 Vinted title/description/ISBN/author/price first, then master data, then ISBN
-lookup for missing bibliographic facts. Complete books require no re-entry:
-publishing creates or updates a BIBLIO ChannelListing linked to the same
-physical InventoryItem and queues the existing BIBLIO FTP sync. If a required
-field is still missing, only that field is requested inline.
+lookup for missing bibliographic facts. Eligibility is source-aware: older
+Vinted books that are still classified as `general` are still offered the
+BIBLIO action when their linked Vinted metadata contains ISBN, author or a
+book category, and later syncs normalize those master items to `book`.
+Complete books require no re-entry: publishing creates or updates a BIBLIO
+ChannelListing linked to the same physical InventoryItem and queues the
+existing BIBLIO FTP sync. If a required field is still missing, only that field
+is requested inline.
 
 
 The product Analytics page reads Vinted listing snapshots directly from the
