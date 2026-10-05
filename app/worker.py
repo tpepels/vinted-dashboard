@@ -32,21 +32,16 @@ def handle(job: dict) -> None:
                         "Workspace is read-only until the subscription is active or trialing"
                     )
     if job_type == "biblio_sync":
-        if workspace_id is not None:
-            from app.connectors.hosted import sync_biblio_workspace
-            sync_biblio_workspace(workspace_id)
-            return
-        from app.channels import sync_biblio_ftp
-        sync_biblio_ftp()
+        if workspace_id is None:
+            raise RuntimeError("biblio_sync requires a workspace")
+        from app.connectors.hosted import sync_biblio_workspace
+        sync_biblio_workspace(workspace_id)
         return
     if job_type == "ebay_sync":
-        if workspace_id is not None:
-            from app.connectors.hosted import has_credentials, sync_ebay_workspace
-            if has_credentials(workspace_id, "ebay"):
-                sync_ebay_workspace(workspace_id)
-                return
-        from app.channels import sync_ebay_inventory
-        sync_ebay_inventory()
+        if workspace_id is None:
+            raise RuntimeError("ebay_sync requires a workspace")
+        from app.connectors.hosted import sync_ebay_workspace
+        sync_ebay_workspace(workspace_id)
         return
     if job_type == "etsy_sync":
         if workspace_id is None:
