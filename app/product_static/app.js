@@ -2441,6 +2441,10 @@ function listingDisplayDate(row) {
 function listingAgeSeconds(row) {
   const exact = timeValue(listingDisplayDate(row));
   if (exact > 0) return Math.max(0, Math.floor((Date.now() - exact) / 1000));
+  if (
+    row?.channel === "vinted"
+    && !String(row?.listed_age_source || "").startsWith("vinted_page")
+  ) return null;
   const relative = Number(row?.listed_age_seconds);
   return Number.isFinite(relative) && relative >= 0 ? relative : null;
 }
