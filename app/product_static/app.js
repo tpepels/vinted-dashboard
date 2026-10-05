@@ -49,7 +49,7 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Optional book connector. Import your current BIBLIO inventory once, then use FTP for updates and deletes.",
+    help: "Book connector. Inventory and Vinted source photos are sent by FTP. Vinted photos are converted to JPG and named from the BIBLIO Book ID automatically.",
     fields: [
       ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
@@ -1058,7 +1058,7 @@ $("#biblio-publish-submit").onclick = async () => {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    flash("BIBLIO listing queued for FTP publication.");
+    flash("BIBLIO listing and available Vinted photos queued for FTP publication.");
     $("#biblio-publish-panel").classList.add("hidden");
     state.biblioPublish = null;
     await inventory();
