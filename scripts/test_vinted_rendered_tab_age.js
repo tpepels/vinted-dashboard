@@ -26,7 +26,7 @@ const chrome = {
     getManifest() {
       return {
         content_scripts: [{ matches: ["https://www.vinted.pt/*"] }],
-        version: "2.8.0",
+        version: "2.9.0",
       };
     },
     onInstalled: { addListener() {} },
