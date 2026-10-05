@@ -203,7 +203,7 @@ def test_content_script_uses_persistent_rendered_uploaded_age_sweep():
     assert "VintedAge.advanceCached(cached)" in content
     assert "function relativeAgeFromPageHtml" not in content
     assert "age_scan_items:ageScanItems" in content
-    assert 'type:"read-vinted-uploaded-age"' in content
+    assert 'message?.type==="read-vinted-uploaded-age"' in content
     assert "async function renderedUploadedAges(items,workerCount=4)" in background
     assert 'AGE_SWEEP_QUEUE_KEY="vintedAgeSweepQueueV1"' in background
     assert 'api("/api/extension/listing-ages"' in background
