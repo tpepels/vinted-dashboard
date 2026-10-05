@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake
+from app.bridge_package import extension_source_version
 from app.channels import parse_biblio_inventory
 from app.auth import (
     RequestContext,
@@ -98,13 +99,12 @@ from app.runtime_config import public_app_origin
 from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
 from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
-from pathlib import Path
 import json
 from app.workspace_bootstrap import (
     BOOTSTRAP_OWNER_EMAIL,
     get_or_create_channel_account,
 )
-from app.workspace_ingest import maybe_record_legacy_snapshot, record_workspace_snapshot
+from app.workspace_ingest import record_workspace_snapshot
 
 
 router = APIRouter()
@@ -3006,15 +3006,6 @@ def complete_pairing(payload: PairingCompleteRequest, request: Request):
     }
 
 
-def extension_source_version() -> str:
-    manifest_path = Path(__file__).resolve().parent / "extension" / "manifest.json"
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        version = str(manifest.get("version") or "").strip()
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        version = ""
-    return version or "0.0.0"
-
 
 @router.get("/api/extension/status")
 def extension_status(context: RequestContext = Depends(extension_context)):
@@ -3043,7 +3034,6 @@ def extension_browser_sync(
         context.extension.extension_version if context.extension else None
     )
     result = record_workspace_snapshot(context.workspace.id, data, extension_version=version)
-    maybe_record_legacy_snapshot(context.workspace.slug, data)
     if context.extension is not None and version:
         with db.session_scope() as session:
             row = session.get(ExtensionCredential, context.extension.id)
@@ -3052,15 +3042,6 @@ def extension_browser_sync(
                 row.last_seen_at = utcnow()
     return {"ok": True, **result}
 
-
-@router.get("/api/extension/market-research/queue")
-def extension_market_queue(context: RequestContext = Depends(extension_context)):
-    # Store builds keep unattended scraping disabled.  The legacy development
-    # extension still has its old explicit endpoint for the personal setup.
-    enabled = os.getenv("EXTENSION_MARKET_RESEARCH_ENABLED", "false").lower() in {
-        "1", "true", "yes", "on"
-    }
-    return {"jobs": [], "enabled": enabled}
 
 
 @router.get("/api/app/settings")
