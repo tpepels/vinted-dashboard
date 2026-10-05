@@ -4,86 +4,6 @@ function nameOf(v){if(v&&typeof v==="object")v=first(v,"login","username","name"
 function money(v){let currency="EUR";if(v&&typeof v==="object"){currency=String(first(v,"currency_code","currency","code")||"EUR");v=first(v,"amount","value","price")}if(v==null||v==="")return [null,currency];const n=Number.parseFloat(String(v).replace("€","").replaceAll(" ","").replace(",","."));return [Number.isFinite(n)?Math.round(n*100):null,currency]}
 function stamp(v){if(v==null||v==="")return null;const t=String(v).trim();if(/^\d+(?:\.\d+)?$/.test(t)){let n=Number(t);if(n<1e11)n*=1000;const d=new Date(n);if(!Number.isNaN(d.getTime()))return d.toISOString()}return String(v)}
 function exactStamp(v){const normalized=stamp(v);if(!normalized)return null;const d=new Date(normalized);return Number.isNaN(d.getTime())?null:d.toISOString()}
-function relativeAgeSeconds(v){
-  if(v==null||v==="")return null;
-  let text=String(v).trim().toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g,"");
-  if(!text)return null;
-  if(/^(today|hoje|hoy|oggi|heute|vandaag|aujourd.?hui)$/.test(text))return 0;
-  if(/^(yesterday|ontem|ayer|ieri|gestern|gisteren|hier)$/.test(text))return 86400;
-  text=text.replace(/\b(a|an|one|um|uma|un|una|uno|une|ein|eine|einem|einer|een)\b/g,"1");
-  const match=text.match(/(\d+(?:[.,]\d+)?)\s*([a-z]+)/);
-  if(!match)return null;
-  const amount=Number(match[1].replace(",","."));
-  if(!Number.isFinite(amount)||amount<0)return null;
-  const unit=match[2];
-  const groups=[
-    [60,["minute","minutes","minuto","minutos","minuti","minuten"]],
-    [3600,["hour","hours","hora","horas","heure","heures","ora","ore","stunde","stunden","uur","uren"]],
-    [86400,["day","days","dia","dias","jour","jours","giorno","giorni","tag","tage","tagen","dag","dagen"]],
-    [604800,["week","weeks","semana","semanas","semaine","semaines","settimana","settimane","woche","wochen","weken"]],
-    [2630016,["month","months","mes","meses","mois","mese","mesi","monat","monate","monaten","maand","maanden"]],
-    [31557600,["year","years","ano","anos","an","ans","anno","anni","jahr","jahre","jahren","jaar","jaren"]],
-  ];
-  for(const[seconds,names]of groups)if(names.includes(unit))return Math.round(amount*seconds);
-  return null;
-}
-function normalizedPageText(v){return String(v||"").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim()}
-const UPLOADED_LABELS=["uploaded","carregado","publicado","subido","televerse","mis en ligne","caricato","hochgeladen","geupload","dodano"];
-const RELATIVE_UNITS="minute|minutes|minuto|minutos|minuti|minuten|hour|hours|hora|horas|heure|heures|ora|ore|stunde|stunden|uur|uren|day|days|dia|dias|jour|jours|giorno|giorni|tag|tage|tagen|dag|dagen|week|weeks|semana|semanas|semaine|semaines|settimana|settimane|woche|wochen|weken|month|months|mes|meses|mois|mese|mesi|monat|monate|monaten|maand|maanden|year|years|ano|anos|an|ans|anno|anni|jahr|jahre|jahren|jaar|jaren";
-function relativePhrase(v){
-  const text=normalizedPageText(v);
-  if(!text)return null;
-  for(const single of["today","hoje","hoy","oggi","heute","vandaag","aujourd'hui","yesterday","ontem","ayer","ieri","gestern","gisteren","hier"]){
-    if(text.startsWith(single)||text.includes(" "+single+" "))return single;
-  }
-  const match=text.match(new RegExp("(?:\\b(?:a|an|one|um|uma|un|una|uno|une|ein|eine|einem|einer|een|\\d+(?:[.,]\\d+)?)\\s+(?:"+RELATIVE_UNITS+")\\b(?:\\s+(?:ago|atras|atrás))?)","i"));
-  return match?match[0]:null;
-}
-function relativeAgeAfterUploaded(v){
-  const text=normalizedPageText(v);
-  if(!text)return null;
-  for(const label of UPLOADED_LABELS){
-    let at=text.indexOf(label);
-    while(at>=0){
-      const tail=text.slice(at+label.length,at+label.length+220);
-      const phrase=relativePhrase(tail);
-      const seconds=relativeAgeSeconds(phrase);
-      if(seconds!=null)return{seconds,text:phrase};
-      at=text.indexOf(label,at+label.length);
-    }
-  }
-  return null;
-}
-function relativeAgeFromPageHtml(html){
-  if(!html)return null;
-  try{
-    const doc=new DOMParser().parseFromString(String(html),"text/html");
-    const elements=[...doc.querySelectorAll("body *")];
-    for(const element of elements){
-      const own=normalizedPageText(element.textContent);
-      if(!UPLOADED_LABELS.some(label=>own===label||own.startsWith(label+" ")))continue;
-      for(const candidate of[element,element.nextElementSibling,element.parentElement,element.parentElement?.nextElementSibling]){
-        const found=relativeAgeAfterUploaded(candidate?.textContent);
-        if(found)return found;
-      }
-    }
-    const bodyFound=relativeAgeAfterUploaded(doc.body?.textContent);
-    if(bodyFound)return bodyFound;
-  }catch{}
-  return relativeAgeAfterUploaded(String(html).replace(/<[^>]+>/g," "));
-}
-function relativeAgeFromRenderedDocument(){
-  const text=document.body?.innerText||document.body?.textContent||"";
-  return relativeAgeAfterUploaded(text);
-}
-function cachedRelativeAge(cached){
-  if(!cached||cached.listed_age_seconds==null)return null;
-  const base=Number(cached.listed_age_seconds);
-  if(!Number.isFinite(base)||base<0)return null;
-  const observed=Number(cached.age_observed_at||0);
-  const elapsed=observed>0?Math.max(0,Date.now()/1000-observed):0;
-  return Math.round(base+elapsed);
-}
 function metaText(v){if(v==null||v==="")return null;if(Array.isArray(v)){const values=v.map(metaText).filter(Boolean);return values.length?values.join(", "):null}if(typeof v==="object")v=first(v,"title","name","label","display_value","value","text");return v==null||v===""?null:String(v).trim()||null}
 function metaKey(v){return String(v||"").toLowerCase().replace(/[^a-z0-9]+/g,"")}
 function attributeValue(raw,...names){const wanted=new Set(names.map(metaKey));for(const [key,value] of Object.entries(raw||{})){if(wanted.has(metaKey(key))){const text=metaText(value);if(text)return text}}for(const group of[first(raw,"attributes","item_attributes","details","item_details"),first(raw,"item","product")]){if(!group)continue;if(Array.isArray(group)){for(const entry of group){if(!entry||typeof entry!=="object")continue;const key=first(entry,"code","key","name","title","label","type");if(!wanted.has(metaKey(key)))continue;const text=metaText(first(entry,"value","value_name","display_value","selected_value","title","name","label"));if(text)return text}}else if(typeof group==="object"){for(const [key,value] of Object.entries(group)){if(wanted.has(metaKey(key))){const text=metaText(value);if(text)return text}}}}return null}
@@ -106,7 +26,7 @@ async function renderedUploadedAges(rows){
   for(const row of rows){
     const currentId=location.pathname.match(/\/items\/(\d+)/)?.[1]||null;
     if(currentId&&String(currentId)===String(row.id)){
-      const direct=relativeAgeFromRenderedDocument();
+      const direct=VintedAge.fromRenderedDocument(document);
       if(direct){ages[String(row.id)]=direct;continue}
     }
     const url=new URL(row.vinted_url||`/items/${row.id}`,location.origin);
@@ -148,7 +68,7 @@ async function enrichListingDates(listings){
     row.listed_at=null;row.listed_at_source=null;
 
     const cached=ageCache[row.id];
-    const cachedAge=cachedRelativeAge(cached);
+    const cachedAge=VintedAge.advanceCached(cached);
     if(cachedAge!=null){
       row.listed_age_seconds=cachedAge;
       row.listed_age_source="vinted_page_cache";
@@ -284,7 +204,7 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
   if(message?.type==="read-vinted-uploaded-age"){
     const currentId=location.pathname.match(/\/items\/(\d+)/)?.[1]||null;
     const age=currentId&&String(currentId)===String(message.item_id)
-      ? relativeAgeFromRenderedDocument()
+      ? VintedAge.fromRenderedDocument(document)
       : null;
     sendResponse({ok:true,age});
   }
