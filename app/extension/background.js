@@ -6,6 +6,7 @@ const AGE_SWEEP_QUEUE_KEY="vintedAgeSweepQueueV1";
 const AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
 const AGE_BATCH_SIZE=16;
 const AGE_SWEEP_WINDOW_MS=90000;
+const CONTENT_PROTOCOL=3;
 let syncInFlight=null;
 let ageSweepInFlight=null;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -16,6 +17,21 @@ async function api(path,options={}){const headers=Object.assign({},await authHea
 async function waitForTab(tabId,timeout=20000){const start=Date.now();while(Date.now()-start<timeout){const tab=await chrome.tabs.get(tabId);if(tab.status==="complete")return tab;await sleep(300)}throw new Error("Vinted tab did not finish loading.")}
 async function message(tabId,payload){try{return await chrome.tabs.sendMessage(tabId,payload)}catch(error){if(!String(error?.message||error).includes("Receiving end does not exist"))throw error;await chrome.scripting.executeScript({target:{tabId},files:["vinted_age.js","content.js"]});await sleep(250);return await chrome.tabs.sendMessage(tabId,payload)}}
 async function vintedTab(){const tabs=await chrome.tabs.query({url:VINTED_PATTERNS});if(tabs.length)return{tab:tabs[0],temporary:false};const data=await stored();if(!data.vintedOrigin)throw new Error("Open your signed-in Vinted website once, then press Sync now.");const tab=await chrome.tabs.create({url:data.vintedOrigin+"/",active:false});await waitForTab(tab.id);return{tab,temporary:true}}
+async function ensureCurrentContentScript(tab){
+  let protocol=null;
+  try{
+    const result=await chrome.tabs.sendMessage(tab.id,{type:"bridge-content-protocol"});
+    protocol=Number(result?.protocol);
+  }catch{}
+  if(protocol===CONTENT_PROTOCOL)return await chrome.tabs.get(tab.id);
+  await chrome.tabs.reload(tab.id);
+  const reloaded=await waitForTab(tab.id,30000);
+  const result=await message(tab.id,{type:"bridge-content-protocol"});
+  if(Number(result?.protocol)!==CONTENT_PROTOCOL){
+    throw new Error("Vinted tab did not load the current bridge content script.");
+  }
+  return reloaded;
+}
 async function readRenderedAgeFromTab(tab,item){
   const target=new URL(String(item.url||""));
   if(!target.hostname.startsWith("www.vinted."))return null;
@@ -172,7 +188,8 @@ async function runSync(reason="manual"){
     try{
       const found=await vintedTab();
       temporary=found.temporary?found.tab.id:null;
-      const tab=await waitForTab(found.tab.id);
+      let tab=await waitForTab(found.tab.id);
+      tab=await ensureCurrentContentScript(tab);
       const tabUrl=new URL(String(tab.url||""));
       if(!tabUrl.hostname.startsWith("www.vinted."))throw new Error("Open and sign in to Vinted first.");
       await chrome.storage.local.set({vintedOrigin:tabUrl.origin});
