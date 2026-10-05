@@ -302,3 +302,42 @@ def test_biblio_publish_posts_source_listing_and_inline_repairs():
     assert 'const payload = { source_listing_id: current.sourceListingId || null };' in APP_JS
     assert 'payload.price_cents = Math.round(Number(value) * 100);' in APP_JS
     assert 'BIBLIO listing queued for FTP publication.' in APP_JS
+
+
+
+def test_vinted_age_is_first_class_and_uses_exact_days():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="listing-stat-youngest"' in html
+    assert 'id="listing-stat-oldest"' in html
+    assert 'id="listing-stat-age-known"' in html
+    assert "Youngest Vinted" in html
+    assert "Oldest Vinted" in html
+    assert '<option value="newest">Youngest posting first</option>' in html
+    assert '<option value="oldest">Oldest posting first</option>' in html
+    assert "function ageDays(value)" in APP_JS
+    assert 'return days + " day" + (days === 1 ? "" : "s");' in APP_JS
+
+
+def test_vinted_youngest_and_oldest_ignore_unknown_dates():
+    assert 'const vinted = rows.filter((row) => row.channel === "vinted");' in APP_JS
+    assert ".filter((entry) => entry.timestamp > 0)" in APP_JS
+    assert "const unknownVinted = vinted.length - datedVinted.length;" in APP_JS
+    assert '" unknown - never substituted with first seen"' in APP_JS
+    assert '"All use actual Vinted timestamps"' in APP_JS
+
+
+def test_vinted_age_cards_drive_real_listed_date_sorting():
+    assert '$("#listing-stat-youngest").onclick = () => {' in APP_JS
+    assert '$("#listing-channel").value = "vinted";' in APP_JS
+    assert '$("#listing-sort").value = "newest";' in APP_JS
+    assert '$("#listing-stat-oldest").onclick = () => {' in APP_JS
+    assert '$("#listing-sort").value = "oldest";' in APP_JS
+    assert 'const ad = timeValue(listingDisplayDate(a));' in APP_JS
+    assert 'const bd = timeValue(listingDisplayDate(b));' in APP_JS
+
+
+def test_vinted_age_columns_remain_visible_when_dates_are_unknown():
+    assert 'const showDate = filtered.some((row) => row.channel === "vinted")' in APP_JS
+    assert 'row.listed_at || null' in APP_JS
