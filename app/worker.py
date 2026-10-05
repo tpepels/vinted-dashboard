@@ -16,85 +16,125 @@ POLL_SECONDS = max(1, int(os.getenv("WORKER_POLL_SECONDS", "5")))
 HEARTBEAT_SECONDS = max(10, int(os.getenv("WORKER_HEARTBEAT_SECONDS", "30")))
 
 
+def _require_workspace(job_type: str, workspace_id: uuid.UUID | None) -> uuid.UUID:
+    if workspace_id is None:
+        raise RuntimeError(f"{job_type} requires a workspace")
+    return workspace_id
+
+
+def _check_workspace_write_access(workspace_id: uuid.UUID | None, job_type: str) -> None:
+    if workspace_id is None or job_type == "noop":
+        return
+    from app import billing, db, models
+
+    if not billing.BILLING_ENABLED:
+        return
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        if workspace is None:
+            raise RuntimeError("Workspace no longer exists")
+        if not billing.workspace_can_write(workspace):
+            raise RuntimeError(
+                "Workspace is read-only until the subscription is active or trialing"
+            )
+
+
+def _sync_biblio(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_biblio_workspace
+
+    sync_biblio_workspace(_require_workspace("biblio_sync", workspace_id))
+
+
+def _sync_ebay(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_ebay_workspace
+
+    sync_ebay_workspace(_require_workspace("ebay_sync", workspace_id))
+
+
+def _sync_etsy(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_etsy_workspace
+
+    sync_etsy_workspace(_require_workspace("etsy_sync", workspace_id))
+
+
+def _sync_woocommerce(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_woocommerce_workspace
+
+    sync_woocommerce_workspace(_require_workspace("woocommerce_sync", workspace_id))
+
+
+def _sync_shopify(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_shopify_workspace
+
+    sync_shopify_workspace(_require_workspace("shopify_sync", workspace_id))
+
+
+def _sync_bigcommerce(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_bigcommerce_workspace
+
+    sync_bigcommerce_workspace(_require_workspace("bigcommerce_sync", workspace_id))
+
+
+def _sync_squarespace(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_squarespace_workspace
+
+    sync_squarespace_workspace(_require_workspace("squarespace_sync", workspace_id))
+
+
+def _sync_wix(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_wix_workspace
+
+    sync_wix_workspace(_require_workspace("wix_sync", workspace_id))
+
+
+def _sync_depop(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+    from app.connectors.hosted import sync_depop_workspace
+
+    sync_depop_workspace(_require_workspace("depop_sync", workspace_id))
+
+
+def _cross_channel_close(payload: dict, workspace_id: uuid.UUID | None) -> None:
+    _require_workspace("cross_channel_close", workspace_id)
+    action_id = payload.get("action_id")
+    if not action_id:
+        raise RuntimeError("cross_channel_close job is missing action_id")
+    from app.cross_channel import execute_action
+
+    execute_action(uuid.UUID(str(action_id)))
+
+
+def _noop(_payload: dict, _workspace_id: uuid.UUID | None) -> None:
+    return
+
+
+_JOB_HANDLERS = {
+    "biblio_sync": _sync_biblio,
+    "ebay_sync": _sync_ebay,
+    "etsy_sync": _sync_etsy,
+    "woocommerce_sync": _sync_woocommerce,
+    "shopify_sync": _sync_shopify,
+    "bigcommerce_sync": _sync_bigcommerce,
+    "squarespace_sync": _sync_squarespace,
+    "wix_sync": _sync_wix,
+    "depop_sync": _sync_depop,
+    "cross_channel_close": _cross_channel_close,
+    "noop": _noop,
+}
+
+
 def handle(job: dict) -> None:
-    job_type = job["job_type"]
-    payload = job.get("payload") or {}
-    workspace_id = uuid.UUID(job["workspace_id"]) if job.get("workspace_id") else None
-    if workspace_id is not None and job_type != "noop":
-        from app import billing, db, models
-        if billing.BILLING_ENABLED:
-            with db.session_scope() as session:
-                workspace = session.get(models.Workspace, workspace_id)
-                if workspace is None:
-                    raise RuntimeError("Workspace no longer exists")
-                if not billing.workspace_can_write(workspace):
-                    raise RuntimeError(
-                        "Workspace is read-only until the subscription is active or trialing"
-                    )
-    if job_type == "biblio_sync":
-        if workspace_id is None:
-            raise RuntimeError("biblio_sync requires a workspace")
-        from app.connectors.hosted import sync_biblio_workspace
-        sync_biblio_workspace(workspace_id)
-        return
-    if job_type == "ebay_sync":
-        if workspace_id is None:
-            raise RuntimeError("ebay_sync requires a workspace")
-        from app.connectors.hosted import sync_ebay_workspace
-        sync_ebay_workspace(workspace_id)
-        return
-    if job_type == "etsy_sync":
-        if workspace_id is None:
-            raise RuntimeError("etsy_sync requires a workspace")
-        from app.connectors.hosted import sync_etsy_workspace
-        sync_etsy_workspace(workspace_id)
-        return
-    if job_type == "woocommerce_sync":
-        if workspace_id is None:
-            raise RuntimeError("woocommerce_sync requires a workspace")
-        from app.connectors.hosted import sync_woocommerce_workspace
-        sync_woocommerce_workspace(workspace_id)
-        return
-    if job_type == "shopify_sync":
-        if workspace_id is None:
-            raise RuntimeError("shopify_sync requires a workspace")
-        from app.connectors.hosted import sync_shopify_workspace
-        sync_shopify_workspace(workspace_id)
-        return
-    if job_type == "bigcommerce_sync":
-        if workspace_id is None:
-            raise RuntimeError("bigcommerce_sync requires a workspace")
-        from app.connectors.hosted import sync_bigcommerce_workspace
-        sync_bigcommerce_workspace(workspace_id)
-        return
-    if job_type == "squarespace_sync":
-        if workspace_id is None:
-            raise RuntimeError("squarespace_sync requires a workspace")
-        from app.connectors.hosted import sync_squarespace_workspace
-        sync_squarespace_workspace(workspace_id)
-        return
-    if job_type == "wix_sync":
-        if workspace_id is None:
-            raise RuntimeError("wix_sync requires a workspace")
-        from app.connectors.hosted import sync_wix_workspace
-        sync_wix_workspace(workspace_id)
-        return
-    if job_type == "depop_sync":
-        if workspace_id is None:
-            raise RuntimeError("depop_sync requires a workspace")
-        from app.connectors.hosted import sync_depop_workspace
-        sync_depop_workspace(workspace_id)
-        return
-    if job_type == "cross_channel_close":
-        action_id = payload.get("action_id")
-        if not action_id:
-            raise RuntimeError("cross_channel_close job is missing action_id")
-        from app.cross_channel import execute_action
-        execute_action(uuid.UUID(str(action_id)))
-        return
-    if job_type == "noop":
-        return
-    raise RuntimeError(f"Unknown background job type: {job_type}")
+    job_type = str(job.get("job_type") or "")
+    handler = _JOB_HANDLERS.get(job_type)
+    if handler is None:
+        raise RuntimeError(f"Unknown background job type: {job_type}")
+
+    workspace_id = (
+        uuid.UUID(str(job["workspace_id"]))
+        if job.get("workspace_id")
+        else None
+    )
+    _check_workspace_write_access(workspace_id, job_type)
+    handler(job.get("payload") or {}, workspace_id)
 
 
 def run_forever() -> None:
