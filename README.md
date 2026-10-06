@@ -142,7 +142,7 @@ stable route is:
 The downloaded artifact itself is always versioned, for example:
 
 ```text
-reseller-dashboard-chrome-bridge-v3.1.0.zip
+reseller-dashboard-chrome-bridge-v3.2.0.zip
 ```
 
 Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
@@ -152,7 +152,7 @@ The bridge supports the principal European Vinted web origins. On its first
 sync it uses an already-open signed-in Vinted tab and remembers that origin for
 later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 3.1.0 keeps a local detail
+For active/reserved/hidden/draft listings, bridge 3.2.0 keeps a local detail
 cache for richer Vinted item metadata. When Vinted does not expose a trustworthy
 absolute posting timestamp, the bridge reads the visible `Uploaded` value from
 the **rendered** Vinted item page, for example `5 weeks ago`. A manual sync
@@ -166,11 +166,11 @@ age-sweep alarm or endless open/close cycle.
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
 `first_seen_at`, and old `Today` fallbacks are never treated as posting age.
-Bridge 3.1.0 also performs a content-script protocol handshake and reloads an
+Bridge 3.2.0 also performs a content-script protocol handshake and reloads an
 already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
-cache constants or registering a second message listener. Bridge 3.1.0 bumps
+cache constants or registering a second message listener. Bridge 3.2.0 bumps
 that protocol so tabs still running the 3.0.1 script are forcibly reloaded once.
 
 
