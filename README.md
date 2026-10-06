@@ -142,7 +142,7 @@ stable route is:
 The downloaded artifact itself is always versioned, for example:
 
 ```text
-reseller-dashboard-chrome-bridge-v3.0.0.zip
+reseller-dashboard-chrome-bridge-v3.0.1.zip
 ```
 
 Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
@@ -152,7 +152,7 @@ The bridge supports the principal European Vinted web origins. On its first
 sync it uses an already-open signed-in Vinted tab and remembers that origin for
 later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 3.0.0 keeps a local detail
+For active/reserved/hidden/draft listings, bridge 3.0.1 keeps a local detail
 cache for richer Vinted item metadata. When Vinted does not expose a trustworthy
 absolute posting timestamp, the bridge reads the visible `Uploaded` value from
 the **rendered** Vinted item page, for example `5 weeks ago`. Posting-age
@@ -165,7 +165,7 @@ service-worker restarts. Failed item pages are retried in later sweep windows.
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
 `first_seen_at`, and old `Today` fallbacks are never treated as posting age.
-Bridge 3.0.0 also performs a content-script protocol handshake and reloads an
+Bridge 3.0.1 also performs a content-script protocol handshake and reloads an
 already-open Vinted tab once when it is still running code from an older bridge.
 
 Age parsing is isolated in `app/extension/vinted_age.js`; tab navigation and
