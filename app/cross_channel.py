@@ -458,11 +458,24 @@ def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
     with db.session_scope() as session:
         action = _get_action(session, action_id)
         listing = session.get(models.ChannelListing, action.channel_listing_id)
+        completed_at = utcnow()
         if listing is not None:
             listing.status = terminal_status
             listing.quantity = 0
+            if channel == Channel.BIBLIO and detail.get("inventory_signature"):
+                # Commit the SOLD state and the exact remote delete signature
+                # together. If the process dies before this transaction, the
+                # close action can safely retry; it cannot leave an ACTIVE
+                # local row carrying a SOLD remote signature that would be
+                # re-added by the next incremental sync.
+                extra = dict(listing.extra or {})
+                extra["inventory_sync_signature"] = str(detail["inventory_signature"])
+                extra["inventory_synced_at"] = completed_at.isoformat()
+                extra["publish_state"] = "ftp_uploaded"
+                extra["publish_completed_at"] = completed_at.isoformat()
+                listing.extra = extra
         action.status = "success"
-        action.completed_at = utcnow()
+        action.completed_at = completed_at
         action.last_error = None
         action.detail = {**dict(action.detail or {}), **dict(detail or {})}
     return {"ok": True, **dict(detail or {})}
