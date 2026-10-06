@@ -29,6 +29,17 @@ _HEADER_ALIASES = {
     "description": {"description", "desc", "book description"},
     "status": {"status"},
     "quantity": {"quantity", "qty"},
+    "publisher": {"publisher", "publishing house", "publishing_house"},
+    "edition": {"edition", "edition statement", "edition_statement"},
+    "condition": {"condition", "book condition", "book_condition"},
+    "binding": {"binding", "format", "book format", "book_format"},
+    "language": {"language", "lang"},
+    "pages": {"pages", "page count", "page_count", "number of pages"},
+    "publish_date": {
+        "publication date", "publication_date", "publish date", "publish_date",
+        "date published", "published",
+    },
+    "publication_year": {"publication year", "publication_year", "year published"},
 }
 
 
@@ -123,6 +134,14 @@ def parse_biblio_inventory(
                 "title": title,
                 "author": raw.get(fields.get("author", "")),
                 "description": raw.get(fields.get("description", "")),
+                "publisher": raw.get(fields.get("publisher", "")),
+                "edition": raw.get(fields.get("edition", "")),
+                "condition": raw.get(fields.get("condition", "")),
+                "binding": raw.get(fields.get("binding", "")),
+                "language": raw.get(fields.get("language", "")),
+                "pages": _int(raw.get(fields.get("pages", ""))),
+                "publish_date": raw.get(fields.get("publish_date", "")),
+                "publication_year": _int(raw.get(fields.get("publication_year", ""))),
                 "status": status,
                 "quantity": quantity,
                 "price_cents": _money(raw.get(fields.get("price", ""))),
