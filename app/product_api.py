@@ -1369,7 +1369,55 @@ def _cross_list_destination_status(
             "writable": True,
         }
 
+    capabilities = set(info.get("capabilities") or [])
+    configured = (
+        ebay_configured(workspace.id)
+        if channel == Channel.EBAY
+        else has_workspace_connector_credentials(workspace.id, channel)
+    )
+    writable = Capability.CREATE_LISTING in capabilities
+    updatable = Capability.UPDATE_LISTING in capabilities
+
     if existing is not None:
+        if updatable:
+            if not configured:
+                return {
+                    "channel": channel,
+                    "display_name": info["display_name"],
+                    "status": "connect",
+                    "reason": f"Reconnect {info['display_name']} before updating this linked listing.",
+                    "action": "connect",
+                    "listing_id": str(existing.id),
+                    "url": existing.url,
+                    "configured": False,
+                    "writable": True,
+                }
+            if candidate.get("missing"):
+                return {
+                    "channel": channel,
+                    "display_name": info["display_name"],
+                    "status": "needs_fields",
+                    "reason": "Missing: " + ", ".join(str(value) for value in candidate["missing"]),
+                    "action": "edit",
+                    "listing_id": str(existing.id),
+                    "url": existing.url,
+                    "configured": True,
+                    "writable": True,
+                }
+            return {
+                "channel": channel,
+                "display_name": info["display_name"],
+                "status": "update_ready",
+                "reason": (
+                    "Already linked. Ready to update price, stock and supported "
+                    "listing data from the current Vinted/master record."
+                ),
+                "action": "update",
+                "listing_id": str(existing.id),
+                "url": existing.url,
+                "configured": True,
+                "writable": True,
+            }
         return {
             "channel": channel,
             "display_name": info["display_name"],
@@ -1378,16 +1426,10 @@ def _cross_list_destination_status(
             "action": "open" if existing.url else None,
             "listing_id": str(existing.id),
             "url": existing.url,
-            "configured": True,
-            "writable": Capability.CREATE_LISTING in set(info.get("capabilities") or []),
+            "configured": configured,
+            "writable": writable,
         }
 
-    configured = (
-        ebay_configured(workspace.id)
-        if channel == Channel.EBAY
-        else has_workspace_connector_credentials(workspace.id, channel)
-    )
-    writable = Capability.CREATE_LISTING in set(info.get("capabilities") or [])
     if writable:
         if not configured:
             return {
@@ -1545,6 +1587,51 @@ def cross_list_publish(
         if overrides:
             candidate = cross_listing.apply_overrides(candidate, overrides)
         return cross_listing.publish(
+            context.workspace.id,
+            item_id,
+            channel,
+            candidate,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/api/app/inventory/{item_id}/cross-list/{channel}")
+def cross_list_update(
+    item_id: uuid.UUID,
+    channel: str,
+    payload: CrossListPublishRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    channel = channel.strip().lower()
+    info = get_connector(channel)
+    if (
+        info is None
+        or not info.supports(Capability.UPDATE_LISTING)
+        or channel == Channel.BIBLIO
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{channel} direct updating is not implemented yet.",
+        )
+    if not has_workspace_connector_credentials(context.workspace.id, channel):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Connect {channel} with write-capable credentials before updating.",
+        )
+    try:
+        with db.session_scope() as session:
+            candidate = cross_listing.build_candidate(
+                session,
+                context.workspace.id,
+                item_id,
+                source_listing_id=payload.source_listing_id,
+            )
+        overrides = payload.model_dump(exclude_none=True)
+        overrides.pop("source_listing_id", None)
+        if overrides:
+            candidate = cross_listing.apply_overrides(candidate, overrides)
+        return cross_listing.update(
             context.workspace.id,
             item_id,
             channel,
