@@ -5,7 +5,7 @@ const AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
 const AGE_FAILURES_KEY="vintedAgeScanFailuresV1";
 const AGE_WORKERS=16;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
-const CONTENT_PROTOCOL=4;
+const CONTENT_PROTOCOL=5;
 let syncInFlight=null;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
