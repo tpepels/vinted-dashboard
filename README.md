@@ -142,7 +142,7 @@ stable route is:
 The downloaded artifact itself is always versioned, for example:
 
 ```text
-reseller-dashboard-chrome-bridge-v3.3.0.zip
+reseller-dashboard-chrome-bridge-v3.4.0.zip
 ```
 
 Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
@@ -152,14 +152,15 @@ The bridge supports the principal European Vinted web origins. On its first
 sync it uses an already-open signed-in Vinted tab and remembers that origin for
 later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 3.3.0 keeps a local detail
+For active/reserved/hidden/draft listings, bridge 3.4.0 keeps a local detail
 cache for richer Vinted item metadata. Core inventory pagination is paced and
 retries HTTP 429 responses with backoff. Rich `/api/v2/items/{id}` enrichment
-is deliberately budgeted separately - up to 12 records on a manual sync and 4
-on a periodic sync, one paced request stream with at least 1.5 seconds between
-detail calls rather than hundreds of concurrent requests. If rich-detail enrichment is rate-limited, the complete core
-inventory snapshot still syncs and optional notification/order calls are skipped
-for that pass. If the core inventory endpoint itself remains rate-limited after
+uses one sequential request stream with at least 1.5 seconds between detail
+calls. There is no fixed per-sync enrichment budget: the bridge drains the
+uncached detail queue until it is complete or Vinted actually returns HTTP 429.
+If the detail endpoint is rate-limited, the complete core inventory snapshot
+still syncs, detail enrichment stops for that pass, and optional API calls are
+skipped. If the core inventory endpoint itself remains rate-limited after
 backoff, the bridge aborts instead of sending a partial inventory snapshot.
 
 When Vinted does not expose a trustworthy absolute posting timestamp, the bridge
@@ -175,9 +176,10 @@ and the job pauses for a persisted cooldown (starting at 30 minutes and backing
 off up to 6 hours) rather than continuing to hit the site. Successful item IDs
 are cached and are not rescanned. Ordinary unread pages are cooldown-marked for
 24 hours on periodic syncs; an explicit manual sync can retry them after the
-current finite job completes. Periodic inventory sync is skipped while an age
-job is active, so the bridge does not add API traffic while the rendered-page
-job is still running.
+current finite job completes. API inventory/detail sync and rendered-page age scanning use independent
+cooldowns. An API 429 pauses API sync without stopping the rendered-page age
+job, while a rendered-page rate-limit or anti-bot challenge pauses only the age
+job.
 
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
@@ -187,7 +189,7 @@ already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
 cache constants or registering a second message listener. Bridge 3.3.0 uses
-content protocol 8, so tabs still running an older bridge script are forcibly
+content protocol 9, so tabs still running an older bridge script are forcibly
 reloaded once.
 
 

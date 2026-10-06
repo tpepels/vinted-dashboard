@@ -121,6 +121,17 @@ function assert(condition, message) {
 }
 
 (async () => {
+  const unlimited = await scenario("normal");
+  assert(unlimited.result.ok === true, "Normal API detail enrichment should succeed");
+  assert(unlimited.detailRequests === 50,
+    "Rich-detail enrichment still has an artificial per-sync request budget");
+  assert(unlimited.result.snapshot.detail_sync.enriched === 50,
+    "Normal API detail enrichment did not drain the full queue");
+  assert(unlimited.result.snapshot.detail_sync.pending === 0,
+    "Normal API detail enrichment left records pending");
+  assert(unlimited.result.snapshot.detail_sync.api_rate_limited === false,
+    "Normal detail enrichment was incorrectly marked rate limited");
+
   const detailLimited = await scenario("detail429");
   assert(detailLimited.result.ok === true, "Detail 429 should not fail core inventory sync");
   assert(detailLimited.result.snapshot.listings.length === 50,
@@ -129,6 +140,10 @@ function assert(condition, message) {
     "Detail rate limit was not reported");
   assert(detailLimited.result.snapshot.detail_sync.enriched === 3,
     "Unexpected number of detail enrichments before 429");
+  assert(detailLimited.result.snapshot.detail_sync.pending === 47,
+    "Pending API-detail count should reflect only records left after the real 429");
+  assert(detailLimited.result.snapshot.detail_sync.detail_endpoint_rate_limited === true,
+    "Detail endpoint 429 was not distinguished from page rate limiting");
   assert(detailLimited.optionalRequests === 0,
     "Optional notification/order requests continued after detail rate limiting");
 

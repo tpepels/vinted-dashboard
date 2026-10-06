@@ -10,10 +10,10 @@ const AGE_WAVES_PER_EVENT=8;
 const AGE_NAVIGATION_MIN_INTERVAL_MS=1800;
 const AGE_RATE_LIMIT_BASE_COOLDOWN_MS=30*60*1000;
 const AGE_RATE_LIMIT_MAX_COOLDOWN_MS=6*60*60*1000;
-const CORE_RATE_LIMIT_COOLDOWN_MS=60*60*1000;
+const API_RATE_LIMIT_COOLDOWN_MS=60*60*1000;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
 const AGE_JOB_WATCHDOG_MS=240000;
-const CONTENT_PROTOCOL=8;
+const CONTENT_PROTOCOL=9;
 let syncInFlight=null;
 let ageJobInFlight=null;
 let lastAgeNavigationAt=0;
@@ -156,7 +156,8 @@ async function updateAgeJobStatus(job,error=null){
     age_scan_skipped:Number(job?.skipped||0),
     age_scan_cooldown_until:Number(job?.cooldown_until||0),
     age_scan_rate_limit_hits:Number(job?.rate_limit_hits||0),
-    vinted_cooldown_until:Number(job?.cooldown_until||0),
+    page_cooldown_until:Number(job?.cooldown_until||0),
+    vinted_cooldown_until:0,
     age_scan_at:new Date().toISOString(),
   };
   if(error)status.age_scan_error=String(error);
@@ -366,31 +367,16 @@ async function unpair(){const data=await chrome.storage.local.get([AGE_JOB_KEY])
 async function connectionStatus(){const data=await stored();if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN};try{const remote=await api("/api/extension/status");return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN}}catch(error){return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN}}}
 async function runSync(reason="manual"){
   if(syncInFlight)return syncInFlight;
-  const activeJobData=await chrome.storage.local.get([AGE_JOB_KEY,"syncStatus"]);
-  const previousStatus=activeJobData?.syncStatus||{};
-  const coreCooldownUntil=Number(previousStatus.vinted_cooldown_until||0);
-  if(coreCooldownUntil>Date.now()){
+  const statusData=await chrome.storage.local.get(["syncStatus"]);
+  const previousStatus=statusData?.syncStatus||{};
+  const apiCooldownUntil=Number(previousStatus.api_cooldown_until||0);
+  if(apiCooldownUntil>Date.now()){
     return{
       ...previousStatus,
       ok:true,
       reason,
-      sync_skipped_for_cooldown:true,
-      vinted_cooldown_until:coreCooldownUntil,
-    };
-  }
-  const activeJob=activeJobData?.[AGE_JOB_KEY];
-  if(activeJob&&Array.isArray(activeJob.remaining)&&activeJob.remaining.length){
-    const previous=activeJobData?.syncStatus||{};
-    return{
-      ...previous,
-      ok:true,
-      reason,
-      sync_skipped_for_age_job:true,
-      age_scan_running:true,
-      age_scan_remaining:activeJob.remaining.length,
-      age_scan_scanned:Number(activeJob.scanned||0),
-      age_scan_updated:Number(activeJob.updated||0),
-      age_scan_failed:Number(activeJob.failed||0),
+      sync_skipped_for_api_cooldown:true,
+      api_cooldown_until:apiCooldownUntil,
     };
   }
   syncInFlight=(async()=>{
@@ -406,13 +392,15 @@ async function runSync(reason="manual"){
       const response=await message(tab.id,{type:"collect-vinted-data",reason});
       if(!response?.ok){
         if(response?.rate_limited){
-          const cooldownUntil=Date.now()+CORE_RATE_LIMIT_COOLDOWN_MS;
+          const cooldownUntil=Date.now()+API_RATE_LIMIT_COOLDOWN_MS;
           const status={
             ok:false,
             at:new Date().toISOString(),
             reason,
-            error:response?.error||"Vinted rate limited the sync.",
-            vinted_cooldown_until:cooldownUntil,
+            error:response?.error||"Vinted API rate limited the inventory sync.",
+            api_rate_limited:true,
+            api_cooldown_until:cooldownUntil,
+            vinted_cooldown_until:0,
           };
           await chrome.storage.local.set({syncStatus:status});
           return status;
@@ -427,10 +415,9 @@ async function runSync(reason="manual"){
       snapshot.extension_version=chrome.runtime.getManifest().version;
 
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
-      const vintedRateLimited=Boolean(detailSync.rate_limited);
-      const ageJob=vintedRateLimited
-        ? {remaining:0,scanned:0,updated:0,failed:0,skipped:ageScanItems.length}
-        : await startAgeJob(ageScanItems,reason);
+      const apiRateLimited=Boolean(detailSync.api_rate_limited??detailSync.rate_limited);
+      const detailRateLimited=Boolean(detailSync.detail_endpoint_rate_limited??detailSync.rate_limited);
+      const ageJob=await startAgeJob(ageScanItems,reason);
       const status={
         ok:true,
         at:new Date().toISOString(),
@@ -438,9 +425,12 @@ async function runSync(reason="manual"){
         listings:result.listings||snapshot.listings.length,
         orders:snapshot.orders.length,
         detail_enriched:Number(detailSync.enriched||0),
-        detail_deferred:Number(detailSync.deferred||0),
-        detail_rate_limited:vintedRateLimited,
-        vinted_cooldown_until:vintedRateLimited?Date.now()+CORE_RATE_LIMIT_COOLDOWN_MS:0,
+        detail_pending:Number(detailSync.pending??detailSync.deferred??0),
+        detail_deferred:Number(detailSync.pending??detailSync.deferred??0),
+        detail_rate_limited:detailRateLimited,
+        api_rate_limited:apiRateLimited,
+        api_cooldown_until:apiRateLimited?Date.now()+API_RATE_LIMIT_COOLDOWN_MS:0,
+        vinted_cooldown_until:0,
         age_scan_running:ageJob.remaining>0,
         age_scan_remaining:ageJob.remaining,
         age_scan_scanned:ageJob.scanned,
