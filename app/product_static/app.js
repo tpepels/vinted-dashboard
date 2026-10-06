@@ -1168,7 +1168,11 @@ function biblioListingState(sync) {
       return { label: "inventory uploaded · photos pending", cls: "running", detail: "Inventory reached FTP; photos are still being sent" };
     }
     if (sync.photo_state === "retry_scheduled") {
-      return { label: "FTP uploaded · photo retry scheduled", cls: "warn", detail: "BIBLIO may ignore photos until the listing is active; one delayed retry is scheduled" };
+      return {
+        label: "FTP uploaded · photo retry scheduled",
+        cls: "warn",
+        detail: sync.photo_error || "BIBLIO may ignore photos until the listing is active; one delayed retry is scheduled",
+      };
     }
     return { label: "FTP uploaded", cls: "success", detail: "Transfer finished; BIBLIO processing is separate" };
   }
