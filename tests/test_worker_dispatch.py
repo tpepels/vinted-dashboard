@@ -53,3 +53,32 @@ def test_worker_dispatches_through_registered_handler(monkeypatch):
 def test_unknown_worker_job_fails_clearly():
     with pytest.raises(RuntimeError, match="Unknown background job type"):
         worker.handle({"job_type": "does_not_exist"})
+
+
+def test_worker_biblio_handler_preserves_target_and_photo_modes(monkeypatch):
+    called = {}
+    workspace_id = uuid.uuid4()
+    listing_id = uuid.uuid4()
+
+    def fake_sync(workspace, **kwargs):
+        called["workspace_id"] = workspace
+        called.update(kwargs)
+
+    monkeypatch.setattr("app.connectors.hosted.sync_biblio_workspace", fake_sync)
+    worker._sync_biblio(
+        {
+            "listing_id": str(listing_id),
+            "full_sync": False,
+            "force_photos": True,
+            "photos_only": True,
+        },
+        workspace_id,
+    )
+
+    assert called == {
+        "workspace_id": workspace_id,
+        "listing_id": listing_id,
+        "full_sync": False,
+        "force_photos": True,
+        "photos_only": True,
+    }

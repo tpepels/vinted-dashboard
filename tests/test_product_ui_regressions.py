@@ -505,3 +505,27 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
     assert 'const required = field.dataset.required === "true";' in APP_JS
     assert 'payload[field.dataset.field] = value' in APP_JS
     assert "bibliographic_enrichment" in APP_JS
+
+
+
+def test_biblio_connections_expose_real_activity_progress_and_recovery_controls():
+    assert 'api("/api/app/connectors/biblio/activity")' in APP_JS
+    assert "function renderBiblioActivity(activity, operational)" in APP_JS
+    assert "View activity" in APP_JS
+    assert "Sync changes" in APP_JS
+    assert "Retry photos" in APP_JS
+    assert "Full resync" in APP_JS
+    assert '"/api/app/connectors/biblio/retry-photos"' in APP_JS
+    assert '"/api/app/connectors/biblio/full-sync"' in APP_JS
+    assert "photos " in APP_JS
+    assert "FTP uploaded means the files reached BIBLIO" in APP_JS
+    assert "BIBLIO still has to process" in APP_JS
+
+
+def test_biblio_inventory_and_listing_rows_show_publication_state():
+    assert "function biblioListingState(sync)" in APP_JS
+    assert "function marketplaceListingBadge(listing)" in APP_JS
+    assert '"queued"' in APP_JS
+    assert '"uploading"' in APP_JS
+    assert '"FTP uploaded"' in APP_JS
+    assert "photo error" in APP_JS

@@ -30,6 +30,10 @@ const state = {
   stockEnrichmentActive: 0,
   stockAudioContext: null,
   biblioPublish: null,
+  biblioActivity: null,
+  biblioActivityTimer: null,
+  biblioInventoryTimer: null,
+  biblioListingsTimer: null,
   crossList: null,
   connectors: [],
   barcodeStream: null,
@@ -51,7 +55,7 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. Inventory and Vinted source photos are sent by FTP. Photos are converted to JPG and named from the BIBLIO Book ID automatically. Multiple photos use BookID_1.jpg, BookID_2.jpg, etc.; BIBLIO may need that multi-photo convention enabled on your seller account.",
+    help: "Book connector. Inventory changes and Vinted source photos are sent by FTP. The dashboard records the FTP transfer separately from BIBLIO's later processing. Photos are converted to JPG and named from the BIBLIO Book ID automatically. Multiple photos use BookID_1.jpg, BookID_2.jpg, etc.; BIBLIO may need that multi-photo convention enabled on your seller account.",
     fields: [
       ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
@@ -1146,7 +1150,115 @@ async function linkListingToInventory(listingId) {
   flash("Choose the physical inventory item, then click Link to master item. Cross-listing will become available after linking.");
 }
 
+function biblioListingState(sync) {
+  if (!sync) return null;
+  const stateValue = String(sync.state || "").toLowerCase();
+  if (stateValue === "queued") return { label: "queued", cls: "queued", detail: "Waiting for worker" };
+  if (stateValue === "uploading") {
+    const photo = sync.photo_state === "uploading" ? " · photos uploading" : "";
+    return { label: "uploading" + photo, cls: "running", detail: "Sending to BIBLIO FTP" };
+  }
+  if (stateValue === "error") return { label: "error", cls: "error", detail: sync.error || "FTP publication failed" };
+  if (stateValue === "ftp_uploaded") {
+    if (sync.photo_state === "error") {
+      return { label: "FTP uploaded · photo error", cls: "warn", detail: sync.photo_error || "Inventory reached FTP; one or more photos failed" };
+    }
+    if (sync.photo_state === "queued" || sync.photo_state === "uploading") {
+      return { label: "inventory uploaded · photos pending", cls: "running", detail: "Inventory reached FTP; photos are still being sent" };
+    }
+    return { label: "FTP uploaded", cls: "success", detail: "Transfer finished; BIBLIO processing is separate" };
+  }
+  return null;
+}
+
+function marketplaceListingBadge(listing) {
+  const pill = '<span class="pill ' + esc(listing.channel) + '">' + esc(listing.channel) + "</span>";
+  if (listing.channel !== "biblio") return pill;
+  const stateInfo = biblioListingState(listing.biblio_sync);
+  if (!stateInfo) return pill;
+  const title = stateInfo.detail ? ' title="' + esc(stateInfo.detail) + '"' : "";
+  return '<span class="channel-sync-stack">' + pill
+    + '<span class="biblio-sync-mini ' + esc(stateInfo.cls) + '"' + title + '>'
+    + esc(stateInfo.label) + "</span></span>";
+}
+
+function biblioActivityStatus(row) {
+  if (!row) return { label: "No activity yet", cls: "idle" };
+  if (row.status === "queued") return { label: "Queued", cls: "queued" };
+  if (row.status === "running") {
+    const stages = {
+      preparing: "Preparing",
+      connecting: "Connecting to FTP",
+      connected: "Connected",
+      inventory_uploaded: "Inventory uploaded",
+      deletes_uploaded: "Deletes uploaded",
+      photos_uploading: "Uploading photos",
+    };
+    return { label: stages[row.stage] || "Running", cls: "running" };
+  }
+  if (row.status === "error") return { label: "Failed", cls: "error" };
+  if (row.status === "success") {
+    return {
+      label: (row.photo_errors || []).length ? "FTP uploaded with photo warnings" : "FTP uploaded",
+      cls: (row.photo_errors || []).length ? "warn" : "success",
+    };
+  }
+  return { label: String(row.status || "Unknown"), cls: "idle" };
+}
+
+function biblioActivityDetail(row) {
+  if (!row) return "No BIBLIO FTP run has been recorded yet.";
+  const parts = [];
+  if (row.listing_title) parts.push(row.listing_title);
+  if (row.photos_only) parts.push("Photo retry");
+  else if (row.full_sync) parts.push("Full resync");
+  if (row.message) parts.push(row.message);
+  const inventoryDone = row.inventory_uploaded ?? (row.status === "success" ? row.active_count : null);
+  if (row.inventory_total != null || inventoryDone != null) {
+    parts.push("inventory " + Number(inventoryDone || 0) + "/" + Number(row.inventory_total ?? row.active_count ?? 0));
+  }
+  if (row.photos_total != null) {
+    parts.push("photos " + Number(row.photos_uploaded || 0) + "/" + Number(row.photos_total || 0));
+  }
+  if (row.error) parts.push(row.error);
+  return parts.join(" · ") || "BIBLIO FTP activity recorded.";
+}
+
+function renderBiblioActivity(activity, operational) {
+  const current = activity?.current || null;
+  const status = biblioActivityStatus(current);
+  const runs = activity?.runs || [];
+  const history = runs.length
+    ? runs.map((run) => {
+      const runStatus = biblioActivityStatus(run);
+      const files = [run.inventory_filename, run.deletes_filename].filter(Boolean).map(esc).join(" · ");
+      const errors = (run.photo_errors || []).length
+        ? '<div class="biblio-activity-errors">' + run.photo_errors.map((value) => esc(value)).join("<br>") + "</div>"
+        : "";
+      return '<div class="biblio-activity-run">'
+        + '<div><strong>' + esc(runStatus.label) + '</strong><span>' + esc(when(run.started_at)) + "</span></div>"
+        + '<p>' + esc(biblioActivityDetail(run)) + "</p>"
+        + (files ? '<small>' + files + "</small>" : "")
+        + errors + "</div>";
+    }).join("")
+    : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
+  return '<div class="biblio-activity-compact">'
+    + '<div class="biblio-activity-current"><span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
+    + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
+    + '<div class="actions biblio-activity-actions">'
+    + '<button class="btn biblio-activity-toggle" type="button">View activity</button>'
+    + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry photos</button>' : "")
+    + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
+    + '</div><div class="biblio-activity-history hidden">'
+    + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards.</div>'
+    + history + "</div></div>";
+}
+
 async function inventory() {
+  if (state.biblioInventoryTimer) {
+    clearTimeout(state.biblioInventoryTimer);
+    state.biblioInventoryTimer = null;
+  }
   const q = encodeURIComponent($("#inventory-q").value.trim());
   const status = encodeURIComponent($("#inventory-status").value);
   const data = await api("/api/app/inventory?q=" + q + "&status=" + status);
@@ -1183,7 +1295,7 @@ async function inventory() {
         + "</td><td>" + money(item.potential_margin_cents, item.currency)
         + "</td><td>"
         + ((item.listings || []).map((listing) =>
-          '<span class="pill ' + esc(listing.channel) + '">' + esc(listing.channel) + "</span>"
+          marketplaceListingBadge(listing)
         ).join(" ") || "—")
         + "</td><td>" + esc(item.status) + '</td><td class="row-actions">'
         + inventoryCrossListAction(item)
@@ -1205,6 +1317,17 @@ async function inventory() {
     };
   }
   updateInventorySelection();
+  const biblioPending = state.inventoryItems.some((item) =>
+    (item.listings || []).some((listing) =>
+      listing.channel === "biblio"
+      && ["queued", "uploading"].includes(String(listing.biblio_sync?.state || ""))
+    )
+  );
+  if (biblioPending && state.view === "inventory") {
+    state.biblioInventoryTimer = setTimeout(() => {
+      if (state.view === "inventory") inventory();
+    }, 2500);
+  }
 }
 
 $("#close-cross-list").onclick = () => {
@@ -2701,9 +2824,22 @@ function listingComparator(sort) {
 }
 
 async function listings() {
+  if (state.biblioListingsTimer) {
+    clearTimeout(state.biblioListingsTimer);
+    state.biblioListingsTimer = null;
+  }
   const data = await api("/api/app/listings");
   state.listings = data.listings || [];
   renderListings();
+  const biblioPending = state.listings.some((row) =>
+    row.channel === "biblio"
+    && ["queued", "uploading"].includes(String(row.biblio_sync?.state || ""))
+  );
+  if (biblioPending && state.view === "listings") {
+    state.biblioListingsTimer = setTimeout(() => {
+      if (state.view === "listings") listings();
+    }, 2500);
+  }
 }
 
 function renderListingStats(rows, duplicates) {
@@ -2808,7 +2944,7 @@ function renderListings() {
           + '<td><div class="title">' + title
           + (duplicateCount ? '<span class="duplicate-pill">' + duplicateCount + " copies</span>" : "")
           + '</div><div class="sub">' + esc(row.external_sku || row.external_id || "") + "</div></td>"
-          + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + "</span></td>"
+          + "<td>" + marketplaceListingBadge(row) + "</td>"
           + "<td>" + esc(row.status) + "</td>"
           + (showDate ? (() => {
             const shown = listingShownDate(row);
@@ -3425,11 +3561,17 @@ $("#export-csv").onclick = () => exportInventory("csv");
 $("#export-xlsx").onclick = () => exportInventory("xlsx");
 
 async function connections() {
-  const [data, devices] = await Promise.all([
+  if (state.biblioActivityTimer) {
+    clearTimeout(state.biblioActivityTimer);
+    state.biblioActivityTimer = null;
+  }
+  const [data, devices, biblioActivity] = await Promise.all([
     api("/api/app/connectors"),
     api("/api/app/extension/devices"),
+    api("/api/app/connectors/biblio/activity"),
   ]);
   state.connectors = data.connectors || [];
+  state.biblioActivity = biblioActivity;
   $("#connector-grid").innerHTML = data.connectors.map((connector) => {
     const connected = connector.status === "connected";
     const statusClass = connected ? "status-ok" : (connector.configured ? "status-warn" : "");
@@ -3455,10 +3597,12 @@ async function connections() {
         ? '<button class="btn configure" data-c="' + esc(connector.channel) + '">Configure</button>'
         : "")
       + (connector.sync_available
-        ? '<button class="btn sync" data-c="' + esc(connector.channel) + '">Queue sync</button>'
+        ? '<button class="btn sync" data-c="' + esc(connector.channel) + '">'
+          + (connector.channel === "biblio" ? "Sync changes" : "Queue sync") + "</button>"
         : "")
       + "</div>"
       + (connector.note ? '<div class="connector-note">' + esc(connector.note) + "</div>" : "")
+      + (connector.channel === "biblio" ? renderBiblioActivity(biblioActivity, connector.operational) : "")
       + "</div>";
   }).join("");
 
@@ -3470,9 +3614,46 @@ async function connections() {
     button.onclick = async () => {
       try {
         await api("/api/app/connectors/" + button.dataset.c + "/sync", { method: "POST" });
-        flash("Sync queued.");
+        flash(button.dataset.c === "biblio" ? "BIBLIO change sync queued." : "Sync queued.");
+        if (button.dataset.c === "biblio") await connections();
       } catch (error) {
         flash(error.message, true);
+      }
+    };
+  });
+  $$(".biblio-activity-toggle").forEach((button) => {
+    button.onclick = () => {
+      const history = button.closest(".biblio-activity-compact")?.querySelector(".biblio-activity-history");
+      if (!history) return;
+      const opening = history.classList.contains("hidden");
+      history.classList.toggle("hidden", !opening);
+      button.textContent = opening ? "Hide activity" : "View activity";
+    };
+  });
+  $(".biblio-retry-photos").forEach((button) => {
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        await api("/api/app/connectors/biblio/retry-photos", { method: "POST" });
+        flash("BIBLIO photo retry queued without resending inventory.");
+        await connections();
+      } catch (error) {
+        flash(error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $(".biblio-full-sync").forEach((button) => {
+    button.onclick = async () => {
+      if (!window.confirm("Full resync will deliberately resend every active BIBLIO listing and its photos. Continue?")) return;
+      button.disabled = true;
+      try {
+        await api("/api/app/connectors/biblio/full-sync", { method: "POST" });
+        flash("Full BIBLIO resync queued.");
+        await connections();
+      } catch (error) {
+        flash(error.message, true);
+        button.disabled = false;
       }
     };
   });
@@ -3498,6 +3679,13 @@ async function connections() {
       }
     };
   });
+
+  const currentStatus = String(biblioActivity?.current?.status || "");
+  if (["queued", "running"].includes(currentStatus) && state.view === "connections") {
+    state.biblioActivityTimer = setTimeout(() => {
+      if (state.view === "connections") connections();
+    }, 2500);
+  }
   return data;
 }
 

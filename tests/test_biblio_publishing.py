@@ -312,6 +312,16 @@ def test_publish_endpoint_creates_linked_biblio_listing_and_queues_ftp(monkeypat
         ).scalar_one()
         assert job.workspace_id == workspace_id
         assert job.status == "queued"
+        assert job.payload["listing_id"] == str(listing.id)
+        assert listing.extra["publish_state"] == "queued"
+        assert listing.extra["publish_job_id"] == str(job.id)
+
+    activity = client.get("/api/app/connectors/biblio/activity")
+    assert activity.status_code == 200, activity.text
+    current = activity.json()["current"]
+    assert current["status"] == "queued"
+    assert current["listing_id"] == str(listing.id)
+    assert current["listing_title"] == "Clean ISBN Title"
 
 
 

@@ -39,10 +39,18 @@ def _check_workspace_write_access(workspace_id: uuid.UUID | None, job_type: str)
             )
 
 
-def _sync_biblio(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_biblio(payload: dict, workspace_id: uuid.UUID | None) -> None:
     from app.connectors.hosted import sync_biblio_workspace
 
-    sync_biblio_workspace(_require_workspace("biblio_sync", workspace_id))
+    raw_listing_id = payload.get("listing_id")
+    listing_id = uuid.UUID(str(raw_listing_id)) if raw_listing_id else None
+    sync_biblio_workspace(
+        _require_workspace("biblio_sync", workspace_id),
+        listing_id=listing_id,
+        full_sync=bool(payload.get("full_sync")),
+        force_photos=bool(payload.get("force_photos")),
+        photos_only=bool(payload.get("photos_only")),
+    )
 
 
 def _sync_ebay(_payload: dict, workspace_id: uuid.UUID | None) -> None:
