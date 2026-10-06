@@ -10,6 +10,7 @@ const AGE_WAVES_PER_EVENT=8;
 const AGE_NAVIGATION_MIN_INTERVAL_MS=1800;
 const AGE_RATE_LIMIT_BASE_COOLDOWN_MS=30*60*1000;
 const AGE_RATE_LIMIT_MAX_COOLDOWN_MS=6*60*60*1000;
+const CORE_RATE_LIMIT_COOLDOWN_MS=60*60*1000;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
 const AGE_JOB_WATCHDOG_MS=240000;
 const CONTENT_PROTOCOL=7;
@@ -155,6 +156,7 @@ async function updateAgeJobStatus(job,error=null){
     age_scan_skipped:Number(job?.skipped||0),
     age_scan_cooldown_until:Number(job?.cooldown_until||0),
     age_scan_rate_limit_hits:Number(job?.rate_limit_hits||0),
+    vinted_cooldown_until:Number(job?.cooldown_until||0),
     age_scan_at:new Date().toISOString(),
   };
   if(error)status.age_scan_error=String(error);
@@ -361,6 +363,17 @@ async function connectionStatus(){const data=await stored();if(!data.bridgeToken
 async function runSync(reason="manual"){
   if(syncInFlight)return syncInFlight;
   const activeJobData=await chrome.storage.local.get([AGE_JOB_KEY,"syncStatus"]);
+  const previousStatus=activeJobData?.syncStatus||{};
+  const coreCooldownUntil=Number(previousStatus.vinted_cooldown_until||0);
+  if(coreCooldownUntil>Date.now()){
+    return{
+      ...previousStatus,
+      ok:true,
+      reason,
+      sync_skipped_for_cooldown:true,
+      vinted_cooldown_until:coreCooldownUntil,
+    };
+  }
   const activeJob=activeJobData?.[AGE_JOB_KEY];
   if(activeJob&&Array.isArray(activeJob.remaining)&&activeJob.remaining.length){
     const previous=activeJobData?.syncStatus||{};
@@ -387,7 +400,21 @@ async function runSync(reason="manual"){
       if(!tabUrl.hostname.startsWith("www.vinted."))throw new Error("Open and sign in to Vinted first.");
       await chrome.storage.local.set({vintedOrigin:tabUrl.origin});
       const response=await message(tab.id,{type:"collect-vinted-data",reason});
-      if(!response?.ok)throw new Error(response?.error||"Could not read Vinted data.");
+      if(!response?.ok){
+        if(response?.rate_limited){
+          const cooldownUntil=Date.now()+CORE_RATE_LIMIT_COOLDOWN_MS;
+          const status={
+            ok:false,
+            at:new Date().toISOString(),
+            reason,
+            error:response?.error||"Vinted rate limited the sync.",
+            vinted_cooldown_until:cooldownUntil,
+          };
+          await chrome.storage.local.set({syncStatus:status});
+          return status;
+        }
+        throw new Error(response?.error||"Could not read Vinted data.");
+      }
       const snapshot=response.snapshot;
       const ageScanItems=Array.isArray(snapshot.age_scan_items)?snapshot.age_scan_items:[];
       const detailSync=snapshot.detail_sync||{};
@@ -406,6 +433,7 @@ async function runSync(reason="manual"){
         detail_enriched:Number(detailSync.enriched||0),
         detail_deferred:Number(detailSync.deferred||0),
         detail_rate_limited:Boolean(detailSync.rate_limited),
+        vinted_cooldown_until:0,
         age_scan_running:ageJob.remaining>0,
         age_scan_remaining:ageJob.remaining,
         age_scan_scanned:ageJob.scanned,
