@@ -1116,3 +1116,47 @@ def test_changing_biblio_book_id_requeues_same_photos():
         assert updated.id == first_id
         assert updated.external_id == "RENAMED-BOOK-ID"
         assert updated.extra["photo_sync_state"] == "queued"
+
+
+
+def test_biblio_candidate_prefills_isbn_from_valid_master_book_barcode():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="BARCODE-BOOK",
+            title="Barcode Book",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            currency="EUR",
+            notes="Description",
+            attributes={
+                "barcode": "9780140328721",
+                "author": "Roald Dahl",
+                "publisher": "Puffin",
+                "edition": "Revised",
+                "publication_year": 1988,
+                "default_price_cents": 700,
+            },
+        )
+        session.add(item)
+        session.flush()
+        item_id = item.id
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            enrich_isbn=False,
+        )
+
+    assert candidate["ready"] is True
+    assert candidate["fields"]["isbn"] == "9780140328721"
+    assert candidate["field_sources"]["isbn"] == "master_barcode"
+    assert candidate["bibliographic_enrichment"]["publisher"] == "Puffin"
+    assert candidate["bibliographic_sources"]["publisher"] == "master"
+    assert candidate["bibliographic_enrichment"]["edition"] == "Revised"
+    assert candidate["bibliographic_sources"]["edition"] == "master"
+    assert candidate["bibliographic_enrichment"]["publish_date"] == 1988
+    assert candidate["bibliographic_sources"]["publish_date"] == "master"
