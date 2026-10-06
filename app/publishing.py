@@ -287,16 +287,14 @@ def build_biblio_candidate(
         ("EUR", "default"),
     )
 
-    if enrichment:
-        if enrichment.get("publisher") and not attrs.get("publisher"):
-            attrs["publisher"] = enrichment["publisher"]
-            attrs["publisher_source"] = "isbn"
-        if enrichment.get("edition") and not attrs.get("edition"):
-            attrs["edition"] = enrichment["edition"]
-            attrs["edition_source"] = "isbn"
-        if enrichment.get("publish_date") and not attrs.get("publish_date"):
-            attrs["publish_date"] = enrichment["publish_date"]
-            attrs["publish_date_source"] = "isbn"
+    enrichment_fields = {
+        key: str(enrichment.get(key) or "").strip() or None
+        for key in ("publisher", "edition", "publish_date")
+    } if enrichment else {
+        "publisher": None,
+        "edition": None,
+        "publish_date": None,
+    }
 
     existing = _existing_biblio(session, workspace_id, item.id)
     book_id = existing.external_id if existing else item.sku
@@ -345,6 +343,7 @@ def build_biblio_candidate(
         },
         "book_id_suggestion": book_id,
         "enrichment_warning": enrichment_warning,
+        "bibliographic_enrichment": enrichment_fields,
     }
     return validate_biblio_candidate(
         session,
@@ -468,6 +467,7 @@ def upsert_biblio_listing(
         "field_sources": dict(candidate.get("field_sources") or {}),
         "image_urls": list(source.get("image_urls") or [])[:5],
         "image_source": source.get("channel") if source.get("image_urls") else None,
+        "bibliographic_enrichment": dict(candidate.get("bibliographic_enrichment") or {}),
         "cross_listed_at": now.isoformat(),
     }
 
@@ -482,6 +482,10 @@ def upsert_biblio_listing(
         attrs["description"] = fields["description"]
     if fields.get("price_cents") is not None and attrs.get("default_price_cents") is None:
         attrs["default_price_cents"] = int(fields["price_cents"])
+    for key, value in dict(candidate.get("bibliographic_enrichment") or {}).items():
+        if key in {"publisher", "edition", "publish_date"} and value and not attrs.get(key):
+            attrs[key] = value
+            attrs[f"{key}_source"] = "isbn"
     item.attributes = attrs
     session.flush()
     return existing
