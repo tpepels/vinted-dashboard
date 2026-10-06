@@ -203,3 +203,49 @@ def test_location_qr_lookup_does_not_create_inventory(monkeypatch):
 
     with db.session_scope() as session:
         assert session.execute(select(models.InventoryItem)).scalars().all() == []
+
+
+
+def test_stock_intake_keeps_all_isbn_lookup_metadata(monkeypatch):
+    client, csrf = _registered_client(monkeypatch, "rich-scan@example.test")
+    response = client.post(
+        "/api/app/stock-intake/items",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "items": [{
+                "barcode": "9780140328721",
+                "barcode_format": "EAN13",
+                "title": "Fantastic Mr. Fox",
+                "category": "book",
+                "currency": "EUR",
+                "author": "Roald Dahl",
+                "isbn": "9780140328721",
+                "subtitle": "A Story",
+                "publisher": "Puffin",
+                "edition": "Revised",
+                "binding": "Paperback",
+                "language": "English",
+                "publish_date": "1988",
+                "publication_year": 1988,
+                "pages": 96,
+                "cover_url": "https://covers.example/fox.jpg",
+                "source_url": "https://openlibrary.org/isbn/9780140328721",
+            }]
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    with db.session_scope() as session:
+        item = session.execute(select(models.InventoryItem)).scalar_one()
+        attrs = item.attributes
+        assert attrs["barcode"] == "9780140328721"
+        assert attrs["isbn"] == "9780140328721"
+        assert attrs["subtitle"] == "A Story"
+        assert attrs["publisher"] == "Puffin"
+        assert attrs["edition"] == "Revised"
+        assert attrs["binding"] == "Paperback"
+        assert attrs["language"] == "English"
+        assert attrs["publish_date"] == "1988"
+        assert attrs["publication_year"] == 1988
+        assert attrs["pages"] == 96
+        assert attrs["cover_url"] == "https://covers.example/fox.jpg"

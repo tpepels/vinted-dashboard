@@ -716,6 +716,20 @@ def test_wix_sync_imports_variants_inventory_and_orders(monkeypatch):
                 }
             )
 
+        if url.endswith("/stores/v3/products/query"):
+            return FakeResponse(
+                {
+                    "products": [
+                        {
+                            "id": "99999999-8888-7777-6666-555555555555",
+                            "plainDescription": "Warm wool coat.",
+                            "url": {"url": "https://shop.example/product/wool-coat"},
+                        }
+                    ],
+                    "pagingMetadata": {"cursors": {}},
+                }
+            )
+
         if url.endswith("/stores/v3/inventory-items/query"):
             return FakeResponse(
                 {

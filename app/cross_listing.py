@@ -6,6 +6,7 @@ photos, while the physical InventoryItem remains the stock authority.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -13,10 +14,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import db, models, publishing
-from app.constants import Channel, ListingStatus
+from app import db, models, publishing, stock_intake
+from app.constants import Channel, ItemCategory, ListingStatus
 from app.connectors import hosted
 from app.connectors.workspace_sync import record_workspace_channel_snapshot
+from app.workspace_bootstrap import clean_isbn
 
 
 DIRECT_CREATE_CHANNELS = {
@@ -24,6 +26,16 @@ DIRECT_CREATE_CHANNELS = {
     Channel.SHOPIFY,
     Channel.WIX,
 }
+
+
+def _isbn_from_book_barcode(value: Any) -> str | None:
+    raw = re.sub(r"[^0-9Xx]", "", str(value or ""))
+    if not (
+        (len(raw) == 13 and raw.startswith(("978", "979")))
+        or len(raw) == 10
+    ):
+        return None
+    return clean_isbn(raw)
 
 
 def _value(*choices: tuple[Any, str]) -> tuple[Any, str | None]:
@@ -89,9 +101,54 @@ def build_candidate(
         if isinstance(extra.get("metadata"), dict)
         else {}
     )
+
+    isbn, isbn_source = _value(
+        (clean_isbn(metadata.get("isbn")), "vinted"),
+        (clean_isbn(attrs.get("isbn")), "master"),
+        (
+            _isbn_from_book_barcode(metadata.get("barcode")),
+            "vinted_barcode",
+        ) if item.category == ItemCategory.BOOK else (None, "vinted_barcode"),
+        (
+            _isbn_from_book_barcode(attrs.get("barcode")),
+            "master_barcode",
+        ) if item.category == ItemCategory.BOOK else (None, "master_barcode"),
+    )
+    barcode, barcode_source = _value(
+        (metadata.get("barcode"), "vinted"),
+        (attrs.get("barcode"), "master"),
+        (isbn, isbn_source or "derived"),
+    )
+
+    enrichment: dict[str, Any] | None = None
+    enrichment_warning: str | None = None
+    existing_bibliographic = {
+        "author": metadata.get("author") or attrs.get("author"),
+        "subtitle": attrs.get("subtitle"),
+        "publisher": metadata.get("publisher") or attrs.get("publisher"),
+        "edition": attrs.get("edition"),
+        "publish_date": (
+            attrs.get("publish_date")
+            or attrs.get("publication_date")
+            or attrs.get("publication_year")
+        ),
+        "binding": attrs.get("binding") or attrs.get("physical_format"),
+        "pages": attrs.get("pages") or attrs.get("number_of_pages"),
+    }
+    needs_isbn_enrichment = any(
+        value in (None, "", [], {})
+        for value in existing_bibliographic.values()
+    )
+    if isbn and item.category == ItemCategory.BOOK and needs_isbn_enrichment:
+        try:
+            enrichment = stock_intake.lookup_isbn(str(isbn))
+        except (ValueError, RuntimeError) as exc:
+            enrichment_warning = str(exc)
+
     title, title_source = _value(
         (source.title if source else None, "vinted"),
         (attrs.get("listing_title"), "master"),
+        ((enrichment or {}).get("title"), "isbn"),
         (item.title, "master"),
     )
     description, description_source = _value(
@@ -117,10 +174,43 @@ def build_candidate(
     author, author_source = _value(
         (metadata.get("author"), "vinted"),
         (attrs.get("author"), "master"),
+        ((enrichment or {}).get("author"), "isbn"),
     )
-    isbn, isbn_source = _value(
-        (metadata.get("isbn"), "vinted"),
-        (attrs.get("isbn"), "master"),
+    publisher, publisher_source = _value(
+        (metadata.get("publisher"), "vinted"),
+        (attrs.get("publisher"), "master"),
+        ((enrichment or {}).get("publisher"), "isbn"),
+    )
+    edition, edition_source = _value(
+        (attrs.get("edition"), "master"),
+        ((enrichment or {}).get("edition"), "isbn"),
+    )
+    publish_date, publish_date_source = _value(
+        (attrs.get("publish_date"), "master"),
+        (attrs.get("publication_date"), "master"),
+        ((enrichment or {}).get("publish_date"), "isbn"),
+    )
+    publication_year, publication_year_source = _value(
+        (attrs.get("publication_year"), "master"),
+        ((enrichment or {}).get("publication_year"), "isbn"),
+    )
+    language, language_source = _value(
+        (metadata.get("language"), "vinted"),
+        (attrs.get("language"), "master"),
+    )
+    binding, binding_source = _value(
+        (attrs.get("binding"), "master"),
+        (attrs.get("physical_format"), "master"),
+        ((enrichment or {}).get("physical_format"), "isbn"),
+    )
+    pages, pages_source = _value(
+        (attrs.get("pages"), "master"),
+        (attrs.get("number_of_pages"), "master"),
+        ((enrichment or {}).get("number_of_pages"), "isbn"),
+    )
+    subtitle, subtitle_source = _value(
+        (attrs.get("subtitle"), "master"),
+        ((enrichment or {}).get("subtitle"), "isbn"),
     )
     brand, brand_source = _value(
         (metadata.get("brand"), "vinted"),
@@ -138,10 +228,15 @@ def build_candidate(
         (metadata.get("material"), "vinted"),
         (attrs.get("material"), "master"),
     )
+    tags, tags_source = _value(
+        (attrs.get("tags"), "master"),
+        (metadata.get("tags"), "vinted"),
+    )
 
     fields = {
         "sku": item.sku,
         "title": title,
+        "subtitle": subtitle,
         "description": description or "",
         "price_cents": int(price_cents) if price_cents not in (None, "") else None,
         "currency": str(currency or "EUR").upper(),
@@ -150,25 +245,45 @@ def build_candidate(
         "condition": condition,
         "author": author,
         "isbn": isbn,
+        "barcode": barcode,
+        "publisher": publisher,
+        "edition": edition,
+        "publish_date": publish_date,
+        "publication_year": publication_year,
+        "language": language,
+        "binding": binding,
+        "pages": pages,
         "brand": brand,
         "size": size,
         "colour": colour,
         "material": material,
+        "tags": tags,
     }
     sources = {
         "sku": "master",
         "title": title_source,
+        "subtitle": subtitle_source,
         "description": description_source,
         "price_cents": price_source,
         "currency": currency_source,
         "quantity": "master",
+        "category": "master",
         "condition": condition_source,
         "author": author_source,
         "isbn": isbn_source,
+        "barcode": barcode_source,
+        "publisher": publisher_source,
+        "edition": edition_source,
+        "publish_date": publish_date_source,
+        "publication_year": publication_year_source,
+        "language": language_source,
+        "binding": binding_source,
+        "pages": pages_source,
         "brand": brand_source,
         "size": size_source,
         "colour": colour_source,
         "material": material_source,
+        "tags": tags_source,
     }
     missing: list[str] = []
     if not fields["title"]:
@@ -186,6 +301,7 @@ def build_candidate(
         "field_sources": sources,
         "missing": missing,
         "ready": not missing,
+        "enrichment_warning": enrichment_warning,
         "source": {
             "channel": Channel.VINTED if source else "master",
             "listing_id": str(source.id) if source else None,
@@ -195,7 +311,6 @@ def build_candidate(
             "photo_count": len(images),
         },
     }
-
 
 def apply_overrides(candidate: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     fields = dict(candidate.get("fields") or {})

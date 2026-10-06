@@ -47,21 +47,23 @@ const state = {
 
 const importFields = [
   "", "sku", "title", "category", "quantity", "condition", "cost", "price",
-  "currency", "location", "notes", "author", "isbn", "publisher", "edition",
-  "binding", "publication_year", "brand", "size", "colour", "material",
+  "currency", "location", "notes", "barcode", "author", "isbn", "subtitle",
+  "publisher", "edition", "binding", "language", "publish_date",
+  "publication_year", "pages", "brand", "size", "colour", "material",
   "measurements",
 ];
 
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. Inventory changes and Vinted source photos are sent by FTP. The dashboard records the FTP transfer separately from BIBLIO's later processing. Photos are converted to JPG and named from the BIBLIO Book ID automatically. Multiple photos use BookID_1.jpg, BookID_2.jpg, etc.; BIBLIO may need that multi-photo convention enabled on your seller account.",
+    help: "Book connector. Inventory changes and Vinted source photos are sent by FTP. Use upload profile core for the existing 8-column BIBLIO filter. Use extended only after BIBLIO has mapped the richer column order in Upload Settings; extended sends subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID automatically.",
     fields: [
       ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
       ["password", "FTP password", "", "password"],
       ["directory", "FTP directory", "", "text"],
       ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
+      ["upload_profile", "Upload profile (core or extended)", "core", "text"],
     ],
   },
   ebay: {
@@ -867,11 +869,35 @@ function renderCrossList(data) {
     ? 'Using <strong>Vinted</strong> as the listing source'
       + (source.url ? ' · <a href="' + esc(source.url) + '" target="_blank" rel="noreferrer">open source</a>' : "")
     : "Using master inventory data; no linked Vinted source was selected.";
+  const prefilled = [
+    ["ISBN", fields.isbn],
+    ["Barcode", fields.isbn ? null : fields.barcode],
+    ["Author", fields.author],
+    ["Publisher", fields.publisher],
+    ["Edition", fields.edition],
+    ["Published", fields.publish_date || fields.publication_year],
+    ["Language", fields.language],
+    ["Binding", fields.binding],
+    ["Pages", fields.pages],
+    ["Condition", fields.condition],
+    ["Brand", fields.brand],
+    ["Size", fields.size],
+    ["Colour", fields.colour],
+    ["Material", fields.material],
+  ].filter(([, value]) => value != null && String(value).trim() !== "");
   $("#cross-list-summary").innerHTML = [
     "<span><strong>Title:</strong> " + esc(fields.title || "Missing") + "</span>",
     "<span><strong>Price:</strong> " + esc(fields.price_cents == null ? "Missing" : money(fields.price_cents, fields.currency)) + "</span>",
     "<span><strong>Stock:</strong> " + esc(fields.quantity == null ? "—" : fields.quantity) + "</span>",
     "<span><strong>Photos:</strong> " + esc(source.photo_count || 0) + "</span>",
+    ...(prefilled.length
+      ? ['<span class="cross-list-prefilled"><strong>Prefilled:</strong> '
+        + prefilled.map(([label, value]) => esc(label) + " " + esc(value)).join(" · ")
+        + "</span>"]
+      : []),
+    ...(data.enrichment_warning
+      ? ['<span class="cross-list-warning"><strong>ISBN lookup:</strong> ' + esc(data.enrichment_warning) + "</span>"]
+      : []),
   ].join("");
 
   const destinations = Array.isArray(data.destinations) ? data.destinations : [];
@@ -1014,8 +1040,17 @@ function bindCrossListButtons() {
 
 function biblioSourceBadge(source) {
   if (!source) return "";
-  const label = source === "vinted" ? "Vinted" : source === "isbn" ? "ISBN lookup" : source === "master" ? "Master" : source;
-  return '<span class="biblio-source">' + esc(label) + "</span>";
+  const labels = {
+    vinted: "Vinted",
+    isbn: "ISBN lookup",
+    master: "Master",
+    vinted_barcode: "Vinted barcode",
+    master_barcode: "Master barcode",
+    review: "Reviewed",
+    biblio: "BIBLIO",
+    default: "Default",
+  };
+  return '<span class="biblio-source">' + esc(labels[source] || source) + "</span>";
 }
 
 function renderBiblioPublish(data) {
@@ -1048,15 +1083,21 @@ function renderBiblioPublish(data) {
   const fields = data.fields || {};
   const sources = data.field_sources || {};
   const enrichment = data.bibliographic_enrichment || {};
+  const bibliographicSources = data.bibliographic_sources || {};
   const bookIdValue = fields.book_id || data.book_id_suggestion || "";
   const rows = [
     ["title", "Title", fields.title || "", sources.title, true, true],
     ["author", "Author", fields.author || "", sources.author, true, true],
     ["description", "Description", fields.description || "", sources.description, true, true],
     ["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false],
-    ["publisher", "Publisher", enrichment.publisher || "", enrichment.publisher ? "isbn" : null, true, false],
-    ["edition", "Edition", enrichment.edition || "", enrichment.edition ? "isbn" : null, true, false],
-    ["publish_date", "Publish date", enrichment.publish_date || "", enrichment.publish_date ? "isbn" : null, true, false],
+    ["subtitle", "Subtitle", enrichment.subtitle || "", bibliographicSources.subtitle || null, true, false],
+    ["publisher", "Publisher", enrichment.publisher || "", bibliographicSources.publisher || null, true, false],
+    ["edition", "Edition", enrichment.edition || "", bibliographicSources.edition || null, true, false],
+    ["binding", "Binding", enrichment.binding || "", bibliographicSources.binding || null, true, false],
+    ["language", "Language", enrichment.language || "", bibliographicSources.language || null, true, false],
+    ["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false],
+    ["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false],
+    ["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false],
     ["price_cents", "Price", fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2), sources.price_cents, true, true],
     ["book_id", "Book ID", bookIdValue, sources.book_id, true, true],
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
@@ -1070,8 +1111,10 @@ function renderBiblioPublish(data) {
         valueHtml = '<textarea class="biblio-review-input" data-field="description" data-required="' + (required ? "true" : "false")
           + '" rows="4" placeholder="Description required by BIBLIO">' + esc(value || "") + '</textarea>';
       } else {
-        const type = key === "price_cents" ? "number" : "text";
-        const extra = key === "price_cents" ? ' min="0" step="0.01" inputmode="decimal"' : "";
+        const type = key === "price_cents" || key === "pages" ? "number" : "text";
+        const extra = key === "price_cents"
+          ? ' min="0" step="0.01" inputmode="decimal"'
+          : (key === "pages" ? ' min="0" step="1" inputmode="numeric"' : "");
         const placeholder = key === "book_id" ? "Unique BIBLIO Book ID" : (required ? label : label + " (optional)");
         valueHtml = '<input class="biblio-review-input" data-field="' + esc(key) + '" data-required="' + (required ? "true" : "false")
           + '" type="' + type + '"' + extra + ' value="' + esc(value || "") + '" placeholder="' + esc(placeholder) + '">';
@@ -1092,9 +1135,12 @@ function renderBiblioPublish(data) {
   else if (missing.length) warning = "Before publishing: " + missing.join(", ") + ".";
   else if (data.enrichment_warning) warning = "ISBN lookup warning: " + data.enrichment_warning;
   else if (data.photo_warning) warning = "Photo warning: " + data.photo_warning;
+  else if (data.upload_profile === "core") warning = data.already_listed
+    ? "Ready to update. Core FTP profile is active: optional bibliographic fields are retained locally but only the existing 8 BIBLIO columns are sent."
+    : "Ready. Core FTP profile is active: optional bibliographic fields are retained locally but only the existing 8 BIBLIO columns are sent.";
   else warning = data.already_listed
-    ? "This physical book already has a BIBLIO listing. Publishing will update it from the current source data."
-    : "Ready. Publishing creates a BIBLIO listing linked to this same physical book and queues the FTP sync.";
+    ? "Ready to update using the extended BIBLIO profile, including the optional bibliographic fields shown above."
+    : "Ready. Extended BIBLIO profile will send the optional bibliographic fields shown above.";
   $("#biblio-publish-warning").textContent = warning;
 
   $("#biblio-open-connections").classList.toggle("hidden", Boolean(data.configured));
@@ -1243,13 +1289,17 @@ function renderBiblioActivity(activity, operational) {
     ? runs.map((run) => {
       const runStatus = biblioActivityStatus(run);
       const files = [run.inventory_filename, run.deletes_filename].filter(Boolean).map(esc).join(" · ");
+      const meta = [
+        run.upload_profile ? "profile " + esc(run.upload_profile) : "",
+        files,
+      ].filter(Boolean).join(" · ");
       const errors = (run.photo_errors || []).length
         ? '<div class="biblio-activity-errors">' + run.photo_errors.map((value) => esc(value)).join("<br>") + "</div>"
         : "";
       return '<div class="biblio-activity-run">'
         + '<div><strong>' + esc(runStatus.label) + '</strong><span>' + esc(when(run.started_at)) + "</span></div>"
         + '<p>' + esc(biblioActivityDetail(run)) + "</p>"
-        + (files ? '<small>' + files + "</small>" : "")
+        + (meta ? '<small>' + meta + "</small>" : "")
         + errors + "</div>";
     }).join("")
     : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
@@ -1712,7 +1762,12 @@ async function enrichStockRow(localId) {
     row.author = metadata.author || row.author || null;
     row.publisher = metadata.publisher || row.publisher || null;
     row.edition = metadata.edition || row.edition || null;
+    row.subtitle = metadata.subtitle || row.subtitle || null;
+    row.binding = metadata.physical_format || row.binding || null;
+    row.language = metadata.language || row.language || null;
+    row.publish_date = metadata.publish_date || row.publish_date || null;
     row.publication_year = metadata.publication_year || row.publication_year || null;
+    row.pages = metadata.number_of_pages || row.pages || null;
     row.cover_url = metadata.cover_url || row.cover_url || null;
     row.source_url = metadata.source_url || row.source_url || null;
     row.existing_copy_count = Number(data.existing_copy_count || 0);
@@ -1774,7 +1829,12 @@ function addScannedBarcode(code, format = "manual") {
     author: null,
     publisher: null,
     edition: null,
+    subtitle: null,
+    binding: null,
+    language: null,
+    publish_date: null,
     publication_year: null,
+    pages: null,
     cover_url: null,
     source_url: null,
     condition: defaults.condition,
@@ -2014,7 +2074,12 @@ async function createScannedStockBatch() {
     isbn: row.isbn || null,
     publisher: row.publisher || null,
     edition: row.edition || null,
+    subtitle: row.subtitle || null,
+    binding: row.binding || null,
+    language: row.language || null,
+    publish_date: row.publish_date || null,
     publication_year: row.publication_year || null,
+    pages: row.pages || null,
     cover_url: row.cover_url || null,
     source_url: row.source_url || null,
   }));
@@ -2137,7 +2202,46 @@ function renderQuickRequired() {
   });
 }
 
-function applyQuickAnalysis(data) {
+async function enrichQuickBookFromIsbn() {
+  const form = $("#quick-listing-form");
+  const isbnField = form.elements.namedItem("isbn");
+  const isbn = String(isbnField?.value || "").trim();
+  if (!isbn) return;
+  try {
+    const data = await api("/api/app/stock-intake/barcode/lookup", {
+      method: "POST",
+      body: JSON.stringify({ code: isbn }),
+    });
+    if (data.kind !== "isbn" || !data.metadata) return;
+    const metadata = data.metadata || {};
+    const fillBlank = (name, value) => {
+      const field = form.elements.namedItem(name);
+      if (!field || value == null || String(value).trim() === "") return;
+      if (!String(field.value || "").trim()) field.value = value;
+    };
+    fillBlank("quick_category", "book");
+    fillBlank("barcode", data.isbn || isbn);
+    fillBlank("author", metadata.author);
+    fillBlank("subtitle", metadata.subtitle);
+    fillBlank("publisher", metadata.publisher);
+    fillBlank("edition", metadata.edition);
+    fillBlank("binding", metadata.physical_format);
+    fillBlank("publish_date", metadata.publish_date);
+    fillBlank("publication_year", metadata.publication_year);
+    fillBlank("pages", metadata.number_of_pages);
+    const title = [metadata.title, metadata.subtitle].filter(Boolean).join(": ");
+    fillBlank("title", title);
+    if (data.metadata_warning) {
+      $("#quick-confidence").textContent = data.metadata_warning;
+    }
+    renderQuickRequired();
+  } catch (_error) {
+    // ISBN enrichment is opportunistic; the detected/entered ISBN remains
+    // available even when the metadata provider cannot be reached.
+  }
+}
+
+async function applyQuickAnalysis(data) {
   const result = data.analysis || {};
   const form = $("#quick-listing-form");
   const mapping = {
@@ -2148,16 +2252,24 @@ function applyQuickAnalysis(data) {
     colour: "colour",
     material: "material",
     condition: "condition",
+    barcode: "barcode",
     author: "author",
     isbn: "isbn",
+    subtitle: "subtitle",
     publisher: "publisher",
     edition: "edition",
+    binding: "binding",
+    language: "language",
+    publish_date: "publish_date",
+    publication_year: "publication_year",
+    pages: "pages",
     suggested_title: "title",
     suggested_description: "description",
   };
   Object.entries(mapping).forEach(([source, target]) => {
     if (result[source]) setFormValue(form, target, result[source]);
   });
+  if (result.isbn) await enrichQuickBookFromIsbn();
   state.quickAnalysisUsed = true;
   state.quickRequiredValues = {};
   const notes = result.confidence_notes || [];
@@ -2283,6 +2395,11 @@ $("#quick-category-hint").onchange = () => {
 };
 $("#quick-item-type").oninput = renderQuickRequired;
 
+const quickIsbnField = $("#quick-listing-form").elements.namedItem("isbn");
+if (quickIsbnField) {
+  quickIsbnField.onchange = () => enrichQuickBookFromIsbn();
+}
+
 $("#quick-analyze").onclick = async () => {
   const files = Array.from($("#quick-photos").files || []);
   if (!files.length) return flash("Choose at least one photo.", true);
@@ -2299,7 +2416,7 @@ $("#quick-analyze").onclick = async () => {
       method: "POST",
       body,
     });
-    applyQuickAnalysis(result);
+    await applyQuickAnalysis(result);
     $("#quick-ai-status").textContent = "Analysis applied · review every detected field";
   } catch (error) {
     $("#quick-ai-status").textContent = error.message;
@@ -2328,10 +2445,17 @@ $("#quick-listing-form").onsubmit = async (event) => {
     colour: String(raw.colour || "").trim() || null,
     material: String(raw.material || "").trim() || null,
     condition: String(raw.condition || "").trim() || null,
+    barcode: String(raw.barcode || "").trim() || null,
     author: String(raw.author || "").trim() || null,
     isbn: String(raw.isbn || "").trim() || null,
+    subtitle: String(raw.subtitle || "").trim() || null,
     publisher: String(raw.publisher || "").trim() || null,
     edition: String(raw.edition || "").trim() || null,
+    binding: String(raw.binding || "").trim() || null,
+    language: String(raw.language || "").trim() || null,
+    publish_date: String(raw.publish_date || "").trim() || null,
+    publication_year: raw.publication_year ? Number(raw.publication_year) : null,
+    pages: raw.pages ? Number(raw.pages) : null,
     measurements: String(raw.measurements || "").trim() || null,
     waist_cm: String(raw.waist_cm || "").trim() || null,
     inside_leg_cm: String(raw.inside_leg_cm || "").trim() || null,
@@ -2435,7 +2559,8 @@ function openItemForm(item) {
     setFormValue(form, "currency", item.currency || "EUR");
     setFormValue(form, "notes", item.notes);
     [
-      "author", "isbn", "publisher", "edition", "binding", "publication_year",
+      "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+      "binding", "language", "publish_date", "publication_year", "pages",
       "brand", "size", "colour", "material", "measurements",
     ].forEach((key) => setFormValue(form, key, item.attributes?.[key]));
   } else {
@@ -2454,7 +2579,8 @@ $("#item-form").onsubmit = async (event) => {
   const existing = state.inventoryItems.find((item) => item.id === state.editItemId);
   const attributes = Object.assign({}, existing?.attributes || {});
   const attributeKeys = [
-    "author", "isbn", "publisher", "edition", "binding", "publication_year",
+    "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+    "binding", "language", "publish_date", "publication_year", "pages",
     "brand", "size", "colour", "material", "measurements",
   ];
   attributeKeys.forEach((key) => {
@@ -3720,10 +3846,12 @@ function openConnectorConfig(channel, connector) {
   state.connectorChannel = channel;
   $("#connector-config-title").textContent = schema.title;
   $("#connector-config-help").textContent = schema.help;
-  $("#connector-fields").innerHTML = schema.fields.map(([name, label, placeholder, type]) =>
-    '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
-    + '" placeholder="' + esc(placeholder) + '"></label>'
-  ).join("");
+  const savedValues = connector?.saved_values || {};
+  $("#connector-fields").innerHTML = schema.fields.map(([name, label, placeholder, type]) => {
+    const value = type === "password" ? "" : (savedValues[name] ?? "");
+    return '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
+      + '" placeholder="' + esc(placeholder) + '" value="' + esc(value) + '"></label>';
+  }).join("");
   $("#biblio-tools").classList.toggle("hidden", channel !== "biblio");
   renderEtsyOAuthTools(connector);
   $("#test-connector").classList.toggle("hidden", !schema.test || !connector?.operational);

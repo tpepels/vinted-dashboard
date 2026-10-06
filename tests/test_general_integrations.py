@@ -622,3 +622,67 @@ def test_expanded_category_catalog_is_accepted_by_bulk_inventory(monkeypatch):
     assert response.status_code == 200, response.text
     inventory = client.get("/api/app/inventory").json()["items"]
     assert inventory[0]["category"] == "collectibles"
+
+
+
+def test_ebay_active_import_preserves_item_specifics_without_extra_calls(monkeypatch):
+    xml = b"""<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBaySellingResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Ack>Success</Ack>
+  <ActiveList>
+    <ItemArray>
+      <Item>
+        <ItemID>1234567890</ItemID>
+        <SKU>EBAY-BOOK-1</SKU>
+        <Title>Fantastic Mr. Fox</Title>
+        <Description>English paperback.</Description>
+        <QuantityAvailable>1</QuantityAvailable>
+        <SellingStatus><CurrentPrice currencyID="EUR">8.50</CurrentPrice></SellingStatus>
+        <ListingDetails><ViewItemURL>https://www.ebay.example/itm/1234567890</ViewItemURL></ListingDetails>
+        <PrimaryCategory><CategoryName>Books</CategoryName></PrimaryCategory>
+        <ConditionDisplayName>Very Good</ConditionDisplayName>
+        <PictureDetails>
+          <GalleryURL>https://i.ebayimg.com/images/g/example/s-l500.jpg</GalleryURL>
+        </PictureDetails>
+        <ItemSpecifics>
+          <NameValueList><Name>ISBN-13</Name><Value>9780140328721</Value></NameValueList>
+          <NameValueList><Name>Author</Name><Value>Roald Dahl</Value></NameValueList>
+          <NameValueList><Name>Publisher</Name><Value>Puffin</Value></NameValueList>
+          <NameValueList><Name>Language</Name><Value>English</Value></NameValueList>
+          <NameValueList><Name>Format</Name><Value>Paperback</Value></NameValueList>
+        </ItemSpecifics>
+      </Item>
+    </ItemArray>
+    <PaginationResult><TotalNumberOfPages>1</TotalNumberOfPages></PaginationResult>
+  </ActiveList>
+</GetMyeBaySellingResponse>"""
+
+    class EbayResponse:
+        status_code = 200
+        content = xml
+
+    monkeypatch.setattr(hosted, "_ebay_access_token", lambda _values: "token")
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return EbayResponse()
+
+    monkeypatch.setattr(hosted.requests, "post", fake_post)
+    items = hosted._fetch_ebay_active({
+        "site_id": "0",
+        "compatibility_level": "1477",
+    })
+
+    assert len(calls) == 1
+    assert len(items) == 1
+    row = items[0]
+    assert row["sku"] == "EBAY-BOOK-1"
+    assert row["category"] == "Books"
+    assert row["condition"] == "Very Good"
+    assert row["description"] == "English paperback."
+    assert row["image_url"].startswith("https://i.ebayimg.com/")
+    assert row["attributes"]["ISBN-13"] == "9780140328721"
+    assert row["attributes"]["Author"] == "Roald Dahl"
+    assert row["attributes"]["Publisher"] == "Puffin"
+    assert row["attributes"]["Format"] == "Paperback"

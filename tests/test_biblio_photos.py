@@ -132,7 +132,7 @@ def test_biblio_sync_uploads_inventory_and_vinted_photos(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
     monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg-data")
 
@@ -223,7 +223,7 @@ def test_partial_biblio_photo_failure_is_retried_later(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
 
     calls = 0
@@ -300,7 +300,7 @@ def test_incremental_biblio_sync_skips_unchanged_inventory(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
     monkeypatch.setattr(
         hosted.ftplib,
@@ -358,7 +358,7 @@ def test_photo_only_retry_resends_photos_without_inventory(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
     monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg-data")
 
@@ -474,7 +474,7 @@ def test_first_inventory_upload_defers_final_photo_signature(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
     monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg-data")
 
@@ -504,4 +504,103 @@ def test_first_inventory_upload_defers_final_photo_signature(monkeypatch):
     assert any(
         kwargs.get("photo_state") == "retry_scheduled"
         for _args, kwargs in states
+    )
+
+
+
+def test_biblio_core_profile_keeps_historical_eight_columns():
+    body = hosted._biblio_tsv(
+        [{
+            "sku": "BK-CORE",
+            "author": "Author",
+            "title": "Title",
+            "subtitle": "Subtitle",
+            "description": "Description",
+            "price_cents": 1250,
+            "isbn": "9780000000002",
+            "publisher": "Publisher",
+            "edition": "First",
+            "binding": "Paperback",
+            "language": "English",
+            "publish_date": "2000",
+            "pages": 200,
+            "condition": "Very good",
+            "quantity": 1,
+        }],
+        sold=False,
+        profile="core",
+    ).decode("utf-8")
+    header, row = body.splitlines()
+    assert header.split("\t") == [
+        "Book ID", "Author", "Title", "Description",
+        "Price", "Status", "ISBN", "Quantity",
+    ]
+    assert len(row.split("\t")) == 8
+    assert "Publisher" not in row
+    assert "Subtitle" not in row
+
+
+def test_biblio_extended_profile_sends_all_prefilled_book_fields():
+    body = hosted._biblio_tsv(
+        [{
+            "sku": "BK-EXT",
+            "author": "Author",
+            "title": "Title",
+            "subtitle": "Subtitle",
+            "description": "Description",
+            "price_cents": 1250,
+            "isbn": "9780000000002",
+            "publisher": "Publisher",
+            "edition": "First",
+            "binding": "Paperback",
+            "language": "English",
+            "publish_date": "2000",
+            "pages": 200,
+            "condition": "Very good",
+            "quantity": 1,
+        }],
+        sold=False,
+        profile="extended",
+    ).decode("utf-8")
+    header, row = body.splitlines()
+    assert header.split("\t") == [
+        "Book ID", "Author", "Title", "Subtitle", "Description",
+        "Price", "Status", "ISBN", "Publisher", "Edition",
+        "Binding", "Language", "Publication Date", "Pages",
+        "Condition", "Quantity",
+    ]
+    values = row.split("\t")
+    assert len(values) == 16
+    assert values[3] == "Subtitle"
+    assert values[8] == "Publisher"
+    assert values[9] == "First"
+    assert values[10] == "Paperback"
+    assert values[11] == "English"
+    assert values[12] == "2000"
+    assert values[13] == "200"
+    assert values[14] == "Very good"
+
+
+def test_biblio_optional_metadata_only_changes_extended_signature():
+    base = {
+        "sku": "BK-SIG",
+        "author": "Author",
+        "title": "Title",
+        "description": "Description",
+        "price_cents": 1250,
+        "isbn": "9780000000002",
+        "quantity": 1,
+        "status": "active",
+        "publisher": "Publisher A",
+    }
+    changed = {**base, "publisher": "Publisher B"}
+    assert hosted._biblio_inventory_signature(
+        base, profile="core"
+    ) == hosted._biblio_inventory_signature(
+        changed, profile="core"
+    )
+    assert hosted._biblio_inventory_signature(
+        base, profile="extended"
+    ) != hosted._biblio_inventory_signature(
+        changed, profile="extended"
     )

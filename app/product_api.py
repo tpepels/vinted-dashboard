@@ -53,6 +53,7 @@ from app.constants import (
 from app.connectors.base import Capability, connector_catalog
 from app.connectors.hosted import (
     biblio_configured,
+    biblio_upload_profile,
     exchange_etsy_authorization_code,
     ebay_configured,
     has_credentials as has_workspace_connector_credentials,
@@ -114,6 +115,20 @@ APP_NAME = os.getenv("APP_NAME", "Reseller Dashboard").strip() or "Reseller Dash
 
 ETSY_OAUTH_SCOPES = ("listings_r", "transactions_r")
 ETSY_OAUTH_CALLBACK_PATH = "/api/app/connectors/etsy/oauth/callback"
+
+CONNECTOR_PREFILL_KEYS: dict[str, tuple[str, ...]] = {
+    Channel.BIBLIO: (
+        "host", "username", "directory", "filename_prefix", "upload_profile",
+    ),
+    Channel.EBAY: ("client_id", "site_id", "compatibility_level"),
+    Channel.ETSY: ("keystring", "shop_id", "order_days", "currency"),
+    Channel.WOOCOMMERCE: ("store_url", "order_days", "currency"),
+    Channel.SHOPIFY: ("store_domain", "api_version", "order_days", "currency"),
+    Channel.BIGCOMMERCE: ("store_hash", "order_days", "currency"),
+    Channel.SQUARESPACE: ("order_days", "currency"),
+    Channel.WIX: ("site_id", "order_days", "currency"),
+    Channel.DEPOP: ("environment", "order_days", "currency"),
+}
 ETSY_OAUTH_TTL = timedelta(minutes=10)
 
 
@@ -198,10 +213,17 @@ class QuickListingCreateRequest(BaseModel):
     colour: str | None = None
     material: str | None = None
     condition: str | None = None
+    barcode: str | None = None
     author: str | None = None
     isbn: str | None = None
+    subtitle: str | None = None
     publisher: str | None = None
     edition: str | None = None
+    binding: str | None = None
+    language: str | None = None
+    publish_date: str | None = None
+    publication_year: int | None = None
+    pages: int | None = Field(default=None, ge=0)
     measurements: str | None = None
     waist_cm: str | None = None
     inside_leg_cm: str | None = None
@@ -223,9 +245,14 @@ class BiblioPublishRequest(BaseModel):
     author: str | None = None
     description: str | None = None
     isbn: str | None = None
+    subtitle: str | None = None
     publisher: str | None = None
     edition: str | None = None
+    binding: str | None = None
+    language: str | None = None
+    pages: int | None = Field(default=None, ge=0)
     publish_date: str | None = None
+    condition: str | None = None
     price_cents: int | None = Field(default=None, ge=0)
 
 
@@ -256,7 +283,12 @@ class StockIntakeItemRequest(BaseModel):
     isbn: str | None = None
     publisher: str | None = None
     edition: str | None = None
+    subtitle: str | None = None
+    binding: str | None = None
+    language: str | None = None
+    publish_date: str | None = None
     publication_year: int | None = None
+    pages: int | None = Field(default=None, ge=0)
     cover_url: str | None = None
     source_url: str | None = None
 
@@ -1082,6 +1114,10 @@ def stock_intake_create_items(
                     "author",
                     "publisher",
                     "edition",
+                    "subtitle",
+                    "binding",
+                    "language",
+                    "publish_date",
                     "cover_url",
                     "source_url",
                 ):
@@ -1090,6 +1126,8 @@ def stock_intake_create_items(
                         attributes[key] = value
                 if values.get("publication_year") is not None:
                     attributes["publication_year"] = int(values["publication_year"])
+                if values.get("pages") is not None:
+                    attributes["pages"] = int(values["pages"])
                 isbn = stock_intake.normalize_barcode(values.get("isbn"))
                 if isbn:
                     attributes["isbn"] = isbn
@@ -1539,6 +1577,7 @@ def biblio_publish_preview(
     return {
         **candidate,
         "configured": configured,
+        "upload_profile": biblio_upload_profile(context.workspace.id),
         "publish_ready": configured and bool(candidate.get("ready")),
         "action": "update" if candidate.get("already_listed") else "publish",
     }
@@ -2717,10 +2756,28 @@ def connectors(context: RequestContext = Depends(require_context)):
             configured = channel in stored_credentials
             operational = configured
 
+        saved_values: dict[str, str] = {}
+        credential = stored_credentials.get(channel)
+        if credential is not None:
+            try:
+                raw_values = decrypt_json(credential.encrypted_payload)
+            except ValueError:
+                raw_values = {}
+            for key in CONNECTOR_PREFILL_KEYS.get(channel, ()):
+                value = raw_values.get(key)
+                if value not in (None, ""):
+                    saved_values[key] = str(value)
+        if channel == Channel.BIBLIO:
+            saved_values.setdefault(
+                "upload_profile",
+                biblio_upload_profile(context.workspace.id),
+            )
+
         result.append(
             {
                 **info,
                 "configured": configured,
+                "saved_values": saved_values,
                 "operational": operational,
                 "sync_available": operational and channel in {
                     Channel.BIBLIO,
@@ -2763,6 +2820,7 @@ def _serialize_biblio_activity_run(run: models.ConnectorSyncRun) -> dict[str, An
         "stage": detail.get("stage"),
         "message": detail.get("message"),
         "mode": detail.get("mode"),
+        "upload_profile": detail.get("upload_profile"),
         "listing_id": detail.get("listing_id"),
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
@@ -2956,6 +3014,13 @@ def save_connector_credentials(
         if channel == Channel.BIBLIO:
             if not str(merged.get("username") or "").strip() or not str(merged.get("password") or "").strip():
                 raise HTTPException(status_code=400, detail="BIBLIO needs username and password")
+            upload_profile = str(merged.get("upload_profile") or "core").strip().lower()
+            if upload_profile not in {"core", "extended"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="BIBLIO upload profile must be core or extended",
+                )
+            merged["upload_profile"] = upload_profile
         elif channel == Channel.EBAY:
             direct = bool(str(merged.get("oauth_token") or "").strip())
             refreshable = all(

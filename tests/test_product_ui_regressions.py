@@ -498,9 +498,9 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
     assert '["title", "Title", fields.title || "", sources.title, true, true]' in APP_JS
     assert '["author", "Author", fields.author || "", sources.author, true, true]' in APP_JS
     assert '["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false]' in APP_JS
-    assert '["publisher", "Publisher", enrichment.publisher || "", enrichment.publisher ? "isbn" : null, true, false]' in APP_JS
-    assert '["edition", "Edition", enrichment.edition || "", enrichment.edition ? "isbn" : null, true, false]' in APP_JS
-    assert '["publish_date", "Publish date", enrichment.publish_date || "", enrichment.publish_date ? "isbn" : null, true, false]' in APP_JS
+    assert '["publisher", "Publisher", enrichment.publisher || "", bibliographicSources.publisher || null, true, false]' in APP_JS
+    assert '["edition", "Edition", enrichment.edition || "", bibliographicSources.edition || null, true, false]' in APP_JS
+    assert '["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false]' in APP_JS
     assert 'document.querySelectorAll(".biblio-review-input").forEach' in APP_JS
     assert 'const required = field.dataset.required === "true";' in APP_JS
     assert 'payload[field.dataset.field] = value' in APP_JS
@@ -536,3 +536,76 @@ def test_biblio_ui_explains_deferred_photo_retry_and_filename_warning():
     assert "photo retry scheduled" in APP_JS
     assert "BIBLIO ignores an image if there is no active listing" in APP_JS
     assert "Photo warning:" in APP_JS
+
+
+
+def test_cross_list_preview_surfaces_all_prefilled_reusable_metadata():
+    for label in (
+        "ISBN", "Barcode", "Author", "Publisher", "Edition", "Published",
+        "Language", "Binding", "Pages", "Condition", "Brand", "Size",
+        "Colour", "Material",
+    ):
+        assert f'["{label}",' in APP_JS
+    assert '<strong>Prefilled:</strong>' in APP_JS
+    assert "data.enrichment_warning" in APP_JS
+
+
+def test_inventory_edit_form_exposes_all_reusable_identifier_and_book_fields():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    for field in (
+        "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+        "binding", "language", "publish_date", "publication_year", "pages",
+    ):
+        assert f'name="{field}"' in html
+        assert f'"{field}"' in APP_JS
+
+
+def test_quick_listing_can_capture_and_enrich_all_book_metadata():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    for field in (
+        "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+        "binding", "language", "publish_date", "publication_year", "pages",
+    ):
+        assert f'name="{field}"' in html
+    assert "async function enrichQuickBookFromIsbn()" in APP_JS
+    assert 'api("/api/app/stock-intake/barcode/lookup"' in APP_JS
+    assert 'fillBlank("binding", metadata.physical_format);' in APP_JS
+    assert 'fillBlank("pages", metadata.number_of_pages);' in APP_JS
+    assert "if (result.isbn) await enrichQuickBookFromIsbn();" in APP_JS
+
+
+
+def test_biblio_review_exposes_every_supported_prefilled_book_field():
+    for row in (
+        '["subtitle", "Subtitle", enrichment.subtitle || "", bibliographicSources.subtitle || null, true, false]',
+        '["publisher", "Publisher", enrichment.publisher || "", bibliographicSources.publisher || null, true, false]',
+        '["edition", "Edition", enrichment.edition || "", bibliographicSources.edition || null, true, false]',
+        '["binding", "Binding", enrichment.binding || "", bibliographicSources.binding || null, true, false]',
+        '["language", "Language", enrichment.language || "", bibliographicSources.language || null, true, false]',
+        '["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false]',
+        '["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false]',
+        '["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false]',
+    ):
+        assert row in APP_JS
+    assert 'master_barcode: "Master barcode"' in APP_JS
+    assert 'vinted_barcode: "Vinted barcode"' in APP_JS
+    assert 'review: "Reviewed"' in APP_JS
+
+
+def test_biblio_upload_profile_is_explicit_and_safe_by_default():
+    assert '["upload_profile", "Upload profile (core or extended)", "core", "text"]' in APP_JS
+    assert "Use upload profile core for the existing 8-column BIBLIO filter" in APP_JS
+    assert 'data.upload_profile === "core"' in APP_JS
+    assert "optional bibliographic fields are retained locally" in APP_JS
+    assert "Extended BIBLIO profile will send" in APP_JS
+
+
+
+def test_connector_forms_prefill_saved_nonsecret_settings_only():
+    assert "connector?.saved_values || {}" in APP_JS
+    assert 'const value = type === "password" ? "" : (savedValues[name] ?? "");' in APP_JS
+    assert "'saved_values':" not in APP_JS

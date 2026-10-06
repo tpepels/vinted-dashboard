@@ -7,6 +7,7 @@ other channel later.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -17,6 +18,16 @@ from sqlalchemy.orm import Session
 from app import models, stock_intake
 from app.constants import Channel, ItemCategory, ListingStatus
 from app.workspace_bootstrap import clean_isbn, get_or_create_channel_account
+
+
+def _isbn_from_book_barcode(value: Any) -> str | None:
+    raw = re.sub(r"[^0-9Xx]", "", str(value or ""))
+    if not (
+        (len(raw) == 13 and raw.startswith(("978", "979")))
+        or len(raw) == 10
+    ):
+        return None
+    return clean_isbn(raw)
 
 
 def _value(*choices: tuple[Any, str]) -> tuple[Any, str | None]:
@@ -130,20 +141,34 @@ def _existing_biblio(
 def _source_image_urls(
     item: models.InventoryItem,
     source_listing: models.ChannelListing | None,
+    *,
+    include_master_fallbacks: bool = True,
 ) -> list[str]:
     urls: list[str] = []
     if source_listing is not None:
         extra = dict(source_listing.extra or {})
         raw_urls = extra.get("image_urls")
         if isinstance(raw_urls, list):
-            urls.extend(str(value).strip() for value in raw_urls if str(value or "").strip())
+            urls.extend(
+                str(value).strip()
+                for value in raw_urls
+                if str(value or "").strip()
+            )
         elif extra.get("image_url"):
             urls.append(str(extra["image_url"]).strip())
-    if not urls:
+    if include_master_fallbacks and not urls:
         attrs = dict(item.attributes or {})
         raw_urls = attrs.get("image_urls")
         if isinstance(raw_urls, list):
-            urls.extend(str(value).strip() for value in raw_urls if str(value or "").strip())
+            urls.extend(
+                str(value).strip()
+                for value in raw_urls
+                if str(value or "").strip()
+            )
+        for key in ("image_url", "cover_url", "cover_image_url"):
+            value = str(attrs.get(key) or "").strip()
+            if value:
+                urls.append(value)
     return list(dict.fromkeys(urls))[:5]
 
 
@@ -258,6 +283,8 @@ def build_biblio_candidate(
     isbn, isbn_source = _value(
         (clean_isbn(vmeta.get("isbn")), "vinted"),
         (clean_isbn(attrs.get("isbn")), "master"),
+        (_isbn_from_book_barcode(vmeta.get("barcode")), "vinted_barcode"),
+        (_isbn_from_book_barcode(attrs.get("barcode")), "master_barcode"),
     )
 
     enrichment: dict[str, Any] | None = None
@@ -306,18 +333,86 @@ def build_biblio_candidate(
         ("EUR", "default"),
     )
 
+    publisher, publisher_source = _value(
+        (vmeta.get("publisher"), "vinted"),
+        (attrs.get("publisher"), "master"),
+        (
+            str(enrichment.get("publisher") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    edition, edition_source = _value(
+        (attrs.get("edition"), "master"),
+        (
+            str(enrichment.get("edition") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    publish_date, publish_date_source = _value(
+        (attrs.get("publish_date"), "master"),
+        (attrs.get("publication_date"), "master"),
+        (attrs.get("publication_year"), "master"),
+        (
+            str(enrichment.get("publish_date") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    subtitle, subtitle_source = _value(
+        (attrs.get("subtitle"), "master"),
+        (
+            str(enrichment.get("subtitle") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    binding, binding_source = _value(
+        (attrs.get("binding"), "master"),
+        (attrs.get("physical_format"), "master"),
+        (
+            str(enrichment.get("physical_format") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    language, language_source = _value(
+        (vmeta.get("language"), "vinted"),
+        (attrs.get("language"), "master"),
+    )
+    pages, pages_source = _value(
+        (attrs.get("pages"), "master"),
+        (attrs.get("number_of_pages"), "master"),
+        ((enrichment or {}).get("number_of_pages"), "isbn"),
+    )
+    condition, condition_source = _value(
+        (vmeta.get("condition"), "vinted"),
+        (item.condition, "master"),
+    )
     enrichment_fields = {
-        key: str(enrichment.get(key) or "").strip() or None
-        for key in ("publisher", "edition", "publish_date")
-    } if enrichment else {
-        "publisher": None,
-        "edition": None,
-        "publish_date": None,
+        "subtitle": subtitle,
+        "publisher": publisher,
+        "edition": edition,
+        "binding": binding,
+        "language": language,
+        "pages": pages,
+        "publish_date": publish_date,
+        "condition": condition,
+    }
+    bibliographic_sources = {
+        "subtitle": subtitle_source,
+        "publisher": publisher_source,
+        "edition": edition_source,
+        "binding": binding_source,
+        "language": language_source,
+        "pages": pages_source,
+        "publish_date": publish_date_source,
+        "condition": condition_source,
     }
 
     existing = _existing_biblio(session, workspace_id, item.id)
     book_id = existing.external_id if existing else item.sku
-    image_urls = _source_image_urls(item, vinted)
+    image_urls = _source_image_urls(
+        item,
+        vinted,
+        include_master_fallbacks=False,
+    )
 
     fields = {
         "sku": item.sku,
@@ -363,6 +458,7 @@ def build_biblio_candidate(
         "book_id_suggestion": book_id,
         "enrichment_warning": enrichment_warning,
         "bibliographic_enrichment": enrichment_fields,
+        "bibliographic_sources": bibliographic_sources,
     }
     return validate_biblio_candidate(
         session,
@@ -396,11 +492,19 @@ def apply_biblio_overrides(
         sources["price_cents"] = "review"
 
     bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
-    for key in ("publisher", "edition", "publish_date"):
+    bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
+    for key in (
+        "subtitle", "publisher", "edition", "binding",
+        "language", "pages", "publish_date", "condition",
+    ):
         if key not in overrides or overrides[key] is None:
             continue
         value = str(overrides[key]).strip()
-        bibliographic[key] = value or None
+        if key == "pages":
+            bibliographic[key] = int(value) if value else None
+        else:
+            bibliographic[key] = value or None
+        bibliographic_sources[key] = "review"
 
     if not fields.get("book_id") and fields.get("sku"):
         fields["book_id"] = fields["sku"]
@@ -424,6 +528,7 @@ def apply_biblio_overrides(
         "fields": fields,
         "field_sources": sources,
         "bibliographic_enrichment": bibliographic,
+        "bibliographic_sources": bibliographic_sources,
         "missing": missing,
         "ready": not missing,
         "photo_warning": _biblio_photo_book_id_warning(
@@ -543,10 +648,19 @@ def upsert_biblio_listing(
         attrs["description"] = fields["description"]
     if fields.get("price_cents") is not None and attrs.get("default_price_cents") is None:
         attrs["default_price_cents"] = int(fields["price_cents"])
-    for key, value in dict(candidate.get("bibliographic_enrichment") or {}).items():
-        if key in {"publisher", "edition", "publish_date"} and value and not attrs.get(key):
+    bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
+    bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
+    for key, value in bibliographic.items():
+        if (
+            key in {
+                "subtitle", "publisher", "edition", "binding",
+                "language", "pages", "publish_date", "condition",
+            }
+            and value not in (None, "")
+            and not attrs.get(key)
+        ):
             attrs[key] = value
-            attrs[f"{key}_source"] = "isbn"
+            attrs[f"{key}_source"] = bibliographic_sources.get(key) or "unknown"
     item.attributes = attrs
     session.flush()
     return existing

@@ -35,12 +35,17 @@ CANONICAL_FIELDS = (
     "currency",
     "location",
     "notes",
+    "barcode",
     "author",
     "isbn",
+    "subtitle",
     "publisher",
     "edition",
     "binding",
+    "language",
+    "publish_date",
     "publication_year",
+    "pages",
     "brand",
     "size",
     "colour",
@@ -62,12 +67,17 @@ FIELD_ALIASES: dict[str, set[str]] = {
     "currency": {"currency", "currency code"},
     "location": {"location", "storage", "storage location", "shelf", "bin"},
     "notes": {"notes", "note"},
+    "barcode": {"barcode", "gtin", "ean", "upc", "global unique id"},
     "author": {"author", "writer"},
     "isbn": {"isbn", "isbn10", "isbn13", "isbn-10", "isbn-13"},
+    "subtitle": {"subtitle", "sub title"},
     "publisher": {"publisher"},
     "edition": {"edition"},
-    "binding": {"binding", "format"},
+    "binding": {"binding", "format", "physical format"},
+    "language": {"language", "lang"},
+    "publish_date": {"publish date", "publication date", "date published"},
     "publication_year": {"publication year", "year", "published"},
+    "pages": {"pages", "page count", "number of pages"},
     "brand": {"brand", "make"},
     "size": {"size"},
     "colour": {"colour", "color"},
@@ -76,7 +86,8 @@ FIELD_ALIASES: dict[str, set[str]] = {
 }
 
 ATTRIBUTE_FIELDS = {
-    "author", "isbn", "publisher", "edition", "binding", "publication_year",
+    "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+    "binding", "language", "publish_date", "publication_year", "pages",
     "brand", "size", "colour", "material", "measurements",
 }
 
@@ -255,6 +266,16 @@ def _row_payload(
                 attributes[key] = cleaned
             else:
                 errors.append("invalid ISBN")
+        elif key == "barcode":
+            cleaned = re.sub(r"[^0-9A-Za-z]", "", str(value))
+            if cleaned:
+                attributes[key] = cleaned
+        elif key in {"publication_year", "pages"}:
+            number = _int(value, None)
+            if number is not None and number >= 0:
+                attributes[key] = number
+            else:
+                errors.append(f"invalid {key.replace('_', ' ')}")
         else:
             attributes[key] = str(value).strip()
 
@@ -470,8 +491,9 @@ def apply_inventory_import(
 
 EXPORT_HEADERS = [
     "SKU", "Title", "Category", "Quantity", "Condition", "Cost", "Price",
-    "Currency", "Location", "Notes", "Author", "ISBN", "Publisher", "Edition",
-    "Binding", "Publication Year", "Brand", "Size", "Colour", "Material",
+    "Currency", "Location", "Notes", "Barcode", "Author", "ISBN", "Subtitle",
+    "Publisher", "Edition", "Binding", "Language", "Publish Date",
+    "Publication Year", "Pages", "Brand", "Size", "Colour", "Material",
     "Measurements", "Status",
 ]
 
@@ -494,12 +516,17 @@ def inventory_export_rows(items: Iterable[models.InventoryItem]) -> list[dict[st
             "Currency": item.currency or "EUR",
             "Location": item.location or "",
             "Notes": item.notes or "",
+            "Barcode": attrs.get("barcode", ""),
             "Author": attrs.get("author", ""),
             "ISBN": attrs.get("isbn", ""),
+            "Subtitle": attrs.get("subtitle", ""),
             "Publisher": attrs.get("publisher", ""),
             "Edition": attrs.get("edition", ""),
             "Binding": attrs.get("binding", ""),
+            "Language": attrs.get("language", ""),
+            "Publish Date": attrs.get("publish_date", ""),
             "Publication Year": attrs.get("publication_year", ""),
+            "Pages": attrs.get("pages", ""),
             "Brand": attrs.get("brand", ""),
             "Size": attrs.get("size", ""),
             "Colour": attrs.get("colour", ""),

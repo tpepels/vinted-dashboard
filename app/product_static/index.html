@@ -243,10 +243,17 @@
               <label class="quick-clothing-field">Colour<input name="colour"></label>
               <label class="quick-clothing-field">Material<input name="material"></label>
               <label>Condition<input name="condition"></label>
+              <label>Barcode / GTIN<input name="barcode"></label>
               <label class="quick-book-field">Author<input name="author"></label>
               <label class="quick-book-field">ISBN<input name="isbn"></label>
+              <label class="quick-book-field">Subtitle<input name="subtitle"></label>
               <label class="quick-book-field">Publisher<input name="publisher"></label>
               <label class="quick-book-field">Edition<input name="edition"></label>
+              <label class="quick-book-field">Binding<input name="binding"></label>
+              <label class="quick-book-field">Language<input name="language"></label>
+              <label class="quick-book-field">Publish date<input name="publish_date"></label>
+              <label class="quick-book-field">Publication year<input name="publication_year" type="number" min="0"></label>
+              <label class="quick-book-field">Pages<input name="pages" type="number" min="0"></label>
               <label>Optional SKU<input name="sku" placeholder="Generated automatically"></label>
               <label>Storage location<input name="location"></label>
               <label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label>
@@ -277,8 +284,8 @@
         </div>
         <form id="item-form" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">MASTER INVENTORY</p><h2 id="item-form-title">Add item</h2></div><span id="item-form-channels" class="muted"></span></div>
-          <div class="form-grid"><label>SKU<input name="sku" required></label><label>Title<input name="title" required></label><label>Category<select name="category" id="item-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="1"></label><label>Condition<input name="condition"></label><label>Location<input name="location"></label><label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Default selling price<input name="price" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Currency<input name="currency" maxlength="3" value="EUR"></label></div>
-          <div id="book-fields" class="form-grid category-fields hidden"><label>Author<input name="author"></label><label>ISBN<input name="isbn"></label><label>Publisher<input name="publisher"></label><label>Edition<input name="edition"></label><label>Binding<input name="binding"></label><label>Publication year<input name="publication_year"></label></div>
+          <div class="form-grid"><label>SKU<input name="sku" required></label><label>Title<input name="title" required></label><label>Category<select name="category" id="item-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option></select></label><label>Quantity<input name="quantity" type="number" min="0" value="1"></label><label>Condition<input name="condition"></label><label>Barcode / GTIN<input name="barcode"></label><label>Location<input name="location"></label><label>Cost price<input name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Default selling price<input name="price" type="number" min="0" step="0.01" placeholder="0.00"></label><label>Currency<input name="currency" maxlength="3" value="EUR"></label></div>
+          <div id="book-fields" class="form-grid category-fields hidden"><label>Author<input name="author"></label><label>ISBN<input name="isbn"></label><label>Subtitle<input name="subtitle"></label><label>Publisher<input name="publisher"></label><label>Edition<input name="edition"></label><label>Binding<input name="binding"></label><label>Language<input name="language"></label><label>Publish date<input name="publish_date"></label><label>Publication year<input name="publication_year"></label><label>Pages<input name="pages" type="number" min="0"></label></div>
           <div id="clothing-fields" class="form-grid category-fields hidden"><label>Brand<input name="brand"></label><label>Size<input name="size"></label><label>Colour<input name="colour"></label><label>Material<input name="material"></label><label>Measurements<input name="measurements"></label></div>
           <label>Notes<textarea name="notes" rows="3"></textarea></label>
           <div class="actions"><button id="save-item" class="btn primary">Save</button><button class="btn" type="button" id="cancel-item">Cancel</button></div>

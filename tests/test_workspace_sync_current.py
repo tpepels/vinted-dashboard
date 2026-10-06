@@ -164,3 +164,93 @@ def test_workspace_snapshot_preserves_explicit_reconciliation_link():
         ).scalar_one()
         assert listing.inventory_item_id == reconciled_id
         assert listing.title == "Updated"
+
+
+
+def test_connector_snapshot_preserves_rich_metadata_and_infers_book_isbn():
+    workspace_id = _workspace_id()
+    record_workspace_channel_snapshot(
+        workspace_id,
+        "woocommerce",
+        [{
+            "source_id": "501",
+            "sku": "BOOK-501",
+            "title": "Imported book",
+            "status": "active",
+            "quantity": 1,
+            "price_cents": 900,
+            "currency": "EUR",
+            "category": "Books",
+            "barcode": "9780140328721",
+            "description": "Imported description",
+            "attributes": {
+                "Author": "Roald Dahl",
+                "Publisher": "Puffin",
+                "Edition": "Revised",
+                "Binding": "Paperback",
+                "Language": "English",
+                "Publication Year": "1988",
+                "Pages": "176",
+            },
+        }],
+        synced_at=datetime.now(timezone.utc),
+        full_snapshot=True,
+    )
+
+    with db.session_scope() as session:
+        item = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == workspace_id,
+                models.InventoryItem.sku == "BOOK-501",
+            )
+        ).scalar_one()
+        assert item.category == "book"
+        assert item.attributes["isbn"] == "9780140328721"
+        assert item.attributes["barcode"] == "9780140328721"
+        assert item.attributes["author"] == "Roald Dahl"
+        assert item.attributes["publisher"] == "Puffin"
+        assert item.attributes["edition"] == "Revised"
+        assert item.attributes["binding"] == "Paperback"
+        assert item.attributes["language"] == "English"
+        assert item.attributes["publication_year"] == 1988
+        assert item.attributes["pages"] == 176
+        assert item.attributes["description"] == "Imported description"
+
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == "woocommerce",
+                models.ChannelListing.external_id == "501",
+            )
+        ).scalar_one()
+        remote = listing.extra["remote_metadata"]
+        assert remote["isbn"] == "9780140328721"
+        assert remote["barcode"] == "9780140328721"
+
+
+def test_nonbook_ean_is_not_misclassified_as_isbn():
+    workspace_id = _workspace_id()
+    record_workspace_channel_snapshot(
+        workspace_id,
+        "woocommerce",
+        [{
+            "source_id": "502",
+            "sku": "GENERAL-502",
+            "title": "General item",
+            "status": "active",
+            "quantity": 1,
+            "category": "Home",
+            "barcode": "9781234567897",
+        }],
+        synced_at=datetime.now(timezone.utc),
+        full_snapshot=True,
+    )
+
+    with db.session_scope() as session:
+        item = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.sku == "GENERAL-502"
+            )
+        ).scalar_one()
+        assert item.attributes["barcode"] == "9781234567897"
+        assert "isbn" not in item.attributes

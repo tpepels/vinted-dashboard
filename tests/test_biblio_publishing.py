@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import db, entry, models, publishing
+from app.connectors import hosted
 from app.constants import Channel, ItemCategory, ListingStatus
 from app.product_models import BackgroundJob
 from app.workspace_ingest import classify_vinted_category, record_workspace_snapshot
@@ -852,9 +853,12 @@ def test_biblio_publish_persists_isbn_enrichment_on_master_item(monkeypatch):
             "found": True,
             "isbn": isbn,
             "title": "The Trial",
+            "subtitle": "A Novel",
             "author": "Franz Kafka",
             "publisher": "Penguin Classics",
             "edition": "Revised edition",
+            "physical_format": "Paperback",
+            "number_of_pages": 256,
             "publish_date": "2000",
         },
     )
@@ -868,11 +872,13 @@ def test_biblio_publish_persists_isbn_enrichment_on_master_item(monkeypatch):
             source_listing_id=listing_id,
             enrich_isbn=True,
         )
-        assert candidate["bibliographic_enrichment"] == {
-            "publisher": "Penguin Classics",
-            "edition": "Revised edition",
-            "publish_date": "2000",
-        }
+        enrichment = candidate["bibliographic_enrichment"]
+        assert enrichment["subtitle"] == "A Novel"
+        assert enrichment["publisher"] == "Penguin Classics"
+        assert enrichment["edition"] == "Revised edition"
+        assert enrichment["binding"] == "Paperback"
+        assert enrichment["pages"] == 256
+        assert enrichment["publish_date"] == "2000"
         publishing.upsert_biblio_listing(
             session,
             workspace,
@@ -886,6 +892,12 @@ def test_biblio_publish_persists_isbn_enrichment_on_master_item(monkeypatch):
         assert item.attributes["publisher_source"] == "isbn"
         assert item.attributes["edition"] == "Revised edition"
         assert item.attributes["edition_source"] == "isbn"
+        assert item.attributes["subtitle"] == "A Novel"
+        assert item.attributes["subtitle_source"] == "isbn"
+        assert item.attributes["binding"] == "Paperback"
+        assert item.attributes["binding_source"] == "isbn"
+        assert item.attributes["pages"] == 256
+        assert item.attributes["pages_source"] == "isbn"
         assert item.attributes["publish_date"] == "2000"
         assert item.attributes["publish_date_source"] == "isbn"
 
@@ -1116,3 +1128,129 @@ def test_changing_biblio_book_id_requeues_same_photos():
         assert updated.id == first_id
         assert updated.external_id == "RENAMED-BOOK-ID"
         assert updated.extra["photo_sync_state"] == "queued"
+
+
+
+def test_biblio_candidate_prefills_isbn_from_valid_master_book_barcode():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="BARCODE-BOOK",
+            title="Barcode Book",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            currency="EUR",
+            notes="Description",
+            attributes={
+                "barcode": "9780140328721",
+                "author": "Roald Dahl",
+                "publisher": "Puffin",
+                "edition": "Revised",
+                "publication_year": 1988,
+                "default_price_cents": 700,
+            },
+        )
+        session.add(item)
+        session.flush()
+        item_id = item.id
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            enrich_isbn=False,
+        )
+
+    assert candidate["ready"] is True
+    assert candidate["fields"]["isbn"] == "9780140328721"
+    assert candidate["field_sources"]["isbn"] == "master_barcode"
+    assert candidate["bibliographic_enrichment"]["publisher"] == "Puffin"
+    assert candidate["bibliographic_sources"]["publisher"] == "master"
+    assert candidate["bibliographic_enrichment"]["edition"] == "Revised"
+    assert candidate["bibliographic_sources"]["edition"] == "master"
+    assert candidate["bibliographic_enrichment"]["publish_date"] == 1988
+    assert candidate["bibliographic_sources"]["publish_date"] == "master"
+
+
+
+def test_biblio_credentials_validate_upload_profile(monkeypatch):
+    client, csrf = _registered_client(monkeypatch)
+    invalid = client.put(
+        "/api/app/connectors/biblio/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {
+            "username": "seller",
+            "password": "secret",
+            "upload_profile": "everything",
+        }},
+    )
+    assert invalid.status_code == 400
+    assert "core or extended" in invalid.json()["detail"]
+
+    valid = client.put(
+        "/api/app/connectors/biblio/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {
+            "username": "seller",
+            "password": "secret",
+            "upload_profile": "extended",
+        }},
+    )
+    assert valid.status_code == 200, valid.text
+
+    with db.session_scope() as session:
+        membership = session.execute(select(models.Membership)).scalar_one()
+        workspace_id = membership.workspace_id
+    assert hosted.biblio_upload_profile(workspace_id) == "extended"
+
+    connectors = client.get("/api/app/connectors")
+    assert connectors.status_code == 200, connectors.text
+    biblio = next(
+        row for row in connectors.json()["connectors"]
+        if row["channel"] == Channel.BIBLIO
+    )
+    assert biblio["saved_values"]["username"] == "seller"
+    assert biblio["saved_values"]["upload_profile"] == "extended"
+    assert "password" not in biblio["saved_values"]
+
+
+
+def test_biblio_does_not_treat_master_cover_as_vinted_photo():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="MASTER-COVER-ONLY",
+            title="Book",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            condition="good",
+            currency="EUR",
+            notes="Description",
+            attributes={
+                "author": "Author",
+                "isbn": "9780140328721",
+                "publisher": "Publisher",
+                "edition": "Edition",
+                "publish_date": "2000",
+                "cover_url": "https://covers.openlibrary.org/b/id/123-M.jpg",
+                "default_price_cents": 900,
+            },
+        )
+        session.add(item)
+        session.flush()
+        item_id = item.id
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            enrich_isbn=False,
+        )
+
+    assert candidate["source"]["channel"] == "master"
+    assert candidate["source"]["image_urls"] == []
+    assert candidate["source"]["photo_count"] == 0

@@ -147,6 +147,33 @@ def _ebay_access_token(values: dict[str, str]) -> str:
     return token
 
 
+def _ebay_item_specifics(node: ET.Element, ns: dict[str, str]) -> dict[str, Any]:
+    attributes: dict[str, Any] = {}
+    for row in node.findall("e:ItemSpecifics/e:NameValueList", ns):
+        name = str(row.findtext("e:Name", default="", namespaces=ns) or "").strip()
+        if not name:
+            continue
+        values = [
+            str(value.text or "").strip()
+            for value in row.findall("e:Value", ns)
+            if str(value.text or "").strip()
+        ]
+        if not values:
+            continue
+        attributes[name] = values[0] if len(values) == 1 else values
+    return attributes
+
+
+def _ebay_picture_url(node: ET.Element, ns: dict[str, str]) -> str | None:
+    gallery = node.findtext("e:PictureDetails/e:GalleryURL", namespaces=ns)
+    if gallery:
+        return gallery
+    picture = node.find("e:PictureDetails/e:PictureURL", ns)
+    if picture is not None and picture.text:
+        return picture.text.strip() or None
+    return None
+
+
 def _fetch_ebay_active(values: dict[str, str]) -> list[dict[str, Any]]:
     token = _ebay_access_token(values)
     site_id = values.get("site_id", "0").strip() or "0"
@@ -196,16 +223,22 @@ def _fetch_ebay_active(values: dict[str, str]) -> list[dict[str, Any]]:
             quantity = _int(node.findtext("e:QuantityAvailable", namespaces=ns))
             if quantity is None:
                 quantity = _int(node.findtext("e:Quantity", namespaces=ns), 1)
+            attributes = _ebay_item_specifics(node, ns)
             items.append(
                 {
                     "source_id": item_id,
                     "sku": node.findtext("e:SKU", namespaces=ns),
                     "title": node.findtext("e:Title", namespaces=ns) or "Untitled",
+                    "description": node.findtext("e:Description", namespaces=ns),
                     "status": ListingStatus.ACTIVE,
                     "quantity": quantity,
                     "price_cents": _money(price_node.text if price_node is not None else None),
                     "currency": price_node.attrib.get("currencyID") if price_node is not None else None,
                     "url": node.findtext("e:ListingDetails/e:ViewItemURL", namespaces=ns),
+                    "category": node.findtext("e:PrimaryCategory/e:CategoryName", namespaces=ns),
+                    "condition": node.findtext("e:ConditionDisplayName", namespaces=ns),
+                    "attributes": attributes,
+                    "image_url": _ebay_picture_url(node, ns),
                 }
             )
         total_pages = _int(
@@ -644,6 +677,65 @@ def _woo_post(
     return response.json()
 
 
+CANDIDATE_DETAIL_FIELDS = (
+    ("Author", "author"),
+    ("Subtitle", "subtitle"),
+    ("Publisher", "publisher"),
+    ("Edition", "edition"),
+    ("Publication date", "publish_date"),
+    ("Publication year", "publication_year"),
+    ("Language", "language"),
+    ("Binding", "binding"),
+    ("Pages", "pages"),
+    ("Condition", "condition"),
+    ("Brand", "brand"),
+    ("Size", "size"),
+    ("Colour", "colour"),
+    ("Material", "material"),
+    ("ISBN", "isbn"),
+)
+
+
+def _candidate_identifier(fields: dict[str, Any]) -> tuple[str | None, str | None]:
+    isbn = str(fields.get("isbn") or "").strip()
+    if isbn:
+        return isbn, "ISBN"
+    barcode = str(fields.get("barcode") or "").strip()
+    if not barcode:
+        return None, None
+    if re.fullmatch(r"\d{12}", barcode):
+        return barcode, "UPC"
+    if re.fullmatch(r"\d{13}", barcode):
+        return barcode, "EAN"
+    return barcode, None
+
+
+def _candidate_detail_values(fields: dict[str, Any]) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    for label, key in CANDIDATE_DETAIL_FIELDS:
+        value = fields.get(key)
+        if value in (None, "", [], {}):
+            continue
+        if isinstance(value, (list, tuple, set)):
+            text = ", ".join(str(part).strip() for part in value if str(part).strip())
+        else:
+            text = str(value).strip()
+        if text:
+            rows.append((label, key, text))
+    return rows
+
+
+def _candidate_snapshot_metadata(fields: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        key: fields.get(key)
+        for _label, key in CANDIDATE_DETAIL_FIELDS
+        if fields.get(key) not in (None, "", [], {})
+    }
+    if fields.get("barcode") not in (None, ""):
+        result["barcode"] = fields.get("barcode")
+    return result
+
+
 def create_woocommerce_workspace_listing(
     workspace_id: uuid.UUID,
     candidate: dict[str, Any],
@@ -662,6 +754,20 @@ def create_woocommerce_workspace_listing(
         "stock_quantity": max(0, int(fields.get("quantity") or 0)),
         "stock_status": "instock" if int(fields.get("quantity") or 0) > 0 else "outofstock",
     }
+    identifier, _identifier_type = _candidate_identifier(fields)
+    if identifier:
+        body["global_unique_id"] = identifier
+    attributes = [
+        {
+            "name": label,
+            "visible": True,
+            "variation": False,
+            "options": [value],
+        }
+        for label, _key, value in _candidate_detail_values(fields)
+    ]
+    if attributes:
+        body["attributes"] = attributes
     if image_urls:
         body["images"] = [{"src": str(url)} for url in image_urls]
     raw = _woo_post(values, "products", body=body)
@@ -684,6 +790,11 @@ def create_woocommerce_workspace_listing(
             else None
         ),
         "description": raw.get("description") or fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "global_unique_id": raw.get("global_unique_id") or identifier,
+        "attributes": _woo_metadata(raw) or {
+            label: value for label, _key, value in _candidate_detail_values(fields)
+        },
         "image_url": (
             (raw.get("images") or [{}])[0].get("src")
             if raw.get("images")
@@ -745,8 +856,11 @@ def _fetch_woocommerce_products(values: dict[str, str]) -> list[dict[str, Any]]:
                 for row in (product.get("brands") or [])
                 if isinstance(row, dict) and row.get("name")
             ]
+            product_attributes = _woo_metadata(product)
             common = {
                 "description": product.get("description") or product.get("short_description"),
+                "global_unique_id": product.get("global_unique_id"),
+                "barcode": product.get("global_unique_id"),
                 "category": " / ".join(categories) if categories else None,
                 "brand": brands[0] if brands else None,
                 "tags": [
@@ -802,8 +916,20 @@ def _fetch_woocommerce_products(values: dict[str, str]) -> list[dict[str, Any]]:
                                     or created
                                 )
                                 else None,
-                                "attributes": attrs,
-                                **common,
+                                "barcode": (
+                                    variation.get("global_unique_id")
+                                    or common.get("barcode")
+                                ),
+                                "global_unique_id": (
+                                    variation.get("global_unique_id")
+                                    or common.get("global_unique_id")
+                                ),
+                                "attributes": {**product_attributes, **attrs},
+                                **{
+                                    key: value
+                                    for key, value in common.items()
+                                    if key not in {"barcode", "global_unique_id"}
+                                },
                             }
                         )
                     if len(variation_rows) < 100:
@@ -1046,6 +1172,17 @@ def create_shopify_workspace_listing(
             }
         ],
     }
+    identifier, identifier_type = _candidate_identifier(fields)
+    if identifier:
+        api_version = str(values.get("api_version") or "")
+        if api_version >= "2026-10":
+            barcode_input: dict[str, Any] = {"value": identifier}
+            if identifier_type:
+                barcode_input["type"] = identifier_type
+            variant_input["barcodes"] = [barcode_input]
+        else:
+            variant_input["barcode"] = identifier
+
     if image_urls:
         variant_input["file"] = {
             "originalSource": str(image_urls[0]),
@@ -1066,6 +1203,31 @@ def create_shopify_workspace_listing(
         ],
         "variants": [variant_input],
     }
+    vendor = str(fields.get("brand") or fields.get("publisher") or "").strip()
+    if vendor:
+        product_input["vendor"] = vendor
+    product_type = str(fields.get("category") or "").replace("_", " ").strip().title()
+    if product_type:
+        product_input["productType"] = product_type
+    raw_tags = fields.get("tags")
+    if isinstance(raw_tags, str):
+        tags = [value.strip() for value in raw_tags.split(",") if value.strip()]
+    else:
+        tags = [str(value).strip() for value in (raw_tags or []) if str(value).strip()]
+    if tags:
+        product_input["tags"] = list(dict.fromkeys(tags))[:250]
+    metafields = [
+        {
+            "namespace": "reseller",
+            "key": key,
+            "type": "single_line_text_field",
+            "value": value,
+        }
+        for _label, key, value in _candidate_detail_values(fields)
+    ]
+    if metafields:
+        product_input["metafields"] = metafields
+
     if image_urls:
         product_input["files"] = [
             {
@@ -1114,6 +1276,8 @@ def create_shopify_workspace_listing(
         "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
         "url": product.get("onlineStoreUrl"),
         "description": fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "barcode": identifier,
         "image_url": image_urls[0] if image_urls else None,
         "attributes": {
             "product_id": product_id,
@@ -1131,6 +1295,8 @@ query ResellerVariants($cursor: String) {
       displayName
       title
       sku
+      barcode
+      barcodes(first: 20) { nodes { value type } }
       price
       inventoryQuantity
       availableForSale
@@ -1139,10 +1305,14 @@ query ResellerVariants($cursor: String) {
       product {
         id
         title
+        descriptionHtml
         status
         productType
         vendor
         tags
+        metafields(first: 20, namespace: "reseller") {
+          nodes { key value }
+        }
         onlineStoreUrl
         featuredMedia { preview { image { url } } }
       }
@@ -1225,6 +1395,28 @@ def _fetch_shopify_products(values: dict[str, str]) -> list[dict[str, Any]]:
                     if not variant_title or variant_title == "Default Title"
                     else f"{product_title} - {variant_title}"
                 )
+            reseller_metafields = {
+                str(row.get("key")): row.get("value")
+                for row in (((product.get("metafields") or {}).get("nodes")) or [])
+                if isinstance(row, dict) and row.get("key")
+            }
+            typed_barcodes = [
+                row for row in (((variant.get("barcodes") or {}).get("nodes")) or [])
+                if isinstance(row, dict) and row.get("value")
+            ]
+            typed_isbn = next(
+                (
+                    str(row.get("value"))
+                    for row in typed_barcodes
+                    if str(row.get("type") or "").upper() == "ISBN"
+                ),
+                None,
+            )
+            barcode_value = (
+                str(typed_barcodes[0].get("value"))
+                if typed_barcodes
+                else variant.get("barcode")
+            )
             created = _remote_datetime(variant.get("createdAt"))
             result.append(
                 {
@@ -1236,10 +1428,23 @@ def _fetch_shopify_products(values: dict[str, str]) -> list[dict[str, Any]]:
                     "price_cents": _money(variant.get("price")),
                     "currency": values.get("currency", "EUR").strip().upper() or "EUR",
                     "listed_at": created.isoformat() if created else None,
+                    "description": product.get("descriptionHtml"),
                     "category": product.get("productType") or None,
                     "brand": product.get("vendor") or None,
+                    "barcode": barcode_value,
+                    "isbn": typed_isbn or reseller_metafields.get("isbn"),
+                    "author": reseller_metafields.get("author"),
+                    "publisher": reseller_metafields.get("publisher"),
+                    "edition": reseller_metafields.get("edition"),
+                    "publication_year": reseller_metafields.get("publication_year"),
+                    "publish_date": reseller_metafields.get("publish_date"),
+                    "language": reseller_metafields.get("language"),
+                    "condition": reseller_metafields.get("condition"),
+                    "material": reseller_metafields.get("material"),
+                    "size": reseller_metafields.get("size"),
+                    "color": reseller_metafields.get("colour"),
                     "tags": list(product.get("tags") or []),
-                    "attributes": options,
+                    "attributes": {**options, **reseller_metafields},
                     "product_type": product.get("productType") or None,
                     "url": product.get("onlineStoreUrl"),
                     "image_url": image_url,
@@ -1420,9 +1625,20 @@ def _bigcommerce_product_common(product: dict[str, Any]) -> dict[str, Any]:
         attributes["category_ids"] = category_ids
     if custom_path:
         attributes["storefront_path"] = custom_path
+    for row in product.get("custom_fields") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        value = row.get("value")
+        if name and value not in (None, ""):
+            attributes[name] = value
+    barcode = product.get("gtin") or product.get("upc") or None
     return {
         "description": product.get("description"),
         "brand": product.get("brand_name") or None,
+        "barcode": barcode,
+        "gtin": product.get("gtin") or None,
+        "upc": product.get("upc") or None,
         "product_type": product.get("type"),
         "tags": [
             value.strip()
@@ -1492,6 +1708,13 @@ def _fetch_bigcommerce_products(values: dict[str, str]) -> list[dict[str, Any]]:
                             "currency": values.get("currency", "EUR").strip().upper() or "EUR",
                             "listed_at": created.isoformat() if created else None,
                             **common,
+                            "barcode": (
+                                variant.get("gtin")
+                                or variant.get("upc")
+                                or common.get("barcode")
+                            ),
+                            "gtin": variant.get("gtin") or product.get("gtin"),
+                            "upc": variant.get("upc") or product.get("upc"),
                             "attributes": {**common.get("attributes", {}), **options},
                         }
                     )
@@ -2089,6 +2312,12 @@ def create_wix_workspace_listing(
             ]
         },
     }
+    description = str(fields.get("description") or "").strip()
+    if description:
+        product["plainDescription"] = description
+    identifier, _identifier_type = _candidate_identifier(fields)
+    if identifier:
+        product["variantsInfo"]["variants"][0]["barcode"] = identifier
     if image_urls:
         product["media"] = {
             "itemsInfo": {
@@ -2120,6 +2349,8 @@ def create_wix_workspace_listing(
             else None
         ),
         "description": fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "barcode": identifier,
         "image_url": image_urls[0] if image_urls else None,
         "attributes": {
             "product_id": product_id,
@@ -2162,6 +2393,33 @@ def _wix_query_variants(values: dict[str, str]) -> list[dict[str, Any]]:
         rows = payload.get("variants") or []
         if isinstance(rows, list):
             result.extend(row for row in rows if isinstance(row, dict))
+        cursor = _wix_next_cursor(payload)
+        if not cursor:
+            break
+    return result
+
+
+def _wix_query_products(values: dict[str, str]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    cursor: str | None = None
+    for _page in range(100):
+        cursor_paging: dict[str, Any] = {"limit": 100}
+        if cursor:
+            cursor_paging["cursor"] = cursor
+        payload = _wix_post(
+            values,
+            "stores/v3/products/query",
+            body={
+                "fields": ["PLAIN_DESCRIPTION"],
+                "query": {"cursorPaging": cursor_paging},
+            },
+        )
+        for product in payload.get("products") or []:
+            if not isinstance(product, dict):
+                continue
+            product_id = str(product.get("id") or "").strip()
+            if product_id:
+                result[product_id] = product
         cursor = _wix_next_cursor(payload)
         if not cursor:
             break
@@ -2266,6 +2524,7 @@ def _wix_variant_image(variant: dict[str, Any]) -> str | None:
 
 def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
     variants = _wix_query_variants(values)
+    products_by_id = _wix_query_products(values)
     inventory = _wix_inventory_by_variant(_wix_query_inventory(values))
     fallback_currency = values.get("currency", "EUR").strip().upper() or "EUR"
     result: list[dict[str, Any]] = []
@@ -2278,6 +2537,7 @@ def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
         variant_id = str(variant.get("variantId") or "").strip()
         if not product_id or not variant_id:
             continue
+        full_product = products_by_id.get(product_id) or {}
         source_id = f"{product_id}:{variant_id}"
         stock = inventory.get(source_id)
         status_info = variant.get("inventoryStatus") or {}
@@ -2318,7 +2578,14 @@ def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
                 "quantity": quantity,
                 "price_cents": _money(price.get("amount")) if isinstance(price, dict) else None,
                 "currency": currency,
-                "product_type": product.get("productType"),
+                "description": full_product.get("plainDescription") or product.get("plainDescription"),
+                "product_type": product.get("productType") or full_product.get("productType"),
+                "url": (
+                    (full_product.get("url") or {}).get("url")
+                    if isinstance(full_product.get("url"), dict)
+                    else full_product.get("url")
+                ),
+                "barcode": variant.get("barcode"),
                 "attributes": attributes,
                 "image_url": _wix_variant_image(variant),
             }
@@ -2821,7 +3088,10 @@ def import_biblio_workspace(
     # An imported BIBLIO file is a snapshot of remote state, not a set of
     # local edits waiting to be pushed back. Mark those rows as synchronized
     # so the next incremental sync does not echo the whole imported catalogue.
-    imported_active, imported_deletes = _biblio_rows(workspace_id)
+    imported_active, imported_deletes = _biblio_rows(
+        workspace_id,
+        profile=biblio_upload_profile(workspace_id),
+    )
     _mark_biblio_inventory_sync(
         workspace_id,
         [*imported_active, *imported_deletes],
@@ -2829,20 +3099,57 @@ def import_biblio_workspace(
     return {"source": Channel.BIBLIO, "items": len(rows), "active": active}
 
 
-def _biblio_inventory_signature(row: dict[str, Any]) -> str:
-    payload = {
-        key: row.get(key)
-        for key in (
-            "sku",
-            "author",
-            "title",
-            "description",
-            "price_cents",
-            "isbn",
-            "quantity",
-            "status",
-        )
-    }
+BIBLIO_UPLOAD_PROFILE_CORE = "core"
+BIBLIO_UPLOAD_PROFILE_EXTENDED = "extended"
+BIBLIO_UPLOAD_PROFILES = {
+    BIBLIO_UPLOAD_PROFILE_CORE,
+    BIBLIO_UPLOAD_PROFILE_EXTENDED,
+}
+
+BIBLIO_CORE_HEADERS = (
+    "Book ID", "Author", "Title", "Description",
+    "Price", "Status", "ISBN", "Quantity",
+)
+BIBLIO_EXTENDED_HEADERS = (
+    "Book ID", "Author", "Title", "Subtitle", "Description",
+    "Price", "Status", "ISBN", "Publisher", "Edition",
+    "Binding", "Language", "Publication Date", "Pages",
+    "Condition", "Quantity",
+)
+
+
+def _normalize_biblio_upload_profile(value: Any) -> str:
+    profile = str(value or BIBLIO_UPLOAD_PROFILE_CORE).strip().lower()
+    if profile not in BIBLIO_UPLOAD_PROFILES:
+        raise ValueError("BIBLIO upload_profile must be 'core' or 'extended'")
+    return profile
+
+
+def biblio_upload_profile(workspace_id: uuid.UUID) -> str:
+    """Return the configured BIBLIO FTP column profile without requiring it."""
+    try:
+        values = _workspace_or_env_biblio_values(workspace_id)
+    except RuntimeError:
+        return BIBLIO_UPLOAD_PROFILE_CORE
+    return _normalize_biblio_upload_profile(values.get("upload_profile"))
+
+
+def _biblio_inventory_signature(
+    row: dict[str, Any],
+    *,
+    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+) -> str:
+    profile = _normalize_biblio_upload_profile(profile)
+    keys = [
+        "sku", "author", "title", "description",
+        "price_cents", "isbn", "quantity", "status",
+    ]
+    if profile == BIBLIO_UPLOAD_PROFILE_EXTENDED:
+        keys.extend([
+            "subtitle", "publisher", "edition", "binding",
+            "language", "publish_date", "pages", "condition",
+        ])
+    payload = {key: row.get(key) for key in keys}
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -2857,14 +3164,10 @@ def _biblio_rows(
     workspace_id: uuid.UUID,
     *,
     listing_id: uuid.UUID | None = None,
+    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return BIBLIO rows with deterministic dirty-state metadata.
-
-    Before per-listing signatures existed, every successful FTP sync contained
-    every active BIBLIO row.  The latest successful run can therefore act as a
-    compatibility baseline for unchanged legacy rows so upgrading does not
-    resend the whole catalogue once.
-    """
+    """Return BIBLIO rows with deterministic, profile-aware dirty state."""
+    profile = _normalize_biblio_upload_profile(profile)
     with db.session_scope() as session:
         query = (
             select(models.ChannelListing, models.InventoryItem)
@@ -2889,9 +3192,6 @@ def _biblio_rows(
             .order_by(models.ConnectorSyncRun.completed_at.desc())
             .limit(100)
         ).scalars().all()
-        # Pre-signature BIBLIO syncs had no "mode" marker and always sent the
-        # whole active catalogue.  A new targeted/incremental run must never
-        # become the compatibility baseline for unrelated unsigned listings.
         legacy = next(
             (
                 run
@@ -2900,20 +3200,44 @@ def _biblio_rows(
             ),
             None,
         )
-        cutoff = legacy.completed_at if legacy and legacy.completed_at else None
+        cutoff = (
+            legacy.completed_at
+            if profile == BIBLIO_UPLOAD_PROFILE_CORE
+            and legacy
+            and legacy.completed_at
+            else None
+        )
 
         active: list[dict[str, Any]] = []
         deletes: list[dict[str, Any]] = []
         for listing, item in listings:
             attrs = dict(item.attributes or {})
             extra = dict(listing.extra or {})
+            bibliographic = (
+                dict(extra.get("bibliographic_enrichment") or {})
+                if isinstance(extra.get("bibliographic_enrichment"), dict)
+                else {}
+            )
             row = {
                 "source_id": listing.external_id,
                 "sku": listing.external_id or listing.external_sku or item.sku,
                 "title": listing.title or item.title,
+                "subtitle": bibliographic.get("subtitle") or attrs.get("subtitle"),
                 "author": extra.get("author") or attrs.get("author"),
                 "description": extra.get("description") or attrs.get("description") or item.notes,
                 "isbn": extra.get("isbn") or attrs.get("isbn"),
+                "publisher": bibliographic.get("publisher") or attrs.get("publisher"),
+                "edition": bibliographic.get("edition") or attrs.get("edition"),
+                "binding": bibliographic.get("binding") or attrs.get("binding") or attrs.get("physical_format"),
+                "language": bibliographic.get("language") or attrs.get("language"),
+                "publish_date": (
+                    bibliographic.get("publish_date")
+                    or attrs.get("publish_date")
+                    or attrs.get("publication_date")
+                    or attrs.get("publication_year")
+                ),
+                "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
+                "condition": bibliographic.get("condition") or item.condition,
                 "price_cents": listing.price_cents,
                 "currency": listing.currency or item.currency or "EUR",
                 "quantity": listing.quantity if listing.quantity is not None else item.quantity,
@@ -2930,7 +3254,7 @@ def _biblio_rows(
                 "inventory_synced_at": extra.get("inventory_synced_at"),
                 "publish_state": extra.get("publish_state"),
             }
-            signature = _biblio_inventory_signature(row)
+            signature = _biblio_inventory_signature(row, profile=profile)
             previous_signature = extra.get("inventory_sync_signature")
             if (
                 not previous_signature
@@ -2938,9 +3262,6 @@ def _biblio_rows(
                 and listing.updated_at <= cutoff
                 and listing.last_seen_at <= cutoff
             ):
-                # Compatibility for pre-signature successful uploads: old syncs
-                # always sent all active rows, so an unchanged row is known to
-                # have been sent already.
                 previous_signature = signature
             row["inventory_signature"] = signature
             row["inventory_dirty"] = signature != previous_signature
@@ -2950,6 +3271,7 @@ def _biblio_rows(
             else:
                 deletes.append(row)
     return active, deletes
+
 
 def _missing_biblio(row: dict[str, Any]) -> list[str]:
     missing = []
@@ -2972,11 +3294,19 @@ def _biblio_text(value: Any) -> str:
     return re.sub(r" {2,}", " ", text).strip()
 
 
-def _biblio_tsv(rows: list[dict[str, Any]], *, sold: bool) -> bytes:
+def _biblio_tsv(
+    rows: list[dict[str, Any]],
+    *,
+    sold: bool,
+    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+) -> bytes:
+    profile = _normalize_biblio_upload_profile(profile)
     output = io.StringIO(newline="")
     writer = csv.writer(output, delimiter="\t", lineterminator="\n")
     writer.writerow(
-        ["Book ID", "Author", "Title", "Description", "Price", "Status", "ISBN", "Quantity"]
+        BIBLIO_EXTENDED_HEADERS
+        if profile == BIBLIO_UPLOAD_PROFILE_EXTENDED
+        else BIBLIO_CORE_HEADERS
     )
     for row in rows:
         price = (
@@ -2984,20 +3314,39 @@ def _biblio_tsv(rows: list[dict[str, Any]], *, sold: bool) -> bytes:
             if row.get("price_cents") not in (None, "")
             else "0.00"
         )
-        writer.writerow(
-            [
-                _biblio_text(row.get("sku") or row.get("source_id") or ""),
-                _biblio_text(row.get("author") or ""),
-                _biblio_text(row.get("title") or ""),
+        start = [
+            _biblio_text(row.get("sku") or row.get("source_id") or ""),
+            _biblio_text(row.get("author") or ""),
+            _biblio_text(row.get("title") or ""),
+        ]
+        if profile == BIBLIO_UPLOAD_PROFILE_EXTENDED:
+            values = [
+                *start,
+                _biblio_text(row.get("subtitle") or ""),
+                _biblio_text(row.get("description") or ""),
+                price,
+                "sold" if sold else "for sale",
+                _biblio_text(row.get("isbn") or ""),
+                _biblio_text(row.get("publisher") or ""),
+                _biblio_text(row.get("edition") or ""),
+                _biblio_text(row.get("binding") or ""),
+                _biblio_text(row.get("language") or ""),
+                _biblio_text(row.get("publish_date") or ""),
+                _biblio_text(row.get("pages") or ""),
+                _biblio_text(row.get("condition") or ""),
+                0 if sold else max(1, int(row.get("quantity") or 1)),
+            ]
+        else:
+            values = [
+                *start,
                 _biblio_text(row.get("description") or ""),
                 price,
                 "sold" if sold else "for sale",
                 _biblio_text(row.get("isbn") or ""),
                 0 if sold else max(1, int(row.get("quantity") or 1)),
             ]
-        )
+        writer.writerow(values)
     return output.getvalue().encode("utf-8")
-
 
 BIBLIO_MAX_PHOTOS = 5
 BIBLIO_MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
@@ -3339,7 +3688,12 @@ def sync_biblio_workspace(
     photos_only: bool = False,
 ) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
-    active, deletes = _biblio_rows(workspace_id, listing_id=listing_id)
+    upload_profile = _normalize_biblio_upload_profile(values.get("upload_profile"))
+    active, deletes = _biblio_rows(
+        workspace_id,
+        listing_id=listing_id,
+        profile=upload_profile,
+    )
     inventory_rows = (
         []
         if photos_only
@@ -3401,6 +3755,7 @@ def sync_biblio_workspace(
             "stage": "preparing",
             "mode": mode,
             "listing_id": str(listing_id) if listing_id else None,
+            "upload_profile": upload_profile,
             "inventory_filename": inventory_filename,
             "deletes_filename": deletes_filename,
             "inventory_total": len(inventory_rows),
@@ -3433,6 +3788,7 @@ def sync_biblio_workspace(
             "active": 0,
             "deletes": 0,
             "photos_uploaded": 0,
+            "upload_profile": upload_profile,
             "detail": "Nothing changed - no FTP upload was required",
             "run_id": str(run_id),
         }
@@ -3488,7 +3844,7 @@ def sync_biblio_workspace(
         if inventory_filename:
             ftp.storbinary(
                 f"STOR {inventory_filename}",
-                io.BytesIO(_biblio_tsv(inventory_rows, sold=False)),
+                io.BytesIO(_biblio_tsv(inventory_rows, sold=False, profile=upload_profile)),
             )
             _mark_biblio_inventory_sync(workspace_id, inventory_rows)
             _update_biblio_run(
@@ -3503,7 +3859,7 @@ def sync_biblio_workspace(
         if deletes_filename:
             ftp.storbinary(
                 f"STOR {deletes_filename}",
-                io.BytesIO(_biblio_tsv(delete_rows, sold=True)),
+                io.BytesIO(_biblio_tsv(delete_rows, sold=True, profile=upload_profile)),
             )
             _mark_biblio_inventory_sync(workspace_id, delete_rows)
             _update_biblio_run(
@@ -3646,6 +4002,7 @@ def sync_biblio_workspace(
         "photos_uploaded": photos_uploaded,
         "photo_errors": photo_errors,
         "deferred_photo_retry_listing_ids": list(dict.fromkeys(deferred_photo_retry_listing_ids)),
+        "upload_profile": upload_profile,
         "run_id": str(run_id),
     }
 
@@ -3686,6 +4043,8 @@ def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
         "timeout_seconds": os.getenv("BIBLIO_FTP_TIMEOUT_SECONDS", "20").strip() or "20",
         "filename_prefix": os.getenv("BIBLIO_FTP_FILENAME_PREFIX", "reseller-dashboard").strip()
         or "reseller-dashboard",
+        "upload_profile": os.getenv("BIBLIO_FTP_UPLOAD_PROFILE", "core").strip()
+        or "core",
     }
 
 
@@ -3732,7 +4091,12 @@ def close_ebay_workspace_listing(workspace_id: uuid.UUID, external_id: str) -> d
     return {"remote": "ended", "external_id": str(external_id)}
 
 
-def _biblio_listing_row(workspace_id: uuid.UUID, listing_id: uuid.UUID) -> dict[str, Any]:
+def _biblio_listing_row(
+    workspace_id: uuid.UUID,
+    listing_id: uuid.UUID,
+    *,
+    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+) -> dict[str, Any]:
     with db.session_scope() as session:
         listing = session.get(models.ChannelListing, listing_id)
         if (
@@ -3746,20 +4110,38 @@ def _biblio_listing_row(workspace_id: uuid.UUID, listing_id: uuid.UUID) -> dict[
             raise RuntimeError("BIBLIO master inventory item no longer exists")
         attrs = dict(item.attributes or {})
         extra = dict(listing.extra or {})
+        bibliographic = (
+            dict(extra.get("bibliographic_enrichment") or {})
+            if isinstance(extra.get("bibliographic_enrichment"), dict)
+            else {}
+        )
         row = {
             "source_id": listing.external_id,
             "sku": listing.external_id or listing.external_sku or item.sku,
             "title": listing.title or item.title,
+            "subtitle": bibliographic.get("subtitle") or attrs.get("subtitle"),
             "author": extra.get("author") or attrs.get("author"),
             "description": extra.get("description") or attrs.get("description") or item.notes,
             "isbn": extra.get("isbn") or attrs.get("isbn"),
+            "publisher": bibliographic.get("publisher") or attrs.get("publisher"),
+            "edition": bibliographic.get("edition") or attrs.get("edition"),
+            "binding": bibliographic.get("binding") or attrs.get("binding") or attrs.get("physical_format"),
+            "language": bibliographic.get("language") or attrs.get("language"),
+            "publish_date": (
+                bibliographic.get("publish_date")
+                or attrs.get("publish_date")
+                or attrs.get("publication_date")
+                or attrs.get("publication_year")
+            ),
+            "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
+            "condition": bibliographic.get("condition") or item.condition,
             "price_cents": listing.price_cents,
             "currency": listing.currency or item.currency or "EUR",
             "quantity": 0,
             "status": ListingStatus.SOLD,
             "listing_id": str(listing.id),
         }
-        row["inventory_signature"] = _biblio_inventory_signature(row)
+        row["inventory_signature"] = _biblio_inventory_signature(row, profile=profile)
         return row
 
 
@@ -3772,8 +4154,9 @@ def close_biblio_workspace_listing(
     This does not run a full inventory sync, so a sold-reconciliation action
     cannot accidentally publish unrelated inventory changes.
     """
-    row = _biblio_listing_row(workspace_id, listing_id)
     values = _workspace_or_env_biblio_values(workspace_id)
+    upload_profile = _normalize_biblio_upload_profile(values.get("upload_profile"))
+    row = _biblio_listing_row(workspace_id, listing_id, profile=upload_profile)
     stamp = _biblio_upload_stamp()
     prefix = re.sub(
         r"[^A-Za-z0-9_-]+",
@@ -3794,7 +4177,10 @@ def close_biblio_workspace_listing(
         directory = values.get("directory", "").strip()
         if directory and directory not in {".", "./"}:
             ftp.cwd(directory)
-        ftp.storbinary(f"STOR {filename}", io.BytesIO(_biblio_tsv([row], sold=True)))
+        ftp.storbinary(
+            f"STOR {filename}",
+            io.BytesIO(_biblio_tsv([row], sold=True, profile=upload_profile)),
+        )
         try:
             ftp.quit()
         except Exception:
@@ -3806,7 +4192,11 @@ def close_biblio_workspace_listing(
             started_at=started,
             active_count=0,
             delete_count=1,
-            detail={"deletes_filename": filename, "cross_channel": True},
+            detail={
+                "deletes_filename": filename,
+                "cross_channel": True,
+                "upload_profile": upload_profile,
+            },
             error=str(exc),
         )
         raise RuntimeError("BIBLIO delete upload failed") from exc
@@ -3817,11 +4207,16 @@ def close_biblio_workspace_listing(
         started_at=started,
         active_count=0,
         delete_count=1,
-        detail={"deletes_filename": filename, "cross_channel": True},
+        detail={
+            "deletes_filename": filename,
+            "cross_channel": True,
+            "upload_profile": upload_profile,
+        },
     )
     return {
         "remote": "delete_uploaded",
         "external_id": str(row.get("source_id") or ""),
         "deletes_filename": filename,
+        "upload_profile": upload_profile,
         "inventory_signature": str(row.get("inventory_signature") or ""),
     }
