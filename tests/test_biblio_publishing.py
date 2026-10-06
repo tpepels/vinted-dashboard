@@ -769,3 +769,54 @@ def test_vinted_category_auto_classifies_books_clothing_and_electronics():
     assert categories["CAT-BOOK"] == ItemCategory.BOOK
     assert categories["CAT-CLOTHING"] == ItemCategory.CLOTHING
     assert categories["CAT-ELECTRONICS"] == ItemCategory.ELECTRONICS
+
+
+
+def test_vinted_book_category_alone_avoids_manual_book_confirmation():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="CATEGORY-ONLY-BOOK",
+            title="Vintage novel listing title",
+            category=ItemCategory.GENERAL,
+            quantity=1,
+            currency="EUR",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        source = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item.id,
+            channel=Channel.VINTED,
+            external_id="CATEGORY-ONLY-1",
+            title="Vintage novel listing title",
+            price_cents=500,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+            extra={
+                "metadata": {
+                    "category": "Fiction",
+                    "description": "Vinted description",
+                }
+            },
+        )
+        session.add(source)
+        session.flush()
+        item_id = item.id
+        source_id = source.id
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_id,
+            enrich_isbn=False,
+        )
+
+    assert candidate["category"] == ItemCategory.GENERAL
+    assert "author" in candidate["missing"]
+    assert candidate["fields"]["description"] == "Vinted description"
