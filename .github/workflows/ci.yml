@@ -37,6 +37,7 @@ jobs:
       - run: node --check app/extension/vinted_age.js
       - run: node --check app/extension/content.js
       - run: node scripts/test_vinted_page_age.js
+      - run: node scripts/test_vinted_content_idempotent.js
       - run: node scripts/test_vinted_rendered_tab_age.js
       - run: node scripts/test_vinted_age_sweep.js
       - run: alembic upgrade head
