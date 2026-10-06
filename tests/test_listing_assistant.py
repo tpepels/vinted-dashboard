@@ -317,3 +317,80 @@ def test_listing_assistant_accepts_expanded_general_categories():
     )
     assert result["category"] == "electronics"
     assert result["missing_fields"] == ["price"]
+
+
+
+def test_quick_book_listing_preserves_all_prefilled_metadata(monkeypatch):
+    client = TestClient(entry.app)
+    csrf = _register(client, "quick-book-rich@example.test", monkeypatch)
+
+    response = client.post(
+        "/api/app/listing-assistant/create",
+        headers=_headers(csrf),
+        json={
+            "title": "Fantastic Mr. Fox",
+            "description": "Paperback copy.",
+            "category": "book",
+            "item_type": "book",
+            "barcode": "9780140328721",
+            "author": "Roald Dahl",
+            "isbn": "9780140328721",
+            "subtitle": "A Story",
+            "publisher": "Puffin",
+            "edition": "Revised",
+            "binding": "Paperback",
+            "language": "English",
+            "publish_date": "1988",
+            "publication_year": 1988,
+            "pages": 96,
+            "condition": "good",
+            "price_cents": 800,
+            "currency": "EUR",
+            "analysis_used": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    with db.session_scope() as session:
+        item = session.execute(select(models.InventoryItem)).scalar_one()
+        attrs = item.attributes
+        assert attrs["barcode"] == "9780140328721"
+        assert attrs["isbn"] == "9780140328721"
+        assert attrs["subtitle"] == "A Story"
+        assert attrs["author"] == "Roald Dahl"
+        assert attrs["publisher"] == "Puffin"
+        assert attrs["edition"] == "Revised"
+        assert attrs["binding"] == "Paperback"
+        assert attrs["language"] == "English"
+        assert attrs["publish_date"] == "1988"
+        assert attrs["publication_year"] == 1988
+        assert attrs["pages"] == 96
+
+
+def test_photo_analysis_normalizes_visible_bibliographic_fields():
+    result = listing_assistant.normalize_analysis({
+        "category": "book",
+        "item_type": "book",
+        "barcode": "9780140328721",
+        "author": "Roald Dahl",
+        "isbn": "9780140328721",
+        "subtitle": "A Story",
+        "publisher": "Puffin",
+        "edition": "Revised",
+        "binding": "Paperback",
+        "language": "English",
+        "publish_date": "1988",
+        "publication_year": "1988",
+        "pages": "96",
+        "suggested_title": "Fantastic Mr. Fox",
+        "suggested_description": "Paperback.",
+        "visible_text": [],
+        "confidence_notes": [],
+    })
+    assert result["barcode"] == "9780140328721"
+    assert result["isbn"] == "9780140328721"
+    assert result["subtitle"] == "A Story"
+    assert result["binding"] == "Paperback"
+    assert result["language"] == "English"
+    assert result["publication_year"] == "1988"
+    assert result["pages"] == "96"
