@@ -253,12 +253,18 @@ def test_partial_biblio_photo_failure_is_retried_later(monkeypatch):
         "_mark_biblio_photo_sync",
         lambda workspace_id, synced: marked.extend(synced),
     )
-    _stub_progress(monkeypatch)
+    _run_id, _updates, states, _inventory_marks = _stub_progress(monkeypatch)
 
     result = hosted.sync_biblio_workspace(uuid.uuid4())
     assert result["photos_uploaded"] == 1
     assert result["photo_errors"]
+    assert result["deferred_photo_retry_listing_ids"] == [listing_id]
     assert marked == []
+    assert any(
+        kwargs.get("photo_state") == "retry_scheduled"
+        and kwargs.get("photo_error")
+        for _args, kwargs in states
+    )
 
 
 def test_incremental_biblio_sync_skips_unchanged_inventory(monkeypatch):
