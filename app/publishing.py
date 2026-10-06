@@ -306,13 +306,39 @@ def build_biblio_candidate(
         ("EUR", "default"),
     )
 
+    publisher, publisher_source = _value(
+        (vmeta.get("publisher"), "vinted"),
+        (attrs.get("publisher"), "master"),
+        (
+            str(enrichment.get("publisher") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    edition, edition_source = _value(
+        (attrs.get("edition"), "master"),
+        (
+            str(enrichment.get("edition") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    publish_date, publish_date_source = _value(
+        (attrs.get("publish_date"), "master"),
+        (attrs.get("publication_date"), "master"),
+        (attrs.get("publication_year"), "master"),
+        (
+            str(enrichment.get("publish_date") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
     enrichment_fields = {
-        key: str(enrichment.get(key) or "").strip() or None
-        for key in ("publisher", "edition", "publish_date")
-    } if enrichment else {
-        "publisher": None,
-        "edition": None,
-        "publish_date": None,
+        "publisher": publisher,
+        "edition": edition,
+        "publish_date": publish_date,
+    }
+    bibliographic_sources = {
+        "publisher": publisher_source,
+        "edition": edition_source,
+        "publish_date": publish_date_source,
     }
 
     existing = _existing_biblio(session, workspace_id, item.id)
@@ -363,6 +389,7 @@ def build_biblio_candidate(
         "book_id_suggestion": book_id,
         "enrichment_warning": enrichment_warning,
         "bibliographic_enrichment": enrichment_fields,
+        "bibliographic_sources": bibliographic_sources,
     }
     return validate_biblio_candidate(
         session,
@@ -396,11 +423,13 @@ def apply_biblio_overrides(
         sources["price_cents"] = "review"
 
     bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
+    bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
     for key in ("publisher", "edition", "publish_date"):
         if key not in overrides or overrides[key] is None:
             continue
         value = str(overrides[key]).strip()
         bibliographic[key] = value or None
+        bibliographic_sources[key] = "review"
 
     if not fields.get("book_id") and fields.get("sku"):
         fields["book_id"] = fields["sku"]
@@ -424,6 +453,7 @@ def apply_biblio_overrides(
         "fields": fields,
         "field_sources": sources,
         "bibliographic_enrichment": bibliographic,
+        "bibliographic_sources": bibliographic_sources,
         "missing": missing,
         "ready": not missing,
         "photo_warning": _biblio_photo_book_id_warning(
