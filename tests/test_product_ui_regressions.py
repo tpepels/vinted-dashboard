@@ -412,7 +412,7 @@ def test_biblio_preflight_has_direct_stock_repair_and_book_id_override():
         Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
     ).read_text(encoding="utf-8")
     assert 'id="biblio-edit-stock"' in html
-    assert 'id="biblio-edit-book"' in html
+    assert 'id="biblio-edit-book"' not in html
     assert '["book_id", "Book ID", fields.book_id, sources.book_id]' in APP_JS
     assert '"unique BIBLIO Book ID"' in APP_JS
     assert 'data.book_id_suggestion' in APP_JS
@@ -452,3 +452,27 @@ def test_cross_list_panel_shows_all_destination_states_and_actions():
     assert "cross-destination-connect" in APP_JS
     assert "cross-destination-biblio" in APP_JS
     assert "openCrossListConnection(channel)" in APP_JS
+
+
+
+def test_cross_list_is_one_universal_action_not_one_column_per_connector():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert "One Cross-list action handles every destination." in html
+    assert "New writable connectors appear here automatically" in html
+    assert "function crossListGroup(destination)" in APP_JS
+    assert "Ready to publish" in APP_JS
+    assert "Needs setup or review" in APP_JS
+    assert "Already listed" in APP_JS
+    assert "Not writable yet" in APP_JS
+    assert "<th>Channels</th><th>Status</th><th>Actions</th>" in APP_JS
+
+
+def test_biblio_review_gate_is_repaired_inside_cross_list():
+    assert 'destination.action === "biblio_classify"' in APP_JS
+    assert "Mark as book & continue" in APP_JS
+    assert 'body: JSON.stringify({ category: "book" })' in APP_JS
+    assert "Marked as Book. Review the BIBLIO fields below." in APP_JS
+    assert "function reviewBiblioItem" not in APP_JS
+    assert "Review BIBLIO" not in APP_JS
