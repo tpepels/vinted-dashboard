@@ -3253,13 +3253,13 @@ def _set_biblio_listing_states(
                     extra["publish_completed_at"] = now
             if publish_error is not None:
                 extra["publish_error"] = publish_error
-            elif publish_state in {"uploading", "ftp_uploaded"}:
+            elif publish_state in {"queued", "uploading", "ftp_uploaded"}:
                 extra.pop("publish_error", None)
             if photo_state is not None:
                 extra["photo_sync_state"] = photo_state
             if photo_error is not None:
                 extra["photo_sync_error"] = photo_error
-            elif photo_state in {"uploading", "ftp_uploaded", "retry_scheduled", "none"}:
+            elif photo_state in {"queued", "uploading", "ftp_uploaded", "retry_scheduled", "none"}:
                 extra.pop("photo_sync_error", None)
             listing.extra = extra
 
