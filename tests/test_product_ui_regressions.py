@@ -478,7 +478,7 @@ def test_cross_list_is_one_universal_action_not_one_column_per_connector():
 
 def test_biblio_review_gate_is_repaired_inside_cross_list():
     assert 'destination.action === "biblio_classify"' in APP_JS
-    assert "Mark as book & continue" in APP_JS
+    assert "Mark as book & review" in APP_JS
     assert 'body: JSON.stringify({ category: "book" })' in APP_JS
     assert "Marked as Book. Review the BIBLIO fields below." in APP_JS
     assert "function reviewBiblioItem" not in APP_JS
@@ -609,3 +609,38 @@ def test_connector_forms_prefill_saved_nonsecret_settings_only():
     assert "connector?.saved_values || {}" in APP_JS
     assert 'const value = type === "password" ? "" : (savedValues[name] ?? "");' in APP_JS
     assert "'saved_values':" not in APP_JS
+
+
+
+def test_universal_cross_list_reviews_missing_fields_inline_instead_of_leaving_panel():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="cross-list-review"' in html
+    assert 'id="cross-list-review-name"' in html
+    assert 'id="cross-list-review-description"' in html
+    assert 'id="cross-list-review-price"' in html
+    assert 'id="cross-list-review-stock"' in html
+    assert "function openCrossListReview(channel)" in APP_JS
+    assert "function publishReviewedCrossList()" in APP_JS
+    assert "cross-destination-review" in APP_JS
+    assert "Review fields" in APP_JS
+    assert "openItemForm(item)" not in APP_JS[
+        APP_JS.index("function renderCrossList(data)"):
+        APP_JS.index("async function openCrossList(itemId")
+    ]
+
+
+def test_biblio_review_never_falls_back_to_generic_inventory_edit():
+    assert 'destination.action === "biblio_classify"' in APP_JS
+    assert "Mark as book & review" in APP_JS
+    assert "Review / publish" in APP_JS
+    assert "Review BIBLIO" not in APP_JS
+
+
+def test_cross_list_remains_one_action_when_connector_count_grows():
+    assert "function inventoryCrossListAction(item)" in APP_JS
+    assert "function listingCrossListAction(row)" in APP_JS
+    assert 'class="btn cross-list"' in APP_JS
+    assert "data-channel=" in APP_JS
+    assert "data.destinations" in APP_JS

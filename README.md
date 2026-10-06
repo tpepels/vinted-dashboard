@@ -142,7 +142,7 @@ stable route is:
 The downloaded artifact itself is always versioned, for example:
 
 ```text
-reseller-dashboard-chrome-bridge-v3.2.0.zip
+reseller-dashboard-chrome-bridge-v3.3.0.zip
 ```
 
 Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
@@ -152,7 +152,7 @@ The bridge supports the principal European Vinted web origins. On its first
 sync it uses an already-open signed-in Vinted tab and remembers that origin for
 later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 3.2.0 keeps a local detail
+For active/reserved/hidden/draft listings, bridge 3.3.0 keeps a local detail
 cache for richer Vinted item metadata. Core inventory pagination is paced and
 retries HTTP 429 responses with backoff. Rich `/api/v2/items/{id}` enrichment
 is deliberately budgeted separately - up to 12 records on a manual sync and 4
@@ -182,12 +182,12 @@ job is still running.
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
 `first_seen_at`, and old `Today` fallbacks are never treated as posting age.
-Bridge 3.2.0 also performs a content-script protocol handshake and reloads an
+Bridge 3.3.0 also performs a content-script protocol handshake and reloads an
 already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
-cache constants or registering a second message listener. Bridge 3.2.0 uses
-content protocol 7, so tabs still running an older bridge script are forcibly
+cache constants or registering a second message listener. Bridge 3.3.0 uses
+content protocol 8, so tabs still running an older bridge script are forcibly
 reloaded once.
 
 
@@ -233,10 +233,15 @@ and Depop rather than hiding destinations behind eligibility checks.
 
 The shared cross-list candidate takes title, description, price and photos from
 Vinted when available, while SKU and physical stock remain authoritative on the
-master InventoryItem. WooCommerce, Shopify and Wix can create remote products
-directly from this preflight, including Vinted source images. The created
-ChannelListing is then linked back to the same physical InventoryItem so later
-sales and stock reconciliation operate on one copy of the item.
+master InventoryItem. If a writable destination needs title, price or stock,
+**Review fields** opens an inline editor inside the same Cross-list panel rather
+than sending the user to generic Inventory Edit. Title/description/price can be
+reviewed for that destination; changing stock explicitly updates the physical
+master quantity before publication. WooCommerce, Shopify and Wix can create
+remote products directly from this preflight, including Vinted source images.
+The created ChannelListing is then linked back to the same physical
+InventoryItem so later sales and stock reconciliation operate on one copy of the
+item.
 
 BIBLIO keeps its book-specific preflight inside the same destination panel.
 When an ISBN is available, ISBN metadata is preferred for bibliographic title
@@ -248,7 +253,7 @@ silently replace what the user reviewed. Publisher/edition/publish-date
 enrichment is persisted onto the master item when published. Older Vinted books
 still classified as `general` qualify from linked ISBN/author/book-category
 evidence. If a sparse legacy Vinted book has no such evidence, Cross-list shows
-**Mark as book & continue**; that explicit action updates the master category and
+**Mark as book & review**; that explicit action updates the master category and
 opens the real BIBLIO preflight immediately instead of dumping the user into
 generic Edit.
 Zero stock exposes **Edit stock**, and a conflicting BIBLIO Book ID can be

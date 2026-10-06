@@ -182,6 +182,23 @@
           <p id="cross-list-source" class="muted"></p>
           <p class="muted cross-list-help">One Cross-list action handles every destination. New writable connectors appear here automatically; the inventory table does not grow one column per platform.</p>
           <div id="cross-list-summary" class="cross-list-summary"></div>
+          <div id="cross-list-review" class="cross-list-review hidden">
+            <div class="card-head inline-head">
+              <div><p class="eyebrow">REVIEW</p><h3 id="cross-list-review-title">Review listing fields</h3></div>
+              <button id="cross-list-review-close" class="btn" type="button">Cancel</button>
+            </div>
+            <p class="muted">These values apply to the selected destination. Changing stock updates the physical inventory quantity.</p>
+            <div class="form-grid">
+              <label>Title<input id="cross-list-review-name" type="text"></label>
+              <label>Price<input id="cross-list-review-price" type="number" min="0" step="0.01" inputmode="decimal"></label>
+              <label>Stock<input id="cross-list-review-stock" type="number" min="0" step="1" inputmode="numeric"></label>
+            </div>
+            <label>Description<textarea id="cross-list-review-description" rows="5"></textarea></label>
+            <div id="cross-list-review-warning" class="muted"></div>
+            <div class="actions">
+              <button id="cross-list-review-publish" class="btn primary" type="button">Publish</button>
+            </div>
+          </div>
           <div id="cross-list-destinations" class="cross-list-destinations"></div>
         </div>
         <div id="biblio-publish-panel" class="card form hidden">

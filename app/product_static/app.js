@@ -845,13 +845,13 @@ function crossListDestinationAction(destination) {
     return '<button class="btn primary cross-destination-biblio">Review / publish</button>';
   }
   if (destination.action === "biblio_classify") {
-    return '<button class="btn primary cross-destination-biblio-classify">Mark as book & continue</button>';
+    return '<button class="btn primary cross-destination-biblio-classify">Mark as book & review</button>';
   }
   if (destination.action === "connect") {
     return '<button class="btn cross-destination-connect" data-channel="' + esc(destination.channel) + '">Connect</button>';
   }
   if (destination.action === "edit" || destination.action === "review") {
-    return '<button class="btn cross-destination-edit">Edit source data</button>';
+    return '<button class="btn cross-destination-review" data-channel="' + esc(destination.channel) + '">Review fields</button>';
   }
   if (destination.action === "open" && destination.url) {
     return '<a class="btn" href="' + esc(destination.url) + '" target="_blank" rel="noreferrer">Open listing</a>';
@@ -957,26 +957,21 @@ function renderCrossList(data) {
       } catch (error) {
         flash(error.message, true);
         button.disabled = false;
-        button.textContent = "Mark as book & continue";
+        button.textContent = "Mark as book & review";
       }
     };
   });
-  document.querySelectorAll(".cross-destination-edit").forEach((button) => {
-    button.onclick = () => {
-      const current = state.crossList;
-      const item = state.inventoryItems.find((row) => row.id === current?.itemId);
-      if (!item) return flash("Inventory item could not be found.", true);
-      $("#cross-list-panel").classList.add("hidden");
-      openItemForm(item);
-    };
+  document.querySelectorAll(".cross-destination-review").forEach((button) => {
+    button.onclick = () => openCrossListReview(button.dataset.channel);
   });
 }
 
 async function openCrossList(itemId, sourceListingId = null) {
   if (!itemId) return flash("Link this listing to a physical inventory item first.", true);
   if (state.view !== "inventory") await selectView("inventory");
-  state.crossList = { itemId, sourceListingId, data: null };
+  state.crossList = { itemId, sourceListingId, data: null, reviewChannel: null };
   $("#cross-list-panel").classList.remove("hidden");
+  $("#cross-list-review").classList.add("hidden");
   $("#cross-list-title").textContent = "Checking destinations…";
   $("#cross-list-source").textContent = "";
   $("#cross-list-summary").innerHTML = "";
@@ -992,21 +987,26 @@ async function openCrossList(itemId, sourceListingId = null) {
   }
 }
 
-async function publishCrossDestination(channel, button) {
+async function publishCrossDestination(channel, button, overrides = null) {
   const current = state.crossList;
   if (!current?.itemId || !channel) return;
   button.disabled = true;
   const old = button.textContent;
   button.textContent = "Publishing…";
   try {
+    const payload = {
+      source_listing_id: current.sourceListingId || null,
+      ...(overrides || {}),
+    };
     const result = await api(
       "/api/app/inventory/" + encodeURIComponent(current.itemId) + "/cross-list/" + encodeURIComponent(channel),
       {
         method: "POST",
-        body: JSON.stringify({ source_listing_id: current.sourceListingId || null }),
+        body: JSON.stringify(payload),
       },
     );
     flash("Published to " + (connectorSchemas[channel]?.title || channel) + ".");
+    $("#cross-list-review").classList.add("hidden");
     await inventory();
     await openCrossList(current.itemId, current.sourceListingId);
   } catch (error) {
@@ -1014,6 +1014,62 @@ async function publishCrossDestination(channel, button) {
     button.disabled = false;
     button.textContent = old;
   }
+}
+
+function openCrossListReview(channel) {
+  const current = state.crossList;
+  const data = current?.data;
+  const fields = data?.fields || {};
+  if (!current?.itemId || !channel) return;
+  current.reviewChannel = channel;
+  $("#cross-list-review-title").textContent = "Review for " + (connectorSchemas[channel]?.title || channel);
+  $("#cross-list-review-name").value = fields.title || "";
+  $("#cross-list-review-description").value = fields.description || "";
+  $("#cross-list-review-price").value = fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2);
+  $("#cross-list-review-stock").value = fields.quantity == null ? "0" : String(fields.quantity);
+  const destination = (data.destinations || []).find((row) => row.channel === channel);
+  $("#cross-list-review-warning").textContent = destination?.reason || "";
+  $("#cross-list-review-publish").textContent = "Publish to " + (connectorSchemas[channel]?.title || channel);
+  $("#cross-list-review").classList.remove("hidden");
+  $("#cross-list-review").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function publishReviewedCrossList() {
+  const current = state.crossList;
+  const channel = current?.reviewChannel;
+  if (!current?.itemId || !channel) return;
+  const title = $("#cross-list-review-name").value.trim();
+  const description = $("#cross-list-review-description").value.trim();
+  const priceValue = Number($("#cross-list-review-price").value);
+  const quantityValue = Number($("#cross-list-review-stock").value);
+  if (!title) return flash("Title is required.", true);
+  if (!Number.isFinite(priceValue) || priceValue <= 0) return flash("Price must be greater than zero.", true);
+  if (!Number.isInteger(quantityValue) || quantityValue < 0) return flash("Stock must be a non-negative whole number.", true);
+
+  const originalQuantity = Number(current.data?.fields?.quantity ?? 0);
+  const button = $("#cross-list-review-publish");
+  if (quantityValue !== originalQuantity) {
+    try {
+      button.disabled = true;
+      button.textContent = "Updating stock…";
+      await api("/api/app/inventory/" + encodeURIComponent(current.itemId), {
+        method: "PATCH",
+        body: JSON.stringify({ quantity: quantityValue }),
+      });
+      current.data.fields.quantity = quantityValue;
+      button.disabled = false;
+      button.textContent = "Publish to " + (connectorSchemas[channel]?.title || channel);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Publish to " + (connectorSchemas[channel]?.title || channel);
+      return flash(error.message, true);
+    }
+  }
+  await publishCrossDestination(channel, button, {
+    title,
+    description,
+    price_cents: Math.round(priceValue * 100),
+  });
 }
 
 async function openCrossListConnection(channel) {
@@ -1025,6 +1081,12 @@ async function openCrossListConnection(channel) {
   }
   openConnectorConfig(channel, connector);
 }
+
+$("#cross-list-review-close").onclick = () => {
+  if (state.crossList) state.crossList.reviewChannel = null;
+  $("#cross-list-review").classList.add("hidden");
+};
+$("#cross-list-review-publish").onclick = publishReviewedCrossList;
 
 function bindCrossListButtons() {
   document.querySelectorAll(".cross-list").forEach((button) => {
