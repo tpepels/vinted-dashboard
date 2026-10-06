@@ -1214,3 +1214,43 @@ def test_biblio_credentials_validate_upload_profile(monkeypatch):
     assert biblio["saved_values"]["username"] == "seller"
     assert biblio["saved_values"]["upload_profile"] == "extended"
     assert "password" not in biblio["saved_values"]
+
+
+
+def test_biblio_does_not_treat_master_cover_as_vinted_photo():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="MASTER-COVER-ONLY",
+            title="Book",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            condition="good",
+            currency="EUR",
+            notes="Description",
+            attributes={
+                "author": "Author",
+                "isbn": "9780140328721",
+                "publisher": "Publisher",
+                "edition": "Edition",
+                "publish_date": "2000",
+                "cover_url": "https://covers.openlibrary.org/b/id/123-M.jpg",
+                "default_price_cents": 900,
+            },
+        )
+        session.add(item)
+        session.flush()
+        item_id = item.id
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            enrich_isbn=False,
+        )
+
+    assert candidate["source"]["channel"] == "master"
+    assert candidate["source"]["image_urls"] == []
+    assert candidate["source"]["photo_count"] == 0
