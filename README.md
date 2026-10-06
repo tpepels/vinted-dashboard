@@ -142,7 +142,7 @@ stable route is:
 The downloaded artifact itself is always versioned, for example:
 
 ```text
-reseller-dashboard-chrome-bridge-v3.4.0.zip
+reseller-dashboard-chrome-bridge-v3.4.1.zip
 ```
 
 Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
@@ -154,7 +154,10 @@ later periodic syncs.
 
 For active/reserved/hidden/draft listings, bridge 3.4.0 keeps a local detail
 cache for richer Vinted item metadata. Core inventory pagination is paced and
-retries HTTP 429 responses with backoff. Rich `/api/v2/items/{id}` enrichment
+retries HTTP 429 responses with backoff. Browser API GETs explicitly reuse the
+signed-in Vinted session, send the normal `X-Requested-With: XMLHttpRequest`
+header, and do not synthesize an `X-Platform` header. HTTP 403 is treated as
+access denial/challenge rather than rate limiting. Rich `/api/v2/items/{id}` enrichment
 uses one sequential request stream with at least 1.5 seconds between detail
 calls. There is no fixed per-sync enrichment budget: the bridge drains the
 uncached detail queue until it is complete or Vinted actually returns HTTP 429.
@@ -189,7 +192,7 @@ already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
 cache constants or registering a second message listener. Bridge 3.3.0 uses
-content protocol 9, so tabs still running an older bridge script are forcibly
+content protocol 10, so tabs still running an older bridge script are forcibly
 reloaded once.
 
 
