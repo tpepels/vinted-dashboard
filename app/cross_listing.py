@@ -339,11 +339,19 @@ def apply_overrides(candidate: dict[str, Any], overrides: dict[str, Any]) -> dic
     }
 
 
-def _adapter(channel: str):
+def _create_adapter(channel: str):
     return {
         Channel.WOOCOMMERCE: hosted.create_woocommerce_workspace_listing,
         Channel.SHOPIFY: hosted.create_shopify_workspace_listing,
         Channel.WIX: hosted.create_wix_workspace_listing,
+    }.get(channel)
+
+
+def _update_adapter(channel: str):
+    return {
+        Channel.WOOCOMMERCE: hosted.update_woocommerce_workspace_listing,
+        Channel.SHOPIFY: hosted.update_shopify_workspace_listing,
+        Channel.WIX: hosted.update_wix_workspace_listing,
     }.get(channel)
 
 
@@ -368,7 +376,7 @@ def publish(
                 "Use the existing listing instead of creating a duplicate."
             )
 
-    adapter = _adapter(channel)
+    adapter = _create_adapter(channel)
     if adapter is None:
         raise ValueError(f"{channel} direct publishing is not implemented")
     remote = adapter(workspace_id, candidate)
@@ -415,4 +423,76 @@ def publish(
         "external_id": external_id,
         "url": remote.get("url"),
         "title": remote.get("title"),
+    }
+
+
+def update(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    channel: str,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    if channel not in DIRECT_CREATE_CHANNELS:
+        raise ValueError(f"{channel} direct updating is not implemented")
+    if candidate.get("missing"):
+        raise ValueError(
+            "Listing is missing: " + ", ".join(str(value) for value in candidate["missing"])
+        )
+
+    with db.session_scope() as session:
+        existing = existing_channel_listing(session, workspace_id, item_id, channel)
+        if existing is None:
+            raise ValueError(
+                f"This physical item has no {channel} listing to update."
+            )
+        external_id = str(existing.external_id or "").strip()
+        listing_id = existing.id
+        if not external_id:
+            raise RuntimeError(f"{channel} listing has no remote ID")
+
+    adapter = _update_adapter(channel)
+    if adapter is None:
+        raise ValueError(f"{channel} direct updating is not implemented")
+    remote = adapter(workspace_id, external_id, candidate)
+    returned_external_id = str(remote.get("source_id") or "").strip()
+    if returned_external_id and returned_external_id != external_id:
+        raise RuntimeError(
+            f"{channel} update returned a different remote listing ID"
+        )
+
+    now = datetime.now(timezone.utc)
+    record_workspace_channel_snapshot(
+        workspace_id,
+        channel,
+        [remote],
+        synced_at=now,
+        full_snapshot=False,
+        note=f"Updated from {candidate.get('source', {}).get('channel') or 'master'}",
+    )
+
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, listing_id)
+        item = session.get(models.InventoryItem, item_id)
+        if listing is None or item is None:
+            raise RuntimeError("Remote listing was updated but local linkage could not be recorded")
+        listing.inventory_item_id = item.id
+        listing.extra = {
+            **dict(listing.extra or {}),
+            "cross_list_updated_at": now.isoformat(),
+            "source_channel": (candidate.get("source") or {}).get("channel"),
+            "source_listing_id": (candidate.get("source") or {}).get("listing_id"),
+            "source_listing_external_id": (candidate.get("source") or {}).get("external_id"),
+            "source_image_urls": list((candidate.get("source") or {}).get("image_urls") or [])[:5],
+        }
+
+    return {
+        "ok": True,
+        "action": "updated",
+        "channel": channel,
+        "listing_id": str(listing_id),
+        "external_id": external_id,
+        "url": remote.get("url"),
+        "title": remote.get("title"),
+        "quantity": remote.get("quantity"),
+        "price_cents": remote.get("price_cents"),
     }
