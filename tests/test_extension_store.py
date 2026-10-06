@@ -254,7 +254,7 @@ def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
     assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV4"' in content
     assert 'function enrichListingDetails(listings,reason="periodic")' in content
     assert "image_urls:images" in content
-    assert "const detailSync=await enrichListingDetails(listings,reason);" in content
+    assert ": await enrichListingDetails(listings,reason);" in content
     assert 'const budget=reason==="manual"?32:10;' in content
     assert '{minDelayMs:900,maxRetries:1}' in content
     assert '["active","reserved","hidden","draft"]' in content
