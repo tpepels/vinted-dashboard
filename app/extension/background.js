@@ -285,6 +285,22 @@ async function unpair(){const data=await chrome.storage.local.get([AGE_JOB_KEY])
 async function connectionStatus(){const data=await stored();if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN};try{const remote=await api("/api/extension/status");return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN}}catch(error){return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN}}}
 async function runSync(reason="manual"){
   if(syncInFlight)return syncInFlight;
+  const activeJobData=await chrome.storage.local.get([AGE_JOB_KEY,"syncStatus"]);
+  const activeJob=activeJobData?.[AGE_JOB_KEY];
+  if(activeJob&&Array.isArray(activeJob.remaining)&&activeJob.remaining.length){
+    const previous=activeJobData?.syncStatus||{};
+    return{
+      ...previous,
+      ok:true,
+      reason,
+      sync_skipped_for_age_job:true,
+      age_scan_running:true,
+      age_scan_remaining:activeJob.remaining.length,
+      age_scan_scanned:Number(activeJob.scanned||0),
+      age_scan_updated:Number(activeJob.updated||0),
+      age_scan_failed:Number(activeJob.failed||0),
+    };
+  }
   syncInFlight=(async()=>{
     let temporary=null;
     try{
