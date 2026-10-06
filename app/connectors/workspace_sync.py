@@ -226,7 +226,7 @@ def _apply_generic_metadata(
         "subtitle": _remote_value(item, "subtitle"),
         "brand": _remote_value(item, "brand", "brand_name", "vendor"),
         "size": _remote_value(item, "size"),
-        "color": _remote_value(item, "color", "colour"),
+        "colour": _remote_value(item, "colour", "color"),
         "material": _remote_value(item, "material", "materials"),
         "condition": _remote_value(item, "condition"),
         "description": _remote_value(item, "description", "plain_description"),
@@ -258,12 +258,12 @@ def _apply_generic_metadata(
     for key in (
         "author", "publisher", "edition", "publication_year", "publish_date",
         "language", "binding", "pages", "subtitle",
-        "brand", "size", "color", "material", "description",
+        "brand", "size", "colour", "material", "description",
         "isbn", "barcode",
     ):
         value = normalized.get(key)
         if value not in (None, "", [], {}) and key not in attrs:
-            if key == "publication_year":
+            if key in {"publication_year", "pages"}:
                 try:
                     value = int(value)
                 except (TypeError, ValueError):
