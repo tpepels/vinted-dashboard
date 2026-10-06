@@ -194,6 +194,24 @@ def _apply_generic_metadata(
     barcode = _remote_value(item, "barcode", "ean", "upc", "gtin", "global_unique_id")
     if isbn:
         barcode = isbn
+    elif barcode not in (None, ""):
+        normalized_barcode = clean_isbn(barcode)
+        category_text = str(
+            item.get("category") or item.get("product_type") or ""
+        ).casefold()
+        existing_category = inventory_item.category if inventory_item is not None else ItemCategory.GENERAL
+        book_evidence = (
+            existing_category == ItemCategory.BOOK
+            or any(token in category_text for token in ("book", "books", "livro", "libro"))
+            or bool(_remote_value(item, "author", "publisher"))
+        )
+        raw_barcode = re.sub(r"[^0-9Xx]", "", str(barcode))
+        isbn_shaped = (
+            (len(raw_barcode) == 13 and raw_barcode.startswith(("978", "979")))
+            or len(raw_barcode) == 10
+        )
+        if book_evidence and normalized_barcode and isbn_shaped:
+            isbn = normalized_barcode
 
     normalized = {
         "author": _remote_value(item, "author", "authors", "creator"),
