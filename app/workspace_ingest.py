@@ -248,11 +248,7 @@ def _vinted_category_token_matches(
     ) is not None
 
 
-def classify_vinted_category(value: str | None) -> str | None:
-    text, segments = _normalize_vinted_category(value)
-    if not text:
-        return None
-
+def _best_vinted_category_match(text: str, segments: list[str]) -> str | None:
     best: tuple[int, int, str] | None = None
     for category, tokens in _VINTED_CATEGORY_TOKENS:
         for token in tokens:
@@ -265,6 +261,22 @@ def classify_vinted_category(value: str | None) -> str | None:
             if best is None or score[:2] > best[:2]:
                 best = score
     return best[2] if best is not None else None
+
+
+def classify_vinted_category(value: str | None) -> str | None:
+    text, segments = _normalize_vinted_category(value)
+    if not text:
+        return None
+
+    # A recognized top-level Vinted taxonomy segment is stronger evidence than
+    # a generic child word such as "Accessories". If the top level is
+    # unrecognized (for example "Women" or "Entertainment"), fall back to the
+    # most-specific phrase anywhere in the path.
+    if len(segments) > 1:
+        top = _best_vinted_category_match(segments[0], [segments[0]])
+        if top is not None:
+            return top
+    return _best_vinted_category_match(text, segments)
 
 
 def _looks_like_book_category(value: str | None) -> bool:
