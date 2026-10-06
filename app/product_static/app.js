@@ -2765,7 +2765,7 @@ function renderListings() {
       + (showDate ? "<th>Listed</th><th>Age</th>" : "")
       + (showFavourites ? "<th>Favourites</th>" : "")
       + (showViews ? "<th>Views</th>" : "")
-      + '<th>Price</th><th></th></tr></thead><tbody>'
+      + '<th>Price</th><th>Actions</th></tr></thead><tbody>'
       + filtered.map((row) => {
         const duplicateCount = duplicates.counts.get(row._index);
         const title = row.url
