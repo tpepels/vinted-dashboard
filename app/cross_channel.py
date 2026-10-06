@@ -21,6 +21,7 @@ from app import db, models
 from app.constants import Channel, ItemStatus, ListingStatus
 from app.product_models import BackgroundJob, CrossChannelAction
 from app.stock_policy import sale_counts_as_sold
+from app.connectors.base import Capability, get_connector
 from app.connectors.workspace_sync import (
     item_has_remaining_stock_on_sale_channel,
     recompute_inventory_item,
@@ -28,7 +29,6 @@ from app.connectors.workspace_sync import (
 
 
 ACTION_TYPE = "close_listing"
-REMOTE_CHANNELS = {Channel.EBAY, Channel.BIBLIO}
 OPEN_LISTING_STATUSES = {
     ListingStatus.ACTIVE,
     getattr(ListingStatus, "RESERVED", "reserved"),
@@ -174,7 +174,8 @@ def resolve_sale_item(
 def _action_mode(channel: str) -> tuple[str, str]:
     if channel == Channel.VINTED:
         return "manual", "attention"
-    if channel in REMOTE_CHANNELS:
+    connector = get_connector(channel)
+    if connector is not None and connector.supports(Capability.CLOSE_LISTING):
         return "remote", "queued"
     return "manual", "attention"
 
@@ -452,6 +453,25 @@ def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
 
         detail = close_biblio_workspace_listing(workspace_id, action.channel_listing_id)
         terminal_status = ListingStatus.SOLD
+    elif channel == Channel.WOOCOMMERCE:
+        from app.connectors.hosted import close_woocommerce_workspace_listing
+
+        detail = close_woocommerce_workspace_listing(workspace_id, external_id)
+        terminal_status = ListingStatus.INACTIVE
+    elif channel == Channel.SHOPIFY:
+        from app.connectors.hosted import close_shopify_workspace_listing
+
+        detail = close_shopify_workspace_listing(
+            workspace_id,
+            external_id,
+            idempotency_key=str(action_id),
+        )
+        terminal_status = ListingStatus.INACTIVE
+    elif channel == Channel.WIX:
+        from app.connectors.hosted import close_wix_workspace_listing
+
+        detail = close_wix_workspace_listing(workspace_id, external_id)
+        terminal_status = ListingStatus.INACTIVE
     else:
         raise RuntimeError(f"Unsupported remote close channel: {channel}")
 
