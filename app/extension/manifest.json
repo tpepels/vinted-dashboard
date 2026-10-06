@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reseller Dashboard Chrome Bridge",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "description": "Connects your signed-in Vinted tab to your reseller workspace for inventory and analytics sync.",
   "permissions": [
     "storage",
