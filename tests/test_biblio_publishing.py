@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app import db, entry, models, publishing
 from app.constants import Channel, ItemCategory, ListingStatus
 from app.product_models import BackgroundJob
-from app.workspace_ingest import record_workspace_snapshot
+from app.workspace_ingest import classify_vinted_category, record_workspace_snapshot
 
 
 def _workspace():
@@ -747,7 +747,7 @@ def test_vinted_category_auto_classifies_books_clothing_and_electronics():
                 },
             ],
         },
-        extension_version="3.1.0",
+        extension_version="3.2.0",
     )
 
     with db.session_scope() as session:
@@ -820,3 +820,162 @@ def test_vinted_book_category_alone_avoids_manual_book_confirmation():
     assert candidate["category"] == ItemCategory.GENERAL
     assert "author" in candidate["missing"]
     assert candidate["fields"]["description"] == "Vinted description"
+
+
+
+def test_vinted_taxonomy_prefers_specific_phrases_and_avoids_substring_false_positives():
+    assert classify_vinted_category("Entertainment > Video games") == ItemCategory.MEDIA
+    assert classify_vinted_category("Toys > Board games") == ItemCategory.TOYS_GAMES
+    assert classify_vinted_category("Women > Party dresses") == ItemCategory.CLOTHING
+    assert classify_vinted_category("Sports > Martial arts") == ItemCategory.SPORTS
+    assert classify_vinted_category("Art") == ItemCategory.ART_CRAFTS
+
+
+def test_biblio_publish_persists_isbn_enrichment_on_master_item(monkeypatch):
+    workspace_id = _workspace()
+    item_id, listing_id = _source_book(workspace_id)
+    monkeypatch.setattr(
+        "app.publishing.stock_intake.lookup_isbn",
+        lambda isbn: {
+            "found": True,
+            "isbn": isbn,
+            "title": "The Trial",
+            "author": "Franz Kafka",
+            "publisher": "Penguin Classics",
+            "edition": "Revised edition",
+            "publish_date": "2000",
+        },
+    )
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=listing_id,
+            enrich_isbn=True,
+        )
+        assert candidate["bibliographic_enrichment"] == {
+            "publisher": "Penguin Classics",
+            "edition": "Revised edition",
+            "publish_date": "2000",
+        }
+        publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        assert item.attributes["publisher"] == "Penguin Classics"
+        assert item.attributes["publisher_source"] == "isbn"
+        assert item.attributes["edition"] == "Revised edition"
+        assert item.attributes["edition_source"] == "isbn"
+        assert item.attributes["publish_date"] == "2000"
+        assert item.attributes["publish_date_source"] == "isbn"
+
+
+def test_biblio_publish_uses_values_reviewed_in_preview_even_if_lookup_changes(monkeypatch):
+    client, csrf = _registered_client(monkeypatch)
+    credentials = client.put(
+        "/api/app/connectors/biblio/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {"username": "seller", "password": "secret"}},
+    )
+    assert credentials.status_code == 200, credentials.text
+
+    with db.session_scope() as session:
+        membership = session.execute(select(models.Membership)).scalar_one()
+        workspace_id = membership.workspace_id
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="REVIEW-STABLE-1",
+            title="Marketing title",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            currency="EUR",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        source = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item.id,
+            channel=Channel.VINTED,
+            external_id="REVIEW-STABLE-V",
+            title="Marketing title",
+            price_cents=1200,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+            extra={
+                "metadata": {
+                    "author": "Vinted Author",
+                    "description": "Vinted description",
+                    "isbn": "9780140328721",
+                }
+            },
+        )
+        session.add(source)
+        session.flush()
+        item_id = item.id
+        source_id = source.id
+
+    calls = iter([
+        {
+            "found": True,
+            "isbn": "9780140328721",
+            "title": "Preview Title",
+            "author": "Preview Author",
+            "publisher": "Preview Publisher",
+        },
+        {
+            "found": True,
+            "isbn": "9780140328721",
+            "title": "Changed Title",
+            "author": "Changed Author",
+            "publisher": "Changed Publisher",
+        },
+    ])
+    monkeypatch.setattr(
+        "app.publishing.stock_intake.lookup_isbn",
+        lambda _isbn: next(calls),
+    )
+
+    preview = client.get(
+        f"/api/app/inventory/{item_id}/publish/biblio",
+        params={"source_listing_id": str(source_id)},
+    )
+    assert preview.status_code == 200, preview.text
+    reviewed = preview.json()["fields"]
+    assert reviewed["title"] == "Preview Title"
+    assert reviewed["author"] == "Preview Author"
+
+    published = client.post(
+        f"/api/app/inventory/{item_id}/publish/biblio",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "source_listing_id": str(source_id),
+            "book_id": reviewed["book_id"],
+            "title": reviewed["title"],
+            "author": reviewed["author"],
+            "description": reviewed["description"],
+            "isbn": reviewed["isbn"],
+            "price_cents": reviewed["price_cents"],
+        },
+    )
+    assert published.status_code == 200, published.text
+
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+            )
+        ).scalar_one()
+        assert listing.title == "Preview Title"
+        assert listing.extra["author"] == "Preview Author"
+        assert listing.extra["description"] == "Vinted description"
