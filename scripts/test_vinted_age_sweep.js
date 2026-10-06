@@ -21,6 +21,8 @@ let nextWindowId = 20;
 const urls = new Map();
 const posted = [];
 const windowsCreated = [];
+const windowsRemoved = [];
+const alarms = [];
 
 const chrome = {
   runtime: {
@@ -45,8 +47,9 @@ const chrome = {
       windowsCreated.push({ id, ...opts, tabs });
       return { id, tabs };
     },
-    async remove() {
-      urls.clear();
+    async remove(id) {
+      windowsRemoved.push(id);
+      for (const [tabId] of [...urls]) urls.delete(tabId);
     },
   },
   tabs: {
@@ -56,6 +59,7 @@ const chrome = {
       return { id, status: "complete", url: urls.get(id) };
     },
     async get(id) {
+      if (!urls.has(id)) throw new Error("tab missing");
       return { id, status: "complete", url: urls.get(id) };
     },
     async sendMessage(_id, payload) {
@@ -64,7 +68,7 @@ const chrome = {
         if (n === 7) return { ok: true, age: null };
         return { ok: true, age: { seconds: n * 86400, text: n + " days ago" } };
       }
-      return { ok: true, protocol: 5 };
+      return { ok: true, protocol: 6 };
     },
     async reload() {},
     async remove() {},
@@ -83,7 +87,7 @@ const chrome = {
     },
   },
   alarms: {
-    create() {},
+    create(name, options) { alarms.push({ name, options }); },
     onAlarm: { addListener() {} },
   },
   scripting: {
@@ -121,23 +125,34 @@ function assert(condition, message) {
 }
 
 (async () => {
-  const items = Array.from({ length: 40 }, (_, index) => {
+  const items = Array.from({ length: 70 }, (_, index) => {
     const id = String(index + 1);
     return { id, url: "https://www.vinted.pt/items/" + id + "-test" };
   });
 
-  const result = await context.runAgeBurst(items, "manual");
+  const started = await context.startAgeJob(items, "manual");
+  assert(started.started === true, "Manual job was not started");
+  assert(started.remaining === 70, "Whole queue was not persisted");
 
-  assert(result.scanned === 40, "Manual burst should scan the whole queue");
-  assert(result.updated === 39, "One intentionally unread item should not be posted");
-  assert(result.failed === 1, "Unread item should be counted once");
-  assert(windowsCreated.length === 1, "One burst should create one worker window");
-  assert(windowsCreated[0].tabs.length === 16, "Burst should use 16 concurrent tabs");
-  assert(Object.keys(state.vintedListingPageAgeCacheV2).length === 39,
+  const first = await context.processAgeJobWave();
+  assert(first.ok === true, "First resumable age chunk failed");
+  assert(first.remaining === 22, "One event should process exactly four 12-item waves");
+  assert(state.vintedAgeBurstJobV2.remaining.length === 22,
+    "Remaining age queue was not persisted after the event");
+  assert(windowsCreated.length === 1, "Age job should create one worker window");
+  assert(windowsCreated[0].tabs.length === 12, "Age job should use 12 reusable tabs");
+  assert(windowsRemoved.length === 0, "Worker window closed before the finite job finished");
+
+  const second = await context.processAgeJobWave();
+  assert(second.ok === true && second.remaining === 0, "Second chunk did not finish the job");
+  assert(state.vintedAgeBurstJobV2 === undefined, "Finished age job was not cleared");
+  assert(windowsCreated.length === 1, "Resumed job created another worker window");
+  assert(windowsRemoved.length === 1, "Worker window was not closed at job completion");
+  assert(Object.keys(state.vintedListingPageAgeCacheV2).length === 69,
     "Successful ages were not cached");
   assert(state.vintedAgeScanFailuresV1["7"], "Unread item was not cooldown-marked");
-  assert(posted.length === 1 && posted[0].ages.length === 39,
-    "Incremental endpoint should receive successful ages in one request");
+  assert(posted.reduce((total, body) => total + body.ages.length, 0) === 69,
+    "Incremental endpoint did not receive every successful age");
 
   const periodic = await context.eligibleAgeScanItems(
     [{ id: "7", url: "https://www.vinted.pt/items/7-test" }],
@@ -151,7 +166,10 @@ function assert(condition, message) {
   );
   assert(manual.length === 1, "Manual sync should allow an explicit retry");
 
-  console.log("Finite Vinted posting-age burst: ok");
+  assert(alarms.some((row) => row.name === "reseller-vinted-age-job"),
+    "Resumable age job did not schedule continuation/watchdog alarms");
+
+  console.log("Resumable finite Vinted posting-age job: ok");
 })().catch((error) => {
   console.error(error);
   process.exit(1);
