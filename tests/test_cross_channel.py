@@ -722,3 +722,289 @@ def test_delayed_jobs_are_not_claimable_before_available_time():
         row = session.get(BackgroundJob, job_id)
         assert row.status == "queued"
         assert row.available_at > NOW
+
+
+
+def test_store_connectors_queue_remote_close_actions_on_vinted_sale():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="LIFECYCLE-1",
+            title="Cross-listed item",
+            category="general",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        _listing(session, workspace_id, item, "vinted", "V-LIFE", status="sold")
+        _listing(session, workspace_id, item, "woocommerce", "42")
+        _listing(
+            session,
+            workspace_id,
+            item,
+            "shopify",
+            "gid://shopify/ProductVariant/11",
+        )
+        _listing(session, workspace_id, item, "wix", "prod-1:var-1")
+        _listing(session, workspace_id, item, "bigcommerce", "BC-1")
+        sale = _sale(session, workspace_id, item)
+
+        created = plan_sale_reconciliation(session, sale)
+        by_channel = {row.channel: row for row in created}
+
+        assert by_channel["woocommerce"].mode == "remote"
+        assert by_channel["woocommerce"].status == "queued"
+        assert by_channel["shopify"].mode == "remote"
+        assert by_channel["shopify"].status == "queued"
+        assert by_channel["wix"].mode == "remote"
+        assert by_channel["wix"].status == "queued"
+        assert by_channel["bigcommerce"].mode == "manual"
+        assert by_channel["bigcommerce"].status == "attention"
+        assert session.execute(
+            select(func.count(BackgroundJob.id)).where(
+                BackgroundJob.workspace_id == workspace_id,
+                BackgroundJob.job_type == "cross_channel_close",
+            )
+        ).scalar_one() == 3
+
+
+def test_execute_store_close_actions_marks_local_listings_inactive(monkeypatch):
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="LIFECYCLE-2",
+            title="Cross-listed item",
+            category="general",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        _listing(session, workspace_id, item, "vinted", "V-LIFE-2", status="sold")
+        woo = _listing(session, workspace_id, item, "woocommerce", "42")
+        shop = _listing(
+            session,
+            workspace_id,
+            item,
+            "shopify",
+            "gid://shopify/ProductVariant/11",
+        )
+        wix = _listing(session, workspace_id, item, "wix", "prod-1:var-1")
+        sale = _sale(session, workspace_id, item)
+        actions = plan_sale_reconciliation(session, sale)
+        action_ids = {row.channel: row.id for row in actions}
+        listing_ids = {
+            "woocommerce": woo.id,
+            "shopify": shop.id,
+            "wix": wix.id,
+        }
+
+    monkeypatch.setattr(
+        hosted,
+        "close_woocommerce_workspace_listing",
+        lambda workspace_id, external_id: {
+            "remote": "stock_zeroed",
+            "external_id": external_id,
+            "quantity": 0,
+        },
+    )
+    shop_keys = []
+    def fake_shop_close(workspace_id, external_id, *, idempotency_key):
+        shop_keys.append(idempotency_key)
+        return {
+            "remote": "stock_zeroed",
+            "external_id": external_id,
+            "quantity": 0,
+        }
+    monkeypatch.setattr(hosted, "close_shopify_workspace_listing", fake_shop_close)
+    monkeypatch.setattr(
+        hosted,
+        "close_wix_workspace_listing",
+        lambda workspace_id, external_id: {
+            "remote": "stock_zeroed",
+            "external_id": external_id,
+            "quantity": 0,
+        },
+    )
+
+    for channel in ("woocommerce", "shopify", "wix"):
+        result = execute_action(action_ids[channel])
+        assert result["remote"] == "stock_zeroed"
+
+    assert shop_keys == [str(action_ids["shopify"])]
+    with db.session_scope() as session:
+        for channel, listing_id in listing_ids.items():
+            listing = session.get(models.ChannelListing, listing_id)
+            assert listing.status == "inactive"
+            assert listing.quantity == 0
+            action = session.get(CrossChannelAction, action_ids[channel])
+            assert action.status == "success"
+
+
+def test_woocommerce_close_is_idempotent(monkeypatch):
+    workspace_id = _workspace()
+    monkeypatch.setattr(
+        hosted,
+        "_credentials",
+        lambda *_args: {
+            "store_url": "https://shop.example.com",
+            "consumer_key": "ck_test",
+            "consumer_secret": "cs_test",
+        },
+    )
+    monkeypatch.setattr(
+        hosted,
+        "_fetch_woocommerce_products",
+        lambda values: [{
+            "source_id": "42",
+            "status": "active",
+            "quantity": 1,
+        }],
+    )
+    writes = []
+    monkeypatch.setattr(
+        hosted,
+        "_woo_put",
+        lambda values, path, *, body: writes.append((path, body)) or {
+            "stock_quantity": 0,
+            "stock_status": "outofstock",
+            "status": "publish",
+        },
+    )
+    first = hosted.close_woocommerce_workspace_listing(workspace_id, "42")
+    assert first["remote"] == "stock_zeroed"
+    assert writes[0][0] == "products/42"
+    assert writes[0][1]["stock_quantity"] == 0
+
+    monkeypatch.setattr(
+        hosted,
+        "_fetch_woocommerce_products",
+        lambda values: [{
+            "source_id": "42",
+            "status": "inactive",
+            "quantity": 0,
+        }],
+    )
+    writes.clear()
+    second = hosted.close_woocommerce_workspace_listing(workspace_id, "42")
+    assert second["remote"] == "already_unavailable"
+    assert writes == []
+
+
+def test_shopify_close_uses_compare_and_swap_and_stable_idempotency(monkeypatch):
+    workspace_id = _workspace()
+    monkeypatch.setattr(
+        hosted,
+        "_credentials",
+        lambda *_args: {
+            "store_domain": "shop.myshopify.com",
+            "access_token": "token",
+            "api_version": "2026-10",
+        },
+    )
+    calls = []
+
+    def fake_graphql(values, query, *, variables=None):
+        calls.append((query, variables or {}))
+        if "ResellerVariantInventory" in query:
+            return {
+                "productVariant": {
+                    "id": "gid://shopify/ProductVariant/11",
+                    "inventoryItem": {
+                        "id": "gid://shopify/InventoryItem/12",
+                        "inventoryLevels": {
+                            "nodes": [
+                                {
+                                    "location": {"id": "gid://shopify/Location/1"},
+                                    "quantities": [{"name": "available", "quantity": 1}],
+                                },
+                                {
+                                    "location": {"id": "gid://shopify/Location/2"},
+                                    "quantities": [{"name": "available", "quantity": 2}],
+                                },
+                            ]
+                        },
+                    },
+                }
+            }
+        return {
+            "inventorySetQuantities": {
+                "inventoryAdjustmentGroup": {"changes": []},
+                "userErrors": [],
+            }
+        }
+
+    monkeypatch.setattr(hosted, "_shopify_graphql", fake_graphql)
+    result = hosted.close_shopify_workspace_listing(
+        workspace_id,
+        "gid://shopify/ProductVariant/11",
+        idempotency_key="action-123",
+    )
+    assert result["remote"] == "stock_zeroed"
+    mutation = next(v for q, v in calls if "ResellerSetInventory" in q)
+    assert mutation["idempotencyKey"] == "action-123"
+    assert mutation["input"]["quantities"] == [
+        {
+            "inventoryItemId": "gid://shopify/InventoryItem/12",
+            "locationId": "gid://shopify/Location/1",
+            "quantity": 0,
+            "changeFromQuantity": 1,
+        },
+        {
+            "inventoryItemId": "gid://shopify/InventoryItem/12",
+            "locationId": "gid://shopify/Location/2",
+            "quantity": 0,
+            "changeFromQuantity": 2,
+        },
+    ]
+
+
+def test_wix_close_zeroes_every_location_with_revision(monkeypatch):
+    workspace_id = _workspace()
+    monkeypatch.setattr(
+        hosted,
+        "_credentials",
+        lambda *_args: {"site_id": "site", "api_key": "key"},
+    )
+    monkeypatch.setattr(
+        hosted,
+        "_wix_query_inventory",
+        lambda values: [
+            {
+                "id": "inv-1",
+                "revision": "3",
+                "productId": "prod-1",
+                "variantId": "var-1",
+                "trackQuantity": True,
+                "quantity": 1,
+            },
+            {
+                "id": "inv-2",
+                "revision": "4",
+                "productId": "prod-1",
+                "variantId": "var-1",
+                "trackQuantity": True,
+                "quantity": 2,
+            },
+        ],
+    )
+    patches = []
+    monkeypatch.setattr(
+        hosted,
+        "_wix_patch",
+        lambda values, path, *, body: patches.append((path, body)) or {},
+    )
+    result = hosted.close_wix_workspace_listing(
+        workspace_id,
+        "prod-1:var-1",
+    )
+    assert result["remote"] == "stock_zeroed"
+    assert result["previous_quantity"] == 3
+    assert result["locations_updated"] == 2
+    assert [row[1]["inventoryItem"]["revision"] for row in patches] == ["3", "4"]
+    assert all(row[1]["inventoryItem"]["quantity"] == 0 for row in patches)
