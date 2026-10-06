@@ -359,7 +359,7 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert '"X-Platform":"web"' not in content
     assert "r.status===403" in content
     assert "function rateLimitDelay(response,attempt)" in content
-    assert "Vinted rate limited the sync." in content
+    assert "Vinted rate limited the API sync." in content
     assert "error.vintedRateLimited=true" in content
     assert 'if(status==="active")throw error;' in content
     assert "secondaryRateLimited=true" in content
