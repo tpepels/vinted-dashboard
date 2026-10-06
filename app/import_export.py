@@ -266,6 +266,16 @@ def _row_payload(
                 attributes[key] = cleaned
             else:
                 errors.append("invalid ISBN")
+        elif key == "barcode":
+            cleaned = re.sub(r"[^0-9A-Za-z]", "", str(value))
+            if cleaned:
+                attributes[key] = cleaned
+        elif key in {"publication_year", "pages"}:
+            number = _int(value, None)
+            if number is not None and number >= 0:
+                attributes[key] = number
+            else:
+                errors.append(f"invalid {key.replace('_', ' ')}")
         else:
             attributes[key] = str(value).strip()
 
