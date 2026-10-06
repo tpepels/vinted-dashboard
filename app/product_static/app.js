@@ -1057,6 +1057,8 @@ async function publishReviewedCrossList() {
         body: JSON.stringify({ quantity: quantityValue }),
       });
       current.data.fields.quantity = quantityValue;
+      button.disabled = false;
+      button.textContent = "Publish to " + (connectorSchemas[channel]?.title || channel);
     } catch (error) {
       button.disabled = false;
       button.textContent = "Publish to " + (connectorSchemas[channel]?.title || channel);
