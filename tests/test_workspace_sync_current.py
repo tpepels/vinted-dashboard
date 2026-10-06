@@ -213,7 +213,7 @@ def test_connector_snapshot_preserves_rich_metadata_and_infers_book_isbn():
         assert item.attributes["binding"] == "Paperback"
         assert item.attributes["language"] == "English"
         assert item.attributes["publication_year"] == 1988
-        assert item.attributes["pages"] == "176"
+        assert item.attributes["pages"] == 176
         assert item.attributes["description"] == "Imported description"
 
         listing = session.execute(
