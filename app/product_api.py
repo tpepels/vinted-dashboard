@@ -222,6 +222,9 @@ class BiblioPublishRequest(BaseModel):
     author: str | None = None
     description: str | None = None
     isbn: str | None = None
+    publisher: str | None = None
+    edition: str | None = None
+    publish_date: str | None = None
     price_cents: int | None = Field(default=None, ge=0)
 
 
