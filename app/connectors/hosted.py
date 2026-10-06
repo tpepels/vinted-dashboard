@@ -3541,10 +3541,15 @@ def sync_biblio_workspace(
                     },
                 )
             if row_errors:
+                if not photos_only and listing_key:
+                    deferred_photo_retry_listing_ids.append(listing_key)
+                    photo_state = "retry_scheduled"
+                else:
+                    photo_state = "error"
                 _set_biblio_listing_states(
                     workspace_id,
                     [listing_key],
-                    photo_state="error",
+                    photo_state=photo_state,
                     photo_error="; ".join(row_errors)[:2000],
                 )
             elif uploaded == len(row.get("image_urls") or []) and uploaded > 0:
@@ -3640,7 +3645,7 @@ def sync_biblio_workspace(
         "photos_total": photo_total,
         "photos_uploaded": photos_uploaded,
         "photo_errors": photo_errors,
-        "deferred_photo_retry_listing_ids": deferred_photo_retry_listing_ids,
+        "deferred_photo_retry_listing_ids": list(dict.fromkeys(deferred_photo_retry_listing_ids)),
         "run_id": str(run_id),
     }
 
