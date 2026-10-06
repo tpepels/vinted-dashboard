@@ -828,6 +828,8 @@ def test_vinted_taxonomy_prefers_specific_phrases_and_avoids_substring_false_pos
     assert classify_vinted_category("Toys > Board games") == ItemCategory.TOYS_GAMES
     assert classify_vinted_category("Women > Party dresses") == ItemCategory.CLOTHING
     assert classify_vinted_category("Sports > Martial arts") == ItemCategory.SPORTS
+    assert classify_vinted_category("Beauty > Accessories") == ItemCategory.BEAUTY
+    assert classify_vinted_category("Electronics > Accessories") == ItemCategory.ELECTRONICS
     assert classify_vinted_category("Art") == ItemCategory.ART_CRAFTS
 
 
