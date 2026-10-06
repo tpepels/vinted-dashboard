@@ -3043,7 +3043,11 @@ def _download_biblio_jpeg(url: str) -> bytes:
         raise ValueError("Photo could not be converted to JPG") from exc
 
 
-def _pending_biblio_photo_rows(active: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _pending_biblio_photo_rows(
+    active: list[dict[str, Any]],
+    *,
+    force: bool = False,
+) -> list[dict[str, Any]]:
     pending: list[dict[str, Any]] = []
     for row in active:
         urls = [
@@ -3052,7 +3056,9 @@ def _pending_biblio_photo_rows(active: list[dict[str, Any]]) -> list[dict[str, A
             if str(value or "").strip()
         ][:BIBLIO_MAX_PHOTOS]
         signature = _biblio_photo_signature(urls)
-        if not signature or signature == row.get("photo_sync_signature"):
+        if not signature:
+            continue
+        if not force and signature == row.get("photo_sync_signature"):
             continue
         pending.append({**row, "image_urls": urls, "photo_signature": signature})
     return pending
@@ -3287,12 +3293,25 @@ def sync_biblio_workspace(
     *,
     listing_id: uuid.UUID | None = None,
     full_sync: bool = False,
+    force_photos: bool = False,
+    photos_only: bool = False,
 ) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
     active, deletes = _biblio_rows(workspace_id, listing_id=listing_id)
-    inventory_rows = active if full_sync else [row for row in active if row.get("inventory_dirty")]
-    delete_rows = deletes if full_sync else [row for row in deletes if row.get("inventory_dirty")]
-    photo_rows = _pending_biblio_photo_rows(active)
+    inventory_rows = (
+        []
+        if photos_only
+        else (active if full_sync else [row for row in active if row.get("inventory_dirty")])
+    )
+    delete_rows = (
+        []
+        if photos_only
+        else (deletes if full_sync else [row for row in deletes if row.get("inventory_dirty")])
+    )
+    photo_rows = _pending_biblio_photo_rows(
+        active,
+        force=bool(force_photos or full_sync),
+    )
     selected_ids = [str(row["listing_id"]) for row in [*active, *deletes] if row.get("listing_id")]
     photo_listing_ids = [str(row["listing_id"]) for row in photo_rows if row.get("listing_id")]
 
@@ -3319,7 +3338,11 @@ def sync_biblio_workspace(
     inventory_filename = f"{prefix}-{stamp}.txt" if inventory_rows else None
     deletes_filename = f"{prefix}-{stamp}-deletes.txt" if delete_rows else None
     photo_total = sum(len(row.get("image_urls") or []) for row in photo_rows)
-    mode = "listing" if listing_id is not None else ("full" if full_sync else "incremental")
+    mode = (
+        "listing"
+        if listing_id is not None
+        else ("photos" if photos_only else ("full" if full_sync else "incremental"))
+    )
     run_id = _start_biblio_run(
         workspace_id,
         active_count=len(inventory_rows),
