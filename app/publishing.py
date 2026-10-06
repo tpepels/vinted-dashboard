@@ -343,15 +343,53 @@ def build_biblio_candidate(
             "isbn",
         ),
     )
+    subtitle, subtitle_source = _value(
+        (attrs.get("subtitle"), "master"),
+        (
+            str(enrichment.get("subtitle") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    binding, binding_source = _value(
+        (attrs.get("binding"), "master"),
+        (attrs.get("physical_format"), "master"),
+        (
+            str(enrichment.get("physical_format") or "").strip() if enrichment else None,
+            "isbn",
+        ),
+    )
+    language, language_source = _value(
+        (vmeta.get("language"), "vinted"),
+        (attrs.get("language"), "master"),
+    )
+    pages, pages_source = _value(
+        (attrs.get("pages"), "master"),
+        (attrs.get("number_of_pages"), "master"),
+        ((enrichment or {}).get("number_of_pages"), "isbn"),
+    )
+    condition, condition_source = _value(
+        (vmeta.get("condition"), "vinted"),
+        (item.condition, "master"),
+    )
     enrichment_fields = {
+        "subtitle": subtitle,
         "publisher": publisher,
         "edition": edition,
+        "binding": binding,
+        "language": language,
+        "pages": pages,
         "publish_date": publish_date,
+        "condition": condition,
     }
     bibliographic_sources = {
+        "subtitle": subtitle_source,
         "publisher": publisher_source,
         "edition": edition_source,
+        "binding": binding_source,
+        "language": language_source,
+        "pages": pages_source,
         "publish_date": publish_date_source,
+        "condition": condition_source,
     }
 
     existing = _existing_biblio(session, workspace_id, item.id)
@@ -437,7 +475,10 @@ def apply_biblio_overrides(
 
     bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
     bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
-    for key in ("publisher", "edition", "publish_date"):
+    for key in (
+        "subtitle", "publisher", "edition", "binding",
+        "language", "pages", "publish_date", "condition",
+    ):
         if key not in overrides or overrides[key] is None:
             continue
         value = str(overrides[key]).strip()
@@ -586,10 +627,19 @@ def upsert_biblio_listing(
         attrs["description"] = fields["description"]
     if fields.get("price_cents") is not None and attrs.get("default_price_cents") is None:
         attrs["default_price_cents"] = int(fields["price_cents"])
-    for key, value in dict(candidate.get("bibliographic_enrichment") or {}).items():
-        if key in {"publisher", "edition", "publish_date"} and value and not attrs.get(key):
+    bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
+    bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
+    for key, value in bibliographic.items():
+        if (
+            key in {
+                "subtitle", "publisher", "edition", "binding",
+                "language", "pages", "publish_date", "condition",
+            }
+            and value not in (None, "")
+            and not attrs.get(key)
+        ):
             attrs[key] = value
-            attrs[f"{key}_source"] = "isbn"
+            attrs[f"{key}_source"] = bibliographic_sources.get(key) or "unknown"
     item.attributes = attrs
     session.flush()
     return existing
