@@ -6,7 +6,7 @@ const AGE_SWEEP_QUEUE_KEY="vintedAgeSweepQueueV1";
 const AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
 const AGE_BATCH_SIZE=16;
 const AGE_SWEEP_WINDOW_MS=90000;
-const CONTENT_PROTOCOL=3;
+const CONTENT_PROTOCOL=4;
 let syncInFlight=null;
 let ageSweepInFlight=null;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
