@@ -467,8 +467,20 @@ def upsert_biblio_listing(
     existing.status = ListingStatus.ACTIVE
     existing.quantity = max(1, int(fields.get("quantity") or 1))
     existing.last_seen_at = now
+    previous_extra = dict(existing.extra or {})
+    image_urls = list(source.get("image_urls") or [])[:5]
+    previous_images = list(previous_extra.get("image_urls") or [])
+    if image_urls:
+        photo_sync_state = (
+            "queued"
+            if image_urls != previous_images or not previous_extra.get("photo_sync_signature")
+            else previous_extra.get("photo_sync_state") or "ftp_uploaded"
+        )
+    else:
+        photo_sync_state = "none"
+
     existing.extra = {
-        **dict(existing.extra or {}),
+        **previous_extra,
         "author": fields.get("author"),
         "description": fields.get("description"),
         "isbn": fields.get("isbn"),
@@ -476,10 +488,13 @@ def upsert_biblio_listing(
         "source_listing_id": source.get("listing_id"),
         "source_listing_external_id": source.get("external_id"),
         "field_sources": dict(candidate.get("field_sources") or {}),
-        "image_urls": list(source.get("image_urls") or [])[:5],
-        "image_source": source.get("channel") if source.get("image_urls") else None,
+        "image_urls": image_urls,
+        "image_source": source.get("channel") if image_urls else None,
         "bibliographic_enrichment": dict(candidate.get("bibliographic_enrichment") or {}),
         "cross_listed_at": now.isoformat(),
+        "publish_state": "queued",
+        "publish_queued_at": now.isoformat(),
+        "photo_sync_state": photo_sync_state,
     }
 
     if item.category == ItemCategory.GENERAL and (fields.get("isbn") or fields.get("author")):
