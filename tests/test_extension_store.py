@@ -205,13 +205,18 @@ def test_content_script_uses_resumable_finite_rendered_uploaded_age_job():
     assert "age_scan_items:ageScanItems" in content
     assert 'message?.type==="read-vinted-uploaded-age"' in content
     assert 'AGE_JOB_KEY="vintedAgeBurstJobV2"' in background
-    assert "const AGE_WORKERS=12;" in background
-    assert "const AGE_WAVES_PER_EVENT=4;" in background
+    assert "const AGE_WORKERS=4;" in background
+    assert "const AGE_WAVES_PER_EVENT=8;" in background
     assert 'AGE_FAILURES_KEY="vintedAgeScanFailuresV1"' in background
     assert 'api("/api/extension/listing-ages"' in background
     assert "async function startAgeJob(items,reason)" in background
     assert "async function processAgeJobWave()" in background
     assert "async function renderedUploadedAgeWave(job,batch)" in background
+    assert "const AGE_NAVIGATION_MIN_INTERVAL_MS=1800;" in background
+    assert "const AGE_RATE_LIMIT_BASE_COOLDOWN_MS=30*60*1000;" in background
+    assert "async function waitForAgeNavigationSlot()" in background
+    assert "let ageNavigationChain=Promise.resolve();" in background
+    assert 'url:Array.from({length:batch.length},()=>"about:blank")' in background
     assert "chrome.windows.create({" in background
     assert 'state:"minimized"' in background
     assert "await chrome.tabs.update(tab.id,{url:target.href,active:false})" in background
@@ -224,9 +229,9 @@ def test_content_script_uses_resumable_finite_rendered_uploaded_age_job():
 def test_bridge_reloads_stale_content_script_before_sync():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
-    assert "const BRIDGE_CONTENT_PROTOCOL=6;" in content
+    assert "const BRIDGE_CONTENT_PROTOCOL=7;" in content
     assert 'message?.type==="bridge-content-protocol"' in content
-    assert "const CONTENT_PROTOCOL=6;" in background
+    assert "const CONTENT_PROTOCOL=7;" in background
     assert "async function ensureCurrentContentScript(tab)" in background
     assert "await chrome.tabs.reload(tab.id)" in background
     assert "tab=await ensureCurrentContentScript(tab);" in background
@@ -236,8 +241,8 @@ def test_content_script_has_reinjection_guard():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "(() => {" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 6" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 6" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 7" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 7" in content
     assert content.rstrip().endswith("})();")
     assert "node scripts/test_vinted_content_idempotent.js" in workflow
 
@@ -255,8 +260,8 @@ def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
     assert 'function enrichListingDetails(listings,reason="periodic")' in content
     assert "image_urls:images" in content
     assert ": await enrichListingDetails(listings,reason);" in content
-    assert 'const budget=reason==="manual"?32:10;' in content
-    assert '{minDelayMs:900,maxRetries:1}' in content
+    assert 'const budget=reason==="manual"?12:4;' in content
+    assert '{minDelayMs:1500,maxRetries:1}' in content
     assert '["active","reserved","hidden","draft"]' in content
 
 
@@ -334,8 +339,8 @@ def test_vinted_detail_parser_prefers_direct_category_and_description_fields():
 
 def test_bridge_age_scan_is_finite_resumable_and_failures_have_cooldown():
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
-    assert "const AGE_WORKERS=12;" in background
-    assert "const AGE_WAVES_PER_EVENT=4;" in background
+    assert "const AGE_WORKERS=4;" in background
+    assert "const AGE_WAVES_PER_EVENT=8;" in background
     assert "const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;" in background
     assert 'if(reason==="manual")return clean;' in background
     assert "job.remaining=job.remaining.slice(batch.length);" in background
@@ -353,5 +358,18 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert "error.vintedRateLimited=true" in content
     assert 'if(status==="active")throw error;' in content
     assert "secondaryRateLimited=true" in content
-    assert 'const budget=reason==="manual"?32:10;' in content
+    assert 'const budget=reason==="manual"?12:4;' in content
     assert "if(!detailSync.rate_limited)" in content
+
+
+
+def test_vinted_age_worker_detects_site_rate_limit_and_pauses():
+    content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
+    assert "function renderedPageAccessState()" in content
+    assert '"you are rate limited"' in content
+    assert '"too many requests"' in content
+    assert "rate_limited:Boolean(result?.rate_limited)" in background
+    assert "AGE_RATE_LIMIT_BASE_COOLDOWN_MS" in background
+    assert "job.cooldown_until=Date.now()+cooldown" in background
+    assert "await closeAgeWorkerWindow(job)" in background
