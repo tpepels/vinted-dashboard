@@ -5,13 +5,17 @@ const AGE_JOB_ALARM="reseller-vinted-age-job";
 const AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
 const AGE_FAILURES_KEY="vintedAgeScanFailuresV1";
 const AGE_JOB_KEY="vintedAgeBurstJobV2";
-const AGE_WORKERS=12;
-const AGE_WAVES_PER_EVENT=4;
+const AGE_WORKERS=4;
+const AGE_WAVES_PER_EVENT=8;
+const AGE_NAVIGATION_MIN_INTERVAL_MS=1800;
+const AGE_RATE_LIMIT_BASE_COOLDOWN_MS=30*60*1000;
+const AGE_RATE_LIMIT_MAX_COOLDOWN_MS=6*60*60*1000;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
 const AGE_JOB_WATCHDOG_MS=240000;
-const CONTENT_PROTOCOL=6;
+const CONTENT_PROTOCOL=7;
 let syncInFlight=null;
 let ageJobInFlight=null;
+let lastAgeNavigationAt=0;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 async function stored(){return await chrome.storage.local.get(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_FAILURES_KEY,AGE_JOB_KEY])}
@@ -35,21 +39,35 @@ async function ensureCurrentContentScript(tab){
   }
   return reloaded;
 }
+async function waitForAgeNavigationSlot(){
+  const delay=AGE_NAVIGATION_MIN_INTERVAL_MS-(Date.now()-lastAgeNavigationAt);
+  if(delay>0)await sleep(delay);
+  lastAgeNavigationAt=Date.now();
+}
+
 async function readRenderedAgeFromTab(tab,item){
   const target=new URL(String(item.url||""));
-  if(!target.hostname.startsWith("www.vinted."))return null;
+  if(!target.hostname.startsWith("www.vinted."))return{age:null,rate_limited:false,challenged:false};
   const current=await chrome.tabs.get(tab.id);
   if(String(current.url||"")!==target.href){
+    await waitForAgeNavigationSlot();
     await chrome.tabs.update(tab.id,{url:target.href,active:false});
   }
   await waitForTab(tab.id,30000);
   const started=Date.now();
   while(Date.now()-started<12000){
     const result=await message(tab.id,{type:"read-vinted-uploaded-age",item_id:String(item.id)});
-    if(result?.ok&&result.age)return result.age;
+    if(result?.rate_limited||result?.challenged){
+      return{
+        age:null,
+        rate_limited:Boolean(result?.rate_limited),
+        challenged:Boolean(result?.challenged),
+      };
+    }
+    if(result?.ok&&result.age)return{age:result.age,rate_limited:false,challenged:false};
     await sleep(350);
   }
-  return null;
+  return{age:null,rate_limited:false,challenged:false};
 }
 
 async function saveAgeBatchToCache(ages){
@@ -130,6 +148,8 @@ async function updateAgeJobStatus(job,error=null){
     age_scan_updated:Number(job?.updated||0),
     age_scan_failed:Number(job?.failed||0),
     age_scan_skipped:Number(job?.skipped||0),
+    age_scan_cooldown_until:Number(job?.cooldown_until||0),
+    age_scan_rate_limit_hits:Number(job?.rate_limit_hits||0),
     age_scan_at:new Date().toISOString(),
   };
   if(error)status.age_scan_error=String(error);
@@ -155,7 +175,7 @@ async function ensureAgeWorkerTabs(job,batch){
 
   await closeAgeWorkerWindow(job);
   const workerWindow=await chrome.windows.create({
-    url:batch.map(item=>item.url),
+    url:Array.from({length:batch.length},()=>"about:blank"),
     focused:false,
     state:"minimized",
   });
@@ -178,13 +198,16 @@ async function ensureAgeWorkerTabs(job,batch){
 async function renderedUploadedAgeWave(job,batch){
   const tabs=await ensureAgeWorkerTabs(job,batch);
   const results={};
+  let rateLimited=false,challenged=false;
   await Promise.all(batch.map(async(item,index)=>{
     try{
-      const age=await readRenderedAgeFromTab(tabs[index],item);
-      if(age)results[String(item.id)]=age;
+      const result=await readRenderedAgeFromTab(tabs[index],item);
+      if(result?.age)results[String(item.id)]=result.age;
+      if(result?.rate_limited)rateLimited=true;
+      if(result?.challenged)challenged=true;
     }catch{}
   }));
-  return results;
+  return{ages:results,rate_limited:rateLimited,challenged};
 }
 
 async function startAgeJob(items,reason){
@@ -217,6 +240,8 @@ async function startAgeJob(items,reason){
     tab_ids:[],
     started_at:new Date().toISOString(),
     last_error:null,
+    rate_limit_hits:0,
+    cooldown_until:0,
   };
   await chrome.storage.local.set({[AGE_JOB_KEY]:job});
   chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+500});
@@ -242,24 +267,66 @@ async function processAgeJobWave(){
       return{ok:true,remaining:0};
     }
 
-    // A single event handles a few bounded waves, well below Chrome's
-    // service-worker event lifetime. The persisted queue remains authoritative
-    // after every wave, so termination can only cause a retry of that wave.
+    const now=Date.now();
+    const cooldownUntil=Number(job.cooldown_until||0);
+    if(cooldownUntil>now){
+      await closeAgeWorkerWindow(job);
+      job.window_id=null;
+      job.tab_ids=[];
+      await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+      await updateAgeJobStatus(job,"Vinted website rate limit detected; age scan is cooling down.");
+      chrome.alarms.create(AGE_JOB_ALARM,{when:cooldownUntil});
+      return{ok:true,paused:true,remaining:job.remaining.length,cooldown_until:cooldownUntil};
+    }
+
     chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+AGE_JOB_WATCHDOG_MS});
     let eventUpdated=0,eventFailed=0;
     try{
       for(let wave=0;wave<AGE_WAVES_PER_EVENT&&job.remaining.length;wave++){
         const batch=job.remaining.slice(0,AGE_WORKERS);
-        const ages=await renderedUploadedAgeWave(job,batch);
+        const waveResult=await renderedUploadedAgeWave(job,batch);
+        const ages=waveResult.ages||{};
         await saveAgeBatchToCache(ages);
         const updated=await postAgeUpdates(ages);
-        const failed=await updateAgeFailures(batch,ages);
 
+        if(waveResult.rate_limited||waveResult.challenged){
+          const succeeded=new Set(Object.keys(ages));
+          const keepBatch=batch.filter(item=>!succeeded.has(String(item.id)));
+          job.remaining=[...keepBatch,...job.remaining.slice(batch.length)];
+          job.scanned=Number(job.scanned||0)+succeeded.size;
+          job.updated=Number(job.updated||0)+updated;
+          job.rate_limit_hits=Number(job.rate_limit_hits||0)+1;
+          const cooldown=Math.min(
+            AGE_RATE_LIMIT_MAX_COOLDOWN_MS,
+            AGE_RATE_LIMIT_BASE_COOLDOWN_MS*(2**Math.max(0,job.rate_limit_hits-1)),
+          );
+          job.cooldown_until=Date.now()+cooldown;
+          job.last_error=waveResult.rate_limited
+            ?"Vinted website rate limit detected"
+            :"Vinted anti-bot challenge detected";
+          await closeAgeWorkerWindow(job);
+          job.window_id=null;
+          job.tab_ids=[];
+          await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+          await updateAgeJobStatus(job,job.last_error+"; pausing the age scan.");
+          chrome.alarms.create(AGE_JOB_ALARM,{when:job.cooldown_until});
+          return{
+            ok:true,
+            paused:true,
+            remaining:job.remaining.length,
+            updated:eventUpdated+updated,
+            failed:eventFailed,
+            cooldown_until:job.cooldown_until,
+          };
+        }
+
+        const failed=await updateAgeFailures(batch,ages);
         job.remaining=job.remaining.slice(batch.length);
         job.scanned=Number(job.scanned||0)+batch.length;
         job.updated=Number(job.updated||0)+updated;
         job.failed=Number(job.failed||0)+failed;
         job.last_error=null;
+        job.cooldown_until=0;
         eventUpdated+=updated;
         eventFailed+=failed;
         await chrome.storage.local.set({[AGE_JOB_KEY]:job});
