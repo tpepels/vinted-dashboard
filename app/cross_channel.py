@@ -465,6 +465,9 @@ def reconcile_sale_state(
     pending = session.execute(
         select(CrossChannelAction).where(
             CrossChannelAction.trigger_sale_id == sale.id,
+            CrossChannelAction.action_type.in_(
+                [ACTION_TYPE, SYNC_QUANTITY_ACTION_TYPE]
+            ),
             CrossChannelAction.status.in_(["queued", "running", "attention", "error"]),
         )
     ).scalars().all()
