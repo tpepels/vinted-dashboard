@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app import db, models
 from app.import_export import (
     apply_inventory_import,
+    inventory_export_rows,
     parse_table,
     preview_inventory_import,
     render_xlsx,
@@ -116,3 +117,51 @@ def test_duplicate_sku_in_upload_is_a_conflict():
         preview = preview_inventory_import(session, wid, table.rows, mapping)
     assert preview["can_apply"] is False
     assert preview["counts"]["conflict"] == 1
+
+
+
+def test_rich_metadata_import_export_roundtrip():
+    wid = workspace()
+    table = parse_table(
+        "rich.csv",
+        (
+            "SKU,Title,Category,Quantity,Barcode,Author,ISBN,Subtitle,Publisher,Edition,"
+            "Binding,Language,Publish Date,Publication Year,Pages,Price\n"
+            "BK-RICH,Rich Book,book,1,9780140328721,Roald Dahl,9780140328721,"
+            "A Novel,Puffin,Revised,Paperback,English,1988-01-01,1988,176,9.50\n"
+        ).encode(),
+    )
+    mapping = suggest_mapping(table.headers)
+    assert mapping["Barcode"] == "barcode"
+    assert mapping["Subtitle"] == "subtitle"
+    assert mapping["Language"] == "language"
+    assert mapping["Publish Date"] == "publish_date"
+    assert mapping["Pages"] == "pages"
+
+    with db.session_scope() as session:
+        result = apply_inventory_import(session, wid, table.rows, mapping)
+        assert result["created"] == 1
+
+    with db.session_scope() as session:
+        item = session.execute(
+            select(models.InventoryItem).where(models.InventoryItem.sku == "BK-RICH")
+        ).scalar_one()
+        attrs = item.attributes
+        assert attrs["barcode"] == "9780140328721"
+        assert attrs["isbn"] == "9780140328721"
+        assert attrs["subtitle"] == "A Novel"
+        assert attrs["publisher"] == "Puffin"
+        assert attrs["edition"] == "Revised"
+        assert attrs["binding"] == "Paperback"
+        assert attrs["language"] == "English"
+        assert attrs["publish_date"] == "1988-01-01"
+        assert attrs["publication_year"] == 1988
+        assert attrs["pages"] == 176
+        exported = inventory_export_rows([item])[0]
+
+    assert exported["Barcode"] == "9780140328721"
+    assert exported["ISBN"] == "9780140328721"
+    assert exported["Subtitle"] == "A Novel"
+    assert exported["Language"] == "English"
+    assert exported["Publish Date"] == "1988-01-01"
+    assert exported["Pages"] == 176
