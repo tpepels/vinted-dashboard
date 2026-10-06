@@ -171,7 +171,7 @@ already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
 cache constants or registering a second message listener. Bridge 3.1.0 bumps
-that protocol so tabs still running the 3.0.0 script are forcibly reloaded once.
+that protocol so tabs still running the 3.0.1 script are forcibly reloaded once.
 
 
 Age parsing is isolated in `app/extension/vinted_age.js`; the finite rendered
