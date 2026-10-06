@@ -423,7 +423,10 @@ async function runSync(reason="manual"){
       snapshot.extension_version=chrome.runtime.getManifest().version;
 
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
-      const ageJob=await startAgeJob(ageScanItems,reason);
+      const vintedRateLimited=Boolean(detailSync.rate_limited);
+      const ageJob=vintedRateLimited
+        ? {remaining:0,scanned:0,updated:0,failed:0,skipped:ageScanItems.length}
+        : await startAgeJob(ageScanItems,reason);
       const status={
         ok:true,
         at:new Date().toISOString(),
@@ -432,8 +435,8 @@ async function runSync(reason="manual"){
         orders:snapshot.orders.length,
         detail_enriched:Number(detailSync.enriched||0),
         detail_deferred:Number(detailSync.deferred||0),
-        detail_rate_limited:Boolean(detailSync.rate_limited),
-        vinted_cooldown_until:0,
+        detail_rate_limited:vintedRateLimited,
+        vinted_cooldown_until:vintedRateLimited?Date.now()+CORE_RATE_LIMIT_COOLDOWN_MS:0,
         age_scan_running:ageJob.remaining>0,
         age_scan_remaining:ageJob.remaining,
         age_scan_scanned:ageJob.scanned,
