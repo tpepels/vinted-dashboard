@@ -363,8 +363,11 @@ def apply_biblio_overrides(
         if key not in overrides or overrides[key] is None:
             continue
         value = str(overrides[key]).strip()
-        if value:
-            fields[key] = clean_isbn(value) if key == "isbn" else value
+        if key == "isbn":
+            fields[key] = clean_isbn(value) if value else None
+            sources[key] = "review"
+        elif value:
+            fields[key] = value
             sources[key] = "review"
     if overrides.get("price_cents") is not None:
         price = int(overrides["price_cents"])
@@ -378,8 +381,7 @@ def apply_biblio_overrides(
         if key not in overrides or overrides[key] is None:
             continue
         value = str(overrides[key]).strip()
-        if value:
-            bibliographic[key] = value
+        bibliographic[key] = value or None
 
     if not fields.get("book_id") and fields.get("sku"):
         fields["book_id"] = fields["sku"]
