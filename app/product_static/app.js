@@ -56,13 +56,14 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. Inventory changes and Vinted source photos are sent by FTP. The dashboard records the FTP transfer separately from BIBLIO's later processing. Photos are converted to JPG and named from the BIBLIO Book ID automatically. Multiple photos use BookID_1.jpg, BookID_2.jpg, etc.; BIBLIO may need that multi-photo convention enabled on your seller account.",
+    help: "Book connector. Inventory changes and Vinted source photos are sent by FTP. Use upload profile core for the existing 8-column BIBLIO filter. Use extended only after BIBLIO has mapped the richer column order in Upload Settings; extended sends subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID automatically.",
     fields: [
       ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
       ["password", "FTP password", "", "password"],
       ["directory", "FTP directory", "", "text"],
       ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
+      ["upload_profile", "Upload profile (core or extended)", "core", "text"],
     ],
   },
   ebay: {
@@ -1039,8 +1040,17 @@ function bindCrossListButtons() {
 
 function biblioSourceBadge(source) {
   if (!source) return "";
-  const label = source === "vinted" ? "Vinted" : source === "isbn" ? "ISBN lookup" : source === "master" ? "Master" : source;
-  return '<span class="biblio-source">' + esc(label) + "</span>";
+  const labels = {
+    vinted: "Vinted",
+    isbn: "ISBN lookup",
+    master: "Master",
+    vinted_barcode: "Vinted barcode",
+    master_barcode: "Master barcode",
+    review: "Reviewed",
+    biblio: "BIBLIO",
+    default: "Default",
+  };
+  return '<span class="biblio-source">' + esc(labels[source] || source) + "</span>";
 }
 
 function renderBiblioPublish(data) {
@@ -1080,9 +1090,14 @@ function renderBiblioPublish(data) {
     ["author", "Author", fields.author || "", sources.author, true, true],
     ["description", "Description", fields.description || "", sources.description, true, true],
     ["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false],
+    ["subtitle", "Subtitle", enrichment.subtitle || "", bibliographicSources.subtitle || null, true, false],
     ["publisher", "Publisher", enrichment.publisher || "", bibliographicSources.publisher || null, true, false],
     ["edition", "Edition", enrichment.edition || "", bibliographicSources.edition || null, true, false],
+    ["binding", "Binding", enrichment.binding || "", bibliographicSources.binding || null, true, false],
+    ["language", "Language", enrichment.language || "", bibliographicSources.language || null, true, false],
     ["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false],
+    ["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false],
+    ["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false],
     ["price_cents", "Price", fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2), sources.price_cents, true, true],
     ["book_id", "Book ID", bookIdValue, sources.book_id, true, true],
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
@@ -1096,8 +1111,10 @@ function renderBiblioPublish(data) {
         valueHtml = '<textarea class="biblio-review-input" data-field="description" data-required="' + (required ? "true" : "false")
           + '" rows="4" placeholder="Description required by BIBLIO">' + esc(value || "") + '</textarea>';
       } else {
-        const type = key === "price_cents" ? "number" : "text";
-        const extra = key === "price_cents" ? ' min="0" step="0.01" inputmode="decimal"' : "";
+        const type = key === "price_cents" || key === "pages" ? "number" : "text";
+        const extra = key === "price_cents"
+          ? ' min="0" step="0.01" inputmode="decimal"'
+          : (key === "pages" ? ' min="0" step="1" inputmode="numeric"' : "");
         const placeholder = key === "book_id" ? "Unique BIBLIO Book ID" : (required ? label : label + " (optional)");
         valueHtml = '<input class="biblio-review-input" data-field="' + esc(key) + '" data-required="' + (required ? "true" : "false")
           + '" type="' + type + '"' + extra + ' value="' + esc(value || "") + '" placeholder="' + esc(placeholder) + '">';
@@ -1118,9 +1135,12 @@ function renderBiblioPublish(data) {
   else if (missing.length) warning = "Before publishing: " + missing.join(", ") + ".";
   else if (data.enrichment_warning) warning = "ISBN lookup warning: " + data.enrichment_warning;
   else if (data.photo_warning) warning = "Photo warning: " + data.photo_warning;
+  else if (data.upload_profile === "core") warning = data.already_listed
+    ? "Ready to update. Core FTP profile is active: optional bibliographic fields are retained locally but only the existing 8 BIBLIO columns are sent."
+    : "Ready. Core FTP profile is active: optional bibliographic fields are retained locally but only the existing 8 BIBLIO columns are sent.";
   else warning = data.already_listed
-    ? "This physical book already has a BIBLIO listing. Publishing will update it from the current source data."
-    : "Ready. Publishing creates a BIBLIO listing linked to this same physical book and queues the FTP sync.";
+    ? "Ready to update using the extended BIBLIO profile, including the optional bibliographic fields shown above."
+    : "Ready. Extended BIBLIO profile will send the optional bibliographic fields shown above.";
   $("#biblio-publish-warning").textContent = warning;
 
   $("#biblio-open-connections").classList.toggle("hidden", Boolean(data.configured));
