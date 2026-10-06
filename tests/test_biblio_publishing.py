@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import db, entry, models, publishing
+from app.connectors import hosted
 from app.constants import Channel, ItemCategory, ListingStatus
 from app.product_models import BackgroundJob
 from app.workspace_ingest import classify_vinted_category, record_workspace_snapshot
@@ -1202,6 +1203,14 @@ def test_biblio_credentials_validate_upload_profile(monkeypatch):
     with db.session_scope() as session:
         membership = session.execute(select(models.Membership)).scalar_one()
         workspace_id = membership.workspace_id
-    assert publishing is not None
-    from app.connectors import hosted
     assert hosted.biblio_upload_profile(workspace_id) == "extended"
+
+    connectors = client.get("/api/app/connectors")
+    assert connectors.status_code == 200, connectors.text
+    biblio = next(
+        row for row in connectors.json()["connectors"]
+        if row["channel"] == Channel.BIBLIO
+    )
+    assert biblio["saved_values"]["username"] == "seller"
+    assert biblio["saved_values"]["upload_profile"] == "extended"
+    assert "password" not in biblio["saved_values"]
