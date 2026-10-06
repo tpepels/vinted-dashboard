@@ -478,7 +478,7 @@ def test_cross_list_is_one_universal_action_not_one_column_per_connector():
 
 def test_biblio_review_gate_is_repaired_inside_cross_list():
     assert 'destination.action === "biblio_classify"' in APP_JS
-    assert "Mark as book & continue" in APP_JS
+    assert "Mark as book & review" in APP_JS
     assert 'body: JSON.stringify({ category: "book" })' in APP_JS
     assert "Marked as Book. Review the BIBLIO fields below." in APP_JS
     assert "function reviewBiblioItem" not in APP_JS
