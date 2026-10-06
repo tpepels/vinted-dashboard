@@ -1,7 +1,7 @@
 (() => {
-if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 9) return;
-globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 9;
-const BRIDGE_CONTENT_PROTOCOL=9;
+if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 10) return;
+globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 10;
+const BRIDGE_CONTENT_PROTOCOL=10;
 function first(obj,...keys){if(!obj||typeof obj!=="object")return null;for(const key of keys){const v=obj[key];if(v!==undefined&&v!==null&&v!=="")return v}return null}
 function idOf(v){if(v&&typeof v==="object")v=first(v,"id","user_id");return v==null||v===""?null:String(v)}
 function nameOf(v){if(v&&typeof v==="object")v=first(v,"login","username","name","display_name");return v==null||v===""?null:String(v)}
@@ -53,12 +53,32 @@ async function fetchJson(path,params={},options={}){
     const spacing=minDelayMs-(Date.now()-lastVintedFetchAt);
     if(spacing>0)await wait(spacing);
     lastVintedFetchAt=Date.now();
-    const r=await fetch(url,{headers:{"Accept":"application/json, text/plain, */*","X-Platform":"web"}});
+    const r=await fetch(url,{
+      method:"GET",
+      credentials:"include",
+      cache:"no-store",
+      referrer:location.origin+"/",
+      headers:{
+        "Accept":"application/json, text/plain, */*",
+        "X-Requested-With":"XMLHttpRequest",
+      },
+    });
     if(r.status===404)return null;
     if(r.status===429){
       if(attempt<maxRetries){await wait(rateLimitDelay(r,attempt));continue}
-      const error=new Error("Vinted rate limited the sync. The bridge stopped before sending a partial inventory snapshot; retry after Vinted has cooled down.");
+      const error=new Error("Vinted rate limited the API sync. The bridge stopped before sending a partial inventory snapshot; retry after Vinted has cooled down.");
       error.vintedRateLimited=true;
+      throw error;
+    }
+    if(r.status===403){
+      const challenged=String(r.headers?.get?.("cf-mitigated")||"").toLowerCase()==="challenge";
+      const error=new Error(
+        challenged
+          ?`Vinted/Cloudflare challenged the browser API request for ${url.pathname}. Reload Vinted, confirm you are signed in, complete any browser check, then sync again.`
+          :`Vinted denied the signed-in browser API request (HTTP 403) for ${url.pathname}. Reload Vinted and confirm the website itself is signed in before syncing again.`
+      );
+      error.vintedForbidden=true;
+      error.vintedChallenged=challenged;
       throw error;
     }
     if(!r.ok)throw new Error(`Vinted returned HTTP ${r.status} for ${url.pathname}`);
