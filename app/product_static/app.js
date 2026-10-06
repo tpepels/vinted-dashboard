@@ -3842,10 +3842,12 @@ function openConnectorConfig(channel, connector) {
   state.connectorChannel = channel;
   $("#connector-config-title").textContent = schema.title;
   $("#connector-config-help").textContent = schema.help;
-  $("#connector-fields").innerHTML = schema.fields.map(([name, label, placeholder, type]) =>
-    '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
-    + '" placeholder="' + esc(placeholder) + '"></label>'
-  ).join("");
+  const savedValues = connector?.saved_values || {};
+  $("#connector-fields").innerHTML = schema.fields.map(([name, label, placeholder, type]) => {
+    const value = type === "password" ? "" : (savedValues[name] ?? "");
+    return '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
+      + '" placeholder="' + esc(placeholder) + '" value="' + esc(value) + '"></label>';
+  }).join("");
   $("#biblio-tools").classList.toggle("hidden", channel !== "biblio");
   renderEtsyOAuthTools(connector);
   $("#test-connector").classList.toggle("hidden", !schema.test || !connector?.operational);
