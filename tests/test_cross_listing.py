@@ -348,3 +348,83 @@ def test_cross_list_preview_shows_every_destination_instead_of_hiding_it(monkeyp
     assert rows[Channel.BIGCOMMERCE]["status"] == "not_writable"
     assert rows[Channel.SQUARESPACE]["status"] == "not_writable"
     assert rows[Channel.DEPOP]["status"] == "not_writable"
+
+
+
+def test_cross_list_biblio_review_can_mark_sparse_general_item_as_book(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "cross-list-biblio-review@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Cross-list BIBLIO review",
+        },
+    )
+    assert registered.status_code == 200, registered.text
+    csrf = registered.json()["csrf_token"]
+
+    with db.session_scope() as session:
+        membership = session.execute(select(models.Membership)).scalar_one()
+        workspace_id = membership.workspace_id
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="SPARSE-BOOK-1",
+            title="Sparse vintage book",
+            category=ItemCategory.GENERAL,
+            quantity=1,
+            condition="very_good",
+            currency="EUR",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        source = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item.id,
+            channel=Channel.VINTED,
+            external_id="998877",
+            title="Sparse vintage book",
+            price_cents=500,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+            url="https://www.vinted.pt/items/998877",
+            extra={
+                "metadata": {"description": "Old paperback in very good condition."},
+                "image_urls": ["https://images1.vinted.net/t/sparse.jpg"],
+            },
+        )
+        session.add(source)
+        session.flush()
+        item_id = item.id
+        source_id = source.id
+
+    preview = client.get(
+        f"/api/app/inventory/{item_id}/cross-list",
+        params={"source_listing_id": str(source_id)},
+    )
+    assert preview.status_code == 200, preview.text
+    biblio = next(
+        row for row in preview.json()["destinations"]
+        if row["channel"] == Channel.BIBLIO
+    )
+    assert biblio["status"] == "review"
+    assert biblio["action"] == "biblio_classify"
+    assert "confirm this item is a book" in biblio["reason"].lower()
+
+    patched = client.patch(
+        f"/api/app/inventory/{item_id}",
+        headers={"X-CSRF-Token": csrf},
+        json={"category": ItemCategory.BOOK},
+    )
+    assert patched.status_code == 200, patched.text
+
+    biblio_preview = client.get(
+        f"/api/app/inventory/{item_id}/publish/biblio",
+        params={"source_listing_id": str(source_id)},
+    )
+    assert biblio_preview.status_code == 200, biblio_preview.text
+    assert biblio_preview.json()["fields"]["title"] == "Sparse vintage book"
+    assert "author" in biblio_preview.json()["missing"]
