@@ -256,7 +256,12 @@ class StockIntakeItemRequest(BaseModel):
     isbn: str | None = None
     publisher: str | None = None
     edition: str | None = None
+    subtitle: str | None = None
+    binding: str | None = None
+    language: str | None = None
+    publish_date: str | None = None
     publication_year: int | None = None
+    pages: int | None = Field(default=None, ge=0)
     cover_url: str | None = None
     source_url: str | None = None
 
@@ -1082,6 +1087,10 @@ def stock_intake_create_items(
                     "author",
                     "publisher",
                     "edition",
+                    "subtitle",
+                    "binding",
+                    "language",
+                    "publish_date",
                     "cover_url",
                     "source_url",
                 ):
@@ -1090,6 +1099,8 @@ def stock_intake_create_items(
                         attributes[key] = value
                 if values.get("publication_year") is not None:
                     attributes["publication_year"] = int(values["publication_year"])
+                if values.get("pages") is not None:
+                    attributes["pages"] = int(values["pages"])
                 isbn = stock_intake.normalize_barcode(values.get("isbn"))
                 if isbn:
                     attributes["isbn"] = isbn
