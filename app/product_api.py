@@ -115,6 +115,20 @@ APP_NAME = os.getenv("APP_NAME", "Reseller Dashboard").strip() or "Reseller Dash
 
 ETSY_OAUTH_SCOPES = ("listings_r", "transactions_r")
 ETSY_OAUTH_CALLBACK_PATH = "/api/app/connectors/etsy/oauth/callback"
+
+CONNECTOR_PREFILL_KEYS: dict[str, tuple[str, ...]] = {
+    Channel.BIBLIO: (
+        "host", "username", "directory", "filename_prefix", "upload_profile",
+    ),
+    Channel.EBAY: ("client_id", "site_id", "compatibility_level"),
+    Channel.ETSY: ("keystring", "shop_id", "order_days", "currency"),
+    Channel.WOOCOMMERCE: ("store_url", "order_days", "currency"),
+    Channel.SHOPIFY: ("store_domain", "api_version", "order_days", "currency"),
+    Channel.BIGCOMMERCE: ("store_hash", "order_days", "currency"),
+    Channel.SQUARESPACE: ("order_days", "currency"),
+    Channel.WIX: ("site_id", "order_days", "currency"),
+    Channel.DEPOP: ("environment", "order_days", "currency"),
+}
 ETSY_OAUTH_TTL = timedelta(minutes=10)
 
 
@@ -2742,10 +2756,28 @@ def connectors(context: RequestContext = Depends(require_context)):
             configured = channel in stored_credentials
             operational = configured
 
+        saved_values: dict[str, str] = {}
+        credential = stored_credentials.get(channel)
+        if credential is not None:
+            try:
+                raw_values = decrypt_json(credential.encrypted_payload)
+            except ValueError:
+                raw_values = {}
+            for key in CONNECTOR_PREFILL_KEYS.get(channel, ()):
+                value = raw_values.get(key)
+                if value not in (None, ""):
+                    saved_values[key] = str(value)
+        if channel == Channel.BIBLIO:
+            saved_values.setdefault(
+                "upload_profile",
+                biblio_upload_profile(context.workspace.id),
+            )
+
         result.append(
             {
                 **info,
                 "configured": configured,
+                "saved_values": saved_values,
                 "operational": operational,
                 "sync_available": operational and channel in {
                     Channel.BIBLIO,
