@@ -60,7 +60,7 @@ const chrome = {
     },
     async get(id) {
       if (!urls.has(id)) throw new Error("tab missing");
-      return { id, status: "complete", url: urls.get(id) };
+      return { id, windowId: windowsCreated[windowsCreated.length - 1]?.id, status: "complete", url: urls.get(id) };
     },
     async sendMessage(_id, payload) {
       if (payload.type === "read-vinted-uploaded-age") {
