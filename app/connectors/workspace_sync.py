@@ -288,28 +288,53 @@ def _apply_generic_metadata(
     ):
         inventory_item.category = ItemCategory.BOOK
 
+QUANTITY_AWARE_CHANNELS = {
+    Channel.ETSY,
+    Channel.WOOCOMMERCE,
+    Channel.SHOPIFY,
+    Channel.BIGCOMMERCE,
+    Channel.SQUARESPACE,
+    Channel.WIX,
+    Channel.DEPOP,
+}
+
+
+def remaining_stock_quantity_on_sale_channel(
+    session: Session,
+    item: models.InventoryItem,
+    sale: models.Sale,
+) -> int | None:
+    """Return authoritative remaining stock from the selling channel.
+
+    None means either that the selling channel is not quantity-aware or that
+    its active listing reports unknown/unlimited quantity. A concrete
+    non-negative number is safe to use as the master quantity after the sale.
+    """
+    if sale.channel not in QUANTITY_AWARE_CHANNELS:
+        return None
+    listings = session.execute(
+        select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == item.workspace_id,
+            models.ChannelListing.inventory_item_id == item.id,
+            models.ChannelListing.channel == sale.channel,
+            models.ChannelListing.status == ListingStatus.ACTIVE,
+        )
+    ).scalars().all()
+    if not listings:
+        return 0
+    if any(listing.quantity is None for listing in listings):
+        return None
+    quantities = [max(0, int(listing.quantity or 0)) for listing in listings]
+    return max(quantities, default=0)
+
+
 def item_has_remaining_stock_on_sale_channel(
     session: Session,
     item: models.InventoryItem,
     sale: models.Sale,
 ) -> bool:
-    """Return whether a quantity-aware selling channel still reports stock.
-
-    Vinted and the established one-off connector semantics remain exhaustive:
-    a seller-side sale consumes the physical item even if a stale active
-    listing is still present. Store/catalog connectors can represent multi-unit
-    stock, so an active same-channel listing with remaining quantity keeps the
-    master item active.
-    """
-    if sale.channel not in {
-        Channel.ETSY,
-        Channel.WOOCOMMERCE,
-        Channel.SHOPIFY,
-        Channel.BIGCOMMERCE,
-        Channel.SQUARESPACE,
-        Channel.WIX,
-        Channel.DEPOP,
-    }:
+    """Return whether a quantity-aware selling channel still reports stock."""
+    if sale.channel not in QUANTITY_AWARE_CHANNELS:
         return False
     listings = session.execute(
         select(models.ChannelListing).where(
