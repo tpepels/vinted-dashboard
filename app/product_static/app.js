@@ -1208,6 +1208,8 @@ function biblioActivityDetail(row) {
   if (!row) return "No BIBLIO FTP run has been recorded yet.";
   const parts = [];
   if (row.listing_title) parts.push(row.listing_title);
+  if (row.photos_only) parts.push("Photo retry");
+  else if (row.full_sync) parts.push("Full resync");
   if (row.message) parts.push(row.message);
   const inventoryDone = row.inventory_uploaded ?? (row.status === "success" ? row.active_count : null);
   if (row.inventory_total != null || inventoryDone != null) {
@@ -1243,6 +1245,7 @@ function renderBiblioActivity(activity, operational) {
     + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
     + '<div class="actions biblio-activity-actions">'
     + '<button class="btn biblio-activity-toggle" type="button">View activity</button>'
+    + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry photos</button>' : "")
     + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
     + '</div><div class="biblio-activity-history hidden">'
     + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards.</div>'
@@ -3597,9 +3600,22 @@ async function connections() {
       button.textContent = opening ? "Hide activity" : "View activity";
     };
   });
-  $$(".biblio-full-sync").forEach((button) => {
+  $(".biblio-retry-photos").forEach((button) => {
     button.onclick = async () => {
-      if (!window.confirm("Full resync will deliberately resend every active BIBLIO listing. Continue?")) return;
+      button.disabled = true;
+      try {
+        await api("/api/app/connectors/biblio/retry-photos", { method: "POST" });
+        flash("BIBLIO photo retry queued without resending inventory.");
+        await connections();
+      } catch (error) {
+        flash(error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $(".biblio-full-sync").forEach((button) => {
+    button.onclick = async () => {
+      if (!window.confirm("Full resync will deliberately resend every active BIBLIO listing and its photos. Continue?")) return;
       button.disabled = true;
       try {
         await api("/api/app/connectors/biblio/full-sync", { method: "POST" });
