@@ -47,8 +47,9 @@ const state = {
 
 const importFields = [
   "", "sku", "title", "category", "quantity", "condition", "cost", "price",
-  "currency", "location", "notes", "author", "isbn", "publisher", "edition",
-  "binding", "publication_year", "brand", "size", "colour", "material",
+  "currency", "location", "notes", "barcode", "author", "isbn", "subtitle",
+  "publisher", "edition", "binding", "language", "publish_date",
+  "publication_year", "pages", "brand", "size", "colour", "material",
   "measurements",
 ];
 
@@ -1737,7 +1738,12 @@ async function enrichStockRow(localId) {
     row.author = metadata.author || row.author || null;
     row.publisher = metadata.publisher || row.publisher || null;
     row.edition = metadata.edition || row.edition || null;
+    row.subtitle = metadata.subtitle || row.subtitle || null;
+    row.binding = metadata.physical_format || row.binding || null;
+    row.language = metadata.language || row.language || null;
+    row.publish_date = metadata.publish_date || row.publish_date || null;
     row.publication_year = metadata.publication_year || row.publication_year || null;
+    row.pages = metadata.number_of_pages || row.pages || null;
     row.cover_url = metadata.cover_url || row.cover_url || null;
     row.source_url = metadata.source_url || row.source_url || null;
     row.existing_copy_count = Number(data.existing_copy_count || 0);
@@ -1799,7 +1805,12 @@ function addScannedBarcode(code, format = "manual") {
     author: null,
     publisher: null,
     edition: null,
+    subtitle: null,
+    binding: null,
+    language: null,
+    publish_date: null,
     publication_year: null,
+    pages: null,
     cover_url: null,
     source_url: null,
     condition: defaults.condition,
@@ -2039,7 +2050,12 @@ async function createScannedStockBatch() {
     isbn: row.isbn || null,
     publisher: row.publisher || null,
     edition: row.edition || null,
+    subtitle: row.subtitle || null,
+    binding: row.binding || null,
+    language: row.language || null,
+    publish_date: row.publish_date || null,
     publication_year: row.publication_year || null,
+    pages: row.pages || null,
     cover_url: row.cover_url || null,
     source_url: row.source_url || null,
   }));
@@ -2460,7 +2476,8 @@ function openItemForm(item) {
     setFormValue(form, "currency", item.currency || "EUR");
     setFormValue(form, "notes", item.notes);
     [
-      "author", "isbn", "publisher", "edition", "binding", "publication_year",
+      "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+      "binding", "language", "publish_date", "publication_year", "pages",
       "brand", "size", "colour", "material", "measurements",
     ].forEach((key) => setFormValue(form, key, item.attributes?.[key]));
   } else {
@@ -2479,7 +2496,8 @@ $("#item-form").onsubmit = async (event) => {
   const existing = state.inventoryItems.find((item) => item.id === state.editItemId);
   const attributes = Object.assign({}, existing?.attributes || {});
   const attributeKeys = [
-    "author", "isbn", "publisher", "edition", "binding", "publication_year",
+    "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+    "binding", "language", "publish_date", "publication_year", "pages",
     "brand", "size", "colour", "material", "measurements",
   ];
   attributeKeys.forEach((key) => {
