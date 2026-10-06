@@ -50,7 +50,7 @@ from app.constants import (
     SyncRunStatus,
     KNOWN_ITEM_CATEGORIES,
 )
-from app.connectors.base import Capability, connector_catalog
+from app.connectors.base import Capability, connector_catalog, get_connector
 from app.connectors.hosted import (
     biblio_configured,
     biblio_upload_profile,
