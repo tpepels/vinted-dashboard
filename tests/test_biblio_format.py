@@ -107,3 +107,25 @@ def test_targeted_success_run_is_not_used_as_legacy_catalogue_baseline():
     assert len(active) == 1
     assert active[0]["sku"] == "REMOTE-1"
     assert active[0]["inventory_dirty"] is True
+
+
+
+def test_parse_biblio_inventory_preserves_optional_bibliographic_fields():
+    rows = parse_biblio_inventory(
+        "Book ID\tAuthor\tTitle\tDescription\tPrice\tISBN\tPublisher\tEdition\t"
+        "Binding\tLanguage\tPublication Date\tPublication Year\tPages\tCondition\tStatus\tQuantity\n"
+        "ABC-9\tAuthor\tBook\tDescription\t9.50\t9780140328721\tPuffin\tRevised\t"
+        "Paperback\tEnglish\t1988-01-01\t1988\t176\tVery good\tFor sale\t1\n",
+        currency="EUR",
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["isbn"] == "9780140328721"
+    assert row["publisher"] == "Puffin"
+    assert row["edition"] == "Revised"
+    assert row["binding"] == "Paperback"
+    assert row["language"] == "English"
+    assert row["publish_date"] == "1988-01-01"
+    assert row["publication_year"] == 1988
+    assert row["pages"] == 176
+    assert row["condition"] == "Very good"
