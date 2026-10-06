@@ -1,7 +1,7 @@
 (() => {
-if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 8) return;
-globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 8;
-const BRIDGE_CONTENT_PROTOCOL=8;
+if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 9) return;
+globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 9;
+const BRIDGE_CONTENT_PROTOCOL=9;
 function first(obj,...keys){if(!obj||typeof obj!=="object")return null;for(const key of keys){const v=obj[key];if(v!==undefined&&v!==null&&v!=="")return v}return null}
 function idOf(v){if(v&&typeof v==="object")v=first(v,"id","user_id");return v==null||v===""?null:String(v)}
 function nameOf(v){if(v&&typeof v==="object")v=first(v,"login","username","name","display_name");return v==null||v===""?null:String(v)}
@@ -168,8 +168,7 @@ async function enrichListingDetails(listings,reason="periodic"){
     missing.push(row);
   }
 
-  const budget=reason==="manual"?12:4;
-  const queue=missing.slice(0,budget);
+  const queue=missing;
   let enriched=0,rateLimited=false;
   for(const row of queue){
     try{
@@ -197,10 +196,12 @@ async function enrichListingDetails(listings,reason="periodic"){
   const eligibleIds=new Set(eligible.map(row=>String(row.id)));
   for(const key of Object.keys(cache)){if(!eligibleIds.has(String(key))){delete cache[key];changed=true}}
   if(changed){try{await chrome.storage.local.set({[LISTING_DETAIL_CACHE_KEY]:cache})}catch{}}
+  const pending=Math.max(0,missing.length-enriched);
   return{
     enriched,
     attempted:queue.length,
-    deferred:Math.max(0,missing.length-enriched),
+    pending,
+    deferred:pending,
     rate_limited:rateLimited,
   };
 }
@@ -255,7 +256,7 @@ async function collectVintedData(reason="periodic"){
   }
   const detailEligible=[...listings.values()].filter(row=>row?.id&&["active","reserved","hidden","draft"].includes(String(row.status||"active"))).length;
   const detailSync=secondaryRateLimited
-    ? {enriched:0,attempted:0,deferred:detailEligible,rate_limited:true}
+    ? {enriched:0,attempted:0,pending:detailEligible,deferred:detailEligible,rate_limited:true}
     : await enrichListingDetails(listings,reason);
   const ageScanItems=await enrichListingDates(listings);
 
@@ -286,7 +287,8 @@ async function collectVintedData(reason="periodic"){
     }
   }
 
-  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems,detail_sync:{...detailSync,rate_limited:Boolean(detailSync.rate_limited||secondaryRateLimited||optionalRateLimited),secondary_rate_limited:secondaryRateLimited,optional_rate_limited:optionalRateLimited}};
+  const apiRateLimited=Boolean(detailSync.rate_limited||secondaryRateLimited||optionalRateLimited);
+  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems,detail_sync:{...detailSync,api_rate_limited:apiRateLimited,detail_endpoint_rate_limited:Boolean(detailSync.rate_limited),rate_limited:apiRateLimited,secondary_rate_limited:secondaryRateLimited,optional_rate_limited:optionalRateLimited}};
 }
 
 
