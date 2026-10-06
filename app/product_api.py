@@ -230,9 +230,14 @@ class BiblioPublishRequest(BaseModel):
     author: str | None = None
     description: str | None = None
     isbn: str | None = None
+    subtitle: str | None = None
     publisher: str | None = None
     edition: str | None = None
+    binding: str | None = None
+    language: str | None = None
+    pages: int | None = Field(default=None, ge=0)
     publish_date: str | None = None
+    condition: str | None = None
     price_cents: int | None = Field(default=None, ge=0)
 
 
