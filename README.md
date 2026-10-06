@@ -187,7 +187,7 @@ already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
 cache constants or registering a second message listener. Bridge 3.3.0 uses
-content protocol 7, so tabs still running an older bridge script are forcibly
+content protocol 8, so tabs still running an older bridge script are forcibly
 reloaded once.
 
 
