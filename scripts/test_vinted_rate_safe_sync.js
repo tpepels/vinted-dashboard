@@ -21,6 +21,7 @@ async function scenario(mode) {
   const storage = {};
   let detailRequests = 0;
   let optionalRequests = 0;
+  let currentRequestOptions = null;
 
   const items = Array.from({ length: 50 }, (_, index) => ({
     id: String(index + 1),
@@ -60,11 +61,13 @@ async function scenario(mode) {
       advanceCached() { return null; },
       fromRenderedDocument() { return null; },
     },
-    fetch: async (input) => {
+    fetch: async (input, options = {}) => {
       const url = new URL(String(input));
       const pathname = url.pathname;
 
       if (pathname === "/api/v2/users/current") {
+        currentRequestOptions = options;
+        if (mode === "core403") return response(403, {});
         return response(200, { user: { id: "42", login: "seller" } });
       }
       if (pathname === "/api/v2/users/42") {
@@ -111,7 +114,7 @@ async function scenario(mode) {
     listeners[0](
       { type: "collect-vinted-data", reason: "manual" },
       {},
-      (result) => resolve({ result, detailRequests, optionalRequests }),
+      (result) => resolve({ result, detailRequests, optionalRequests, currentRequestOptions }),
     );
   });
 }
@@ -132,6 +135,13 @@ function assert(condition, message) {
   assert(unlimited.result.snapshot.detail_sync.api_rate_limited === false,
     "Normal detail enrichment was incorrectly marked rate limited");
 
+  assert(unlimited.currentRequestOptions?.credentials === "include",
+    "Vinted browser API request did not explicitly include the signed-in session");
+  assert(unlimited.currentRequestOptions?.headers?.["X-Requested-With"] === "XMLHttpRequest",
+    "Vinted browser API request did not use the normal web X-Requested-With header");
+  assert(!("X-Platform" in (unlimited.currentRequestOptions?.headers || {})),
+    "Vinted browser API request still sends the synthetic X-Platform header");
+
   const detailLimited = await scenario("detail429");
   assert(detailLimited.result.ok === true, "Detail 429 should not fail core inventory sync");
   assert(detailLimited.result.snapshot.listings.length === 50,
@@ -151,6 +161,13 @@ function assert(condition, message) {
   assert(coreLimited.result.ok === false, "Core inventory 429 should abort the sync");
   assert(String(coreLimited.result.error || "").includes("rate limited"),
     "Core 429 did not return a clear rate-limit error");
+
+  const forbidden = await scenario("core403");
+  assert(forbidden.result.ok === false, "Current-user 403 should abort the sync");
+  assert(String(forbidden.result.error || "").includes("signed-in browser API request"),
+    "Current-user 403 did not return a useful signed-in browser API error");
+  assert(!String(forbidden.result.error || "").includes("rate limited"),
+    "Current-user 403 was incorrectly reported as rate limiting");
 
   console.log("Vinted rate-safe inventory sync: ok");
 })().catch((error) => {
