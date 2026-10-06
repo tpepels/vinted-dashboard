@@ -1238,12 +1238,26 @@ def _cross_list_destination_status(
                 enrich_isbn=False,
             )
         except ValueError as exc:
+            detail = str(exc)
+            if detail == "Only book inventory can be published to BIBLIO":
+                return {
+                    "channel": channel,
+                    "display_name": info["display_name"],
+                    "status": "review",
+                    "reason": (
+                        "BIBLIO only accepts books. Confirm this item is a book, "
+                        "then review the BIBLIO fields without leaving Cross-list."
+                    ),
+                    "action": "biblio_classify",
+                    "configured": configured,
+                    "writable": True,
+                }
             return {
                 "channel": channel,
                 "display_name": info["display_name"],
                 "status": "review",
-                "reason": str(exc),
-                "action": "review",
+                "reason": detail,
+                "action": "biblio",
                 "configured": configured,
                 "writable": True,
             }
