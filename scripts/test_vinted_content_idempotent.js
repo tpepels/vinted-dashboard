@@ -55,8 +55,8 @@ compiled.runInContext(context);
 if (listeners.length !== 1) {
   throw new Error("content.js registered " + listeners.length + " listeners after two injections");
 }
-if (context.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ !== 9) {
-  throw new Error("content.js did not expose protocol guard 9");
+if (context.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ !== 10) {
+  throw new Error("content.js did not expose protocol guard 10");
 }
 
 console.log("Vinted content script reinjection: ok");
