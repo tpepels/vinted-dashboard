@@ -40,6 +40,7 @@ jobs:
       - run: node scripts/test_vinted_content_idempotent.js
       - run: node scripts/test_vinted_rendered_tab_age.js
       - run: node scripts/test_vinted_age_sweep.js
+      - run: node scripts/test_vinted_site_rate_limit.js
       - run: node scripts/test_vinted_rate_safe_sync.js
       - run: alembic upgrade head
         env:
