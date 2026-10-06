@@ -3688,7 +3688,12 @@ def sync_biblio_workspace(
     photos_only: bool = False,
 ) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
-    active, deletes = _biblio_rows(workspace_id, listing_id=listing_id)
+    upload_profile = _normalize_biblio_upload_profile(values.get("upload_profile"))
+    active, deletes = _biblio_rows(
+        workspace_id,
+        listing_id=listing_id,
+        profile=upload_profile,
+    )
     inventory_rows = (
         []
         if photos_only
@@ -3750,6 +3755,7 @@ def sync_biblio_workspace(
             "stage": "preparing",
             "mode": mode,
             "listing_id": str(listing_id) if listing_id else None,
+            "upload_profile": upload_profile,
             "inventory_filename": inventory_filename,
             "deletes_filename": deletes_filename,
             "inventory_total": len(inventory_rows),
@@ -3837,7 +3843,7 @@ def sync_biblio_workspace(
         if inventory_filename:
             ftp.storbinary(
                 f"STOR {inventory_filename}",
-                io.BytesIO(_biblio_tsv(inventory_rows, sold=False)),
+                io.BytesIO(_biblio_tsv(inventory_rows, sold=False, profile=upload_profile)),
             )
             _mark_biblio_inventory_sync(workspace_id, inventory_rows)
             _update_biblio_run(
@@ -3852,7 +3858,7 @@ def sync_biblio_workspace(
         if deletes_filename:
             ftp.storbinary(
                 f"STOR {deletes_filename}",
-                io.BytesIO(_biblio_tsv(delete_rows, sold=True)),
+                io.BytesIO(_biblio_tsv(delete_rows, sold=True, profile=upload_profile)),
             )
             _mark_biblio_inventory_sync(workspace_id, delete_rows)
             _update_biblio_run(
@@ -3995,6 +4001,7 @@ def sync_biblio_workspace(
         "photos_uploaded": photos_uploaded,
         "photo_errors": photo_errors,
         "deferred_photo_retry_listing_ids": list(dict.fromkeys(deferred_photo_retry_listing_ids)),
+        "upload_profile": upload_profile,
         "run_id": str(run_id),
     }
 
@@ -4035,6 +4042,8 @@ def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
         "timeout_seconds": os.getenv("BIBLIO_FTP_TIMEOUT_SECONDS", "20").strip() or "20",
         "filename_prefix": os.getenv("BIBLIO_FTP_FILENAME_PREFIX", "reseller-dashboard").strip()
         or "reseller-dashboard",
+        "upload_profile": os.getenv("BIBLIO_FTP_UPLOAD_PROFILE", "core").strip()
+        or "core",
     }
 
 
@@ -4081,7 +4090,12 @@ def close_ebay_workspace_listing(workspace_id: uuid.UUID, external_id: str) -> d
     return {"remote": "ended", "external_id": str(external_id)}
 
 
-def _biblio_listing_row(workspace_id: uuid.UUID, listing_id: uuid.UUID) -> dict[str, Any]:
+def _biblio_listing_row(
+    workspace_id: uuid.UUID,
+    listing_id: uuid.UUID,
+    *,
+    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+) -> dict[str, Any]:
     with db.session_scope() as session:
         listing = session.get(models.ChannelListing, listing_id)
         if (
@@ -4095,20 +4109,38 @@ def _biblio_listing_row(workspace_id: uuid.UUID, listing_id: uuid.UUID) -> dict[
             raise RuntimeError("BIBLIO master inventory item no longer exists")
         attrs = dict(item.attributes or {})
         extra = dict(listing.extra or {})
+        bibliographic = (
+            dict(extra.get("bibliographic_enrichment") or {})
+            if isinstance(extra.get("bibliographic_enrichment"), dict)
+            else {}
+        )
         row = {
             "source_id": listing.external_id,
             "sku": listing.external_id or listing.external_sku or item.sku,
             "title": listing.title or item.title,
+            "subtitle": bibliographic.get("subtitle") or attrs.get("subtitle"),
             "author": extra.get("author") or attrs.get("author"),
             "description": extra.get("description") or attrs.get("description") or item.notes,
             "isbn": extra.get("isbn") or attrs.get("isbn"),
+            "publisher": bibliographic.get("publisher") or attrs.get("publisher"),
+            "edition": bibliographic.get("edition") or attrs.get("edition"),
+            "binding": bibliographic.get("binding") or attrs.get("binding") or attrs.get("physical_format"),
+            "language": bibliographic.get("language") or attrs.get("language"),
+            "publish_date": (
+                bibliographic.get("publish_date")
+                or attrs.get("publish_date")
+                or attrs.get("publication_date")
+                or attrs.get("publication_year")
+            ),
+            "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
+            "condition": bibliographic.get("condition") or item.condition,
             "price_cents": listing.price_cents,
             "currency": listing.currency or item.currency or "EUR",
             "quantity": 0,
             "status": ListingStatus.SOLD,
             "listing_id": str(listing.id),
         }
-        row["inventory_signature"] = _biblio_inventory_signature(row)
+        row["inventory_signature"] = _biblio_inventory_signature(row, profile=profile)
         return row
 
 
@@ -4121,8 +4153,9 @@ def close_biblio_workspace_listing(
     This does not run a full inventory sync, so a sold-reconciliation action
     cannot accidentally publish unrelated inventory changes.
     """
-    row = _biblio_listing_row(workspace_id, listing_id)
     values = _workspace_or_env_biblio_values(workspace_id)
+    upload_profile = _normalize_biblio_upload_profile(values.get("upload_profile"))
+    row = _biblio_listing_row(workspace_id, listing_id, profile=upload_profile)
     stamp = _biblio_upload_stamp()
     prefix = re.sub(
         r"[^A-Za-z0-9_-]+",
@@ -4143,7 +4176,10 @@ def close_biblio_workspace_listing(
         directory = values.get("directory", "").strip()
         if directory and directory not in {".", "./"}:
             ftp.cwd(directory)
-        ftp.storbinary(f"STOR {filename}", io.BytesIO(_biblio_tsv([row], sold=True)))
+        ftp.storbinary(
+            f"STOR {filename}",
+            io.BytesIO(_biblio_tsv([row], sold=True, profile=upload_profile)),
+        )
         try:
             ftp.quit()
         except Exception:
