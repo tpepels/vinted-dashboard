@@ -850,8 +850,6 @@ def test_cross_list_update_preserves_existing_remote_identity(monkeypatch):
             currency="EUR",
             status=ListingStatus.ACTIVE,
             quantity=2,
-            first_seen_at=models.utcnow(),
-            last_seen_at=models.utcnow(),
             extra={},
         )
         session.add(existing)
