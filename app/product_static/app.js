@@ -867,11 +867,35 @@ function renderCrossList(data) {
     ? 'Using <strong>Vinted</strong> as the listing source'
       + (source.url ? ' · <a href="' + esc(source.url) + '" target="_blank" rel="noreferrer">open source</a>' : "")
     : "Using master inventory data; no linked Vinted source was selected.";
+  const prefilled = [
+    ["ISBN", fields.isbn],
+    ["Barcode", fields.isbn ? null : fields.barcode],
+    ["Author", fields.author],
+    ["Publisher", fields.publisher],
+    ["Edition", fields.edition],
+    ["Published", fields.publish_date || fields.publication_year],
+    ["Language", fields.language],
+    ["Binding", fields.binding],
+    ["Pages", fields.pages],
+    ["Condition", fields.condition],
+    ["Brand", fields.brand],
+    ["Size", fields.size],
+    ["Colour", fields.colour],
+    ["Material", fields.material],
+  ].filter(([, value]) => value != null && String(value).trim() !== "");
   $("#cross-list-summary").innerHTML = [
     "<span><strong>Title:</strong> " + esc(fields.title || "Missing") + "</span>",
     "<span><strong>Price:</strong> " + esc(fields.price_cents == null ? "Missing" : money(fields.price_cents, fields.currency)) + "</span>",
     "<span><strong>Stock:</strong> " + esc(fields.quantity == null ? "—" : fields.quantity) + "</span>",
     "<span><strong>Photos:</strong> " + esc(source.photo_count || 0) + "</span>",
+    ...(prefilled.length
+      ? ['<span class="cross-list-prefilled"><strong>Prefilled:</strong> '
+        + prefilled.map(([label, value]) => esc(label) + " " + esc(value)).join(" · ")
+        + "</span>"]
+      : []),
+    ...(data.enrichment_warning
+      ? ['<span class="cross-list-warning"><strong>ISBN lookup:</strong> ' + esc(data.enrichment_warning) + "</span>"]
+      : []),
   ].join("");
 
   const destinations = Array.isArray(data.destinations) ? data.destinations : [];
@@ -1048,15 +1072,16 @@ function renderBiblioPublish(data) {
   const fields = data.fields || {};
   const sources = data.field_sources || {};
   const enrichment = data.bibliographic_enrichment || {};
+  const bibliographicSources = data.bibliographic_sources || {};
   const bookIdValue = fields.book_id || data.book_id_suggestion || "";
   const rows = [
     ["title", "Title", fields.title || "", sources.title, true, true],
     ["author", "Author", fields.author || "", sources.author, true, true],
     ["description", "Description", fields.description || "", sources.description, true, true],
     ["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false],
-    ["publisher", "Publisher", enrichment.publisher || "", enrichment.publisher ? "isbn" : null, true, false],
-    ["edition", "Edition", enrichment.edition || "", enrichment.edition ? "isbn" : null, true, false],
-    ["publish_date", "Publish date", enrichment.publish_date || "", enrichment.publish_date ? "isbn" : null, true, false],
+    ["publisher", "Publisher", enrichment.publisher || "", bibliographicSources.publisher || null, true, false],
+    ["edition", "Edition", enrichment.edition || "", bibliographicSources.edition || null, true, false],
+    ["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false],
     ["price_cents", "Price", fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2), sources.price_cents, true, true],
     ["book_id", "Book ID", bookIdValue, sources.book_id, true, true],
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
