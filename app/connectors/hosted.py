@@ -822,6 +822,7 @@ def _fetch_woocommerce_products(values: dict[str, str]) -> list[dict[str, Any]]:
                 for row in (product.get("brands") or [])
                 if isinstance(row, dict) and row.get("name")
             ]
+            product_attributes = _woo_metadata(product)
             common = {
                 "description": product.get("description") or product.get("short_description"),
                 "global_unique_id": product.get("global_unique_id"),
@@ -881,8 +882,20 @@ def _fetch_woocommerce_products(values: dict[str, str]) -> list[dict[str, Any]]:
                                     or created
                                 )
                                 else None,
-                                "attributes": attrs,
-                                **common,
+                                "barcode": (
+                                    variation.get("global_unique_id")
+                                    or common.get("barcode")
+                                ),
+                                "global_unique_id": (
+                                    variation.get("global_unique_id")
+                                    or common.get("global_unique_id")
+                                ),
+                                "attributes": {**product_attributes, **attrs},
+                                **{
+                                    key: value
+                                    for key, value in common.items()
+                                    if key not in {"barcode", "global_unique_id"}
+                                },
                             }
                         )
                     if len(variation_rows) < 100:
@@ -1249,6 +1262,7 @@ query ResellerVariants($cursor: String) {
       title
       sku
       barcode
+      barcodes(first: 20) { nodes { value type } }
       price
       inventoryQuantity
       availableForSale
@@ -1352,6 +1366,23 @@ def _fetch_shopify_products(values: dict[str, str]) -> list[dict[str, Any]]:
                 for row in (((product.get("metafields") or {}).get("nodes")) or [])
                 if isinstance(row, dict) and row.get("key")
             }
+            typed_barcodes = [
+                row for row in (((variant.get("barcodes") or {}).get("nodes")) or [])
+                if isinstance(row, dict) and row.get("value")
+            ]
+            typed_isbn = next(
+                (
+                    str(row.get("value"))
+                    for row in typed_barcodes
+                    if str(row.get("type") or "").upper() == "ISBN"
+                ),
+                None,
+            )
+            barcode_value = (
+                str(typed_barcodes[0].get("value"))
+                if typed_barcodes
+                else variant.get("barcode")
+            )
             created = _remote_datetime(variant.get("createdAt"))
             result.append(
                 {
@@ -1366,8 +1397,8 @@ def _fetch_shopify_products(values: dict[str, str]) -> list[dict[str, Any]]:
                     "description": product.get("descriptionHtml"),
                     "category": product.get("productType") or None,
                     "brand": product.get("vendor") or None,
-                    "barcode": variant.get("barcode"),
-                    "isbn": reseller_metafields.get("isbn"),
+                    "barcode": barcode_value,
+                    "isbn": typed_isbn or reseller_metafields.get("isbn"),
                     "author": reseller_metafields.get("author"),
                     "publisher": reseller_metafields.get("publisher"),
                     "edition": reseller_metafields.get("edition"),
@@ -2345,7 +2376,7 @@ def _wix_query_products(values: dict[str, str]) -> dict[str, dict[str, Any]]:
             values,
             "stores/v3/products/query",
             body={
-                "fields": ["PLAIN_DESCRIPTION", "URL"],
+                "fields": ["PLAIN_DESCRIPTION"],
                 "query": {"cursorPaging": cursor_paging},
             },
         )
