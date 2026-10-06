@@ -1,15 +1,26 @@
 const API_ORIGIN="__API_ORIGIN__";
 const VINTED_PATTERNS=chrome.runtime.getManifest().content_scripts[0].matches.slice();
 const SYNC_ALARM="reseller-vinted-sync";
+const AGE_JOB_ALARM="reseller-vinted-age-job";
 const AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
 const AGE_FAILURES_KEY="vintedAgeScanFailuresV1";
-const AGE_WORKERS=16;
+const AGE_JOB_KEY="vintedAgeBurstJobV2";
+const AGE_WORKERS=4;
+const AGE_WAVES_PER_EVENT=8;
+const AGE_NAVIGATION_MIN_INTERVAL_MS=1800;
+const AGE_RATE_LIMIT_BASE_COOLDOWN_MS=30*60*1000;
+const AGE_RATE_LIMIT_MAX_COOLDOWN_MS=6*60*60*1000;
+const CORE_RATE_LIMIT_COOLDOWN_MS=60*60*1000;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
-const CONTENT_PROTOCOL=5;
+const AGE_JOB_WATCHDOG_MS=240000;
+const CONTENT_PROTOCOL=7;
 let syncInFlight=null;
+let ageJobInFlight=null;
+let lastAgeNavigationAt=0;
+let ageNavigationChain=Promise.resolve();
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
-async function stored(){return await chrome.storage.local.get(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_FAILURES_KEY])}
+async function stored(){return await chrome.storage.local.get(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_FAILURES_KEY,AGE_JOB_KEY])}
 async function authHeaders(){const data=await stored();if(!data.bridgeToken)throw new Error("Pair this extension with your dashboard first.");return{"Authorization":"Bearer "+data.bridgeToken,"Content-Type":"application/json"}}
 async function api(path,options={}){const headers=Object.assign({},await authHeaders(),options.headers||{});const response=await fetch(API_ORIGIN+path,Object.assign({},options,{headers}));let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||("Dashboard returned HTTP "+response.status));return body}
 async function waitForTab(tabId,timeout=20000){const start=Date.now();while(Date.now()-start<timeout){const tab=await chrome.tabs.get(tabId);if(tab.status==="complete")return tab;await sleep(300)}throw new Error("Vinted tab did not finish loading.")}
@@ -30,60 +41,39 @@ async function ensureCurrentContentScript(tab){
   }
   return reloaded;
 }
+async function waitForAgeNavigationSlot(){
+  const task=ageNavigationChain.then(async()=>{
+    const delay=AGE_NAVIGATION_MIN_INTERVAL_MS-(Date.now()-lastAgeNavigationAt);
+    if(delay>0)await sleep(delay);
+    lastAgeNavigationAt=Date.now();
+  });
+  ageNavigationChain=task.catch(()=>{});
+  return task;
+}
+
 async function readRenderedAgeFromTab(tab,item){
   const target=new URL(String(item.url||""));
-  if(!target.hostname.startsWith("www.vinted."))return null;
+  if(!target.hostname.startsWith("www.vinted."))return{age:null,rate_limited:false,challenged:false};
   const current=await chrome.tabs.get(tab.id);
   if(String(current.url||"")!==target.href){
+    await waitForAgeNavigationSlot();
     await chrome.tabs.update(tab.id,{url:target.href,active:false});
   }
   await waitForTab(tab.id,30000);
   const started=Date.now();
   while(Date.now()-started<12000){
     const result=await message(tab.id,{type:"read-vinted-uploaded-age",item_id:String(item.id)});
-    if(result?.ok&&result.age)return result.age;
+    if(result?.rate_limited||result?.challenged){
+      return{
+        age:null,
+        rate_limited:Boolean(result?.rate_limited),
+        challenged:Boolean(result?.challenged),
+      };
+    }
+    if(result?.ok&&result.age)return{age:result.age,rate_limited:false,challenged:false};
     await sleep(350);
   }
-  return null;
-}
-
-async function renderedUploadedAgesBurst(items,workerCount=AGE_WORKERS){
-  const queue=(Array.isArray(items)?items:[]).filter(item=>item?.id&&item?.url);
-  if(!queue.length)return{};
-  const workers=Math.max(1,Math.min(Number(workerCount)||1,queue.length));
-  const initial=queue.slice(0,workers);
-  let cursor=initial.length;
-  const results={};
-  let workerWindow=null;
-
-  try{
-    workerWindow=await chrome.windows.create({
-      url:initial.map(item=>item.url),
-      focused:false,
-      state:"minimized",
-    });
-    const tabs=Array.isArray(workerWindow?.tabs)?workerWindow.tabs:[];
-    if(tabs.length!==initial.length){
-      throw new Error("Chrome did not create the expected Vinted worker tabs.");
-    }
-
-    async function worker(tab,item){
-      let current=item;
-      while(current){
-        try{
-          const age=await readRenderedAgeFromTab(tab,current);
-          if(age)results[String(current.id)]=age;
-        }catch{}
-        current=cursor<queue.length?queue[cursor++]:null;
-      }
-    }
-    await Promise.all(tabs.map((tab,index)=>worker(tab,initial[index])));
-    return results;
-  }finally{
-    if(workerWindow?.id!=null){
-      try{await chrome.windows.remove(workerWindow.id)}catch{}
-    }
-  }
+  return{age:null,rate_limited:false,challenged:false};
 }
 
 async function saveAgeBatchToCache(ages){
@@ -101,8 +91,17 @@ async function saveAgeBatchToCache(ages){
   await chrome.storage.local.set({[AGE_CACHE_KEY]:cache});
 }
 
+function uniqueAgeItems(items){
+  const byId=new Map();
+  for(const item of(Array.isArray(items)?items:[])){
+    if(!item?.id||!item?.url)continue;
+    byId.set(String(item.id),{id:String(item.id),url:String(item.url)});
+  }
+  return [...byId.values()];
+}
+
 async function eligibleAgeScanItems(items,reason){
-  const clean=(Array.isArray(items)?items:[]).filter(item=>item?.id&&item?.url);
+  const clean=uniqueAgeItems(items);
   if(reason==="manual")return clean;
   const data=await chrome.storage.local.get([AGE_FAILURES_KEY]);
   const failures=(data&&typeof data[AGE_FAILURES_KEY]==="object"&&data[AGE_FAILURES_KEY])||{};
@@ -144,38 +143,256 @@ async function postAgeUpdates(ages){
   return updated;
 }
 
-async function runAgeBurst(items,reason){
-  const eligible=await eligibleAgeScanItems(items,reason);
-  if(!eligible.length){
-    return{scanned:0,updated:0,failed:0,skipped:(Array.isArray(items)?items.length:0)};
-  }
+async function updateAgeJobStatus(job,error=null){
   const data=await chrome.storage.local.get(["syncStatus"]);
-  await chrome.storage.local.set({
-    syncStatus:{
-      ...(data?.syncStatus||{}),
-      age_scan_running:true,
-      age_scan_remaining:eligible.length,
-      age_scan_at:new Date().toISOString(),
-    },
-  });
-
-  const ages=await renderedUploadedAgesBurst(eligible,AGE_WORKERS);
-  await saveAgeBatchToCache(ages);
-  const updated=await postAgeUpdates(ages);
-  const failed=await updateAgeFailures(eligible,ages);
-  return{
-    scanned:eligible.length,
-    updated,
-    failed,
-    skipped:Math.max(0,(Array.isArray(items)?items.length:0)-eligible.length),
+  const previous=data?.syncStatus||{};
+  const status={
+    ...previous,
+    age_scan_running:Boolean(job&&Array.isArray(job.remaining)&&job.remaining.length),
+    age_scan_remaining:job?.remaining?.length||0,
+    age_scan_scanned:Number(job?.scanned||0),
+    age_scan_updated:Number(job?.updated||0),
+    age_scan_failed:Number(job?.failed||0),
+    age_scan_skipped:Number(job?.skipped||0),
+    age_scan_cooldown_until:Number(job?.cooldown_until||0),
+    age_scan_rate_limit_hits:Number(job?.rate_limit_hits||0),
+    vinted_cooldown_until:Number(job?.cooldown_until||0),
+    age_scan_at:new Date().toISOString(),
   };
+  if(error)status.age_scan_error=String(error);
+  else if(job&&!job.last_error)status.age_scan_error=null;
+  await chrome.storage.local.set({syncStatus:status});
+  return status;
+}
+
+async function closeAgeWorkerWindow(job){
+  if(job?.window_id!=null){
+    try{await chrome.windows.remove(job.window_id)}catch{}
+  }
+}
+
+async function ensureAgeWorkerTabs(job,batch){
+  const ids=Array.isArray(job.tab_ids)?job.tab_ids:[];
+  if(job.window_id!=null&&ids.length>=batch.length){
+    try{
+      const tabs=await Promise.all(ids.slice(0,batch.length).map(id=>chrome.tabs.get(id)));
+      if(tabs.every(tab=>tab&&tab.id!=null&&tab.windowId===job.window_id))return tabs;
+    }catch{}
+  }
+
+  await closeAgeWorkerWindow(job);
+  const workerWindow=await chrome.windows.create({
+    url:Array.from({length:batch.length},()=>"about:blank"),
+    focused:false,
+    state:"minimized",
+  });
+  let tabs=Array.isArray(workerWindow?.tabs)?workerWindow.tabs:[];
+  if(tabs.length!==batch.length&&workerWindow?.id!=null){
+    try{tabs=await chrome.tabs.query({windowId:workerWindow.id})}catch{}
+  }
+  if(tabs.length!==batch.length){
+    if(workerWindow?.id!=null){
+      try{await chrome.windows.remove(workerWindow.id)}catch{}
+    }
+    throw new Error("Chrome did not create the expected Vinted worker tabs.");
+  }
+  job.window_id=workerWindow.id;
+  job.tab_ids=tabs.map(tab=>tab.id);
+  await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+  return tabs;
+}
+
+async function renderedUploadedAgeWave(job,batch){
+  const tabs=await ensureAgeWorkerTabs(job,batch);
+  const results={};
+  let rateLimited=false,challenged=false;
+  await Promise.all(batch.map(async(item,index)=>{
+    try{
+      const result=await readRenderedAgeFromTab(tabs[index],item);
+      if(result?.age)results[String(item.id)]=result.age;
+      if(result?.rate_limited)rateLimited=true;
+      if(result?.challenged)challenged=true;
+    }catch{}
+  }));
+  return{ages:results,rate_limited:rateLimited,challenged};
+}
+
+async function startAgeJob(items,reason){
+  const eligible=await eligibleAgeScanItems(items,reason);
+  const data=await chrome.storage.local.get([AGE_JOB_KEY]);
+  const existing=data?.[AGE_JOB_KEY];
+  if(existing&&Array.isArray(existing.remaining)&&existing.remaining.length){
+    const merged=new Map(existing.remaining.map(item=>[String(item.id),item]));
+    for(const item of eligible)merged.set(String(item.id),item);
+    existing.remaining=[...merged.values()];
+    if(reason==="manual")existing.reason="manual";
+    await chrome.storage.local.set({[AGE_JOB_KEY]:existing});
+    chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+500});
+    await updateAgeJobStatus(existing);
+    return{started:false,remaining:existing.remaining.length,scanned:existing.scanned||0,updated:existing.updated||0,failed:existing.failed||0,skipped:existing.skipped||0};
+  }
+  if(!eligible.length){
+    return{started:false,remaining:0,scanned:0,updated:0,failed:0,skipped:uniqueAgeItems(items).length};
+  }
+
+  const job={
+    version:2,
+    reason,
+    remaining:eligible,
+    scanned:0,
+    updated:0,
+    failed:0,
+    skipped:Math.max(0,uniqueAgeItems(items).length-eligible.length),
+    window_id:null,
+    tab_ids:[],
+    started_at:new Date().toISOString(),
+    last_error:null,
+    rate_limit_hits:0,
+    cooldown_until:0,
+  };
+  await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+  chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+500});
+  await updateAgeJobStatus(job);
+  return{started:true,remaining:job.remaining.length,scanned:0,updated:0,failed:0,skipped:job.skipped};
+}
+
+async function finishAgeJob(job){
+  await closeAgeWorkerWindow(job);
+  await chrome.storage.local.remove([AGE_JOB_KEY]);
+  const finished={...job,remaining:[]};
+  await updateAgeJobStatus(finished);
+  return finished;
+}
+
+async function processAgeJobWave(){
+  if(ageJobInFlight)return ageJobInFlight;
+  ageJobInFlight=(async()=>{
+    const data=await chrome.storage.local.get([AGE_JOB_KEY]);
+    let job=data?.[AGE_JOB_KEY];
+    if(!job||!Array.isArray(job.remaining)||!job.remaining.length){
+      if(job)await finishAgeJob(job);
+      return{ok:true,remaining:0};
+    }
+
+    const now=Date.now();
+    const cooldownUntil=Number(job.cooldown_until||0);
+    if(cooldownUntil>now){
+      await closeAgeWorkerWindow(job);
+      job.window_id=null;
+      job.tab_ids=[];
+      await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+      await updateAgeJobStatus(job,"Vinted website rate limit detected; age scan is cooling down.");
+      chrome.alarms.create(AGE_JOB_ALARM,{when:cooldownUntil});
+      return{ok:true,paused:true,remaining:job.remaining.length,cooldown_until:cooldownUntil};
+    }
+
+    chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+AGE_JOB_WATCHDOG_MS});
+    let eventUpdated=0,eventFailed=0;
+    try{
+      for(let wave=0;wave<AGE_WAVES_PER_EVENT&&job.remaining.length;wave++){
+        const adaptiveWorkers=Math.max(
+          1,
+          AGE_WORKERS-Math.min(AGE_WORKERS-1,Number(job.rate_limit_hits||0)),
+        );
+        const batch=job.remaining.slice(0,adaptiveWorkers);
+        const waveResult=await renderedUploadedAgeWave(job,batch);
+        const ages=waveResult.ages||{};
+        await saveAgeBatchToCache(ages);
+        const updated=await postAgeUpdates(ages);
+
+        if(waveResult.rate_limited||waveResult.challenged){
+          const succeeded=new Set(Object.keys(ages));
+          const keepBatch=batch.filter(item=>!succeeded.has(String(item.id)));
+          job.remaining=[...keepBatch,...job.remaining.slice(batch.length)];
+          job.scanned=Number(job.scanned||0)+succeeded.size;
+          job.updated=Number(job.updated||0)+updated;
+          job.rate_limit_hits=Number(job.rate_limit_hits||0)+1;
+          const cooldown=Math.min(
+            AGE_RATE_LIMIT_MAX_COOLDOWN_MS,
+            AGE_RATE_LIMIT_BASE_COOLDOWN_MS*(2**Math.max(0,job.rate_limit_hits-1)),
+          );
+          job.cooldown_until=Date.now()+cooldown;
+          job.last_error=waveResult.rate_limited
+            ?"Vinted website rate limit detected"
+            :"Vinted anti-bot challenge detected";
+          await closeAgeWorkerWindow(job);
+          job.window_id=null;
+          job.tab_ids=[];
+          await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+          await updateAgeJobStatus(job,job.last_error+"; pausing the age scan.");
+          chrome.alarms.create(AGE_JOB_ALARM,{when:job.cooldown_until});
+          return{
+            ok:true,
+            paused:true,
+            remaining:job.remaining.length,
+            updated:eventUpdated+updated,
+            failed:eventFailed,
+            cooldown_until:job.cooldown_until,
+          };
+        }
+
+        const failed=await updateAgeFailures(batch,ages);
+        job.remaining=job.remaining.slice(batch.length);
+        job.scanned=Number(job.scanned||0)+batch.length;
+        job.updated=Number(job.updated||0)+updated;
+        job.failed=Number(job.failed||0)+failed;
+        job.last_error=null;
+        job.cooldown_until=0;
+        eventUpdated+=updated;
+        eventFailed+=failed;
+        await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+        await updateAgeJobStatus(job);
+      }
+
+      if(job.remaining.length){
+        chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+30000});
+        return{ok:true,remaining:job.remaining.length,updated:eventUpdated,failed:eventFailed};
+      }
+      await finishAgeJob(job);
+      return{ok:true,remaining:0,updated:eventUpdated,failed:eventFailed};
+    }catch(error){
+      job.last_error=error instanceof Error?error.message:String(error);
+      await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+      await updateAgeJobStatus(job,job.last_error);
+      chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+30000});
+      return{ok:false,remaining:job.remaining.length,error:job.last_error};
+    }
+  })();
+  try{return await ageJobInFlight}finally{ageJobInFlight=null}
 }
 
 async function pair(code){const response=await fetch(API_ORIGIN+"/api/extension/pair",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:String(code||"").trim().toUpperCase(),extension_version:chrome.runtime.getManifest().version,device_name:"Chrome"})});let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||"Pairing failed");await chrome.storage.local.set({bridgeToken:body.token,bridgeWorkspace:body.workspace});return body}
-async function unpair(){await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_CACHE_KEY,AGE_FAILURES_KEY])}
+async function unpair(){const data=await chrome.storage.local.get([AGE_JOB_KEY]);await closeAgeWorkerWindow(data?.[AGE_JOB_KEY]);await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
 async function connectionStatus(){const data=await stored();if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN};try{const remote=await api("/api/extension/status");return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN}}catch(error){return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN}}}
 async function runSync(reason="manual"){
   if(syncInFlight)return syncInFlight;
+  const activeJobData=await chrome.storage.local.get([AGE_JOB_KEY,"syncStatus"]);
+  const previousStatus=activeJobData?.syncStatus||{};
+  const coreCooldownUntil=Number(previousStatus.vinted_cooldown_until||0);
+  if(coreCooldownUntil>Date.now()){
+    return{
+      ...previousStatus,
+      ok:true,
+      reason,
+      sync_skipped_for_cooldown:true,
+      vinted_cooldown_until:coreCooldownUntil,
+    };
+  }
+  const activeJob=activeJobData?.[AGE_JOB_KEY];
+  if(activeJob&&Array.isArray(activeJob.remaining)&&activeJob.remaining.length){
+    const previous=activeJobData?.syncStatus||{};
+    return{
+      ...previous,
+      ok:true,
+      reason,
+      sync_skipped_for_age_job:true,
+      age_scan_running:true,
+      age_scan_remaining:activeJob.remaining.length,
+      age_scan_scanned:Number(activeJob.scanned||0),
+      age_scan_updated:Number(activeJob.updated||0),
+      age_scan_failed:Number(activeJob.failed||0),
+    };
+  }
   syncInFlight=(async()=>{
     let temporary=null;
     try{
@@ -186,39 +403,50 @@ async function runSync(reason="manual"){
       const tabUrl=new URL(String(tab.url||""));
       if(!tabUrl.hostname.startsWith("www.vinted."))throw new Error("Open and sign in to Vinted first.");
       await chrome.storage.local.set({vintedOrigin:tabUrl.origin});
-      const response=await message(tab.id,{type:"collect-vinted-data"});
-      if(!response?.ok)throw new Error(response?.error||"Could not read Vinted data.");
+      const response=await message(tab.id,{type:"collect-vinted-data",reason});
+      if(!response?.ok){
+        if(response?.rate_limited){
+          const cooldownUntil=Date.now()+CORE_RATE_LIMIT_COOLDOWN_MS;
+          const status={
+            ok:false,
+            at:new Date().toISOString(),
+            reason,
+            error:response?.error||"Vinted rate limited the sync.",
+            vinted_cooldown_until:cooldownUntil,
+          };
+          await chrome.storage.local.set({syncStatus:status});
+          return status;
+        }
+        throw new Error(response?.error||"Could not read Vinted data.");
+      }
       const snapshot=response.snapshot;
       const ageScanItems=Array.isArray(snapshot.age_scan_items)?snapshot.age_scan_items:[];
+      const detailSync=snapshot.detail_sync||{};
       delete snapshot.age_scan_items;
+      delete snapshot.detail_sync;
       snapshot.extension_version=chrome.runtime.getManifest().version;
 
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
-      let ageBurst;
-      try{
-        ageBurst=await runAgeBurst(ageScanItems,reason);
-      }catch(error){
-        ageBurst={
-          scanned:0,
-          updated:0,
-          failed:0,
-          skipped:ageScanItems.length,
-          error:error instanceof Error?error.message:String(error),
-        };
-      }
+      const vintedRateLimited=Boolean(detailSync.rate_limited);
+      const ageJob=vintedRateLimited
+        ? {remaining:0,scanned:0,updated:0,failed:0,skipped:ageScanItems.length}
+        : await startAgeJob(ageScanItems,reason);
       const status={
         ok:true,
         at:new Date().toISOString(),
         reason,
         listings:result.listings||snapshot.listings.length,
         orders:snapshot.orders.length,
-        age_scan_running:false,
-        age_scan_remaining:0,
-        age_scan_scanned:ageBurst.scanned,
-        age_scan_updated:ageBurst.updated,
-        age_scan_failed:ageBurst.failed,
-        age_scan_skipped:ageBurst.skipped,
-        age_scan_error:ageBurst.error||null,
+        detail_enriched:Number(detailSync.enriched||0),
+        detail_deferred:Number(detailSync.deferred||0),
+        detail_rate_limited:vintedRateLimited,
+        vinted_cooldown_until:vintedRateLimited?Date.now()+CORE_RATE_LIMIT_COOLDOWN_MS:0,
+        age_scan_running:ageJob.remaining>0,
+        age_scan_remaining:ageJob.remaining,
+        age_scan_scanned:ageJob.scanned,
+        age_scan_updated:ageJob.updated,
+        age_scan_failed:ageJob.failed,
+        age_scan_skipped:ageJob.skipped,
       };
       await chrome.storage.local.set({syncStatus:status});
       return status;
@@ -233,16 +461,33 @@ async function runSync(reason="manual"){
   })();
   return syncInFlight;
 }
-function alarms(){chrome.alarms.create(SYNC_ALARM,{periodInMinutes:10})}
+function alarms(){
+  chrome.alarms.create(SYNC_ALARM,{periodInMinutes:10});
+  chrome.storage.local.get([AGE_JOB_KEY]).then(data=>{
+    const job=data?.[AGE_JOB_KEY];
+    if(job&&Array.isArray(job.remaining)&&job.remaining.length){
+      chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+1000});
+    }
+  }).catch(()=>{});
+}
 chrome.runtime.onInstalled.addListener(alarms);
 chrome.runtime.onStartup.addListener(alarms);
-chrome.alarms.onAlarm.addListener(a=>{if(a.name===SYNC_ALARM)runSync("periodic")});
+chrome.alarms.onAlarm.addListener(async a=>{
+  if(a.name===AGE_JOB_ALARM)return processAgeJobWave();
+  if(a.name===SYNC_ALARM){
+    const data=await chrome.storage.local.get([AGE_JOB_KEY]);
+    const job=data?.[AGE_JOB_KEY];
+    if(job&&Array.isArray(job.remaining)&&job.remaining.length)return;
+    return runSync("periodic");
+  }
+});
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
   (async()=>{
     if(msg?.type==="pair")return sendResponse(await pair(msg.code));
     if(msg?.type==="unpair"){await unpair();return sendResponse({ok:true})}
     if(msg?.type==="sync-now")return sendResponse(await runSync("manual"));
     if(msg?.type==="status")return sendResponse(await connectionStatus());
+    if(msg?.type==="age-job-step")return sendResponse(await processAgeJobWave());
     sendResponse({ok:false,error:"Unknown message"});
   })().catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
   return true;

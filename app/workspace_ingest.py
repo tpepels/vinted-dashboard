@@ -7,7 +7,9 @@ truth for Vinted inventory, history and sales.
 
 from __future__ import annotations
 
+import re
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -217,14 +219,64 @@ _VINTED_CATEGORY_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+def _normalize_vinted_category(value: str | None) -> tuple[str, list[str]]:
+    raw = unicodedata.normalize("NFKD", str(value or "").casefold())
+    raw = "".join(char for char in raw if not unicodedata.combining(char))
+    segments = [
+        " ".join(re.sub(r"[^a-z0-9]+", " ", part).split())
+        for part in re.split(r"[>\\/|›»]+", raw)
+    ]
+    segments = [part for part in segments if part]
+    return " ".join(segments), segments
+
+
+def _vinted_category_token_matches(
+    text: str,
+    segments: list[str],
+    token: str,
+) -> bool:
+    token_text, _ = _normalize_vinted_category(token)
+    if not token_text:
+        return False
+    # "art"/"arts" are too ambiguous to match as arbitrary path words
+    # (for example "martial arts"). Accept them only as a category segment.
+    if token_text in {"art", "arts"}:
+        return token_text in segments
+    return re.search(
+        rf"(?<![a-z0-9]){re.escape(token_text)}(?![a-z0-9])",
+        text,
+    ) is not None
+
+
+def _best_vinted_category_match(text: str, segments: list[str]) -> str | None:
+    best: tuple[int, int, str] | None = None
+    for category, tokens in _VINTED_CATEGORY_TOKENS:
+        for token in tokens:
+            token_text, _ = _normalize_vinted_category(token)
+            if not _vinted_category_token_matches(text, segments, token):
+                continue
+            # Prefer the most specific matching phrase across all broad
+            # categories. This makes "video games" beat the generic "games".
+            score = (len(token_text.split()), len(token_text), category)
+            if best is None or score[:2] > best[:2]:
+                best = score
+    return best[2] if best is not None else None
+
+
 def classify_vinted_category(value: str | None) -> str | None:
-    text = " ".join(str(value or "").casefold().replace(">", " ").split())
+    text, segments = _normalize_vinted_category(value)
     if not text:
         return None
-    for category, tokens in _VINTED_CATEGORY_TOKENS:
-        if any(token in text for token in tokens):
-            return category
-    return None
+
+    # A recognized top-level Vinted taxonomy segment is stronger evidence than
+    # a generic child word such as "Accessories". If the top level is
+    # unrecognized (for example "Women" or "Entertainment"), fall back to the
+    # most-specific phrase anywhere in the path.
+    if len(segments) > 1:
+        top = _best_vinted_category_match(segments[0], [segments[0]])
+        if top is not None:
+            return top
+    return _best_vinted_category_match(text, segments)
 
 
 def _looks_like_book_category(value: str | None) -> bool:

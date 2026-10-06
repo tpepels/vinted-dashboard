@@ -22,12 +22,18 @@ const ageByItem = {
   "1000000003": { seconds: 3 * 86400, text: "3 days ago" },
 };
 
+const state = {
+  bridgeToken: "token",
+  bridgeWorkspace: "Test",
+  syncStatus: {},
+};
+
 const chrome = {
   runtime: {
     getManifest() {
       return {
         content_scripts: [{ matches: ["https://www.vinted.pt/*"] }],
-        version: "3.1.0",
+        version: "3.2.0",
       };
     },
     onInstalled: { addListener() {} },
@@ -47,7 +53,7 @@ const chrome = {
     },
     async remove(id) {
       windowsRemoved.push(id);
-      for (const [tabId] of urls) urls.delete(tabId);
+      for (const [tabId] of [...urls]) urls.delete(tabId);
     },
   },
   tabs: {
@@ -55,26 +61,33 @@ const chrome = {
     async update(id, opts) {
       updated.push({ id, ...opts });
       if (opts.url) urls.set(id, opts.url);
-      return { id, status: "complete", url: urls.get(id) };
+      return { id, windowId: windowsCreated[windowsCreated.length - 1]?.id, status: "complete", url: urls.get(id) };
     },
     async get(id) {
-      return { id, status: "complete", url: urls.get(id) };
+      if (!urls.has(id)) throw new Error("tab missing");
+      return { id, windowId: windowsCreated[windowsCreated.length - 1]?.id, status: "complete", url: urls.get(id) };
     },
     async sendMessage(id, payload) {
       sent.push({ id, payload });
       if (payload.type === "read-vinted-uploaded-age") {
         return { ok: true, age: ageByItem[String(payload.item_id)] || null };
       }
-      return { ok: true, protocol: 5 };
+      return { ok: true, protocol: 7 };
     },
     async reload() {},
     async remove() {},
   },
   storage: {
     local: {
-      async get() { return {}; },
-      async set() {},
-      async remove() {},
+      async get(keys) {
+        const result = {};
+        for (const key of keys || []) result[key] = state[key];
+        return result;
+      },
+      async set(values) { Object.assign(state, values); },
+      async remove(keys) {
+        for (const key of keys || []) delete state[key];
+      },
     },
   },
   alarms: {
@@ -91,7 +104,7 @@ const context = {
   URL,
   fetch: async () => ({ ok: true, async json() { return {}; } }),
   chrome,
-  setTimeout,
+  setTimeout: (fn, _ms) => setTimeout(fn, 0),
   clearTimeout,
   Date,
 };
@@ -113,22 +126,39 @@ function assert(condition, message) {
     { id: "1000000003", url: "https://www.vinted.pt/items/1000000003-three" },
   ];
 
-  const ages = await context.renderedUploadedAgesBurst(items, 2);
+  const job = {
+    remaining: items,
+    scanned: 0,
+    updated: 0,
+    failed: 0,
+    skipped: 0,
+    window_id: null,
+    tab_ids: [],
+  };
 
-  assert(ages["9826364597"].text === "5 weeks ago", "Destination India age was not returned");
-  assert(ages["9826364597"].seconds === 5 * 7 * 86400, "5 weeks converted incorrectly");
-  assert(Object.keys(ages).length === 4, "Not all rendered ages were collected");
-
-  assert(windowsCreated.length === 1, "Burst should use one worker window");
+  const first = await context.renderedUploadedAgeWave(job, items.slice(0, 2));
+  assert(first.ages["9826364597"].text === "5 weeks ago", "Destination India age was not returned");
+  assert(first.ages["9826364597"].seconds === 5 * 7 * 86400, "5 weeks converted incorrectly");
+  assert(Object.keys(first.ages).length === 2, "First rendered wave did not collect both ages");
+  assert(first.rate_limited === false, "Normal pages were marked rate limited");
+  assert(windowsCreated.length === 1, "Worker window was not created");
   assert(windowsCreated[0].state === "minimized", "Worker window should be minimized");
   assert(windowsCreated[0].focused === false, "Worker window should not steal focus");
-  assert(windowsCreated[0].tabs.length === 2, "Requested worker count was not respected");
-  assert(updated.length === 2, "Worker tabs should be reused for the remaining items");
+  assert(windowsCreated[0].tabs.length === 2, "Wave should use requested number of tabs");
+  assert(windowsCreated[0].url.every((url) => url === "about:blank"),
+    "Worker window should open blank tabs before staggered navigation");
+
+  const second = await context.renderedUploadedAgeWave(job, items.slice(2));
+  assert(Object.keys(second.ages).length === 2, "Second rendered wave did not collect both ages");
+  assert(windowsCreated.length === 1, "Worker tabs were not reused");
+  assert(updated.length === 4, "Blank worker tabs and the reused second wave should each navigate two items");
   assert(sent.filter((entry) => entry.payload.type === "read-vinted-uploaded-age").length === 4,
     "Each item page should be queried through its rendered DOM");
+
+  await context.closeAgeWorkerWindow(job);
   assert(windowsRemoved.length === 1, "Worker window was not closed");
 
-  console.log("Vinted minimized-window rendered Uploaded-age burst: ok");
+  console.log("Vinted minimized-window rendered Uploaded-age waves: ok");
 })().catch((error) => {
   console.error(error);
   process.exit(1);
