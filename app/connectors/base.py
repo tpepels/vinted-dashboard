@@ -21,6 +21,7 @@ class Capability:
     SYNC_INVENTORY = "sync_inventory"
     CREATE_LISTING = "create_listing"
     UPDATE_LISTING = "update_listing"
+    UPDATE_STOCK = "update_stock"
     CLOSE_LISTING = "close_listing"
     ANALYTICS = "analytics"
     BROWSER_ASSISTED = "browser_assisted"
@@ -114,6 +115,7 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         capabilities=frozenset({
             Capability.CREATE_LISTING,
             Capability.UPDATE_LISTING,
+            Capability.UPDATE_STOCK,
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
             Capability.CLOSE_LISTING,
@@ -128,6 +130,7 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         capabilities=frozenset({
             Capability.CREATE_LISTING,
             Capability.UPDATE_LISTING,
+            Capability.UPDATE_STOCK,
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
             Capability.CLOSE_LISTING,
@@ -164,6 +167,7 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         capabilities=frozenset({
             Capability.CREATE_LISTING,
             Capability.UPDATE_LISTING,
+            Capability.UPDATE_STOCK,
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
             Capability.CLOSE_LISTING,
