@@ -83,7 +83,15 @@ def is_biblio_book_candidate(
     category = str(metadata.get("category") or attrs.get("vinted_category") or "").casefold()
     return any(
         token in category
-        for token in ("book", "books", "livro", "livros", "livre", "livres", "libro", "libros", "buch", "bücher", "ksiaz", "książ")
+        for token in (
+            "book", "books", "livro", "livros", "livre", "livres",
+            "libro", "libros", "buch", "bücher", "ksiaz", "książ",
+            "fiction", "ficção", "ficcao", "non-fiction", "nonfiction",
+            "literature", "literatura", "novel", "novels", "romance",
+            "crime", "thriller", "fantasy", "biography", "biografia",
+            "memoir", "poetry", "poesia", "textbook", "comic", "comics",
+            "manga", "banda desenhada",
+        )
     )
 
 
@@ -228,12 +236,37 @@ def build_biblio_candidate(
     if not is_biblio_book_candidate(item, vinted):
         raise ValueError("Only book inventory can be published to BIBLIO")
 
+    isbn, isbn_source = _value(
+        (clean_isbn(vmeta.get("isbn")), "vinted"),
+        (clean_isbn(attrs.get("isbn")), "master"),
+    )
+
+    enrichment: dict[str, Any] | None = None
+    enrichment_warning: str | None = None
+    if enrich_isbn and isbn:
+        try:
+            enrichment = stock_intake.lookup_isbn(str(isbn))
+        except (ValueError, RuntimeError) as exc:
+            enrichment_warning = str(exc)
+
+    isbn_title = None
+    if enrichment and enrichment.get("title"):
+        isbn_title = str(enrichment["title"]).strip()
+        subtitle = str(enrichment.get("subtitle") or "").strip()
+        if subtitle and subtitle.casefold() not in isbn_title.casefold():
+            isbn_title = f"{isbn_title}: {subtitle}"
+
     title, title_source = _value(
-        (vinted.title if vinted else None, "vinted"),
+        (isbn_title, "isbn"),
         (attrs.get("listing_title"), "master"),
+        (vinted.title if vinted else None, "vinted"),
         (item.title, "master"),
     )
     author, author_source = _value(
+        (
+            str(enrichment.get("author") or "").strip() if enrichment else None,
+            "isbn",
+        ),
         (vmeta.get("author"), "vinted"),
         (attrs.get("author"), "master"),
     )
@@ -243,10 +276,6 @@ def build_biblio_candidate(
         (attrs.get("listing_description"), "master"),
         (attrs.get("description"), "master"),
         (item.notes, "master"),
-    )
-    isbn, isbn_source = _value(
-        (clean_isbn(vmeta.get("isbn")), "vinted"),
-        (clean_isbn(attrs.get("isbn")), "master"),
     )
     price_cents, price_source = _value(
         (vinted.price_cents if vinted else None, "vinted"),
@@ -258,23 +287,16 @@ def build_biblio_candidate(
         ("EUR", "default"),
     )
 
-    enrichment: dict[str, Any] | None = None
-    enrichment_warning: str | None = None
-    if enrich_isbn and isbn and (not author):
-        try:
-            enrichment = stock_intake.lookup_isbn(str(isbn))
-        except (ValueError, RuntimeError) as exc:
-            enrichment_warning = str(exc)
-        if enrichment:
-            if not author and enrichment.get("author"):
-                author = str(enrichment["author"]).strip()
-                author_source = "isbn"
-            if enrichment.get("publisher") and not attrs.get("publisher"):
-                attrs["publisher"] = enrichment["publisher"]
-                attrs["publisher_source"] = "isbn"
-            if enrichment.get("edition") and not attrs.get("edition"):
-                attrs["edition"] = enrichment["edition"]
-                attrs["edition_source"] = "isbn"
+    if enrichment:
+        if enrichment.get("publisher") and not attrs.get("publisher"):
+            attrs["publisher"] = enrichment["publisher"]
+            attrs["publisher_source"] = "isbn"
+        if enrichment.get("edition") and not attrs.get("edition"):
+            attrs["edition"] = enrichment["edition"]
+            attrs["edition_source"] = "isbn"
+        if enrichment.get("publish_date") and not attrs.get("publish_date"):
+            attrs["publish_date"] = enrichment["publish_date"]
+            attrs["publish_date_source"] = "isbn"
 
     existing = _existing_biblio(session, workspace_id, item.id)
     book_id = existing.external_id if existing else item.sku

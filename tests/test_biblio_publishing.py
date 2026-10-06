@@ -82,7 +82,7 @@ def test_biblio_candidate_prefers_vinted_source_and_uses_isbn_for_missing_author
 
     assert candidate["ready"] is True
     assert candidate["fields"]["title"] == "The Trial"
-    assert candidate["field_sources"]["title"] == "vinted"
+    assert candidate["field_sources"]["title"] == "isbn"
     assert candidate["fields"]["description"] == "English paperback in very good condition."
     assert candidate["field_sources"]["description"] == "vinted"
     assert candidate["fields"]["isbn"] == "9780099428640"
@@ -227,6 +227,16 @@ def _registered_client(monkeypatch):
 
 
 def test_publish_endpoint_creates_linked_biblio_listing_and_queues_ftp(monkeypatch):
+    monkeypatch.setattr(
+        "app.publishing.stock_intake.lookup_isbn",
+        lambda isbn: {
+            "found": True,
+            "isbn": isbn,
+            "title": "Clean ISBN Title",
+            "author": "Source Author",
+            "publisher": "Publisher",
+        },
+    )
     client, csrf = _registered_client(monkeypatch)
     credentials = client.put(
         "/api/app/connectors/biblio/credentials",
@@ -296,7 +306,7 @@ def test_publish_endpoint_creates_linked_biblio_listing_and_queues_ftp(monkeypat
             )
         ).scalar_one()
         assert listing.inventory_item_id == item_id
-        assert listing.title == "Vinted title"
+        assert listing.title == "Clean ISBN Title"
         job = session.execute(
             select(BackgroundJob).where(BackgroundJob.job_type == "biblio_sync")
         ).scalar_one()
@@ -619,3 +629,194 @@ def test_listing_api_exposes_biblio_gate_instead_of_hiding_vinted_actions(monkey
     }
     assert rows["SPARSE-1"]["biblio_gate"] == "book_review"
     assert rows["UNLINKED-1"]["biblio_gate"] == "link_required"
+
+
+
+def test_biblio_isbn_metadata_overrides_marketing_heavy_vinted_title(monkeypatch):
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="VINTED-ISBN-CLEAN",
+            title="Hunter S. Thompson - The Great Shark Hunt - First Edition First Printing 1979",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            currency="EUR",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        source = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item.id,
+            channel=Channel.VINTED,
+            external_id="10253402699",
+            title="Hunter S. Thompson - The Great Shark Hunt - First Edition First Printing 1979",
+            price_cents=10900,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+            extra={
+                "metadata": {
+                    "category": "Books > Fiction",
+                    "author": "Hunter S. Thompson",
+                    "isbn": "9780000000002",
+                    "description": "Vinted condition description should be kept exactly as the listing source.",
+                },
+                "image_urls": [
+                    "https://images1.vinted.net/t/a.jpg",
+                    "https://images1.vinted.net/t/b.jpg",
+                ],
+            },
+        )
+        session.add(source)
+        session.flush()
+        item_id = item.id
+        source_id = source.id
+
+    monkeypatch.setattr(
+        "app.publishing.stock_intake.lookup_isbn",
+        lambda isbn: {
+            "found": True,
+            "isbn": isbn,
+            "title": "The Great Shark Hunt",
+            "subtitle": "Strange Tales from a Strange Time",
+            "author": "Hunter S. Thompson",
+            "publisher": "Summit Books",
+            "edition": "First edition",
+            "publish_date": "1979",
+        },
+    )
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_id,
+            enrich_isbn=True,
+        )
+
+    assert candidate["fields"]["title"] == (
+        "The Great Shark Hunt: Strange Tales from a Strange Time"
+    )
+    assert candidate["field_sources"]["title"] == "isbn"
+    assert candidate["fields"]["author"] == "Hunter S. Thompson"
+    assert candidate["field_sources"]["author"] == "isbn"
+    assert candidate["fields"]["description"] == (
+        "Vinted condition description should be kept exactly as the listing source."
+    )
+    assert candidate["field_sources"]["description"] == "vinted"
+    assert candidate["source"]["photo_count"] == 2
+    assert len(candidate["source"]["image_urls"]) == 2
+
+
+def test_vinted_category_auto_classifies_books_clothing_and_electronics():
+    workspace_id = _workspace()
+    record_workspace_snapshot(
+        workspace_id,
+        {
+            "collected_at": 1_799_100_000,
+            "current_user": {},
+            "notifications": [],
+            "orders": [],
+            "listings": [
+                {
+                    "id": "CAT-BOOK",
+                    "title": "Book",
+                    "price_cents": 500,
+                    "currency": "EUR",
+                    "status": "active",
+                    "metadata": {"category": "Books > Fiction"},
+                },
+                {
+                    "id": "CAT-CLOTHING",
+                    "title": "Jacket",
+                    "price_cents": 1500,
+                    "currency": "EUR",
+                    "status": "active",
+                    "metadata": {"category": "Men > Clothing > Jackets"},
+                },
+                {
+                    "id": "CAT-ELECTRONICS",
+                    "title": "Phone",
+                    "price_cents": 9000,
+                    "currency": "EUR",
+                    "status": "active",
+                    "metadata": {"category": "Electronics > Phones"},
+                },
+            ],
+        },
+        extension_version="3.1.0",
+    )
+
+    with db.session_scope() as session:
+        rows = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id.in_(
+                    ["CAT-BOOK", "CAT-CLOTHING", "CAT-ELECTRONICS"]
+                ),
+            )
+        ).scalars().all()
+        categories = {
+            row.external_id: session.get(
+                models.InventoryItem, row.inventory_item_id
+            ).category
+            for row in rows
+        }
+
+    assert categories["CAT-BOOK"] == ItemCategory.BOOK
+    assert categories["CAT-CLOTHING"] == ItemCategory.CLOTHING
+    assert categories["CAT-ELECTRONICS"] == ItemCategory.ELECTRONICS
+
+
+
+def test_vinted_book_category_alone_avoids_manual_book_confirmation():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="CATEGORY-ONLY-BOOK",
+            title="Vintage novel listing title",
+            category=ItemCategory.GENERAL,
+            quantity=1,
+            currency="EUR",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        source = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item.id,
+            channel=Channel.VINTED,
+            external_id="CATEGORY-ONLY-1",
+            title="Vintage novel listing title",
+            price_cents=500,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+            extra={
+                "metadata": {
+                    "category": "Fiction",
+                    "description": "Vinted description",
+                }
+            },
+        )
+        session.add(source)
+        session.flush()
+        item_id = item.id
+        source_id = source.id
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_id,
+            enrich_isbn=False,
+        )
+
+    assert candidate["category"] == ItemCategory.GENERAL
+    assert "author" in candidate["missing"]
+    assert candidate["fields"]["description"] == "Vinted description"

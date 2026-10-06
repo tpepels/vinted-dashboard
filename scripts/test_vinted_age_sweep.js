@@ -10,56 +10,64 @@ const source = fs.readFileSync(
 const state = {
   bridgeToken: "token",
   bridgeWorkspace: "Test",
-  vintedAgeSweepQueueV1: [
-    { id: "1", url: "https://www.vinted.pt/items/1-one", attempts: 0 },
-    { id: "2", url: "https://www.vinted.pt/items/2-two", attempts: 0 },
-    { id: "3", url: "https://www.vinted.pt/items/3-three", attempts: 0 },
-  ],
+  syncStatus: {},
   vintedListingPageAgeCacheV2: {},
+  vintedAgeScanFailuresV1: {
+    old_failure: { failed_at: Date.now() - 1000 },
+  },
 };
-let nextTabId = 10;
-const tabUrls = new Map();
+let nextTabId = 100;
+let nextWindowId = 20;
+const urls = new Map();
 const posted = [];
-const alarms = [];
+const windowsCreated = [];
 
 const chrome = {
   runtime: {
     getManifest() {
       return {
         content_scripts: [{ matches: ["https://www.vinted.pt/*"] }],
-        version: "3.0.1",
+        version: "3.1.0",
       };
     },
     onInstalled: { addListener() {} },
     onStartup: { addListener() {} },
     onMessage: { addListener() {} },
   },
+  windows: {
+    async create(opts) {
+      const id = ++nextWindowId;
+      const tabs = (Array.isArray(opts.url) ? opts.url : [opts.url]).map((url) => {
+        const tabId = ++nextTabId;
+        urls.set(tabId, url);
+        return { id: tabId, windowId: id, status: "complete", url };
+      });
+      windowsCreated.push({ id, ...opts, tabs });
+      return { id, tabs };
+    },
+    async remove() {
+      urls.clear();
+    },
+  },
   tabs: {
     async query() { return []; },
-    async create(opts) {
-      const id = ++nextTabId;
-      tabUrls.set(id, opts.url);
-      return { id, status: "complete", url: opts.url };
-    },
     async update(id, opts) {
-      if (opts.url) tabUrls.set(id, opts.url);
-      return { id, status: "complete", url: tabUrls.get(id) };
+      if (opts.url) urls.set(id, opts.url);
+      return { id, status: "complete", url: urls.get(id) };
     },
     async get(id) {
-      return { id, status: "complete", url: tabUrls.get(id) };
+      return { id, status: "complete", url: urls.get(id) };
     },
     async sendMessage(_id, payload) {
       if (payload.type === "read-vinted-uploaded-age") {
-        const days = Number(payload.item_id);
-        return {
-          ok: true,
-          age: { seconds: days * 86400, text: days + " days ago" },
-        };
+        const n = Number(payload.item_id);
+        if (n === 7) return { ok: true, age: null };
+        return { ok: true, age: { seconds: n * 86400, text: n + " days ago" } };
       }
-      return { ok: true, protocol: 3 };
+      return { ok: true, protocol: 5 };
     },
-    async remove(id) { tabUrls.delete(id); },
     async reload() {},
+    async remove() {},
   },
   storage: {
     local: {
@@ -75,7 +83,7 @@ const chrome = {
     },
   },
   alarms: {
-    create(name, options) { alarms.push({ name, options }); },
+    create() {},
     onAlarm: { addListener() {} },
   },
   scripting: {
@@ -113,19 +121,37 @@ function assert(condition, message) {
 }
 
 (async () => {
-  const result = await context.processAgeSweepWindow();
-  assert(result.ok === true, "Sweep did not succeed");
-  assert(result.remaining === 0, "Sweep queue was not drained");
-  assert(result.updated === 3, "Server update count was wrong");
-  assert(Array.isArray(state.vintedAgeSweepQueueV1) && state.vintedAgeSweepQueueV1.length === 0,
-    "Persisted queue was not emptied");
-  assert(Object.keys(state.vintedListingPageAgeCacheV2).length === 3,
-    "Rendered ages were not cached");
-  assert(posted.length === 1 && posted[0].ages.length === 3,
-    "Incremental listing-age endpoint did not receive the batch");
-  assert(posted[0].ages.every((row) => row.listed_age_text.endsWith("days ago")),
-    "Uploaded wording was not preserved");
-  console.log("Persistent Vinted Uploaded-age sweep: ok");
+  const items = Array.from({ length: 40 }, (_, index) => {
+    const id = String(index + 1);
+    return { id, url: "https://www.vinted.pt/items/" + id + "-test" };
+  });
+
+  const result = await context.runAgeBurst(items, "manual");
+
+  assert(result.scanned === 40, "Manual burst should scan the whole queue");
+  assert(result.updated === 39, "One intentionally unread item should not be posted");
+  assert(result.failed === 1, "Unread item should be counted once");
+  assert(windowsCreated.length === 1, "One burst should create one worker window");
+  assert(windowsCreated[0].tabs.length === 16, "Burst should use 16 concurrent tabs");
+  assert(Object.keys(state.vintedListingPageAgeCacheV2).length === 39,
+    "Successful ages were not cached");
+  assert(state.vintedAgeScanFailuresV1["7"], "Unread item was not cooldown-marked");
+  assert(posted.length === 1 && posted[0].ages.length === 39,
+    "Incremental endpoint should receive successful ages in one request");
+
+  const periodic = await context.eligibleAgeScanItems(
+    [{ id: "7", url: "https://www.vinted.pt/items/7-test" }],
+    "periodic",
+  );
+  assert(periodic.length === 0, "Recent failures should not be retried every periodic sync");
+
+  const manual = await context.eligibleAgeScanItems(
+    [{ id: "7", url: "https://www.vinted.pt/items/7-test" }],
+    "manual",
+  );
+  assert(manual.length === 1, "Manual sync should allow an explicit retry");
+
+  console.log("Finite Vinted posting-age burst: ok");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

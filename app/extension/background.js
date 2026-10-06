@@ -1,17 +1,15 @@
 const API_ORIGIN="__API_ORIGIN__";
 const VINTED_PATTERNS=chrome.runtime.getManifest().content_scripts[0].matches.slice();
 const SYNC_ALARM="reseller-vinted-sync";
-const AGE_SWEEP_ALARM="reseller-vinted-age-sweep";
-const AGE_SWEEP_QUEUE_KEY="vintedAgeSweepQueueV1";
 const AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
-const AGE_BATCH_SIZE=16;
-const AGE_SWEEP_WINDOW_MS=90000;
-const CONTENT_PROTOCOL=4;
+const AGE_FAILURES_KEY="vintedAgeScanFailuresV1";
+const AGE_WORKERS=16;
+const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
+const CONTENT_PROTOCOL=5;
 let syncInFlight=null;
-let ageSweepInFlight=null;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
-async function stored(){return await chrome.storage.local.get(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_SWEEP_QUEUE_KEY])}
+async function stored(){return await chrome.storage.local.get(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_FAILURES_KEY])}
 async function authHeaders(){const data=await stored();if(!data.bridgeToken)throw new Error("Pair this extension with your dashboard first.");return{"Authorization":"Bearer "+data.bridgeToken,"Content-Type":"application/json"}}
 async function api(path,options={}){const headers=Object.assign({},await authHeaders(),options.headers||{});const response=await fetch(API_ORIGIN+path,Object.assign({},options,{headers}));let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||("Dashboard returned HTTP "+response.status));return body}
 async function waitForTab(tabId,timeout=20000){const start=Date.now();while(Date.now()-start<timeout){const tab=await chrome.tabs.get(tabId);if(tab.status==="complete")return tab;await sleep(300)}throw new Error("Vinted tab did not finish loading.")}
@@ -49,54 +47,43 @@ async function readRenderedAgeFromTab(tab,item){
   return null;
 }
 
-async function renderedUploadedAges(items,workerCount=4){
+async function renderedUploadedAgesBurst(items,workerCount=AGE_WORKERS){
   const queue=(Array.isArray(items)?items:[]).filter(item=>item?.id&&item?.url);
   if(!queue.length)return{};
-  let cursor=0;
-  const results={};
-  async function worker(){
-    const first=queue[cursor++];
-    if(!first)return;
-    const tab=await chrome.tabs.create({url:first.url,active:false});
-    try{
-      let item=first;
-      while(item){
-        try{
-          const age=await readRenderedAgeFromTab(tab,item);
-          if(age)results[String(item.id)]=age;
-        }catch{}
-        item=cursor<queue.length?queue[cursor++]:null;
-      }
-    }finally{
-      try{await chrome.tabs.remove(tab.id)}catch{}
-    }
-  }
   const workers=Math.max(1,Math.min(Number(workerCount)||1,queue.length));
-  await Promise.all(Array.from({length:workers},()=>worker()));
-  return results;
-}
+  const initial=queue.slice(0,workers);
+  let cursor=initial.length;
+  const results={};
+  let workerWindow=null;
 
-async function enqueueAgeSweep(items){
-  const data=await chrome.storage.local.get([AGE_SWEEP_QUEUE_KEY]);
-  const existing=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
-  const merged=new Map();
-  for(const item of existing){
-    if(item?.id&&item?.url)merged.set(String(item.id),{id:String(item.id),url:String(item.url),attempts:Number(item.attempts)||0});
-  }
-  for(const item of(Array.isArray(items)?items:[])){
-    if(item?.id&&item?.url){
-      const existingItem=merged.get(String(item.id));
-      merged.set(String(item.id),{
-        id:String(item.id),
-        url:String(item.url),
-        attempts:Number(existingItem?.attempts)||0,
-      });
+  try{
+    workerWindow=await chrome.windows.create({
+      url:initial.map(item=>item.url),
+      focused:false,
+      state:"minimized",
+    });
+    const tabs=Array.isArray(workerWindow?.tabs)?workerWindow.tabs:[];
+    if(tabs.length!==initial.length){
+      throw new Error("Chrome did not create the expected Vinted worker tabs.");
+    }
+
+    async function worker(tab,item){
+      let current=item;
+      while(current){
+        try{
+          const age=await readRenderedAgeFromTab(tab,current);
+          if(age)results[String(current.id)]=age;
+        }catch{}
+        current=cursor<queue.length?queue[cursor++]:null;
+      }
+    }
+    await Promise.all(tabs.map((tab,index)=>worker(tab,initial[index])));
+    return results;
+  }finally{
+    if(workerWindow?.id!=null){
+      try{await chrome.windows.remove(workerWindow.id)}catch{}
     }
   }
-  const queue=[...merged.values()];
-  await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:queue});
-  if(queue.length)chrome.alarms.create(AGE_SWEEP_ALARM,{when:Date.now()+1000});
-  return queue.length;
 }
 
 async function saveAgeBatchToCache(ages){
@@ -114,97 +101,78 @@ async function saveAgeBatchToCache(ages){
   await chrome.storage.local.set({[AGE_CACHE_KEY]:cache});
 }
 
-async function updateAgeSweepStatus(remaining,updated,error=null){
+async function eligibleAgeScanItems(items,reason){
+  const clean=(Array.isArray(items)?items:[]).filter(item=>item?.id&&item?.url);
+  if(reason==="manual")return clean;
+  const data=await chrome.storage.local.get([AGE_FAILURES_KEY]);
+  const failures=(data&&typeof data[AGE_FAILURES_KEY]==="object"&&data[AGE_FAILURES_KEY])||{};
+  const now=Date.now();
+  return clean.filter(item=>{
+    const failedAt=Number(failures[String(item.id)]?.failed_at||0);
+    return !failedAt||now-failedAt>=AGE_FAILURE_COOLDOWN_MS;
+  });
+}
+
+async function updateAgeFailures(scanned,ages){
+  const data=await chrome.storage.local.get([AGE_FAILURES_KEY]);
+  const failures=(data&&typeof data[AGE_FAILURES_KEY]==="object"&&data[AGE_FAILURES_KEY])||{};
+  const now=Date.now();
+  for(const item of scanned){
+    const id=String(item.id);
+    if(ages[id])delete failures[id];
+    else failures[id]={failed_at:now};
+  }
+  await chrome.storage.local.set({[AGE_FAILURES_KEY]:failures});
+  return scanned.filter(item=>!ages[String(item.id)]).length;
+}
+
+async function postAgeUpdates(ages){
+  const rows=Object.entries(ages||{}).map(([external_id,age])=>({
+    external_id,
+    listed_age_seconds:Math.max(0,Math.round(Number(age.seconds)||0)),
+    listed_age_text:age.text||null,
+    observed_at:Date.now()/1000,
+  }));
+  let updated=0;
+  for(let index=0;index<rows.length;index+=100){
+    const result=await api("/api/extension/listing-ages",{
+      method:"POST",
+      body:JSON.stringify({ages:rows.slice(index,index+100)}),
+    });
+    updated+=Number(result.updated||0);
+  }
+  return updated;
+}
+
+async function runAgeBurst(items,reason){
+  const eligible=await eligibleAgeScanItems(items,reason);
+  if(!eligible.length){
+    return{scanned:0,updated:0,failed:0,skipped:(Array.isArray(items)?items.length:0)};
+  }
   const data=await chrome.storage.local.get(["syncStatus"]);
-  const previous=data?.syncStatus||{};
-  const status={
-    ...previous,
-    age_scan_remaining:Number(remaining)||0,
-    age_scan_updated:Number(updated)||0,
-    age_scan_at:new Date().toISOString(),
+  await chrome.storage.local.set({
+    syncStatus:{
+      ...(data?.syncStatus||{}),
+      age_scan_running:true,
+      age_scan_remaining:eligible.length,
+      age_scan_at:new Date().toISOString(),
+    },
+  });
+
+  const ages=await renderedUploadedAgesBurst(eligible,AGE_WORKERS);
+  await saveAgeBatchToCache(ages);
+  const updated=await postAgeUpdates(ages);
+  const failed=await updateAgeFailures(eligible,ages);
+  return{
+    scanned:eligible.length,
+    updated,
+    failed,
+    skipped:Math.max(0,(Array.isArray(items)?items.length:0)-eligible.length),
   };
-  if(error)status.age_scan_error=String(error);
-  else delete status.age_scan_error;
-  await chrome.storage.local.set({syncStatus:status});
 }
 
-async function processAgeSweepWindow(){
-  if(ageSweepInFlight)return ageSweepInFlight;
-  ageSweepInFlight=(async()=>{
-    const started=Date.now();
-    let updated=0;
-    const deferred=[];
-    try{
-      while(Date.now()-started<AGE_SWEEP_WINDOW_MS){
-        const data=await chrome.storage.local.get([AGE_SWEEP_QUEUE_KEY]);
-        const queue=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
-        if(!queue.length){
-          if(deferred.length){
-            await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:deferred});
-            chrome.alarms.create(AGE_SWEEP_ALARM,{when:Date.now()+30000});
-            await updateAgeSweepStatus(deferred.length,updated);
-            return{ok:true,remaining:deferred.length,updated};
-          }
-          await updateAgeSweepStatus(0,updated);
-          return{ok:true,remaining:0,updated};
-        }
-
-        const batch=queue.slice(0,AGE_BATCH_SIZE);
-        const remaining=queue.slice(AGE_BATCH_SIZE);
-        await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:remaining});
-
-        const ages=await renderedUploadedAges(batch,4);
-        await saveAgeBatchToCache(ages);
-        const updates=Object.entries(ages).map(([external_id,age])=>({
-          external_id,
-          listed_age_seconds:Math.max(0,Math.round(Number(age.seconds)||0)),
-          listed_age_text:age.text||null,
-          observed_at:Date.now()/1000,
-        }));
-        if(updates.length){
-          try{
-            const result=await api("/api/extension/listing-ages",{
-              method:"POST",
-              body:JSON.stringify({ages:updates}),
-            });
-            updated+=Number(result.updated||0);
-          }catch(error){
-            await updateAgeSweepStatus(remaining.length+deferred.length,updated,error instanceof Error?error.message:String(error));
-          }
-        }
-        for(const item of batch){
-          if(ages[String(item.id)])continue;
-          const attempts=(Number(item.attempts)||0)+1;
-          if(attempts<3)deferred.push({...item,attempts});
-        }
-        await updateAgeSweepStatus(remaining.length+deferred.length,updated);
-      }
-
-      const data=await chrome.storage.local.get([AGE_SWEEP_QUEUE_KEY]);
-      const pending=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
-      const combined=[...pending,...deferred];
-      await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:combined});
-      const remaining=combined.length;
-      if(remaining)chrome.alarms.create(AGE_SWEEP_ALARM,{when:Date.now()+30000});
-      await updateAgeSweepStatus(remaining,updated);
-      return{ok:true,remaining,updated};
-    }catch(error){
-      const data=await chrome.storage.local.get([AGE_SWEEP_QUEUE_KEY]);
-      const pending=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
-      const combined=[...pending,...deferred];
-      await chrome.storage.local.set({[AGE_SWEEP_QUEUE_KEY]:combined});
-      const remaining=combined.length;
-      if(remaining)chrome.alarms.create(AGE_SWEEP_ALARM,{when:Date.now()+30000});
-      await updateAgeSweepStatus(remaining,updated,error instanceof Error?error.message:String(error));
-      return{ok:false,remaining,updated,error:error instanceof Error?error.message:String(error)};
-    }finally{
-      ageSweepInFlight=null;
-    }
-  })();
-  return ageSweepInFlight;
-}
 async function pair(code){const response=await fetch(API_ORIGIN+"/api/extension/pair",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:String(code||"").trim().toUpperCase(),extension_version:chrome.runtime.getManifest().version,device_name:"Chrome"})});let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||"Pairing failed");await chrome.storage.local.set({bridgeToken:body.token,bridgeWorkspace:body.workspace});return body}
-async function unpair(){await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_SWEEP_QUEUE_KEY,AGE_CACHE_KEY])}
+async function unpair(){await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_CACHE_KEY,AGE_FAILURES_KEY])}
 async function connectionStatus(){const data=await stored();if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN};try{const remote=await api("/api/extension/status");return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN}}catch(error){return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN}}}
 async function runSync(reason="manual"){
   if(syncInFlight)return syncInFlight;
@@ -226,15 +194,31 @@ async function runSync(reason="manual"){
       snapshot.extension_version=chrome.runtime.getManifest().version;
 
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
-      const remaining=await enqueueAgeSweep(ageScanItems);
+      let ageBurst;
+      try{
+        ageBurst=await runAgeBurst(ageScanItems,reason);
+      }catch(error){
+        ageBurst={
+          scanned:0,
+          updated:0,
+          failed:0,
+          skipped:ageScanItems.length,
+          error:error instanceof Error?error.message:String(error),
+        };
+      }
       const status={
         ok:true,
         at:new Date().toISOString(),
         reason,
         listings:result.listings||snapshot.listings.length,
         orders:snapshot.orders.length,
-        age_scan_remaining:remaining,
-        age_scan_updated:0,
+        age_scan_running:false,
+        age_scan_remaining:0,
+        age_scan_scanned:ageBurst.scanned,
+        age_scan_updated:ageBurst.updated,
+        age_scan_failed:ageBurst.failed,
+        age_scan_skipped:ageBurst.skipped,
+        age_scan_error:ageBurst.error||null,
       };
       await chrome.storage.local.set({syncStatus:status});
       return status;
@@ -249,26 +233,16 @@ async function runSync(reason="manual"){
   })();
   return syncInFlight;
 }
-function alarms(){
-  chrome.alarms.create(SYNC_ALARM,{periodInMinutes:10});
-  chrome.storage.local.get([AGE_SWEEP_QUEUE_KEY]).then(data=>{
-    const queue=Array.isArray(data?.[AGE_SWEEP_QUEUE_KEY])?data[AGE_SWEEP_QUEUE_KEY]:[];
-    if(queue.length)chrome.alarms.create(AGE_SWEEP_ALARM,{when:Date.now()+1000});
-  }).catch(()=>{});
-}
+function alarms(){chrome.alarms.create(SYNC_ALARM,{periodInMinutes:10})}
 chrome.runtime.onInstalled.addListener(alarms);
 chrome.runtime.onStartup.addListener(alarms);
-chrome.alarms.onAlarm.addListener(a=>{
-  if(a.name===SYNC_ALARM)runSync("periodic");
-  if(a.name===AGE_SWEEP_ALARM)processAgeSweepWindow();
-});
+chrome.alarms.onAlarm.addListener(a=>{if(a.name===SYNC_ALARM)runSync("periodic")});
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
   (async()=>{
     if(msg?.type==="pair")return sendResponse(await pair(msg.code));
     if(msg?.type==="unpair"){await unpair();return sendResponse({ok:true})}
     if(msg?.type==="sync-now")return sendResponse(await runSync("manual"));
     if(msg?.type==="status")return sendResponse(await connectionStatus());
-    if(msg?.type==="age-scan-now")return sendResponse(await processAgeSweepWindow());
     sendResponse({ok:false,error:"Unknown message"});
   })().catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
   return true;

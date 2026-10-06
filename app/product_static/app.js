@@ -1023,6 +1023,24 @@ function renderBiblioPublish(data) {
       + (source.url ? ' · <a href="' + esc(source.url) + '" target="_blank" rel="noreferrer">open Vinted</a>' : "")
     : "No linked Vinted source was found; using the master inventory record.";
 
+  const photoUrls = Array.isArray(source.image_urls) ? source.image_urls.filter(Boolean).slice(0, 5) : [];
+  const photoPreview = $("#biblio-photo-preview");
+  if (photoUrls.length) {
+    photoPreview.classList.remove("hidden");
+    photoPreview.innerHTML = '<div class="biblio-photo-copy"><strong>'
+      + photoUrls.length + ' Vinted photo' + (photoUrls.length === 1 ? "" : "s")
+      + ' will be uploaded automatically to BIBLIO.</strong>'
+      + '<span>No manual image upload is required.</span></div>'
+      + '<div class="biblio-photo-strip">'
+      + photoUrls.map((url, index) =>
+        '<img src="' + esc(url) + '" alt="Vinted photo ' + (index + 1) + '" loading="lazy">'
+      ).join("")
+      + '</div>';
+  } else {
+    photoPreview.classList.add("hidden");
+    photoPreview.innerHTML = "";
+  }
+
   const fields = data.fields || {};
   const sources = data.field_sources || {};
   const rows = [
@@ -1033,7 +1051,7 @@ function renderBiblioPublish(data) {
     ["price_cents", "Price", fields.price_cents == null ? null : money(fields.price_cents, fields.currency), sources.price_cents],
     ["book_id", "Book ID", fields.book_id, sources.book_id],
     ["quantity", "Quantity", fields.quantity, sources.quantity],
-    ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - upload automatically" : "No Vinted photos", source.photo_count ? "vinted" : null],
+    ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - automatic BIBLIO upload" : "No Vinted photos available", source.photo_count ? "vinted" : null],
   ];
   const editableMissing = new Set(["title", "author", "description", "price_cents", "book_id"]);
   $("#biblio-publish-fields").innerHTML = rows.map(([key, label, value, sourceName]) => {
@@ -1089,7 +1107,9 @@ async function openBiblioPublish(itemId, sourceListingId = null) {
   $("#biblio-publish-panel").classList.remove("hidden");
   $("#biblio-publish-title").textContent = "Checking BIBLIO…";
   $("#biblio-publish-source").textContent = "";
-  $("#biblio-publish-fields").innerHTML = '<div class="empty">Preparing listing from Vinted and master metadata…</div>';
+  $("#biblio-photo-preview").classList.add("hidden");
+  $("#biblio-photo-preview").innerHTML = "";
+  $("#biblio-publish-fields").innerHTML = '<div class="empty">Preparing listing from Vinted, ISBN metadata and master data…</div>';
   $("#biblio-publish-warning").textContent = "";
   $("#biblio-publish-submit").disabled = true;
   $("#biblio-open-connections").classList.add("hidden");
