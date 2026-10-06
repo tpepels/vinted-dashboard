@@ -20,7 +20,7 @@ services:
       - key: PRIVACY_CONTACT_EMAIL
         sync: false
       - key: EXTENSION_LATEST_VERSION
-        value: "3.0.0"
+        value: "3.0.1"
       - key: COOKIE_SECURE
         value: "true"
       - key: RUN_LEGACY_BACKFILL
@@ -51,7 +51,7 @@ services:
       - key: PRIVACY_CONTACT_EMAIL
         sync: false
       - key: EXTENSION_LATEST_VERSION
-        value: "3.0.0"
+        value: "3.0.1"
       - key: COOKIE_SECURE
         value: "true"
       - key: LISTING_ASSISTANT_ENABLED

@@ -142,7 +142,7 @@ stable route is:
 The downloaded artifact itself is always versioned, for example:
 
 ```text
-reseller-dashboard-chrome-bridge-v3.0.0.zip
+reseller-dashboard-chrome-bridge-v3.0.1.zip
 ```
 
 Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
@@ -152,7 +152,7 @@ The bridge supports the principal European Vinted web origins. On its first
 sync it uses an already-open signed-in Vinted tab and remembers that origin for
 later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 3.0.0 keeps a local detail
+For active/reserved/hidden/draft listings, bridge 3.0.1 keeps a local detail
 cache for richer Vinted item metadata. When Vinted does not expose a trustworthy
 absolute posting timestamp, the bridge reads the visible `Uploaded` value from
 the **rendered** Vinted item page, for example `5 weeks ago`. Posting-age
@@ -165,8 +165,13 @@ service-worker restarts. Failed item pages are retried in later sweep windows.
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
 `first_seen_at`, and old `Today` fallbacks are never treated as posting age.
-Bridge 3.0.0 also performs a content-script protocol handshake and reloads an
+Bridge 3.0.1 also performs a content-script protocol handshake and reloads an
 already-open Vinted tab once when it is still running code from an older bridge.
+The content script itself is idempotent: if Chrome or the service worker injects
+it again into the same Vinted tab, a protocol guard exits before redeclaring
+cache constants or registering a second message listener. Bridge 3.0.1 bumps
+that protocol so tabs still running the 3.0.0 script are forcibly reloaded once.
+
 
 Age parsing is isolated in `app/extension/vinted_age.js`; tab navigation and
 the persisted rendered-page sweep stay in `background.js`; normal Vinted
@@ -200,11 +205,13 @@ statuses and URLs. Workspace account-data export is also available under
 Settings.
 
 Vinted can act as the source listing for cross-listing. Inventory and linked
-Vinted rows expose a single **Cross-list** action. Its destination panel always
+Vinted rows expose a single **Cross-list** action - there is never one table
+column per marketplace. The destination panel is generated from connector
+capabilities and grouped into **Ready to publish**, **Needs setup or review**,
+**Already listed** and **Not writable yet**. New connectors therefore appear in
+the same panel without changing the inventory/listing table shape. The panel
 shows BIBLIO, eBay, Etsy, WooCommerce, Shopify, BigCommerce, Squarespace, Wix
-and Depop rather than hiding destinations behind eligibility checks. Each row
-reports **Ready**, **Needs connection**, **Needs fields**, **Already listed** or
-**Not writable yet**, with the relevant repair action.
+and Depop rather than hiding destinations behind eligibility checks.
 
 The shared cross-list candidate takes title, description, price and photos from
 Vinted when available, while SKU and physical stock remain authoritative on the
@@ -216,11 +223,14 @@ sales and stock reconciliation operate on one copy of the item.
 BIBLIO keeps its book-specific preflight inside the same destination panel. It
 uses Vinted title/description/ISBN/author/price first, then master data, then
 ISBN lookup for missing bibliographic facts. Older Vinted books still classified
-as `general` qualify from linked ISBN/author/book-category evidence. Zero stock
-exposes **Edit stock**, and a conflicting BIBLIO Book ID can be replaced inline
-with a server-validated unique ID. Unlinked Vinted listings show **Link to
-inventory** and jump directly to reconciliation before any destination can be
-published.
+as `general` qualify from linked ISBN/author/book-category evidence. If a
+sparse legacy Vinted book has no such evidence, Cross-list shows **Mark as book
+& continue**; that explicit action updates the master category and opens the
+real BIBLIO preflight immediately instead of dumping the user into generic Edit.
+Zero stock exposes **Edit stock**, and a conflicting BIBLIO Book ID can be
+replaced inline with a server-validated unique ID. Unlinked Vinted listings show
+**Link to inventory** and jump directly to reconciliation before any destination
+can be published.
 
 When the Vinted source carries photos, up to five are copied automatically to
 BIBLIO during the FTP sync. The server downloads only trusted Vinted HTTPS

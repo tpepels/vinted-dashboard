@@ -789,14 +789,6 @@ function updateInventorySelection() {
   }
 }
 
-function itemCanPublishToBiblio(item) {
-  return Boolean(item?.biblio_publishable);
-}
-
-function itemHasVintedSource(item) {
-  return Boolean((item?.listings || []).some((listing) => listing.channel === "vinted"));
-}
-
 function inventoryCrossListAction(item) {
   if (!item?.id) return "";
   return '<button class="btn cross-list" data-item-id="' + esc(item.id) + '">Cross-list</button>';
@@ -823,6 +815,44 @@ function crossListStatusLabel(status) {
   }[status] || status || "Unavailable";
 }
 
+function crossListGroup(destination) {
+  if (destination.status === "ready") return "ready";
+  if (destination.status === "listed") return "listed";
+  if (["connect", "needs_fields", "review"].includes(destination.status)) return "attention";
+  return "unavailable";
+}
+
+function crossListGroupLabel(group) {
+  return {
+    ready: "Ready to publish",
+    attention: "Needs setup or review",
+    listed: "Already listed",
+    unavailable: "Not writable yet",
+  }[group] || group;
+}
+
+function crossListDestinationAction(destination) {
+  if (destination.action === "publish") {
+    return '<button class="btn primary cross-destination-publish" data-channel="' + esc(destination.channel) + '">Publish</button>';
+  }
+  if (destination.action === "biblio") {
+    return '<button class="btn primary cross-destination-biblio">Review / publish</button>';
+  }
+  if (destination.action === "biblio_classify") {
+    return '<button class="btn primary cross-destination-biblio-classify">Mark as book & continue</button>';
+  }
+  if (destination.action === "connect") {
+    return '<button class="btn cross-destination-connect" data-channel="' + esc(destination.channel) + '">Connect</button>';
+  }
+  if (destination.action === "edit" || destination.action === "review") {
+    return '<button class="btn cross-destination-edit">Edit source data</button>';
+  }
+  if (destination.action === "open" && destination.url) {
+    return '<a class="btn" href="' + esc(destination.url) + '" target="_blank" rel="noreferrer">Open listing</a>';
+  }
+  return "";
+}
+
 function renderCrossList(data) {
   if (!state.crossList) return;
   state.crossList.data = data;
@@ -841,26 +871,26 @@ function renderCrossList(data) {
   ].join("");
 
   const destinations = Array.isArray(data.destinations) ? data.destinations : [];
-  $("#cross-list-destinations").innerHTML = destinations.length
-    ? destinations.map((destination) => {
-      let action = "";
-      if (destination.action === "publish") {
-        action = '<button class="btn primary cross-destination-publish" data-channel="' + esc(destination.channel) + '">Publish</button>';
-      } else if (destination.action === "biblio") {
-        action = '<button class="btn primary cross-destination-biblio">Review / publish</button>';
-      } else if (destination.action === "connect") {
-        action = '<button class="btn cross-destination-connect" data-channel="' + esc(destination.channel) + '">Connect</button>';
-      } else if (destination.action === "edit" || destination.action === "review") {
-        action = '<button class="btn cross-destination-edit">Edit item</button>';
-      } else if (destination.action === "open" && destination.url) {
-        action = '<a class="btn" href="' + esc(destination.url) + '" target="_blank" rel="noreferrer">Open listing</a>';
-      }
-      return '<div class="cross-list-destination ' + esc(destination.status) + '">'
+  const groupOrder = ["ready", "attention", "listed", "unavailable"];
+  const groups = groupOrder.map((group) => ({
+    group,
+    rows: destinations.filter((destination) => crossListGroup(destination) === group),
+  })).filter((entry) => entry.rows.length);
+
+  $("#cross-list-destinations").innerHTML = groups.length
+    ? groups.map(({ group, rows }) =>
+      '<section class="cross-list-group" data-group="' + esc(group) + '">'
+      + '<div class="cross-list-group-head"><strong>' + esc(crossListGroupLabel(group)) + '</strong>'
+      + '<span>' + rows.length + '</span></div>'
+      + rows.map((destination) =>
+        '<div class="cross-list-destination ' + esc(destination.status) + '">'
         + '<div class="cross-list-destination-name"><span>' + esc(destination.display_name) + '</span>'
         + '<span class="cross-list-state">' + esc(crossListStatusLabel(destination.status)) + "</span></div>"
         + '<div class="cross-list-destination-copy">' + esc(destination.reason || "") + "</div>"
-        + '<div class="actions">' + action + "</div></div>";
-    }).join("")
+        + '<div class="actions">' + crossListDestinationAction(destination) + "</div></div>"
+      ).join("")
+      + "</section>"
+    ).join("")
     : '<div class="empty">No cross-list destinations are available.</div>';
 
   document.querySelectorAll(".cross-destination-publish").forEach((button) => {
@@ -875,6 +905,30 @@ function renderCrossList(data) {
       if (!current?.itemId) return;
       $("#cross-list-panel").classList.add("hidden");
       await openBiblioPublish(current.itemId, current.sourceListingId);
+    };
+  });
+  document.querySelectorAll(".cross-destination-biblio-classify").forEach((button) => {
+    button.onclick = async () => {
+      const current = state.crossList;
+      if (!current?.itemId) return;
+      button.disabled = true;
+      button.textContent = "Updating…";
+      try {
+        await api("/api/app/inventory/" + encodeURIComponent(current.itemId), {
+          method: "PATCH",
+          body: JSON.stringify({ category: "book" }),
+        });
+        const itemId = current.itemId;
+        const sourceListingId = current.sourceListingId || null;
+        await inventory();
+        $("#cross-list-panel").classList.add("hidden");
+        flash("Marked as Book. Review the BIBLIO fields below.");
+        await openBiblioPublish(itemId, sourceListingId);
+      } catch (error) {
+        flash(error.message, true);
+        button.disabled = false;
+        button.textContent = "Mark as book & continue";
+      }
     };
   });
   document.querySelectorAll(".cross-destination-edit").forEach((button) => {
@@ -1014,7 +1068,6 @@ function renderBiblioPublish(data) {
 
   $("#biblio-open-connections").classList.toggle("hidden", Boolean(data.configured));
   $("#biblio-edit-stock").classList.toggle("hidden", !missing.includes("available stock"));
-  $("#biblio-edit-book").classList.add("hidden");
   const publish = $("#biblio-publish-submit");
   const hardMissing = missing.filter((value) => ![
     "author", "title", "description", "price", "Book ID", "unique BIBLIO Book ID",
@@ -1041,7 +1094,6 @@ async function openBiblioPublish(itemId, sourceListingId = null) {
   $("#biblio-publish-submit").disabled = true;
   $("#biblio-open-connections").classList.add("hidden");
   $("#biblio-edit-stock").classList.add("hidden");
-  $("#biblio-edit-book").classList.add("hidden");
   $("#biblio-publish-panel").scrollIntoView({ behavior: "smooth", block: "start" });
   try {
     const suffix = sourceListingId ? "?source_listing_id=" + encodeURIComponent(sourceListingId) : "";
@@ -1054,14 +1106,6 @@ async function openBiblioPublish(itemId, sourceListingId = null) {
   }
 }
 
-async function reviewBiblioItem(itemId) {
-  if (state.view !== "inventory") await selectView("inventory");
-  const item = state.inventoryItems.find((row) => row.id === itemId);
-  if (!item) return flash("Inventory item could not be found.", true);
-  openItemForm(item);
-  flash("Review category, author or ISBN. Mark the item as Book if needed.");
-}
-
 async function linkListingToInventory(listingId) {
   await selectView("reconcile");
   const select = $("#reconcile-listing");
@@ -1071,23 +1115,6 @@ async function linkListingToInventory(listingId) {
   select.value = listingId;
   select.scrollIntoView({ behavior: "smooth", block: "center" });
   flash("Choose the physical inventory item, then click Link to master item. Cross-listing will become available after linking.");
-}
-
-function bindBiblioPublishButtons() {
-  document.querySelectorAll(".biblio-publish").forEach((button) => {
-    button.onclick = async () => {
-      const itemId = button.dataset.itemId;
-      const sourceListingId = button.dataset.sourceListingId || null;
-      if (state.view !== "inventory") await selectView("inventory");
-      await openBiblioPublish(itemId, sourceListingId);
-    };
-  });
-  document.querySelectorAll(".biblio-review").forEach((button) => {
-    button.onclick = () => reviewBiblioItem(button.dataset.itemId);
-  });
-  document.querySelectorAll(".biblio-link").forEach((button) => {
-    button.onclick = () => linkListingToInventory(button.dataset.listingId);
-  });
 }
 
 async function inventory() {
@@ -1105,7 +1132,7 @@ async function inventory() {
     + " shown" + (visibleItems.length !== state.inventoryItems.length ? " of " + state.inventoryItems.length : "");
 
   $("#inventory-table").innerHTML = visibleItems.length
-    ? '<table><thead><tr><th><input id="inventory-select-all" type="checkbox" aria-label="Select all"></th><th>Item</th><th>SKU</th><th>Category</th><th>Qty</th><th>Location</th><th>Cost</th><th>Ask</th><th>Margin</th><th>Channels</th><th>Status</th><th></th></tr></thead><tbody>'
+    ? '<table><thead><tr><th><input id="inventory-select-all" type="checkbox" aria-label="Select all"></th><th>Item</th><th>SKU</th><th>Category</th><th>Qty</th><th>Location</th><th>Cost</th><th>Ask</th><th>Margin</th><th>Channels</th><th>Status</th><th>Actions</th></tr></thead><tbody>'
       + visibleItems.map((item) =>
         '<tr><td><input class="inventory-select" type="checkbox" data-id="' + esc(item.id) + '" aria-label="Select ' + esc(item.title) + '"></td>'
         + '<td><div class="title">' + esc(item.title) + '</div><div class="sub">'
@@ -1139,7 +1166,6 @@ async function inventory() {
   document.querySelectorAll(".edit-item").forEach((button) => {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
   });
-  bindBiblioPublishButtons();
   bindCrossListButtons();
   $$(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
   const selectAll = $("#inventory-select-all");
@@ -1169,10 +1195,6 @@ $("#biblio-edit-stock").onclick = () => {
   $("#biblio-publish-panel").classList.add("hidden");
   openItemForm(item);
   flash("Set the physical stock quantity, save, then publish to BIBLIO.");
-};
-$("#biblio-edit-book").onclick = () => {
-  const itemId = state.biblioPublish?.itemId;
-  if (itemId) reviewBiblioItem(itemId);
 };
 $("#biblio-publish-submit").onclick = async () => {
   const current = state.biblioPublish;
@@ -2743,7 +2765,7 @@ function renderListings() {
       + (showDate ? "<th>Listed</th><th>Age</th>" : "")
       + (showFavourites ? "<th>Favourites</th>" : "")
       + (showViews ? "<th>Views</th>" : "")
-      + '<th>Price</th><th></th></tr></thead><tbody>'
+      + '<th>Price</th><th>Actions</th></tr></thead><tbody>'
       + filtered.map((row) => {
         const duplicateCount = duplicates.counts.get(row._index);
         const title = row.url
@@ -2776,7 +2798,6 @@ function renderListings() {
       }).join("")
       + "</tbody></table>"
     : '<div class="empty">No matching listings.</div>';
-  bindBiblioPublishButtons();
   bindCrossListButtons();
 }
 

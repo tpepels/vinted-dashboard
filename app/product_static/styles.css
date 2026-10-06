@@ -29,3 +29,12 @@ table tbody tr{transition:background .12s ease}table tbody tr:hover{background:#
 @media(max-width:700px){.biblio-field{grid-template-columns:1fr}.biblio-source{justify-self:start}}
 .pairing-inline{flex:1 0 100%;display:flex;align-items:center;gap:10px;margin-top:4px;padding:10px 11px;border:1px solid var(--line);border-radius:9px;background:var(--soft)}.pairing-inline .eyebrow{margin:0}.pair-code-inline{font-size:20px;letter-spacing:.08em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.pairing-inline small{margin-left:auto;color:var(--muted);font-size:9px}
 @media(max-width:700px){.pairing-inline{align-items:flex-start;flex-direction:column}.pairing-inline small{margin-left:0}}
+
+.cross-list-help{margin:-2px 0 8px;max-width:820px}
+.cross-list-group{display:grid;gap:7px}
+.cross-list-group+.cross-list-group{margin-top:14px}
+.cross-list-group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 2px;color:var(--muted);font-size:9px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
+.cross-list-group-head span{min-width:22px;padding:2px 6px;border-radius:999px;background:#edf3f1;text-align:center;font-variant-numeric:tabular-nums}
+.cross-list-group[data-group="ready"] .cross-list-group-head{color:var(--accent-strong)}
+.cross-list-group[data-group="attention"] .cross-list-group-head{color:#7a5d17}
+.cross-list-group[data-group="unavailable"] .cross-list-destination{opacity:.82}
