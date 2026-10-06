@@ -286,7 +286,7 @@ async function collectVintedData(reason="periodic"){
     }
   }
 
-  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems,detail_sync:{...detailSync,optional_rate_limited:optionalRateLimited}};
+  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems,detail_sync:{...detailSync,rate_limited:Boolean(detailSync.rate_limited||secondaryRateLimited||optionalRateLimited),secondary_rate_limited:secondaryRateLimited,optional_rate_limited:optionalRateLimited}};
 }
 
 
