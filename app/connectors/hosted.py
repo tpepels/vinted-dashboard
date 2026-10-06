@@ -3362,11 +3362,13 @@ def sync_biblio_workspace(
             "message": "Preparing BIBLIO FTP upload",
         },
     )
-    _set_biblio_listing_states(workspace_id, selected_ids, publish_state="uploading")
+    if not photos_only:
+        _set_biblio_listing_states(workspace_id, selected_ids, publish_state="uploading")
     _set_biblio_listing_states(workspace_id, photo_listing_ids, photo_state="uploading")
 
     if not inventory_filename and not deletes_filename and not photo_rows:
-        _set_biblio_listing_states(workspace_id, selected_ids, publish_state="ftp_uploaded")
+        if not photos_only:
+            _set_biblio_listing_states(workspace_id, selected_ids, publish_state="ftp_uploaded")
         _update_biblio_run(
             run_id,
             status=SyncRunStatus.SUCCESS,
@@ -3389,7 +3391,14 @@ def sync_biblio_workspace(
     password = values.get("password", "").strip()
     if not username or not password:
         error = "BIBLIO needs username and password"
-        _set_biblio_listing_states(workspace_id, selected_ids, publish_state="error", publish_error=error)
+        if not photos_only:
+            _set_biblio_listing_states(workspace_id, selected_ids, publish_state="error", publish_error=error)
+        _set_biblio_listing_states(
+            workspace_id,
+            photo_listing_ids,
+            photo_state="error",
+            photo_error=error,
+        )
         _update_biblio_run(
             run_id,
             status=SyncRunStatus.ERROR,
@@ -3504,11 +3513,18 @@ def sync_biblio_workspace(
             ftp.close()
     except Exception as exc:
         error = str(exc)
+        if not photos_only:
+            _set_biblio_listing_states(
+                workspace_id,
+                selected_ids,
+                publish_state="error",
+                publish_error=error,
+            )
         _set_biblio_listing_states(
             workspace_id,
-            selected_ids,
-            publish_state="error",
-            publish_error=error,
+            photo_listing_ids,
+            photo_state="error",
+            photo_error=error,
         )
         _update_biblio_run(
             run_id,
@@ -3527,7 +3543,8 @@ def sync_biblio_workspace(
         raise RuntimeError("BIBLIO FTP sync failed") from exc
 
     _mark_biblio_photo_sync(workspace_id, photo_synced)
-    _set_biblio_listing_states(workspace_id, selected_ids, publish_state="ftp_uploaded")
+    if not photos_only:
+        _set_biblio_listing_states(workspace_id, selected_ids, publish_state="ftp_uploaded")
 
     _update_biblio_run(
         run_id,
