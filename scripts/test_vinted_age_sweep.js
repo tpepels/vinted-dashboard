@@ -65,10 +65,10 @@ const chrome = {
     async sendMessage(_id, payload) {
       if (payload.type === "read-vinted-uploaded-age") {
         const n = Number(payload.item_id);
-        if (n === 7) return { ok: true, age: null };
-        return { ok: true, age: { seconds: n * 86400, text: n + " days ago" } };
+        if (n === 7) return { ok: true, age: null, rate_limited: false, challenged: false };
+        return { ok: true, age: { seconds: n * 86400, text: n + " days ago" }, rate_limited: false, challenged: false };
       }
-      return { ok: true, protocol: 6 };
+      return { ok: true, protocol: 7 };
     },
     async reload() {},
     async remove() {},
@@ -99,7 +99,7 @@ const context = {
   console,
   URL,
   chrome,
-  setTimeout,
+  setTimeout: (fn, _ms) => setTimeout(fn, 0),
   clearTimeout,
   Date,
   fetch: async (url, options = {}) => {
@@ -136,15 +136,21 @@ function assert(condition, message) {
 
   const first = await context.processAgeJobWave();
   assert(first.ok === true, "First resumable age chunk failed");
-  assert(first.remaining === 22, "One event should process exactly four 12-item waves");
-  assert(state.vintedAgeBurstJobV2.remaining.length === 22,
+  assert(first.remaining === 38, "One event should process exactly eight 4-item waves");
+  assert(state.vintedAgeBurstJobV2.remaining.length === 38,
     "Remaining age queue was not persisted after the event");
   assert(windowsCreated.length === 1, "Age job should create one worker window");
-  assert(windowsCreated[0].tabs.length === 12, "Age job should use 12 reusable tabs");
+  assert(windowsCreated[0].tabs.length === 4, "Age job should use four reusable tabs");
+  assert(windowsCreated[0].url.every((url) => url === "about:blank"),
+    "Age worker should open blank tabs before paced navigation");
   assert(windowsRemoved.length === 0, "Worker window closed before the finite job finished");
 
   const second = await context.processAgeJobWave();
-  assert(second.ok === true && second.remaining === 0, "Second chunk did not finish the job");
+  assert(second.ok === true, "Second chunk failed");
+  assert(second.remaining === 6, "Second event should leave the final six listings");
+
+  const third = await context.processAgeJobWave();
+  assert(third.ok === true && third.remaining === 0, "Third chunk did not finish the job");
   assert(state.vintedAgeBurstJobV2 === undefined, "Finished age job was not cleared");
   assert(windowsCreated.length === 1, "Resumed job created another worker window");
   assert(windowsRemoved.length === 1, "Worker window was not closed at job completion");
