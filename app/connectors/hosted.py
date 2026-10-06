@@ -1560,9 +1560,20 @@ def _bigcommerce_product_common(product: dict[str, Any]) -> dict[str, Any]:
         attributes["category_ids"] = category_ids
     if custom_path:
         attributes["storefront_path"] = custom_path
+    for row in product.get("custom_fields") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        value = row.get("value")
+        if name and value not in (None, ""):
+            attributes[name] = value
+    barcode = product.get("gtin") or product.get("upc") or None
     return {
         "description": product.get("description"),
         "brand": product.get("brand_name") or None,
+        "barcode": barcode,
+        "gtin": product.get("gtin") or None,
+        "upc": product.get("upc") or None,
         "product_type": product.get("type"),
         "tags": [
             value.strip()
@@ -1632,6 +1643,13 @@ def _fetch_bigcommerce_products(values: dict[str, str]) -> list[dict[str, Any]]:
                             "currency": values.get("currency", "EUR").strip().upper() or "EUR",
                             "listed_at": created.isoformat() if created else None,
                             **common,
+                            "barcode": (
+                                variant.get("gtin")
+                                or variant.get("upc")
+                                or common.get("barcode")
+                            ),
+                            "gtin": variant.get("gtin") or product.get("gtin"),
+                            "upc": variant.get("upc") or product.get("upc"),
                             "attributes": {**common.get("attributes", {}), **options},
                         }
                     )
@@ -2303,13 +2321,40 @@ def _wix_query_variants(values: dict[str, str]) -> list[dict[str, Any]]:
             values,
             "stores/v3/products/query-variants",
             body={
-                "fields": ["CURRENCY", "PLAIN_DESCRIPTION"],
+                "fields": ["CURRENCY"],
                 "query": {"cursorPaging": cursor_paging},
             },
         )
         rows = payload.get("variants") or []
         if isinstance(rows, list):
             result.extend(row for row in rows if isinstance(row, dict))
+        cursor = _wix_next_cursor(payload)
+        if not cursor:
+            break
+    return result
+
+
+def _wix_query_products(values: dict[str, str]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    cursor: str | None = None
+    for _page in range(100):
+        cursor_paging: dict[str, Any] = {"limit": 100}
+        if cursor:
+            cursor_paging["cursor"] = cursor
+        payload = _wix_post(
+            values,
+            "stores/v3/products/query",
+            body={
+                "fields": ["PLAIN_DESCRIPTION", "URL"],
+                "query": {"cursorPaging": cursor_paging},
+            },
+        )
+        for product in payload.get("products") or []:
+            if not isinstance(product, dict):
+                continue
+            product_id = str(product.get("id") or "").strip()
+            if product_id:
+                result[product_id] = product
         cursor = _wix_next_cursor(payload)
         if not cursor:
             break
@@ -2414,6 +2459,7 @@ def _wix_variant_image(variant: dict[str, Any]) -> str | None:
 
 def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
     variants = _wix_query_variants(values)
+    products_by_id = _wix_query_products(values)
     inventory = _wix_inventory_by_variant(_wix_query_inventory(values))
     fallback_currency = values.get("currency", "EUR").strip().upper() or "EUR"
     result: list[dict[str, Any]] = []
@@ -2426,6 +2472,7 @@ def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
         variant_id = str(variant.get("variantId") or "").strip()
         if not product_id or not variant_id:
             continue
+        full_product = products_by_id.get(product_id) or {}
         source_id = f"{product_id}:{variant_id}"
         stock = inventory.get(source_id)
         status_info = variant.get("inventoryStatus") or {}
@@ -2466,8 +2513,13 @@ def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
                 "quantity": quantity,
                 "price_cents": _money(price.get("amount")) if isinstance(price, dict) else None,
                 "currency": currency,
-                "description": product.get("plainDescription"),
-                "product_type": product.get("productType"),
+                "description": full_product.get("plainDescription") or product.get("plainDescription"),
+                "product_type": product.get("productType") or full_product.get("productType"),
+                "url": (
+                    (full_product.get("url") or {}).get("url")
+                    if isinstance(full_product.get("url"), dict)
+                    else full_product.get("url")
+                ),
                 "barcode": variant.get("barcode"),
                 "attributes": attributes,
                 "image_url": _wix_variant_image(variant),
