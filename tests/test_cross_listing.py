@@ -573,3 +573,323 @@ def test_cross_list_reuses_master_cover_when_no_vinted_photos_exist():
         "https://covers.openlibrary.org/b/id/123-M.jpg"
     ]
     assert candidate["source"]["photo_count"] == 1
+
+
+
+def _update_candidate(*, sku="SKU-UP", quantity=1, price_cents=950):
+    return {
+        "fields": {
+            "sku": sku,
+            "title": "Updated book",
+            "description": "Updated description",
+            "price_cents": price_cents,
+            "quantity": quantity,
+            "currency": "EUR",
+            "category": "book",
+            "condition": "Very good",
+            "author": "Author Name",
+            "isbn": "9780140328721",
+            "publisher": "Puffin",
+            "edition": "Revised",
+            "language": "English",
+            "binding": "Paperback",
+            "pages": 176,
+            "tags": ["fiction"],
+        },
+        "source": {"image_urls": ["https://images1.vinted.net/t/update.jpg"]},
+    }
+
+
+def test_woocommerce_update_changes_existing_product_in_place(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(hosted, "_credentials", lambda *_args: {
+        "store_url": "https://shop.example.com",
+        "consumer_key": "ck_test",
+        "consumer_secret": "cs_test",
+        "currency": "EUR",
+    })
+
+    def fake_put(values, path, *, body):
+        captured.update({"path": path, "body": body})
+        return {
+            "id": 42,
+            "name": body["name"],
+            "sku": "SKU-UP",
+            "regular_price": body["regular_price"],
+            "price": body["regular_price"],
+            "stock_quantity": body["stock_quantity"],
+            "stock_status": body["stock_status"],
+            "status": "publish",
+            "permalink": "https://shop.example.com/product/42",
+            "global_unique_id": body["global_unique_id"],
+            "attributes": body["attributes"],
+            "images": body["images"],
+        }
+
+    monkeypatch.setattr(hosted, "_woo_put", fake_put)
+    result = hosted.update_woocommerce_workspace_listing(
+        _workspace("woo-update"),
+        "42",
+        _update_candidate(quantity=3, price_cents=975),
+    )
+
+    assert captured["path"] == "products/42"
+    assert captured["body"]["stock_quantity"] == 3
+    assert captured["body"]["regular_price"] == "9.75"
+    assert captured["body"]["global_unique_id"] == "9780140328721"
+    assert result["source_id"] == "42"
+    assert result["quantity"] == 3
+    assert result["price_cents"] == 975
+
+
+def test_shopify_update_changes_copy_variant_and_single_location_stock(monkeypatch):
+    calls = []
+    monkeypatch.setattr(hosted, "_credentials", lambda *_args: {
+        "store_domain": "shop.myshopify.com",
+        "access_token": "shpat_test",
+        "api_version": "2026-10",
+        "currency": "EUR",
+    })
+
+    def fake_graphql(values, query, *, variables=None):
+        calls.append((query, variables or {}))
+        if "ResellerVariantInventory" in query:
+            return {
+                "productVariant": {
+                    "id": "gid://shopify/ProductVariant/11",
+                    "sku": "OLD",
+                    "price": "7.25",
+                    "product": {
+                        "id": "gid://shopify/Product/10",
+                        "title": "Old title",
+                        "status": "ACTIVE",
+                        "onlineStoreUrl": "https://shop.example/products/book",
+                    },
+                    "inventoryItem": {
+                        "id": "gid://shopify/InventoryItem/12",
+                        "inventoryLevels": {
+                            "nodes": [{
+                                "location": {"id": "gid://shopify/Location/1"},
+                                "quantities": [{"name": "available", "quantity": 1}],
+                            }]
+                        },
+                    },
+                }
+            }
+        if "ResellerProductUpdate" in query:
+            return {
+                "productUpdate": {
+                    "product": {
+                        "id": "gid://shopify/Product/10",
+                        "title": "Updated book",
+                        "status": "ACTIVE",
+                        "onlineStoreUrl": "https://shop.example/products/book",
+                    },
+                    "userErrors": [],
+                }
+            }
+        if "ResellerVariantUpdate" in query:
+            variant = variables["variants"][0]
+            return {
+                "productVariantsBulkUpdate": {
+                    "productVariants": [{
+                        "id": variant["id"],
+                        "sku": variant["inventoryItem"]["sku"],
+                        "price": variant["price"],
+                        "inventoryQuantity": 1,
+                    }],
+                    "userErrors": [],
+                }
+            }
+        if "ResellerSetInventory" in query:
+            return {
+                "inventorySetQuantities": {
+                    "inventoryAdjustmentGroup": {
+                        "changes": [{"name": "available", "delta": 1, "quantityAfterChange": 2}]
+                    },
+                    "userErrors": [],
+                }
+            }
+        raise AssertionError(query)
+
+    monkeypatch.setattr(hosted, "_shopify_graphql", fake_graphql)
+    result = hosted.update_shopify_workspace_listing(
+        _workspace("shopify-update"),
+        "gid://shopify/ProductVariant/11",
+        _update_candidate(sku="SKU-SHOP-UP", quantity=2, price_cents=975),
+    )
+
+    product_call = next(v for q, v in calls if "ResellerProductUpdate" in q)
+    assert product_call["product"]["title"] == "Updated book"
+    variant_call = next(v for q, v in calls if "ResellerVariantUpdate" in q)
+    variant = variant_call["variants"][0]
+    assert variant["price"] == "9.75"
+    assert variant["inventoryItem"] == {"sku": "SKU-SHOP-UP", "tracked": True}
+    assert variant["barcodes"] == [{"value": "9780140328721", "type": "ISBN"}]
+    stock_call = next(v for q, v in calls if "ResellerSetInventory" in q)
+    assert stock_call["input"]["quantities"] == [{
+        "inventoryItemId": "gid://shopify/InventoryItem/12",
+        "locationId": "gid://shopify/Location/1",
+        "quantity": 2,
+        "changeFromQuantity": 1,
+    }]
+    assert stock_call["idempotencyKey"]
+    assert result["quantity"] == 2
+    assert result["price_cents"] == 975
+
+
+def test_wix_update_uses_revision_safe_product_and_inventory_updates(monkeypatch):
+    patches = []
+    posts = []
+    monkeypatch.setattr(hosted, "_credentials", lambda *_args: {
+        "site_id": "site-1",
+        "api_key": "test",
+        "currency": "EUR",
+    })
+    monkeypatch.setattr(
+        hosted,
+        "_wix_get",
+        lambda values, path: {
+            "product": {
+                "id": "prod-1",
+                "revision": "7",
+                "name": "Old",
+                "url": {"url": "https://shop.example/product/old"},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        hosted,
+        "_wix_query_variants",
+        lambda values: [{
+            "variantId": "var-1",
+            "productData": {"productId": "prod-1"},
+        }],
+    )
+    monkeypatch.setattr(
+        hosted,
+        "_wix_query_inventory",
+        lambda values: [{
+            "id": "inv-1",
+            "revision": "4",
+            "productId": "prod-1",
+            "variantId": "var-1",
+            "trackQuantity": True,
+            "quantity": 1,
+            "inStock": True,
+        }],
+    )
+
+    def fake_patch(values, path, *, body):
+        patches.append((path, body))
+        if path == "stores/v3/products/prod-1":
+            return {
+                "product": {
+                    "id": "prod-1",
+                    "revision": "8",
+                    "name": body["product"]["name"],
+                    "url": {"url": "https://shop.example/product/book"},
+                }
+            }
+        return {"inventoryItem": body["inventoryItem"]}
+
+    def fake_post(values, path, *, body=None):
+        posts.append((path, body))
+        return {"jobId": "price-job-1"}
+
+    monkeypatch.setattr(hosted, "_wix_patch", fake_patch)
+    monkeypatch.setattr(hosted, "_wix_post", fake_post)
+    result = hosted.update_wix_workspace_listing(
+        _workspace("wix-update"),
+        "prod-1:var-1",
+        _update_candidate(sku="SKU-WIX-UP", quantity=2, price_cents=975),
+    )
+
+    assert patches[0] == (
+        "stores/v3/products/prod-1",
+        {"product": {
+            "id": "prod-1",
+            "revision": "7",
+            "name": "Updated book",
+            "visible": True,
+            "plainDescription": "Updated description",
+        }},
+    )
+    assert posts[0][0] == "stores/v3/bulk/products/update-variants-by-filter"
+    assert posts[0][1]["filter"] == {"id": "prod-1"}
+    assert posts[0][1]["variant"]["price"]["actualPrice"]["amount"] == "9.75"
+    assert patches[1][0] == "stores/v3/inventory-items/inv-1"
+    assert patches[1][1]["inventoryItem"]["revision"] == "4"
+    assert patches[1][1]["inventoryItem"]["quantity"] == 2
+    assert result["quantity"] == 2
+    assert result["attributes"]["price_job_id"] == "price-job-1"
+
+
+def test_cross_list_update_preserves_existing_remote_identity(monkeypatch):
+    workspace_id = _workspace("update-link")
+    item_id, source_id = _source_item(workspace_id)
+    with db.session_scope() as session:
+        account = models.ChannelAccount(
+            workspace_id=workspace_id,
+            channel=Channel.WOOCOMMERCE,
+            display_name="WooCommerce",
+            status="connected",
+            config={},
+        )
+        session.add(account)
+        session.flush()
+        existing = models.ChannelListing(
+            workspace_id=workspace_id,
+            inventory_item_id=item_id,
+            channel_account_id=account.id,
+            channel=Channel.WOOCOMMERCE,
+            external_id="9001",
+            external_sku="VINTED-BOOK-1",
+            title="Old title",
+            price_cents=500,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=2,
+            first_seen_at=models.utcnow(),
+            last_seen_at=models.utcnow(),
+            extra={},
+        )
+        session.add(existing)
+
+    with db.session_scope() as session:
+        candidate = cross_listing.build_candidate(
+            session, workspace_id, item_id, source_listing_id=source_id
+        )
+
+    monkeypatch.setattr(
+        hosted,
+        "update_woocommerce_workspace_listing",
+        lambda workspace_id, external_id, candidate: {
+            "source_id": external_id,
+            "sku": candidate["fields"]["sku"],
+            "title": candidate["fields"]["title"],
+            "status": ListingStatus.ACTIVE,
+            "quantity": candidate["fields"]["quantity"],
+            "price_cents": candidate["fields"]["price_cents"],
+            "currency": candidate["fields"]["currency"],
+            "url": "https://shop.example/products/9001",
+            "description": candidate["fields"]["description"],
+        },
+    )
+    result = cross_listing.update(
+        workspace_id, item_id, Channel.WOOCOMMERCE, candidate
+    )
+    assert result["external_id"] == "9001"
+    assert result["action"] == "updated"
+
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.WOOCOMMERCE,
+                models.ChannelListing.external_id == "9001",
+            )
+        ).scalar_one()
+        assert listing.inventory_item_id == item_id
+        assert listing.extra["cross_list_updated_at"]
+        assert listing.extra["source_channel"] == Channel.VINTED
