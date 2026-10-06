@@ -502,5 +502,6 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
     assert '["edition", "Edition", enrichment.edition || "", enrichment.edition ? "isbn" : null, true, false]' in APP_JS
     assert '["publish_date", "Publish date", enrichment.publish_date || "", enrichment.publish_date ? "isbn" : null, true, false]' in APP_JS
     assert 'document.querySelectorAll(".biblio-review-input").forEach' in APP_JS
+    assert 'const required = field.dataset.required === "true";' in APP_JS
     assert 'payload[field.dataset.field] = value' in APP_JS
     assert "bibliographic_enrichment" in APP_JS
