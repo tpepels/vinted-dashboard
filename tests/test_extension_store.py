@@ -187,7 +187,7 @@ def test_source_extension_version_is_bumped_for_local_download():
 
 
 
-def test_content_script_uses_persistent_rendered_uploaded_age_sweep():
+def test_content_script_uses_finite_rendered_uploaded_age_burst():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     age = (ROOT / "app" / "extension" / "vinted_age.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
@@ -204,13 +204,17 @@ def test_content_script_uses_persistent_rendered_uploaded_age_sweep():
     assert "function relativeAgeFromPageHtml" not in content
     assert "age_scan_items:ageScanItems" in content
     assert 'message?.type==="read-vinted-uploaded-age"' in content
-    assert "async function renderedUploadedAges(items,workerCount=4)" in background
-    assert 'AGE_SWEEP_QUEUE_KEY="vintedAgeSweepQueueV1"' in background
+    assert "async function renderedUploadedAgesBurst(items,workerCount=AGE_WORKERS)" in background
+    assert "const AGE_WORKERS=16;" in background
+    assert 'AGE_FAILURES_KEY="vintedAgeScanFailuresV1"' in background
     assert 'api("/api/extension/listing-ages"' in background
-    assert "async function processAgeSweepWindow()" in background
-    assert "await chrome.tabs.create({url:first.url,active:false})" in background
+    assert "async function runAgeBurst(items,reason)" in background
+    assert "chrome.windows.create({" in background
+    assert 'state:"minimized"' in background
     assert "await chrome.tabs.update(tab.id,{url:target.href,active:false})" in background
-    assert "await chrome.tabs.remove(tab.id)" in background
+    assert "await chrome.windows.remove(workerWindow.id)" in background
+    assert "AGE_SWEEP_ALARM" not in background
+    assert "processAgeSweepWindow" not in background
     assert 'files:["vinted_age.js","content.js"]' in background
     assert "const ageScanItems=await enrichListingDates(listings);" in content
 
@@ -218,9 +222,9 @@ def test_content_script_uses_persistent_rendered_uploaded_age_sweep():
 def test_bridge_reloads_stale_content_script_before_sync():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
-    assert "const BRIDGE_CONTENT_PROTOCOL=4;" in content
+    assert "const BRIDGE_CONTENT_PROTOCOL=5;" in content
     assert 'message?.type==="bridge-content-protocol"' in content
-    assert "const CONTENT_PROTOCOL=4;" in background
+    assert "const CONTENT_PROTOCOL=5;" in background
     assert "async function ensureCurrentContentScript(tab)" in background
     assert "await chrome.tabs.reload(tab.id)" in background
     assert "tab=await ensureCurrentContentScript(tab);" in background
@@ -230,8 +234,8 @@ def test_content_script_has_reinjection_guard():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "(() => {" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 4" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 4" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 5" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 5" in content
     assert content.rstrip().endswith("})();")
     assert "node scripts/test_vinted_content_idempotent.js" in workflow
 
@@ -245,7 +249,7 @@ def test_ci_does_not_commit_a_static_fernet_key():
 
 def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
-    assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV3"' in content
+    assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV4"' in content
     assert "function enrichListingDetails(listings)" in content
     assert "image_urls:images" in content
     assert "await enrichListingDetails(listings);" in content
@@ -315,3 +319,19 @@ def test_dashboard_refuses_generic_vinted_relative_age_client_side():
     app = (ROOT / "app" / "product_static" / "app.js").read_text(encoding="utf-8")
     assert 'row?.channel === "vinted"' in app
     assert '!String(row?.listed_age_source || "").startsWith("vinted_page")' in app
+
+
+
+def test_vinted_detail_parser_prefers_direct_category_and_description_fields():
+    content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    assert 'description:metaText(first(raw,"description","item_description","itemDescription"))' in content
+    assert 'category:metaText(first(raw,"catalog_title","category_title","category_name","catalog","category","catalogs"))' in content
+
+
+def test_bridge_age_scan_is_finite_and_failures_have_cooldown():
+    background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
+    assert "const AGE_WORKERS=16;" in background
+    assert "const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;" in background
+    assert 'if(reason==="manual")return clean;' in background
+    assert "age_scan_failed:ageBurst.failed" in background
+    assert "AGE_SWEEP_ALARM" not in background
