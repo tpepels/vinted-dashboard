@@ -813,6 +813,7 @@ function listingCrossListAction(row) {
 function crossListStatusLabel(status) {
   return {
     ready: "Ready",
+    update_ready: "Ready to update",
     listed: "Already listed",
     connect: "Needs connection",
     needs_fields: "Needs fields",
@@ -823,6 +824,7 @@ function crossListStatusLabel(status) {
 
 function crossListGroup(destination) {
   if (destination.status === "ready") return "ready";
+  if (destination.status === "update_ready") return "update";
   if (destination.status === "listed") return "listed";
   if (["connect", "needs_fields", "review"].includes(destination.status)) return "attention";
   return "unavailable";
@@ -831,6 +833,7 @@ function crossListGroup(destination) {
 function crossListGroupLabel(group) {
   return {
     ready: "Ready to publish",
+    update: "Ready to update",
     attention: "Needs setup or review",
     listed: "Already listed",
     unavailable: "Not writable yet",
@@ -840,6 +843,12 @@ function crossListGroupLabel(group) {
 function crossListDestinationAction(destination) {
   if (destination.action === "publish") {
     return '<button class="btn primary cross-destination-publish" data-channel="' + esc(destination.channel) + '">Publish</button>';
+  }
+  if (destination.action === "update") {
+    return '<button class="btn primary cross-destination-update" data-channel="' + esc(destination.channel) + '">Update</button>'
+      + (destination.url
+        ? ' <a class="btn" href="' + esc(destination.url) + '" target="_blank" rel="noreferrer">Open listing</a>'
+        : "");
   }
   if (destination.action === "biblio") {
     return '<button class="btn primary cross-destination-biblio">Review / publish</button>';
@@ -901,7 +910,7 @@ function renderCrossList(data) {
   ].join("");
 
   const destinations = Array.isArray(data.destinations) ? data.destinations : [];
-  const groupOrder = ["ready", "attention", "listed", "unavailable"];
+  const groupOrder = ["ready", "update", "attention", "listed", "unavailable"];
   const groups = groupOrder.map((group) => ({
     group,
     rows: destinations.filter((destination) => crossListGroup(destination) === group),
@@ -925,6 +934,9 @@ function renderCrossList(data) {
 
   document.querySelectorAll(".cross-destination-publish").forEach((button) => {
     button.onclick = () => publishCrossDestination(button.dataset.channel, button);
+  });
+  document.querySelectorAll(".cross-destination-update").forEach((button) => {
+    button.onclick = () => updateCrossDestination(button.dataset.channel, button);
   });
   document.querySelectorAll(".cross-destination-connect").forEach((button) => {
     button.onclick = () => openCrossListConnection(button.dataset.channel);
@@ -1007,6 +1019,30 @@ async function publishCrossDestination(channel, button) {
       },
     );
     flash("Published to " + (connectorSchemas[channel]?.title || channel) + ".");
+    await inventory();
+    await openCrossList(current.itemId, current.sourceListingId);
+  } catch (error) {
+    flash(error.message, true);
+    button.disabled = false;
+    button.textContent = old;
+  }
+}
+
+async function updateCrossDestination(channel, button) {
+  const current = state.crossList;
+  if (!current?.itemId || !channel) return;
+  button.disabled = true;
+  const old = button.textContent;
+  button.textContent = "Updating…";
+  try {
+    await api(
+      "/api/app/inventory/" + encodeURIComponent(current.itemId) + "/cross-list/" + encodeURIComponent(channel),
+      {
+        method: "PUT",
+        body: JSON.stringify({ source_listing_id: current.sourceListingId || null }),
+      },
+    );
+    flash("Updated " + (connectorSchemas[channel]?.title || channel) + ".");
     await inventory();
     await openCrossList(current.itemId, current.sourceListingId);
   } catch (error) {
