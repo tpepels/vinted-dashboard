@@ -3788,6 +3788,7 @@ def sync_biblio_workspace(
             "active": 0,
             "deletes": 0,
             "photos_uploaded": 0,
+            "upload_profile": upload_profile,
             "detail": "Nothing changed - no FTP upload was required",
             "run_id": str(run_id),
         }
@@ -4191,7 +4192,11 @@ def close_biblio_workspace_listing(
             started_at=started,
             active_count=0,
             delete_count=1,
-            detail={"deletes_filename": filename, "cross_channel": True},
+            detail={
+                "deletes_filename": filename,
+                "cross_channel": True,
+                "upload_profile": upload_profile,
+            },
             error=str(exc),
         )
         raise RuntimeError("BIBLIO delete upload failed") from exc
@@ -4202,11 +4207,16 @@ def close_biblio_workspace_listing(
         started_at=started,
         active_count=0,
         delete_count=1,
-        detail={"deletes_filename": filename, "cross_channel": True},
+        detail={
+            "deletes_filename": filename,
+            "cross_channel": True,
+            "upload_profile": upload_profile,
+        },
     )
     return {
         "remote": "delete_uploaded",
         "external_id": str(row.get("source_id") or ""),
         "deletes_filename": filename,
+        "upload_profile": upload_profile,
         "inventory_signature": str(row.get("inventory_signature") or ""),
     }
