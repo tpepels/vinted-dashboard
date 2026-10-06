@@ -602,3 +602,10 @@ def test_biblio_upload_profile_is_explicit_and_safe_by_default():
     assert 'data.upload_profile === "core"' in APP_JS
     assert "optional bibliographic fields are retained locally" in APP_JS
     assert "Extended BIBLIO profile will send" in APP_JS
+
+
+
+def test_connector_forms_prefill_saved_nonsecret_settings_only():
+    assert "connector?.saved_values || {}" in APP_JS
+    assert 'const value = type === "password" ? "" : (savedValues[name] ?? "");' in APP_JS
+    assert "'saved_values':" not in APP_JS
