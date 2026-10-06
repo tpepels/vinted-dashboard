@@ -1980,7 +1980,7 @@ def update_shopify_workspace_listing(
         raise RuntimeError(f"Shopify product update failed: {detail}")
     updated_product = product_result.get("product") or product
 
-    identifier, _identifier_type = _candidate_identifier(fields)
+    identifier, identifier_type = _candidate_identifier(fields)
     variant_input: dict[str, Any] = {
         "id": variant_id,
         "price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
@@ -1990,7 +1990,13 @@ def update_shopify_workspace_listing(
         },
     }
     if identifier:
-        variant_input["barcode"] = identifier
+        if version >= "2026-10":
+            barcode_input: dict[str, Any] = {"value": identifier}
+            if identifier_type:
+                barcode_input["type"] = identifier_type
+            variant_input["barcodes"] = [barcode_input]
+        else:
+            variant_input["barcode"] = identifier
     variant_result = _shopify_graphql(
         values,
         SHOPIFY_VARIANT_UPDATE_MUTATION,
