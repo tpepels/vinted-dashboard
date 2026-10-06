@@ -831,6 +831,103 @@ def create_woocommerce_workspace_listing(
     }
 
 
+def update_woocommerce_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    """Update an existing WooCommerce product or one variation in place."""
+    values = _credentials(workspace_id, Channel.WOOCOMMERCE)
+    fields = dict(candidate.get("fields") or {})
+    image_urls = list((candidate.get("source") or {}).get("image_urls") or [])[:5]
+    external_id = str(external_id or "").strip()
+    quantity = max(0, int(fields.get("quantity") or 0))
+    identifier, _identifier_type = _candidate_identifier(fields)
+
+    if ":" in external_id:
+        product_id, variation_id = external_id.split(":", 1)
+        if not product_id.isdigit() or not variation_id.isdigit():
+            raise RuntimeError("WooCommerce variation listing ID is malformed")
+        body: dict[str, Any] = {
+            "sku": str(fields.get("sku") or "").strip(),
+            "regular_price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+            "manage_stock": True,
+            "stock_quantity": quantity,
+            "stock_status": "instock" if quantity > 0 else "outofstock",
+        }
+        if identifier:
+            body["global_unique_id"] = identifier
+        if image_urls:
+            body["image"] = {"src": str(image_urls[0])}
+        raw = _woo_put(
+            values,
+            f"products/{product_id}/variations/{variation_id}",
+            body=body,
+        )
+        title = str(fields.get("title") or "").strip() or "Untitled"
+        url = None
+        attributes = {
+            label: value for label, _key, value in _candidate_detail_values(fields)
+        }
+    else:
+        if not external_id.isdigit():
+            raise RuntimeError("WooCommerce product listing ID is malformed")
+        body = {
+            "name": str(fields.get("title") or "").strip(),
+            "regular_price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+            "description": str(fields.get("description") or ""),
+            "manage_stock": True,
+            "stock_quantity": quantity,
+            "stock_status": "instock" if quantity > 0 else "outofstock",
+        }
+        if identifier:
+            body["global_unique_id"] = identifier
+        details = [
+            {
+                "name": label,
+                "visible": True,
+                "variation": False,
+                "options": [value],
+            }
+            for label, _key, value in _candidate_detail_values(fields)
+        ]
+        if details:
+            body["attributes"] = details
+        if image_urls:
+            body["images"] = [{"src": str(url)} for url in image_urls]
+        raw = _woo_put(values, f"products/{external_id}", body=body)
+        title = raw.get("name") or fields.get("title")
+        url = raw.get("permalink")
+        attributes = _woo_metadata(raw) or {
+            label: value for label, _key, value in _candidate_detail_values(fields)
+        }
+
+    return {
+        "source_id": external_id,
+        "sku": raw.get("sku") or fields.get("sku"),
+        "title": title,
+        "status": _woo_status(raw),
+        "quantity": _woo_quantity(raw),
+        "price_cents": _money(raw.get("price") or raw.get("regular_price"))
+        or int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": url,
+        "description": fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "global_unique_id": raw.get("global_unique_id") or identifier,
+        "attributes": attributes,
+        "image_url": (
+            (raw.get("images") or [{}])[0].get("src")
+            if raw.get("images")
+            else (
+                (raw.get("image") or {}).get("src")
+                if isinstance(raw.get("image"), dict)
+                else (image_urls[0] if image_urls else None)
+            )
+        ),
+    }
+
+
 def _woo_quantity(raw: dict[str, Any]) -> int:
     quantity = _int(raw.get("stock_quantity"))
     if quantity is not None:
@@ -1637,6 +1734,14 @@ SHOPIFY_VARIANT_INVENTORY_QUERY = """
 query ResellerVariantInventory($id: ID!) {
   productVariant(id: $id) {
     id
+    sku
+    price
+    product {
+      id
+      title
+      status
+      onlineStoreUrl
+    }
     inventoryItem {
       id
       inventoryLevels(first: 100) {
@@ -1664,6 +1769,268 @@ mutation ResellerSetInventory(
   }
 }
 """
+
+
+SHOPIFY_PRODUCT_UPDATE_MUTATION = """
+mutation ResellerProductUpdate($product: ProductUpdateInput!) {
+  productUpdate(product: $product) {
+    product { id title status onlineStoreUrl }
+    userErrors { field message }
+  }
+}
+"""
+
+
+SHOPIFY_VARIANT_UPDATE_MUTATION = """
+mutation ResellerVariantUpdate(
+  $productId: ID!,
+  $variants: [ProductVariantsBulkInput!]!
+) {
+  productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+    productVariants { id sku price inventoryQuantity }
+    userErrors { field message }
+  }
+}
+"""
+
+
+def _shopify_inventory_snapshot(variant: dict[str, Any]) -> tuple[str, list[dict[str, Any]], int]:
+    inventory_item = variant.get("inventoryItem") or {}
+    inventory_item_id = str(inventory_item.get("id") or "").strip()
+    levels = ((inventory_item.get("inventoryLevels") or {}).get("nodes") or [])
+    normalized: list[dict[str, Any]] = []
+    total = 0
+    for level in levels:
+        if not isinstance(level, dict):
+            continue
+        location_id = str((level.get("location") or {}).get("id") or "").strip()
+        if not location_id:
+            continue
+        available = next(
+            (
+                _int(row.get("quantity"), 0) or 0
+                for row in (level.get("quantities") or [])
+                if isinstance(row, dict)
+                and str(row.get("name") or "") == "available"
+            ),
+            0,
+        )
+        normalized.append({
+            "location_id": location_id,
+            "available": max(0, available),
+        })
+        total += max(0, available)
+    return inventory_item_id, normalized, total
+
+
+def _set_shopify_total_inventory(
+    values: dict[str, str],
+    variant: dict[str, Any],
+    target_quantity: int,
+    *,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    target_quantity = max(0, int(target_quantity or 0))
+    inventory_item_id, levels, total = _shopify_inventory_snapshot(variant)
+    if total == target_quantity:
+        return {
+            "previous_quantity": total,
+            "quantity": target_quantity,
+            "locations_updated": 0,
+        }
+    if not inventory_item_id:
+        raise RuntimeError("Shopify variant has no inventory item")
+    if target_quantity > 0 and len(levels) != 1:
+        raise RuntimeError(
+            "Shopify stock differs across multiple locations. "
+            "Choose one inventory location in Shopify before syncing a non-zero quantity."
+        )
+
+    writes: list[dict[str, Any]] = []
+    if target_quantity == 0:
+        for level in levels:
+            if level["available"] <= 0:
+                continue
+            writes.append({
+                "inventoryItemId": inventory_item_id,
+                "locationId": level["location_id"],
+                "quantity": 0,
+                "changeFromQuantity": level["available"],
+            })
+    else:
+        if not levels:
+            raise RuntimeError(
+                "Shopify variant is not active at an inventory location. "
+                "Activate it in Shopify before syncing stock."
+            )
+        level = levels[0]
+        writes.append({
+            "inventoryItemId": inventory_item_id,
+            "locationId": level["location_id"],
+            "quantity": target_quantity,
+            "changeFromQuantity": level["available"],
+        })
+
+    if not writes:
+        return {
+            "previous_quantity": total,
+            "quantity": target_quantity,
+            "locations_updated": 0,
+        }
+    result = _shopify_graphql(
+        values,
+        SHOPIFY_SET_INVENTORY_MUTATION,
+        variables={
+            "input": {
+                "name": "available",
+                "reason": "correction",
+                "quantities": writes,
+            },
+            "idempotencyKey": str(idempotency_key),
+        },
+    )
+    payload = result.get("inventorySetQuantities") or {}
+    errors = payload.get("userErrors") or []
+    if errors:
+        detail = "; ".join(
+            str(row.get("message") or "Shopify inventory error")
+            for row in errors
+            if isinstance(row, dict)
+        )
+        raise RuntimeError(f"Shopify inventory update failed: {detail}")
+    return {
+        "previous_quantity": total,
+        "quantity": target_quantity,
+        "locations_updated": len(writes),
+    }
+
+
+def update_shopify_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    """Update product copy, variant price/identifier, and safe stock in place."""
+    values = _credentials(workspace_id, Channel.SHOPIFY)
+    version = str(values.get("api_version") or "2026-10").strip() or "2026-10"
+    if version < "2026-04":
+        raise RuntimeError(
+            "Shopify updates require Admin API version 2026-04 or newer"
+        )
+    variant_id = str(external_id or "").strip()
+    if not variant_id.startswith("gid://shopify/ProductVariant/"):
+        raise RuntimeError("Shopify listing ID is not a ProductVariant GID")
+
+    current_data = _shopify_graphql(
+        values,
+        SHOPIFY_VARIANT_INVENTORY_QUERY,
+        variables={"id": variant_id},
+    )
+    current = current_data.get("productVariant")
+    if not isinstance(current, dict):
+        raise RuntimeError("Shopify variant no longer exists")
+    product = current.get("product") or {}
+    product_id = str(product.get("id") or "").strip()
+    if not product_id:
+        raise RuntimeError("Shopify variant has no parent product")
+
+    fields = dict(candidate.get("fields") or {})
+    product_input: dict[str, Any] = {
+        "id": product_id,
+        "title": str(fields.get("title") or "").strip(),
+        "descriptionHtml": str(fields.get("description") or ""),
+        "status": "ACTIVE",
+    }
+    vendor = str(fields.get("brand") or fields.get("publisher") or "").strip()
+    if vendor:
+        product_input["vendor"] = vendor
+    product_type = str(fields.get("category") or "").replace("_", " ").strip().title()
+    if product_type:
+        product_input["productType"] = product_type
+    raw_tags = fields.get("tags")
+    if isinstance(raw_tags, str):
+        tags = [value.strip() for value in raw_tags.split(",") if value.strip()]
+    else:
+        tags = [str(value).strip() for value in (raw_tags or []) if str(value).strip()]
+    if tags:
+        product_input["tags"] = list(dict.fromkeys(tags))[:250]
+    metafields = [
+        {
+            "namespace": "reseller",
+            "key": key,
+            "type": "single_line_text_field",
+            "value": value,
+        }
+        for _label, key, value in _candidate_detail_values(fields)
+    ]
+    if metafields:
+        product_input["metafields"] = metafields
+
+    product_result = _shopify_graphql(
+        values,
+        SHOPIFY_PRODUCT_UPDATE_MUTATION,
+        variables={"product": product_input},
+    ).get("productUpdate") or {}
+    errors = product_result.get("userErrors") or []
+    if errors:
+        detail = "; ".join(
+            str(row.get("message") or "Shopify product error")
+            for row in errors if isinstance(row, dict)
+        )
+        raise RuntimeError(f"Shopify product update failed: {detail}")
+    updated_product = product_result.get("product") or product
+
+    identifier, _identifier_type = _candidate_identifier(fields)
+    variant_input: dict[str, Any] = {
+        "id": variant_id,
+        "price": f"{int(fields.get('price_cents') or 0) / 100:.2f}",
+        "inventoryItem": {
+            "sku": str(fields.get("sku") or "").strip(),
+            "tracked": True,
+        },
+    }
+    if identifier:
+        variant_input["barcode"] = identifier
+    variant_result = _shopify_graphql(
+        values,
+        SHOPIFY_VARIANT_UPDATE_MUTATION,
+        variables={"productId": product_id, "variants": [variant_input]},
+    ).get("productVariantsBulkUpdate") or {}
+    errors = variant_result.get("userErrors") or []
+    if errors:
+        detail = "; ".join(
+            str(row.get("message") or "Shopify variant error")
+            for row in errors if isinstance(row, dict)
+        )
+        raise RuntimeError(f"Shopify variant update failed: {detail}")
+    variants = variant_result.get("productVariants") or []
+    updated_variant = variants[0] if variants and isinstance(variants[0], dict) else {}
+
+    stock = _set_shopify_total_inventory(
+        values,
+        current,
+        int(fields.get("quantity") or 0),
+        idempotency_key=str(uuid.uuid4()),
+    )
+    quantity = int(stock["quantity"])
+    return {
+        "source_id": variant_id,
+        "sku": updated_variant.get("sku") or fields.get("sku"),
+        "title": updated_product.get("title") or fields.get("title"),
+        "status": ListingStatus.ACTIVE if quantity > 0 else ListingStatus.INACTIVE,
+        "quantity": quantity,
+        "price_cents": _money(updated_variant.get("price"))
+        or int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": updated_product.get("onlineStoreUrl") or product.get("onlineStoreUrl"),
+        "description": fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "barcode": identifier,
+        "attributes": {
+            "product_id": product_id,
+            "inventory_locations_updated": stock["locations_updated"],
+        },
+    }
 
 
 def close_shopify_workspace_listing(
@@ -1696,71 +2063,23 @@ def close_shopify_workspace_listing(
             "quantity": 0,
         }
 
-    inventory_item = variant.get("inventoryItem") or {}
-    inventory_item_id = str(inventory_item.get("id") or "").strip()
-    levels = ((inventory_item.get("inventoryLevels") or {}).get("nodes") or [])
-    quantities: list[dict[str, Any]] = []
-    total_available = 0
-    for level in levels:
-        if not isinstance(level, dict):
-            continue
-        location_id = str((level.get("location") or {}).get("id") or "").strip()
-        if not location_id:
-            continue
-        available = next(
-            (
-                _int(row.get("quantity"), 0) or 0
-                for row in (level.get("quantities") or [])
-                if isinstance(row, dict)
-                and str(row.get("name") or "") == "available"
-            ),
-            0,
-        )
-        total_available += max(0, available)
-        if available > 0:
-            quantities.append(
-                {
-                    "inventoryItemId": inventory_item_id,
-                    "locationId": location_id,
-                    "quantity": 0,
-                    "changeFromQuantity": available,
-                }
-            )
-
-    if not inventory_item_id or not quantities:
+    _inventory_item_id, _levels, total_available = _shopify_inventory_snapshot(variant)
+    if total_available <= 0:
         return {
             "remote": "already_unavailable",
             "external_id": variant_id,
             "quantity": 0,
         }
-
-    result = _shopify_graphql(
+    stock = _set_shopify_total_inventory(
         values,
-        SHOPIFY_SET_INVENTORY_MUTATION,
-        variables={
-            "input": {
-                "name": "available",
-                "reason": "correction",
-                "quantities": quantities,
-            },
-            "idempotencyKey": str(idempotency_key),
-        },
+        variant,
+        0,
+        idempotency_key=str(idempotency_key),
     )
-    payload = result.get("inventorySetQuantities") or {}
-    errors = payload.get("userErrors") or []
-    if errors:
-        detail = "; ".join(
-            str(row.get("message") or "Shopify inventory error")
-            for row in errors
-            if isinstance(row, dict)
-        )
-        raise RuntimeError(f"Shopify inventory close failed: {detail}")
     return {
         "remote": "stock_zeroed",
         "external_id": variant_id,
-        "quantity": 0,
-        "previous_quantity": total_available,
-        "locations_updated": len(quantities),
+        **stock,
     }
 
 
