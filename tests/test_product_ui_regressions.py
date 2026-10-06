@@ -609,3 +609,18 @@ def test_connector_forms_prefill_saved_nonsecret_settings_only():
     assert "connector?.saved_values || {}" in APP_JS
     assert 'const value = type === "password" ? "" : (savedValues[name] ?? "");' in APP_JS
     assert "'saved_values':" not in APP_JS
+
+
+
+def test_cross_list_existing_writable_destinations_offer_update():
+    assert 'update_ready: "Ready to update"' in APP_JS
+    assert 'if (destination.status === "update_ready") return "update";' in APP_JS
+    assert 'update: "Ready to update"' in APP_JS
+    assert 'destination.action === "update"' in APP_JS
+    assert "cross-destination-update" in APP_JS
+    assert 'method: "PUT"' in APP_JS
+    assert "async function updateCrossDestination(channel, button)" in APP_JS
+
+
+def test_cross_list_update_group_is_visible_before_already_listed():
+    assert 'const groupOrder = ["ready", "update", "attention", "listed", "unavailable"];' in APP_JS
