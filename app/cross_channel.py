@@ -24,11 +24,14 @@ from app.stock_policy import sale_counts_as_sold
 from app.connectors.base import Capability, get_connector
 from app.connectors.workspace_sync import (
     item_has_remaining_stock_on_sale_channel,
+    remaining_stock_quantity_on_sale_channel,
     recompute_inventory_item,
 )
 
 
 ACTION_TYPE = "close_listing"
+SYNC_QUANTITY_ACTION_TYPE = "sync_quantity"
+RESTORE_REVIEW_ACTION_TYPE = "review_restore"
 OPEN_LISTING_STATUSES = {
     ListingStatus.ACTIVE,
     getattr(ListingStatus, "RESERVED", "reserved"),
@@ -180,6 +183,15 @@ def _action_mode(channel: str) -> tuple[str, str]:
     return "manual", "attention"
 
 
+def _stock_action_mode(channel: str) -> tuple[str, str]:
+    if channel == Channel.VINTED:
+        return "manual", "attention"
+    connector = get_connector(channel)
+    if connector is not None and connector.supports(Capability.UPDATE_STOCK):
+        return "remote", "queued"
+    return "manual", "attention"
+
+
 def _enqueue_action_job(session: Session, action: CrossChannelAction) -> None:
     session.add(
         BackgroundJob(
@@ -316,7 +328,6 @@ def plan_sale_reconciliation(
         return []
 
     if item_has_remaining_stock_on_sale_channel(session, item, sale):
-        recompute_inventory_item(session, item)
         pending = session.execute(
             select(CrossChannelAction).where(
                 CrossChannelAction.trigger_sale_id == sale.id,
@@ -327,7 +338,60 @@ def plan_sale_reconciliation(
             action.status = "cancelled"
             action.completed_at = utcnow()
             action.last_error = None
-        return []
+
+        remaining = remaining_stock_quantity_on_sale_channel(session, item, sale)
+        if remaining is None:
+            # Unlimited/unknown stock cannot be propagated as an exact number.
+            recompute_inventory_item(session, item)
+            return []
+
+        item.status = ItemStatus.ACTIVE
+        item.quantity = remaining
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == sale.workspace_id,
+                models.ChannelListing.inventory_item_id == item.id,
+                models.ChannelListing.channel != sale.channel,
+                models.ChannelListing.status.in_(OPEN_LISTING_STATUSES),
+            )
+        ).scalars().all()
+
+        created: list[CrossChannelAction] = []
+        for listing in listings:
+            if listing.quantity is not None and int(listing.quantity or 0) == remaining:
+                continue
+            existing = session.execute(
+                select(CrossChannelAction).where(
+                    CrossChannelAction.trigger_sale_id == sale.id,
+                    CrossChannelAction.channel_listing_id == listing.id,
+                    CrossChannelAction.action_type == SYNC_QUANTITY_ACTION_TYPE,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                continue
+            mode, status = _stock_action_mode(listing.channel)
+            action = CrossChannelAction(
+                workspace_id=sale.workspace_id,
+                inventory_item_id=item.id,
+                trigger_sale_id=sale.id,
+                channel_listing_id=listing.id,
+                channel=listing.channel,
+                action_type=SYNC_QUANTITY_ACTION_TYPE,
+                mode=mode,
+                status=status,
+                detail={
+                    "sale_channel": sale.channel,
+                    "sale_external_order_id": sale.external_order_id,
+                    "listing_external_id": listing.external_id,
+                    "target_quantity": remaining,
+                },
+            )
+            session.add(action)
+            session.flush()
+            if mode == "remote":
+                _enqueue_action_job(session, action)
+            created.append(action)
+        return created
 
     item.quantity = 0
     item.status = ItemStatus.SOLD
@@ -410,11 +474,55 @@ def reconcile_sale_state(
         action.last_error = None
 
     item = resolve_sale_item(session, sale, external_item_id=external_item_id)
-    if item is not None:
-        from app.connectors.workspace_sync import recompute_inventory_item
+    if item is None:
+        return []
 
-        recompute_inventory_item(session, item)
-    return []
+    recompute_inventory_item(session, item)
+    successful_remote_changes = session.execute(
+        select(CrossChannelAction).where(
+            CrossChannelAction.trigger_sale_id == sale.id,
+            CrossChannelAction.status == "success",
+            CrossChannelAction.action_type.in_(
+                [ACTION_TYPE, SYNC_QUANTITY_ACTION_TYPE]
+            ),
+        )
+    ).scalars().all()
+    created: list[CrossChannelAction] = []
+    for previous in successful_remote_changes:
+        existing = session.execute(
+            select(CrossChannelAction).where(
+                CrossChannelAction.trigger_sale_id == sale.id,
+                CrossChannelAction.channel_listing_id == previous.channel_listing_id,
+                CrossChannelAction.action_type == RESTORE_REVIEW_ACTION_TYPE,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            continue
+        restore = CrossChannelAction(
+            workspace_id=sale.workspace_id,
+            inventory_item_id=item.id,
+            trigger_sale_id=sale.id,
+            channel_listing_id=previous.channel_listing_id,
+            channel=previous.channel,
+            action_type=RESTORE_REVIEW_ACTION_TYPE,
+            mode="manual",
+            status="attention",
+            detail={
+                "reason": (
+                    "The sale was cancelled/refunded after this listing had "
+                    "already been changed remotely. Review the remote listing "
+                    "and restore stock if appropriate."
+                ),
+                "previous_action_id": str(previous.id),
+                "previous_action_type": previous.action_type,
+                "previous_remote_detail": dict(previous.detail or {}),
+                "target_quantity": item.quantity,
+            },
+        )
+        session.add(restore)
+        session.flush()
+        created.append(restore)
+    return created
 
 
 def _get_action(session: Session, action_id: uuid.UUID) -> CrossChannelAction:
@@ -439,41 +547,92 @@ def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
         workspace_id = action.workspace_id
         external_id = listing.external_id
         channel = action.channel
+        action_type = action.action_type
+        target_quantity = max(
+            0,
+            int((action.detail or {}).get("target_quantity") or 0),
+        )
         action.status = "running"
         action.attempts += 1
         action.last_error = None
 
-    if channel == Channel.EBAY:
-        from app.connectors.hosted import close_ebay_workspace_listing
+    if action_type == SYNC_QUANTITY_ACTION_TYPE:
+        if channel == Channel.WOOCOMMERCE:
+            from app.connectors.hosted import set_woocommerce_workspace_listing_quantity
 
-        detail = close_ebay_workspace_listing(workspace_id, external_id)
-        terminal_status = ListingStatus.ENDED
-    elif channel == Channel.BIBLIO:
-        from app.connectors.hosted import close_biblio_workspace_listing
+            detail = set_woocommerce_workspace_listing_quantity(
+                workspace_id,
+                external_id,
+                target_quantity,
+            )
+        elif channel == Channel.SHOPIFY:
+            from app.connectors.hosted import set_shopify_workspace_listing_quantity
 
-        detail = close_biblio_workspace_listing(workspace_id, action.channel_listing_id)
-        terminal_status = ListingStatus.SOLD
-    elif channel == Channel.WOOCOMMERCE:
-        from app.connectors.hosted import close_woocommerce_workspace_listing
+            detail = set_shopify_workspace_listing_quantity(
+                workspace_id,
+                external_id,
+                target_quantity,
+                idempotency_key=str(action_id),
+            )
+        elif channel == Channel.WIX:
+            from app.connectors.hosted import set_wix_workspace_listing_quantity
 
-        detail = close_woocommerce_workspace_listing(workspace_id, external_id)
-        terminal_status = ListingStatus.INACTIVE
-    elif channel == Channel.SHOPIFY:
-        from app.connectors.hosted import close_shopify_workspace_listing
-
-        detail = close_shopify_workspace_listing(
-            workspace_id,
-            external_id,
-            idempotency_key=str(action_id),
+            detail = set_wix_workspace_listing_quantity(
+                workspace_id,
+                external_id,
+                target_quantity,
+            )
+        else:
+            raise RuntimeError(
+                f"Unsupported remote stock-sync channel: {channel}"
+            )
+        terminal_status = (
+            ListingStatus.ACTIVE
+            if target_quantity > 0
+            else ListingStatus.INACTIVE
         )
-        terminal_status = ListingStatus.INACTIVE
-    elif channel == Channel.WIX:
-        from app.connectors.hosted import close_wix_workspace_listing
+        terminal_quantity = target_quantity
+    elif action_type == ACTION_TYPE:
+        if channel == Channel.EBAY:
+            from app.connectors.hosted import close_ebay_workspace_listing
 
-        detail = close_wix_workspace_listing(workspace_id, external_id)
-        terminal_status = ListingStatus.INACTIVE
+            detail = close_ebay_workspace_listing(workspace_id, external_id)
+            terminal_status = ListingStatus.ENDED
+        elif channel == Channel.BIBLIO:
+            from app.connectors.hosted import close_biblio_workspace_listing
+
+            detail = close_biblio_workspace_listing(
+                workspace_id,
+                action.channel_listing_id,
+            )
+            terminal_status = ListingStatus.SOLD
+        elif channel == Channel.WOOCOMMERCE:
+            from app.connectors.hosted import close_woocommerce_workspace_listing
+
+            detail = close_woocommerce_workspace_listing(
+                workspace_id,
+                external_id,
+            )
+            terminal_status = ListingStatus.INACTIVE
+        elif channel == Channel.SHOPIFY:
+            from app.connectors.hosted import close_shopify_workspace_listing
+
+            detail = close_shopify_workspace_listing(
+                workspace_id,
+                external_id,
+                idempotency_key=str(action_id),
+            )
+            terminal_status = ListingStatus.INACTIVE
+        elif channel == Channel.WIX:
+            from app.connectors.hosted import close_wix_workspace_listing
+
+            detail = close_wix_workspace_listing(workspace_id, external_id)
+            terminal_status = ListingStatus.INACTIVE
+        else:
+            raise RuntimeError(f"Unsupported remote close channel: {channel}")
+        terminal_quantity = 0
     else:
-        raise RuntimeError(f"Unsupported remote close channel: {channel}")
+        raise RuntimeError(f"Unsupported remote action type: {action_type}")
 
     with db.session_scope() as session:
         action = _get_action(session, action_id)
@@ -481,8 +640,12 @@ def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
         completed_at = utcnow()
         if listing is not None:
             listing.status = terminal_status
-            listing.quantity = 0
-            if channel == Channel.BIBLIO and detail.get("inventory_signature"):
+            listing.quantity = terminal_quantity
+            if (
+                action_type == ACTION_TYPE
+                and channel == Channel.BIBLIO
+                and detail.get("inventory_signature")
+            ):
                 # Commit the SOLD state and the exact remote delete signature
                 # together. If the process dies before this transaction, the
                 # close action can safely retry; it cannot leave an ACTIVE
@@ -574,6 +737,7 @@ def serialize_actions(
                 "mode": action.mode,
                 "channel": action.channel,
                 "action_type": action.action_type,
+                "detail": dict(action.detail or {}),
                 "attempts": action.attempts,
                 "last_error": action.last_error,
                 "created_at": action.created_at.isoformat() if action.created_at else None,
