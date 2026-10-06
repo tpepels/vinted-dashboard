@@ -160,29 +160,90 @@ def _category_hint(value: Any) -> str | None:
     return None
 
 
+def _remote_attribute_map(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("attributes")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(key).strip().casefold().replace("-", "_").replace(" ", "_"): value
+        for key, value in raw.items()
+        if str(key or "").strip()
+    }
+
+
+def _remote_value(item: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    attributes = _remote_attribute_map(item)
+    for key in keys:
+        normalized = key.casefold().replace("-", "_").replace(" ", "_")
+        value = attributes.get(normalized)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
 def _apply_generic_metadata(
     inventory_item: models.InventoryItem,
     listing: models.ChannelListing,
     item: dict[str, Any],
 ) -> None:
+    isbn = clean_isbn(_remote_value(item, "isbn", "isbn13", "isbn_13", "isbn10", "isbn_10"))
+    barcode = _remote_value(item, "barcode", "ean", "upc", "gtin", "global_unique_id")
+    if isbn:
+        barcode = isbn
+
+    normalized = {
+        "author": _remote_value(item, "author", "authors", "creator"),
+        "publisher": _remote_value(item, "publisher", "publishing_house"),
+        "edition": _remote_value(item, "edition", "edition_name"),
+        "publication_year": _remote_value(item, "publication_year", "year"),
+        "publish_date": _remote_value(item, "publish_date", "publication_date"),
+        "language": _remote_value(item, "language", "lang"),
+        "brand": _remote_value(item, "brand", "brand_name", "vendor"),
+        "size": _remote_value(item, "size"),
+        "color": _remote_value(item, "color", "colour"),
+        "material": _remote_value(item, "material", "materials"),
+        "condition": _remote_value(item, "condition"),
+        "description": _remote_value(item, "description", "plain_description"),
+        "isbn": isbn,
+        "barcode": barcode,
+    }
+
     remote: dict[str, Any] = {}
     for key in (
         "category", "condition", "brand", "size", "color", "colour", "material",
         "description", "image_url", "tags", "attributes", "product_type", "taxonomy_id",
+        "author", "publisher", "edition", "publication_year", "publish_date",
+        "language", "isbn", "barcode", "global_unique_id",
     ):
         value = item.get(key)
         if value not in (None, "", [], {}):
             remote[key] = value
+    for key, value in normalized.items():
+        if value not in (None, "", [], {}) and key not in remote:
+            remote[key] = value
     if remote:
         listing.extra = {**(listing.extra or {}), "remote_metadata": remote}
 
-    if not inventory_item.condition and item.get("condition"):
-        inventory_item.condition = str(item["condition"]).strip() or None
+    if not inventory_item.condition and normalized["condition"]:
+        inventory_item.condition = str(normalized["condition"]).strip() or None
 
     attrs = dict(inventory_item.attributes or {})
-    for key in ("brand", "size", "color", "colour", "material"):
-        value = item.get(key)
-        if value not in (None, "") and key not in attrs:
+    for key in (
+        "author", "publisher", "edition", "publication_year", "publish_date",
+        "language", "brand", "size", "color", "material", "description",
+        "isbn", "barcode",
+    ):
+        value = normalized.get(key)
+        if value not in (None, "", [], {}) and key not in attrs:
+            if key == "publication_year":
+                try:
+                    value = int(value)
+                except (TypeError, ValueError):
+                    value = str(value).strip()
             attrs[key] = value
     if item.get("category") not in (None, "") and "marketplace_category" not in attrs:
         attrs["marketplace_category"] = item["category"]
@@ -197,7 +258,11 @@ def _apply_generic_metadata(
     hinted = _category_hint(item.get("category"))
     if hinted and inventory_item.category == ItemCategory.GENERAL:
         inventory_item.category = hinted
-
+    elif (
+        inventory_item.category == ItemCategory.GENERAL
+        and (attrs.get("isbn") or attrs.get("author"))
+    ):
+        inventory_item.category = ItemCategory.BOOK
 
 def item_has_remaining_stock_on_sale_channel(
     session: Session,
