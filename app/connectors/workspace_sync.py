@@ -202,6 +202,9 @@ def _apply_generic_metadata(
         "publication_year": _remote_value(item, "publication_year", "year"),
         "publish_date": _remote_value(item, "publish_date", "publication_date"),
         "language": _remote_value(item, "language", "lang"),
+        "binding": _remote_value(item, "binding", "format", "physical_format"),
+        "pages": _remote_value(item, "pages", "page_count", "number_of_pages"),
+        "subtitle": _remote_value(item, "subtitle"),
         "brand": _remote_value(item, "brand", "brand_name", "vendor"),
         "size": _remote_value(item, "size"),
         "color": _remote_value(item, "color", "colour"),
@@ -217,7 +220,8 @@ def _apply_generic_metadata(
         "category", "condition", "brand", "size", "color", "colour", "material",
         "description", "image_url", "tags", "attributes", "product_type", "taxonomy_id",
         "author", "publisher", "edition", "publication_year", "publish_date",
-        "language", "isbn", "barcode", "global_unique_id",
+        "language", "binding", "pages", "subtitle",
+        "isbn", "barcode", "global_unique_id",
     ):
         value = item.get(key)
         if value not in (None, "", [], {}):
@@ -234,7 +238,8 @@ def _apply_generic_metadata(
     attrs = dict(inventory_item.attributes or {})
     for key in (
         "author", "publisher", "edition", "publication_year", "publish_date",
-        "language", "brand", "size", "color", "material", "description",
+        "language", "binding", "pages", "subtitle",
+        "brand", "size", "color", "material", "description",
         "isbn", "barcode",
     ):
         value = normalized.get(key)
