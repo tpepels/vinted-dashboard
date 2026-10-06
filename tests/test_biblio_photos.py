@@ -84,7 +84,7 @@ def test_biblio_photo_signature_prevents_repeat_upload():
         "https://images1.vinted.net/t/a.jpg",
         "https://images1.vinted.net/t/b.jpg",
     ]
-    signature = hosted._biblio_photo_signature(urls)
+    signature = hosted._biblio_photo_signature(urls, book_id="BK-1")
     active = [{
         "sku": "BK-1",
         "image_urls": urls,
@@ -112,7 +112,8 @@ def test_biblio_sync_uploads_inventory_and_vinted_photos(monkeypatch):
             "https://images1.vinted.net/t/two.webp",
         ],
         "photo_sync_signature": None,
-        "inventory_sync_signature": None,
+        "inventory_sync_signature": "older-inventory-sig",
+        "inventory_synced_at": "2026-10-05T10:00:00+00:00",
         "inventory_signature": "inventory-sig",
         "inventory_dirty": True,
     }]
@@ -332,7 +333,7 @@ def test_photo_only_retry_resends_photos_without_inventory(monkeypatch):
         "status": "active",
         "listing_id": listing_id,
         "image_urls": urls,
-        "photo_sync_signature": hosted._biblio_photo_signature(urls),
+        "photo_sync_signature": hosted._biblio_photo_signature(urls, book_id="BK-PHOTOS"),
         "inventory_signature": "same",
         "inventory_sync_signature": "same",
         "inventory_dirty": False,
@@ -389,3 +390,112 @@ def test_photo_only_retry_resends_photos_without_inventory(monkeypatch):
     assert inventory_marks == []
     assert marked and marked[0][0] == listing_id
     assert any(kwargs.get("status") == "success" for _args, kwargs in updates)
+
+
+
+def test_photo_signature_changes_when_book_id_changes():
+    urls = ["https://images1.vinted.net/t/a.jpg"]
+    first = hosted._biblio_photo_signature(urls, book_id="BOOK-1")
+    second = hosted._biblio_photo_signature(urls, book_id="BOOK-2")
+    assert first
+    assert second
+    assert first != second
+
+
+def test_biblio_tsv_flattens_tabs_newlines_and_nuls():
+    body = hosted._biblio_tsv(
+        [{
+            "sku": "BK-CTRL",
+            "author": "Ada\tAuthor",
+            "title": "Line one\nLine two",
+            "description": "First\r\nSecond\x00",
+            "price_cents": 1250,
+            "isbn": "9780000000002",
+            "quantity": 1,
+        }],
+        sold=False,
+    ).decode("utf-8")
+    lines = body.splitlines()
+    assert len(lines) == 2
+    assert "Ada Author" in lines[1]
+    assert "Line one Line two" in lines[1]
+    assert "First Second" in lines[1]
+    assert "\x00" not in body
+
+
+def test_biblio_upload_stamp_is_unique_within_same_second(monkeypatch):
+    monkeypatch.setattr(hosted.time, "strftime", lambda *args, **kwargs: "20261006-120000")
+    monkeypatch.setattr(hosted.time, "gmtime", lambda: object())
+    first = hosted._biblio_upload_stamp()
+    second = hosted._biblio_upload_stamp()
+    assert first.startswith("20261006-120000-")
+    assert second.startswith("20261006-120000-")
+    assert first != second
+
+
+def test_first_inventory_upload_defers_final_photo_signature(monkeypatch):
+    listing_id = str(uuid.uuid4())
+    active = [{
+        "source_id": "BK-FIRST",
+        "sku": "BK-FIRST",
+        "title": "Book",
+        "author": "Author",
+        "description": "Description",
+        "isbn": None,
+        "price_cents": 600,
+        "currency": "EUR",
+        "quantity": 1,
+        "status": "active",
+        "listing_id": listing_id,
+        "image_urls": ["https://images1.vinted.net/t/one.jpg"],
+        "photo_sync_signature": None,
+        "inventory_sync_signature": None,
+        "inventory_synced_at": None,
+        "inventory_signature": "inventory-first",
+        "inventory_dirty": True,
+    }]
+    monkeypatch.setattr(
+        hosted,
+        "_workspace_or_env_biblio_values",
+        lambda workspace_id: {
+            "host": "ftp.biblio.com",
+            "username": "seller",
+            "password": "secret",
+            "directory": "",
+            "filename_prefix": "test",
+        },
+    )
+    monkeypatch.setattr(
+        hosted,
+        "_biblio_rows",
+        lambda workspace_id, listing_id=None: (active, []),
+    )
+    monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg-data")
+
+    class FakeFTP:
+        def connect(self, host, timeout=20): pass
+        def login(self, username, password): pass
+        def set_pasv(self, value): pass
+        def cwd(self, directory): pass
+        def storbinary(self, command, handle): handle.read()
+        def quit(self): pass
+        def close(self): pass
+
+    monkeypatch.setattr(hosted.ftplib, "FTP", FakeFTP)
+    marked = []
+    monkeypatch.setattr(
+        hosted,
+        "_mark_biblio_photo_sync",
+        lambda workspace_id, synced: marked.extend(synced),
+    )
+    _run_id, _updates, states, _inventory_marks = _stub_progress(monkeypatch)
+
+    result = hosted.sync_biblio_workspace(uuid.uuid4())
+
+    assert result["photos_uploaded"] == 1
+    assert result["deferred_photo_retry_listing_ids"] == [listing_id]
+    assert marked == []
+    assert any(
+        kwargs.get("photo_state") == "retry_scheduled"
+        for _args, kwargs in states
+    )
