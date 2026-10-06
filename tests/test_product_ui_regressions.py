@@ -295,10 +295,10 @@ def test_universal_cross_listing_is_available_from_inventory_and_vinted_listings
     assert "function openBiblioPublish(itemId, sourceListingId = null)" in APP_JS
 
 
-def test_biblio_preflight_shows_source_and_only_inline_missing_fields():
+def test_biblio_preflight_shows_source_and_reviewable_prefilled_fields():
     assert "Using the linked <strong>Vinted listing</strong> as the source" in APP_JS
-    assert 'const editableMissing = new Set(["title", "author", "description", "price_cents", "book_id"]);' in APP_JS
-    assert 'class="biblio-missing-input"' in APP_JS
+    assert 'class="biblio-review-input"' in APP_JS
+    assert "data-required" in APP_JS
     assert 'field_sources' in APP_JS
     assert "ISBN lookup" in APP_JS
 
