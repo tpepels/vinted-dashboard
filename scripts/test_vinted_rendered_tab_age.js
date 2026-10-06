@@ -72,7 +72,7 @@ const chrome = {
       if (payload.type === "read-vinted-uploaded-age") {
         return { ok: true, age: ageByItem[String(payload.item_id)] || null };
       }
-      return { ok: true, protocol: 6 };
+      return { ok: true, protocol: 7 };
     },
     async reload() {},
     async remove() {},
@@ -104,7 +104,7 @@ const context = {
   URL,
   fetch: async () => ({ ok: true, async json() { return {}; } }),
   chrome,
-  setTimeout,
+  setTimeout: (fn, _ms) => setTimeout(fn, 0),
   clearTimeout,
   Date,
 };
@@ -137,16 +137,19 @@ function assert(condition, message) {
   };
 
   const first = await context.renderedUploadedAgeWave(job, items.slice(0, 2));
-  assert(first["9826364597"].text === "5 weeks ago", "Destination India age was not returned");
-  assert(first["9826364597"].seconds === 5 * 7 * 86400, "5 weeks converted incorrectly");
-  assert(Object.keys(first).length === 2, "First rendered wave did not collect both ages");
+  assert(first.ages["9826364597"].text === "5 weeks ago", "Destination India age was not returned");
+  assert(first.ages["9826364597"].seconds === 5 * 7 * 86400, "5 weeks converted incorrectly");
+  assert(Object.keys(first.ages).length === 2, "First rendered wave did not collect both ages");
+  assert(first.rate_limited === false, "Normal pages were marked rate limited");
   assert(windowsCreated.length === 1, "Worker window was not created");
   assert(windowsCreated[0].state === "minimized", "Worker window should be minimized");
   assert(windowsCreated[0].focused === false, "Worker window should not steal focus");
   assert(windowsCreated[0].tabs.length === 2, "Wave should use requested number of tabs");
+  assert(windowsCreated[0].url.every((url) => url === "about:blank"),
+    "Worker window should open blank tabs before staggered navigation");
 
   const second = await context.renderedUploadedAgeWave(job, items.slice(2));
-  assert(Object.keys(second).length === 2, "Second rendered wave did not collect both ages");
+  assert(Object.keys(second.ages).length === 2, "Second rendered wave did not collect both ages");
   assert(windowsCreated.length === 1, "Worker tabs were not reused");
   assert(updated.length === 2, "Reused worker tabs should navigate to the next two items");
   assert(sent.filter((entry) => entry.payload.type === "read-vinted-uploaded-age").length === 4,
