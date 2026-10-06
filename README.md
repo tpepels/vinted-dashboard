@@ -155,9 +155,9 @@ later periodic syncs.
 For active/reserved/hidden/draft listings, bridge 3.2.0 keeps a local detail
 cache for richer Vinted item metadata. Core inventory pagination is paced and
 retries HTTP 429 responses with backoff. Rich `/api/v2/items/{id}` enrichment
-is deliberately budgeted separately - up to 32 records on a manual sync and 10
-on a periodic sync, one paced request stream rather than hundreds of concurrent
-detail calls. If rich-detail enrichment is rate-limited, the complete core
+is deliberately budgeted separately - up to 12 records on a manual sync and 4
+on a periodic sync, one paced request stream with at least 1.5 seconds between
+detail calls rather than hundreds of concurrent requests. If rich-detail enrichment is rate-limited, the complete core
 inventory snapshot still syncs and optional notification/order calls are skipped
 for that pass. If the core inventory endpoint itself remains rate-limited after
 backoff, the bridge aborts instead of sending a partial inventory snapshot.
@@ -165,14 +165,19 @@ backoff, the bridge aborts instead of sending a partial inventory snapshot.
 When Vinted does not expose a trustworthy absolute posting timestamp, the bridge
 reads the visible `Uploaded` value from the **rendered** Vinted item page, for
 example `5 weeks ago`. Missing ages form one finite persisted job. A single
-minimized worker window uses 12 reusable tabs; the queue is checkpointed after
-each wave and processed in bounded chunks so Chrome can terminate/restart the
-Manifest V3 service worker without losing progress. The same window is reused
-until the finite queue finishes, then it is closed. Successful item IDs are
-cached and are not rescanned. Failed pages are cooldown-marked for 24 hours on
-periodic syncs; an explicit manual sync can retry them immediately. Periodic
-inventory sync is skipped while an age job is active, so the bridge does not add
-API traffic while the rendered-page burst is still running.
+minimized worker window uses 4 reusable tabs. Tab navigation is globally spaced
+by at least 1.8 seconds, the queue is checkpointed after every wave, and each
+service-worker event handles a bounded number of waves so Chrome can
+terminate/restart the Manifest V3 worker without losing progress. The same
+window is reused until the finite queue finishes, then it is closed. If a
+rendered page shows a Vinted rate-limit or anti-bot challenge, the window closes
+and the job pauses for a persisted cooldown (starting at 30 minutes and backing
+off up to 6 hours) rather than continuing to hit the site. Successful item IDs
+are cached and are not rescanned. Ordinary unread pages are cooldown-marked for
+24 hours on periodic syncs; an explicit manual sync can retry them after the
+current finite job completes. Periodic inventory sync is skipped while an age
+job is active, so the bridge does not add API traffic while the rendered-page
+job is still running.
 
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
@@ -182,7 +187,7 @@ already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
 cache constants or registering a second message listener. Bridge 3.2.0 uses
-content protocol 6, so tabs still running an older bridge script are forcibly
+content protocol 7, so tabs still running an older bridge script are forcibly
 reloaded once.
 
 
