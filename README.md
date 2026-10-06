@@ -233,10 +233,15 @@ and Depop rather than hiding destinations behind eligibility checks.
 
 The shared cross-list candidate takes title, description, price and photos from
 Vinted when available, while SKU and physical stock remain authoritative on the
-master InventoryItem. WooCommerce, Shopify and Wix can create remote products
-directly from this preflight, including Vinted source images. The created
-ChannelListing is then linked back to the same physical InventoryItem so later
-sales and stock reconciliation operate on one copy of the item.
+master InventoryItem. If a writable destination needs title, price or stock,
+**Review fields** opens an inline editor inside the same Cross-list panel rather
+than sending the user to generic Inventory Edit. Title/description/price can be
+reviewed for that destination; changing stock explicitly updates the physical
+master quantity before publication. WooCommerce, Shopify and Wix can create
+remote products directly from this preflight, including Vinted source images.
+The created ChannelListing is then linked back to the same physical
+InventoryItem so later sales and stock reconciliation operate on one copy of the
+item.
 
 BIBLIO keeps its book-specific preflight inside the same destination panel.
 When an ISBN is available, ISBN metadata is preferred for bibliographic title
@@ -248,7 +253,7 @@ silently replace what the user reviewed. Publisher/edition/publish-date
 enrichment is persisted onto the master item when published. Older Vinted books
 still classified as `general` qualify from linked ISBN/author/book-category
 evidence. If a sparse legacy Vinted book has no such evidence, Cross-list shows
-**Mark as book & continue**; that explicit action updates the master category and
+**Mark as book & review**; that explicit action updates the master category and
 opens the real BIBLIO preflight immediately instead of dumping the user into
 generic Edit.
 Zero stock exposes **Edit stock**, and a conflicting BIBLIO Book ID can be
