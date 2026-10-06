@@ -124,7 +124,7 @@ def build_candidate(
     enrichment_warning: str | None = None
     existing_bibliographic = {
         "subtitle": attrs.get("subtitle"),
-        "publisher": vmeta.get("publisher") or attrs.get("publisher"),
+        "publisher": metadata.get("publisher") or attrs.get("publisher"),
         "edition": attrs.get("edition"),
         "publish_date": (
             attrs.get("publish_date")
