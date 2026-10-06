@@ -413,7 +413,7 @@ def test_biblio_preflight_has_direct_stock_repair_and_book_id_override():
     ).read_text(encoding="utf-8")
     assert 'id="biblio-edit-stock"' in html
     assert 'id="biblio-edit-book"' not in html
-    assert '["book_id", "Book ID", fields.book_id, sources.book_id]' in APP_JS
+    assert '["book_id", "Book ID", bookIdValue, sources.book_id, true, true]' in APP_JS
     assert '"unique BIBLIO Book ID"' in APP_JS
     assert 'data.book_id_suggestion' in APP_JS
     assert 'missing.includes("available stock")' in APP_JS
@@ -489,4 +489,15 @@ def test_biblio_review_gate_is_repaired_inside_cross_list():
 def test_biblio_preflight_prepares_isbn_metadata_and_vinted_description():
     assert "ISBN lookup" in APP_JS
     assert "Preparing listing from Vinted, ISBN metadata and master data" in APP_JS
-    assert '["description", "Description", fields.description, sources.description]' in APP_JS
+    assert '["description", "Description", fields.description || "", sources.description, true, true]' in APP_JS
+
+
+
+def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_values():
+    assert 'class="biblio-review-input"' in APP_JS
+    assert '["title", "Title", fields.title || "", sources.title, true, true]' in APP_JS
+    assert '["author", "Author", fields.author || "", sources.author, true, true]' in APP_JS
+    assert '["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false]' in APP_JS
+    assert 'document.querySelectorAll(".biblio-review-input").forEach' in APP_JS
+    assert 'payload[field.dataset.field] = value' in APP_JS
+    assert "bibliographic_enrichment" in APP_JS
