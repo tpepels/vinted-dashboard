@@ -155,12 +155,13 @@ later periodic syncs.
 For active/reserved/hidden/draft listings, bridge 3.1.0 keeps a local detail
 cache for richer Vinted item metadata. When Vinted does not expose a trustworthy
 absolute posting timestamp, the bridge reads the visible `Uploaded` value from
-the **rendered** Vinted item page, for example `5 weeks ago`. Posting-age
-collection is decoupled from the normal browser snapshot: the snapshot completes
-first, then a persisted background queue scans rendered item pages in bounded
-multi-tab batches and writes each trusted age back incrementally. This avoids
-Manifest V3 service-worker timeouts on large inventories and survives browser or
-service-worker restarts. Failed item pages are retried in later sweep windows.
+the **rendered** Vinted item page, for example `5 weeks ago`. A manual sync
+collects all currently missing posting ages in **one finite burst**: one minimized
+worker window uses up to 16 tabs in parallel, reuses those tabs until the queue is
+finished, then closes the window. Successful item IDs are cached permanently and
+are not rescanned. Failed pages are cooldown-marked for 24 hours on periodic
+syncs; an explicit manual sync can retry them immediately. There is no repeating
+age-sweep alarm or endless open/close cycle.
 
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
@@ -173,9 +174,9 @@ cache constants or registering a second message listener. Bridge 3.1.0 bumps
 that protocol so tabs still running the 3.0.0 script are forcibly reloaded once.
 
 
-Age parsing is isolated in `app/extension/vinted_age.js`; tab navigation and
-the persisted rendered-page sweep stay in `background.js`; normal Vinted
-snapshot collection stays in `content.js`.
+Age parsing is isolated in `app/extension/vinted_age.js`; the finite rendered
+page burst stays in `background.js`; normal Vinted snapshot collection stays
+in `content.js`.
 
 Bridge releases follow a visible-version invariant: the downloaded ZIP filename
 contains the manifest version, the extension popup displays
@@ -233,11 +234,27 @@ replaced inline with a server-validated unique ID. Unlinked Vinted listings show
 can be published.
 
 When the Vinted source carries photos, up to five are copied automatically to
-BIBLIO during the FTP sync. The server downloads only trusted Vinted HTTPS
-image URLs, converts them to JPG, enforces BIBLIO's basic image requirements,
-and uploads them as `BookID.jpg`, `BookID_1.jpg`, etc. Successful photo
-sets are fingerprinted so unchanged photos are not re-uploaded on every sync;
-partial failures remain pending for retry.
+BIBLIO during the FTP sync. The BIBLIO preflight shows the actual Vinted image
+thumbnails and explicitly states that they will upload automatically. The server
+downloads only trusted Vinted HTTPS image URLs, converts them to JPG, enforces
+BIBLIO's basic image requirements, and uploads them as `BookID.jpg`,
+`BookID_1.jpg`, etc. Successful photo sets are fingerprinted so unchanged
+photos are not re-uploaded on every sync; partial failures remain pending for
+retry.
+
+Vinted taxonomy is used to set the broad master category automatically when an
+item is first synced or still classified as `general`. This covers books,
+clothing, electronics, home, collectibles, toys/games, media, sports, beauty,
+and art/crafts while retaining the original Vinted category separately. A book
+with a Vinted book category therefore does not require a manual “mark as book”
+confirmation.
+
+For BIBLIO books with an ISBN, the preflight performs the existing Open Library
+ISBN lookup even when Vinted already supplied an author. ISBN metadata is the
+preferred source for the bibliographic title and author, so marketing-heavy
+Vinted titles are not copied blindly. The Vinted listing description remains the
+preferred BIBLIO description, and Vinted price/photos remain the preferred
+commercial source data.
 
 
 
