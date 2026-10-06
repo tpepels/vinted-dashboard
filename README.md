@@ -152,7 +152,7 @@ The bridge supports the principal European Vinted web origins. On its first
 sync it uses an already-open signed-in Vinted tab and remembers that origin for
 later periodic syncs.
 
-For active/reserved/hidden/draft listings, bridge 3.4.0 keeps a local detail
+For active/reserved/hidden/draft listings, bridge 3.4.1 keeps a local detail
 cache for richer Vinted item metadata. Core inventory pagination is paced and
 retries HTTP 429 responses with backoff. Browser API GETs explicitly reuse the
 signed-in Vinted session, send the normal `X-Requested-With: XMLHttpRequest`
@@ -187,11 +187,11 @@ job.
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
 `first_seen_at`, and old `Today` fallbacks are never treated as posting age.
-Bridge 3.3.0 also performs a content-script protocol handshake and reloads an
+Bridge 3.4.1 also performs a content-script protocol handshake and reloads an
 already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
-cache constants or registering a second message listener. Bridge 3.3.0 uses
+cache constants or registering a second message listener. Bridge 3.4.1 uses
 content protocol 10, so tabs still running an older bridge script are forcibly
 reloaded once.
 
