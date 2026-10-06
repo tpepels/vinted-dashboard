@@ -7,6 +7,7 @@ other channel later.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -17,6 +18,16 @@ from sqlalchemy.orm import Session
 from app import models, stock_intake
 from app.constants import Channel, ItemCategory, ListingStatus
 from app.workspace_bootstrap import clean_isbn, get_or_create_channel_account
+
+
+def _isbn_from_book_barcode(value: Any) -> str | None:
+    raw = re.sub(r"[^0-9Xx]", "", str(value or ""))
+    if not (
+        (len(raw) == 13 and raw.startswith(("978", "979")))
+        or len(raw) == 10
+    ):
+        return None
+    return clean_isbn(raw)
 
 
 def _value(*choices: tuple[Any, str]) -> tuple[Any, str | None]:
@@ -258,6 +269,8 @@ def build_biblio_candidate(
     isbn, isbn_source = _value(
         (clean_isbn(vmeta.get("isbn")), "vinted"),
         (clean_isbn(attrs.get("isbn")), "master"),
+        (_isbn_from_book_barcode(vmeta.get("barcode")), "vinted_barcode"),
+        (_isbn_from_book_barcode(attrs.get("barcode")), "master_barcode"),
     )
 
     enrichment: dict[str, Any] | None = None
