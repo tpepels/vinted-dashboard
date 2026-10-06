@@ -1043,12 +1043,16 @@ function renderBiblioPublish(data) {
 
   const fields = data.fields || {};
   const sources = data.field_sources || {};
+  const enrichment = data.bibliographic_enrichment || {};
   const bookIdValue = fields.book_id || data.book_id_suggestion || "";
   const rows = [
     ["title", "Title", fields.title || "", sources.title, true, true],
     ["author", "Author", fields.author || "", sources.author, true, true],
     ["description", "Description", fields.description || "", sources.description, true, true],
     ["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false],
+    ["publisher", "Publisher", enrichment.publisher || "", enrichment.publisher ? "isbn" : null, true, false],
+    ["edition", "Edition", enrichment.edition || "", enrichment.edition ? "isbn" : null, true, false],
+    ["publish_date", "Publish date", enrichment.publish_date || "", enrichment.publish_date ? "isbn" : null, true, false],
     ["price_cents", "Price", fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2), sources.price_cents, true, true],
     ["book_id", "Book ID", bookIdValue, sources.book_id, true, true],
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
@@ -1077,14 +1081,6 @@ function renderBiblioPublish(data) {
       + (sourceName ? biblioSourceBadge(sourceName) : "")
       + '</div>';
   }).join("");
-
-  const enrichment = data.bibliographic_enrichment || {};
-  if (enrichment.publisher || enrichment.edition || enrichment.publish_date) {
-    $("#biblio-publish-fields").insertAdjacentHTML("beforeend",
-      '<div class="biblio-enrichment"><span class="biblio-field-label">ISBN metadata</span><strong>'
-      + esc([enrichment.publisher, enrichment.edition, enrichment.publish_date].filter(Boolean).join(" · "))
-      + '</strong>' + biblioSourceBadge("isbn") + '</div>');
-  }
 
   const missing = data.missing || [];
   let warning = "";
