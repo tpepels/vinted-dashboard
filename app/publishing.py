@@ -141,20 +141,34 @@ def _existing_biblio(
 def _source_image_urls(
     item: models.InventoryItem,
     source_listing: models.ChannelListing | None,
+    *,
+    include_master_fallbacks: bool = True,
 ) -> list[str]:
     urls: list[str] = []
     if source_listing is not None:
         extra = dict(source_listing.extra or {})
         raw_urls = extra.get("image_urls")
         if isinstance(raw_urls, list):
-            urls.extend(str(value).strip() for value in raw_urls if str(value or "").strip())
+            urls.extend(
+                str(value).strip()
+                for value in raw_urls
+                if str(value or "").strip()
+            )
         elif extra.get("image_url"):
             urls.append(str(extra["image_url"]).strip())
-    if not urls:
+    if include_master_fallbacks and not urls:
         attrs = dict(item.attributes or {})
         raw_urls = attrs.get("image_urls")
         if isinstance(raw_urls, list):
-            urls.extend(str(value).strip() for value in raw_urls if str(value or "").strip())
+            urls.extend(
+                str(value).strip()
+                for value in raw_urls
+                if str(value or "").strip()
+            )
+        for key in ("image_url", "cover_url", "cover_image_url"):
+            value = str(attrs.get(key) or "").strip()
+            if value:
+                urls.append(value)
     return list(dict.fromkeys(urls))[:5]
 
 
@@ -394,7 +408,11 @@ def build_biblio_candidate(
 
     existing = _existing_biblio(session, workspace_id, item.id)
     book_id = existing.external_id if existing else item.sku
-    image_urls = _source_image_urls(item, vinted)
+    image_urls = _source_image_urls(
+        item,
+        vinted,
+        include_master_fallbacks=False,
+    )
 
     fields = {
         "sku": item.sku,
