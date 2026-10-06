@@ -1,7 +1,7 @@
 (() => {
-if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 6) return;
-globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 6;
-const BRIDGE_CONTENT_PROTOCOL=6;
+if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 7) return;
+globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 7;
+const BRIDGE_CONTENT_PROTOCOL=7;
 function first(obj,...keys){if(!obj||typeof obj!=="object")return null;for(const key of keys){const v=obj[key];if(v!==undefined&&v!==null&&v!=="")return v}return null}
 function idOf(v){if(v&&typeof v==="object")v=first(v,"id","user_id");return v==null||v===""?null:String(v)}
 function nameOf(v){if(v&&typeof v==="object")v=first(v,"login","username","name","display_name");return v==null||v===""?null:String(v)}
@@ -270,6 +270,27 @@ async function collectVintedData(reason="periodic"){
 }
 
 
+function renderedPageAccessState(){
+  const title=String(document.title||"").toLowerCase();
+  const body=String(document.body?.innerText||document.body?.textContent||"").toLowerCase();
+  const sample=(title+"\n"+body).slice(0,120000);
+  const rateLimited=[
+    "you are rate limited",
+    "too many requests",
+    "request rate limit exceeded",
+    "access to this site is blocked",
+    "rate limit exceeded",
+  ].some(value=>sample.includes(value));
+  const challenged=[
+    "verify you are human",
+    "confirm you are human",
+    "security check",
+    "captcha",
+    "access denied",
+  ].some(value=>sample.includes(value));
+  return{rate_limited:rateLimited,challenged};
+}
+
 chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
   if(message?.type==="bridge-content-protocol"){
     sendResponse({ok:true,protocol:BRIDGE_CONTENT_PROTOCOL});
@@ -280,11 +301,12 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
     return true;
   }
   if(message?.type==="read-vinted-uploaded-age"){
+    const access=renderedPageAccessState();
     const currentId=location.pathname.match(/\/items\/(\d+)/)?.[1]||null;
-    const age=currentId&&String(currentId)===String(message.item_id)
+    const age=!access.rate_limited&&!access.challenged&&currentId&&String(currentId)===String(message.item_id)
       ? VintedAge.fromRenderedDocument(document)
       : null;
-    sendResponse({ok:true,age});
+    sendResponse({ok:true,age,...access});
   }
 });
 
