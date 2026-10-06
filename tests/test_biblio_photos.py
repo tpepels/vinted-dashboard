@@ -132,7 +132,7 @@ def test_biblio_sync_uploads_inventory_and_vinted_photos(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
     monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg-data")
 
@@ -223,7 +223,7 @@ def test_partial_biblio_photo_failure_is_retried_later(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
 
     calls = 0
@@ -300,7 +300,7 @@ def test_incremental_biblio_sync_skips_unchanged_inventory(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
     monkeypatch.setattr(
         hosted.ftplib,
@@ -358,7 +358,7 @@ def test_photo_only_retry_resends_photos_without_inventory(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
     monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg-data")
 
@@ -474,7 +474,7 @@ def test_first_inventory_upload_defers_final_photo_signature(monkeypatch):
     monkeypatch.setattr(
         hosted,
         "_biblio_rows",
-        lambda workspace_id, listing_id=None: (active, []),
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
     )
     monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg-data")
 
