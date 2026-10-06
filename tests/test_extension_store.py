@@ -226,6 +226,16 @@ def test_bridge_reloads_stale_content_script_before_sync():
     assert "tab=await ensureCurrentContentScript(tab);" in background
 
 
+def test_content_script_has_reinjection_guard():
+    content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "(() => {" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 4" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 4" in content
+    assert content.rstrip().endswith("})();")
+    assert "node scripts/test_vinted_content_idempotent.js" in workflow
+
+
 def test_ci_does_not_commit_a_static_fernet_key():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "APP_ENCRYPTION_KEY:" not in workflow
