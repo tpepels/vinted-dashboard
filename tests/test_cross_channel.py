@@ -1008,3 +1008,247 @@ def test_wix_close_zeroes_every_location_with_revision(monkeypatch):
     assert result["locations_updated"] == 2
     assert [row[1]["inventoryItem"]["revision"] for row in patches] == ["3", "4"]
     assert all(row[1]["inventoryItem"]["quantity"] == 0 for row in patches)
+
+
+
+def test_partial_store_sale_propagates_authoritative_remaining_quantity():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="MULTI-1",
+            title="Multi-unit item",
+            category="general",
+            quantity=3,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        shopify = _listing(
+            session,
+            workspace_id,
+            item,
+            "shopify",
+            "gid://shopify/ProductVariant/21",
+        )
+        shopify.quantity = 2
+        woo = _listing(session, workspace_id, item, "woocommerce", "77")
+        woo.quantity = 3
+        wix = _listing(session, workspace_id, item, "wix", "prod-2:var-2")
+        wix.quantity = 3
+        vinted = _listing(session, workspace_id, item, "vinted", "V-MULTI")
+        vinted.quantity = 1
+        sale = _sale(session, workspace_id, item, channel="shopify")
+
+        created = plan_sale_reconciliation(session, sale)
+        by_channel = {row.channel: row for row in created}
+
+        assert item.status == "active"
+        assert item.quantity == 2
+        assert by_channel["woocommerce"].action_type == "sync_quantity"
+        assert by_channel["woocommerce"].mode == "remote"
+        assert by_channel["woocommerce"].detail["target_quantity"] == 2
+        assert by_channel["wix"].action_type == "sync_quantity"
+        assert by_channel["wix"].mode == "remote"
+        assert by_channel["wix"].detail["target_quantity"] == 2
+        assert by_channel["vinted"].action_type == "sync_quantity"
+        assert by_channel["vinted"].mode == "manual"
+        assert by_channel["vinted"].status == "attention"
+
+        jobs_count = session.execute(
+            select(func.count(BackgroundJob.id)).where(
+                BackgroundJob.workspace_id == workspace_id,
+                BackgroundJob.job_type == "cross_channel_close",
+            )
+        ).scalar_one()
+        assert jobs_count == 2
+
+
+def test_partial_stock_action_updates_remote_and_local_quantity(monkeypatch):
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="MULTI-2",
+            title="Multi-unit item",
+            category="general",
+            quantity=3,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        shopify = _listing(
+            session,
+            workspace_id,
+            item,
+            "shopify",
+            "gid://shopify/ProductVariant/22",
+        )
+        shopify.quantity = 2
+        woo = _listing(session, workspace_id, item, "woocommerce", "78")
+        woo.quantity = 3
+        sale = _sale(session, workspace_id, item, channel="shopify")
+        actions = plan_sale_reconciliation(session, sale)
+        action = next(row for row in actions if row.channel == "woocommerce")
+        action_id = action.id
+        listing_id = woo.id
+
+    calls = []
+    monkeypatch.setattr(
+        hosted,
+        "set_woocommerce_workspace_listing_quantity",
+        lambda workspace_id, external_id, quantity: calls.append(
+            (workspace_id, external_id, quantity)
+        ) or {
+            "remote": "quantity_synced",
+            "external_id": external_id,
+            "quantity": quantity,
+            "previous_quantity": 3,
+        },
+    )
+    result = execute_action(action_id)
+
+    assert result["remote"] == "quantity_synced"
+    assert calls == [(workspace_id, "78", 2)]
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, listing_id)
+        action = session.get(CrossChannelAction, action_id)
+        assert listing.status == "active"
+        assert listing.quantity == 2
+        assert action.status == "success"
+        assert action.detail["target_quantity"] == 2
+
+
+def test_partial_store_sale_skips_destinations_already_at_target_quantity():
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="MULTI-3",
+            title="Multi-unit item",
+            category="general",
+            quantity=3,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        shopify = _listing(
+            session,
+            workspace_id,
+            item,
+            "shopify",
+            "gid://shopify/ProductVariant/23",
+        )
+        shopify.quantity = 2
+        woo = _listing(session, workspace_id, item, "woocommerce", "79")
+        woo.quantity = 2
+        sale = _sale(session, workspace_id, item, channel="shopify")
+
+        created = plan_sale_reconciliation(session, sale)
+        assert created == []
+        assert item.quantity == 2
+
+
+def test_cancelled_sale_after_remote_close_creates_restore_review(monkeypatch):
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="RESTORE-1",
+            title="Restore item",
+            category="general",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        _listing(session, workspace_id, item, "vinted", "V-RESTORE", status="sold")
+        woo = _listing(session, workspace_id, item, "woocommerce", "80")
+        sale = _sale(session, workspace_id, item)
+        actions = plan_sale_reconciliation(session, sale)
+        close_action = next(row for row in actions if row.channel == "woocommerce")
+        close_action_id = close_action.id
+        woo_id = woo.id
+        sale_id = sale.id
+
+    monkeypatch.setattr(
+        hosted,
+        "close_woocommerce_workspace_listing",
+        lambda workspace_id, external_id: {
+            "remote": "stock_zeroed",
+            "external_id": external_id,
+            "quantity": 0,
+        },
+    )
+    execute_action(close_action_id)
+
+    with db.session_scope() as session:
+        sale = session.get(models.Sale, sale_id)
+        sale.status = "cancelled"
+        sale.lifecycle_status = "cancelled"
+        sale.is_closed = True
+        created = reconcile_sale_state(session, sale)
+
+        assert len(created) == 1
+        restore = created[0]
+        assert restore.action_type == "review_restore"
+        assert restore.mode == "manual"
+        assert restore.status == "attention"
+        assert restore.channel == "woocommerce"
+        assert restore.channel_listing_id == woo_id
+        assert restore.detail["previous_action_id"] == str(close_action_id)
+        assert "cancelled/refunded" in restore.detail["reason"]
+
+        jobs_count = session.execute(
+            select(func.count(BackgroundJob.id)).where(
+                BackgroundJob.workspace_id == workspace_id,
+                BackgroundJob.job_type == "cross_channel_close",
+                BackgroundJob.status == "queued",
+            )
+        ).scalar_one()
+        assert jobs_count == 1  # the already-consumed original job only; no restore job
+
+
+def test_cancelled_sale_restore_review_is_idempotent(monkeypatch):
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="RESTORE-2",
+            title="Restore item",
+            category="general",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        _listing(session, workspace_id, item, "vinted", "V-RESTORE-2", status="sold")
+        woo = _listing(session, workspace_id, item, "woocommerce", "81")
+        sale = _sale(session, workspace_id, item)
+        close_action = plan_sale_reconciliation(session, sale)[0]
+        close_action.status = "success"
+        close_action.completed_at = NOW
+        woo.status = "inactive"
+        woo.quantity = 0
+        sale.status = "cancelled"
+        sale.lifecycle_status = "cancelled"
+        sale_id = sale.id
+
+    with db.session_scope() as session:
+        sale = session.get(models.Sale, sale_id)
+        first = reconcile_sale_state(session, sale)
+        second = reconcile_sale_state(session, sale)
+        assert len(first) == 1
+        assert second == []
+        restores = session.execute(
+            select(CrossChannelAction).where(
+                CrossChannelAction.trigger_sale_id == sale_id,
+                CrossChannelAction.action_type == "review_restore",
+            )
+        ).scalars().all()
+        assert len(restores) == 1
