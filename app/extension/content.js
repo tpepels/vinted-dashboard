@@ -47,7 +47,7 @@ function isRateLimitError(error){return Boolean(error?.vintedRateLimited)}
 async function fetchJson(path,params={},options={}){
   const url=new URL(path,location.origin);
   for(const[k,v]of Object.entries(params))url.searchParams.set(k,String(v));
-  const minDelayMs=Math.max(0,Number(options.minDelayMs??300));
+  const minDelayMs=Math.max(0,Number(options.minDelayMs??750));
   const maxRetries=Math.max(0,Number(options.maxRetries??2));
   for(let attempt=0;attempt<=maxRetries;attempt++){
     const spacing=minDelayMs-(Date.now()-lastVintedFetchAt);
@@ -168,7 +168,7 @@ async function enrichListingDetails(listings,reason="periodic"){
     missing.push(row);
   }
 
-  const budget=reason==="manual"?32:10;
+  const budget=reason==="manual"?12:4;
   const queue=missing.slice(0,budget);
   let enriched=0,rateLimited=false;
   for(const row of queue){
@@ -176,7 +176,7 @@ async function enrichListingDetails(listings,reason="periodic"){
       const payload=await fetchJson(
         `/api/v2/items/${row.id}`,
         {localize:"false"},
-        {minDelayMs:900,maxRetries:1},
+        {minDelayMs:1500,maxRetries:1},
       );
       if(payload===null)continue;
       const raw=payload?.item||payload?.data?.item||payload?.data||payload||{};
