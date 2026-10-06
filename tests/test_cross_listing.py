@@ -530,3 +530,46 @@ def test_cross_list_candidate_fills_missing_book_metadata_from_isbn(monkeypatch)
     assert candidate["fields"]["binding"] == "Paperback"
     assert candidate["fields"]["publish_date"] == "1988"
     assert candidate["fields"]["pages"] == 176
+
+
+
+def test_cross_list_reuses_master_cover_when_no_vinted_photos_exist():
+    workspace_id = _workspace("master-cover")
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="BOOK-COVER",
+            title="Cover Book",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            condition="good",
+            currency="EUR",
+            attributes={
+                "author": "Author",
+                "subtitle": "Subtitle",
+                "publisher": "Publisher",
+                "edition": "Edition",
+                "publish_date": "2000",
+                "binding": "Paperback",
+                "pages": 200,
+                "isbn": "9780140328721",
+                "default_price_cents": 900,
+                "cover_url": "https://covers.openlibrary.org/b/id/123-M.jpg",
+            },
+        )
+        session.add(item)
+        session.flush()
+        item_id = item.id
+
+    with db.session_scope() as session:
+        candidate = cross_listing.build_candidate(
+            session,
+            workspace_id,
+            item_id,
+        )
+
+    assert candidate["source"]["channel"] == "master"
+    assert candidate["source"]["image_urls"] == [
+        "https://covers.openlibrary.org/b/id/123-M.jpg"
+    ]
+    assert candidate["source"]["photo_count"] == 1
