@@ -2777,6 +2777,7 @@ def _serialize_biblio_activity_run(run: models.ConnectorSyncRun) -> dict[str, An
         "photos_total": detail.get("photos_total"),
         "photos_uploaded": detail.get("photos_uploaded"),
         "photos_pending_listings": detail.get("photos_pending_listings"),
+        "photo_retry_scheduled": detail.get("photo_retry_scheduled"),
         "photo_errors": list(detail.get("photo_errors") or []),
         "error": run.error,
     }
@@ -2858,6 +2859,8 @@ def biblio_activity(
                 "listing_title": listing_titles.get(listing_id) if listing_id else None,
                 "full_sync": bool(payload.get("full_sync")),
                 "photos_only": bool(payload.get("photos_only")),
+                "automatic_photo_retry": bool(payload.get("automatic_photo_retry")),
+                "available_at": job.available_at.isoformat() if job.available_at else None,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
                 "locked_at": job.locked_at.isoformat() if job.locked_at else None,
                 "completed_at": job.completed_at.isoformat() if job.completed_at else None,
@@ -2869,8 +2872,24 @@ def biblio_activity(
         (row for row in serialized_runs if row["status"] == SyncRunStatus.RUNNING),
         None,
     )
+    now = utcnow()
+    ready_job_ids = {
+        str(job.id)
+        for job in job_rows
+        if (
+            job.status == "running"
+            or (
+                job.status == "queued"
+                and (job.available_at is None or job.available_at <= now)
+            )
+        )
+    }
     active_job = next(
-        (row for row in serialized_jobs if row["status"] in {"queued", "running"}),
+        (
+            row
+            for row in serialized_jobs
+            if row["id"] in ready_job_ids
+        ),
         None,
     )
     current = running_run or active_job or (serialized_runs[0] if serialized_runs else None)

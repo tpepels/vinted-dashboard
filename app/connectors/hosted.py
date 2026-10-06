@@ -2818,6 +2818,14 @@ def import_biblio_workspace(
         full_snapshot=True,
         note=f"Imported {filename}",
     )
+    # An imported BIBLIO file is a snapshot of remote state, not a set of
+    # local edits waiting to be pushed back. Mark those rows as synchronized
+    # so the next incremental sync does not echo the whole imported catalogue.
+    imported_active, imported_deletes = _biblio_rows(workspace_id)
+    _mark_biblio_inventory_sync(
+        workspace_id,
+        [*imported_active, *imported_deletes],
+    )
     return {"source": Channel.BIBLIO, "items": len(rows), "active": active}
 
 
@@ -2870,7 +2878,7 @@ def _biblio_rows(
             query = query.where(models.ChannelListing.id == listing_id)
         listings = session.execute(query.order_by(models.ChannelListing.external_id)).all()
 
-        latest = session.execute(
+        successful_runs = session.execute(
             select(models.ConnectorSyncRun)
             .where(
                 models.ConnectorSyncRun.workspace_id == workspace_id,
@@ -2879,9 +2887,20 @@ def _biblio_rows(
                 models.ConnectorSyncRun.status == SyncRunStatus.SUCCESS,
             )
             .order_by(models.ConnectorSyncRun.completed_at.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-        cutoff = latest.completed_at if latest and latest.completed_at else None
+            .limit(100)
+        ).scalars().all()
+        # Pre-signature BIBLIO syncs had no "mode" marker and always sent the
+        # whole active catalogue.  A new targeted/incremental run must never
+        # become the compatibility baseline for unrelated unsigned listings.
+        legacy = next(
+            (
+                run
+                for run in successful_runs
+                if not str(dict(run.detail or {}).get("mode") or "").strip()
+            ),
+            None,
+        )
+        cutoff = legacy.completed_at if legacy and legacy.completed_at else None
 
         active: list[dict[str, Any]] = []
         deletes: list[dict[str, Any]] = []
@@ -2890,7 +2909,7 @@ def _biblio_rows(
             extra = dict(listing.extra or {})
             row = {
                 "source_id": listing.external_id,
-                "sku": listing.external_sku or item.sku,
+                "sku": listing.external_id or listing.external_sku or item.sku,
                 "title": listing.title or item.title,
                 "author": extra.get("author") or attrs.get("author"),
                 "description": extra.get("description") or attrs.get("description") or item.notes,
@@ -2946,6 +2965,13 @@ def _missing_biblio(row: dict[str, Any]) -> list[str]:
     return missing
 
 
+def _biblio_text(value: Any) -> str:
+    """Return one safe delimited-text cell without record-breaking controls."""
+    text = str(value or "").replace("\x00", "")
+    text = re.sub(r"[\t\r\n]+", " ", text)
+    return re.sub(r" {2,}", " ", text).strip()
+
+
 def _biblio_tsv(rows: list[dict[str, Any]], *, sold: bool) -> bytes:
     output = io.StringIO(newline="")
     writer = csv.writer(output, delimiter="\t", lineterminator="\n")
@@ -2960,13 +2986,13 @@ def _biblio_tsv(rows: list[dict[str, Any]], *, sold: bool) -> bytes:
         )
         writer.writerow(
             [
-                row.get("sku") or row.get("source_id") or "",
-                row.get("author") or "",
-                row.get("title") or "",
-                row.get("description") or "",
+                _biblio_text(row.get("sku") or row.get("source_id") or ""),
+                _biblio_text(row.get("author") or ""),
+                _biblio_text(row.get("title") or ""),
+                _biblio_text(row.get("description") or ""),
                 price,
                 "sold" if sold else "for sale",
-                row.get("isbn") or "",
+                _biblio_text(row.get("isbn") or ""),
                 0 if sold else max(1, int(row.get("quantity") or 1)),
             ]
         )
@@ -2977,11 +3003,18 @@ BIBLIO_MAX_PHOTOS = 5
 BIBLIO_MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
 
 
-def _biblio_photo_signature(urls: list[str]) -> str | None:
+def _biblio_photo_signature(
+    urls: list[str],
+    *,
+    book_id: str = "",
+) -> str | None:
     clean = [str(value).strip() for value in urls if str(value or "").strip()][:BIBLIO_MAX_PHOTOS]
     if not clean:
         return None
-    return hashlib.sha256("\n".join(clean).encode("utf-8")).hexdigest()
+    # The Book ID is part of the remote filename. If it changes, identical
+    # image URLs still need to be uploaded again under the new filenames.
+    payload = "\n".join([f"book:{str(book_id or '').strip()}", *clean])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _biblio_photo_filename(book_id: str, index: int) -> str:
@@ -3055,7 +3088,8 @@ def _pending_biblio_photo_rows(
             for value in (row.get("image_urls") or [])
             if str(value or "").strip()
         ][:BIBLIO_MAX_PHOTOS]
-        signature = _biblio_photo_signature(urls)
+        book_id = str(row.get("sku") or row.get("source_id") or "").strip()
+        signature = _biblio_photo_signature(urls, book_id=book_id)
         if not signature:
             continue
         if not force and signature == row.get("photo_sync_signature"):
@@ -3085,6 +3119,7 @@ def _mark_biblio_photo_sync(
             extra["photo_sync_signature"] = signature
             extra["photo_synced_at"] = now
             extra["photo_count"] = count
+            extra["photo_book_id"] = listing.external_sku or listing.external_id
             listing.extra = extra
 
 
@@ -3226,13 +3261,13 @@ def _set_biblio_listing_states(
                     extra["publish_completed_at"] = now
             if publish_error is not None:
                 extra["publish_error"] = publish_error
-            elif publish_state in {"uploading", "ftp_uploaded"}:
+            elif publish_state in {"queued", "uploading", "ftp_uploaded"}:
                 extra.pop("publish_error", None)
             if photo_state is not None:
                 extra["photo_sync_state"] = photo_state
             if photo_error is not None:
                 extra["photo_sync_error"] = photo_error
-            elif photo_state in {"uploading", "ftp_uploaded", "none"}:
+            elif photo_state in {"queued", "uploading", "ftp_uploaded", "retry_scheduled", "none"}:
                 extra.pop("photo_sync_error", None)
             listing.extra = extra
 
@@ -3263,6 +3298,13 @@ def _mark_biblio_inventory_sync(
             extra["inventory_sync_signature"] = by_id[listing.id]
             extra["inventory_synced_at"] = now
             listing.extra = extra
+
+def _biblio_upload_stamp() -> str:
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    # UUID suffix prevents same-second jobs/workers from overwriting each
+    # other's FTP files.
+    return f"{stamp}-{uuid.uuid4().hex[:10]}"
+
 
 def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
@@ -3312,6 +3354,14 @@ def sync_biblio_workspace(
         active,
         force=bool(force_photos or full_sync),
     )
+    first_upload_photo_ids = {
+        str(row.get("listing_id") or "")
+        for row in photo_rows
+        if not photos_only
+        and row.get("inventory_dirty")
+        and not row.get("inventory_synced_at")
+        and row.get("listing_id")
+    }
     selected_ids = [str(row["listing_id"]) for row in [*active, *deletes] if row.get("listing_id")]
     photo_listing_ids = [str(row["listing_id"]) for row in photo_rows if row.get("listing_id")]
 
@@ -3329,7 +3379,7 @@ def sync_biblio_workspace(
         )
         raise RuntimeError(f"BIBLIO upload blocked: required fields are missing. Examples: {examples}")
 
-    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    stamp = _biblio_upload_stamp()
     prefix = re.sub(
         r"[^A-Za-z0-9_-]+",
         "-",
@@ -3359,6 +3409,7 @@ def sync_biblio_workspace(
             "photos_uploaded": 0,
             "photos_pending_listings": len(photo_rows),
             "photo_errors": [],
+            "photo_retry_scheduled": 0,
             "message": "Preparing BIBLIO FTP upload",
         },
     )
@@ -3408,8 +3459,8 @@ def sync_biblio_workspace(
         raise RuntimeError(error)
 
     photo_synced: list[tuple[str, str, int]] = []
+    deferred_photo_retry_listing_ids: list[str] = []
     photo_errors: list[str] = []
-    photo_error_by_listing: dict[str, list[str]] = {}
     photos_uploaded = 0
     try:
         _update_biblio_run(
@@ -3490,22 +3541,40 @@ def sync_biblio_workspace(
                     },
                 )
             if row_errors:
-                photo_error_by_listing[listing_key] = row_errors
+                if not photos_only and listing_key:
+                    deferred_photo_retry_listing_ids.append(listing_key)
+                    photo_state = "retry_scheduled"
+                else:
+                    photo_state = "error"
                 _set_biblio_listing_states(
                     workspace_id,
                     [listing_key],
-                    photo_state="error",
+                    photo_state=photo_state,
                     photo_error="; ".join(row_errors)[:2000],
                 )
             elif uploaded == len(row.get("image_urls") or []) and uploaded > 0:
-                photo_synced.append(
-                    (listing_key, str(row["photo_signature"]), uploaded)
-                )
-                _set_biblio_listing_states(
-                    workspace_id,
-                    [listing_key],
-                    photo_state="ftp_uploaded",
-                )
+                if listing_key in first_upload_photo_ids:
+                    # BIBLIO ignores a photo if there is no active listing to
+                    # attach it to. A newly-uploaded record may still be
+                    # awaiting their upload filter/indexing, so do not mark the
+                    # photo signature final yet. The worker schedules one
+                    # delayed photo-only retry; a manual Retry photos can also
+                    # satisfy it sooner.
+                    deferred_photo_retry_listing_ids.append(listing_key)
+                    _set_biblio_listing_states(
+                        workspace_id,
+                        [listing_key],
+                        photo_state="retry_scheduled",
+                    )
+                else:
+                    photo_synced.append(
+                        (listing_key, str(row["photo_signature"]), uploaded)
+                    )
+                    _set_biblio_listing_states(
+                        workspace_id,
+                        [listing_key],
+                        photo_state="ftp_uploaded",
+                    )
 
         try:
             ftp.quit()
@@ -3559,6 +3628,7 @@ def sync_biblio_workspace(
             "photos_uploaded": photos_uploaded,
             "photos_pending_listings": len(photo_rows),
             "photo_errors": photo_errors[:20],
+            "photo_retry_scheduled": len(deferred_photo_retry_listing_ids),
             "message": (
                 "FTP upload complete with photo warnings"
                 if photo_errors
@@ -3575,6 +3645,7 @@ def sync_biblio_workspace(
         "photos_total": photo_total,
         "photos_uploaded": photos_uploaded,
         "photo_errors": photo_errors,
+        "deferred_photo_retry_listing_ids": list(dict.fromkeys(deferred_photo_retry_listing_ids)),
         "run_id": str(run_id),
     }
 
@@ -3675,9 +3746,9 @@ def _biblio_listing_row(workspace_id: uuid.UUID, listing_id: uuid.UUID) -> dict[
             raise RuntimeError("BIBLIO master inventory item no longer exists")
         attrs = dict(item.attributes or {})
         extra = dict(listing.extra or {})
-        return {
+        row = {
             "source_id": listing.external_id,
-            "sku": listing.external_sku or item.sku,
+            "sku": listing.external_id or listing.external_sku or item.sku,
             "title": listing.title or item.title,
             "author": extra.get("author") or attrs.get("author"),
             "description": extra.get("description") or attrs.get("description") or item.notes,
@@ -3686,7 +3757,10 @@ def _biblio_listing_row(workspace_id: uuid.UUID, listing_id: uuid.UUID) -> dict[
             "currency": listing.currency or item.currency or "EUR",
             "quantity": 0,
             "status": ListingStatus.SOLD,
+            "listing_id": str(listing.id),
         }
+        row["inventory_signature"] = _biblio_inventory_signature(row)
+        return row
 
 
 def close_biblio_workspace_listing(
@@ -3700,7 +3774,7 @@ def close_biblio_workspace_listing(
     """
     row = _biblio_listing_row(workspace_id, listing_id)
     values = _workspace_or_env_biblio_values(workspace_id)
-    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    stamp = _biblio_upload_stamp()
     prefix = re.sub(
         r"[^A-Za-z0-9_-]+",
         "-",
@@ -3749,4 +3823,5 @@ def close_biblio_workspace_listing(
         "remote": "delete_uploaded",
         "external_id": str(row.get("source_id") or ""),
         "deletes_filename": filename,
+        "inventory_signature": str(row.get("inventory_signature") or ""),
     }

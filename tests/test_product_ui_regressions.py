@@ -529,3 +529,10 @@ def test_biblio_inventory_and_listing_rows_show_publication_state():
     assert '"uploading"' in APP_JS
     assert '"FTP uploaded"' in APP_JS
     assert "photo error" in APP_JS
+
+
+
+def test_biblio_ui_explains_deferred_photo_retry_and_filename_warning():
+    assert "photo retry scheduled" in APP_JS
+    assert "BIBLIO ignores an image if there is no active listing" in APP_JS
+    assert "Photo warning:" in APP_JS

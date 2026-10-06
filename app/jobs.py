@@ -21,14 +21,20 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def enqueue(job_type: str, payload: dict[str, Any], workspace_id: uuid.UUID | None = None) -> uuid.UUID:
+def enqueue(
+    job_type: str,
+    payload: dict[str, Any],
+    workspace_id: uuid.UUID | None = None,
+    *,
+    delay_seconds: int = 0,
+) -> uuid.UUID:
     with db.session_scope() as session:
         job = BackgroundJob(
             workspace_id=workspace_id,
             job_type=job_type,
             payload=payload,
             status="queued",
-            available_at=utcnow(),
+            available_at=utcnow() + timedelta(seconds=max(0, int(delay_seconds or 0))),
         )
         session.add(job)
         session.flush()

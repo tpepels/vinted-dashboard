@@ -63,6 +63,7 @@ def test_worker_biblio_handler_preserves_target_and_photo_modes(monkeypatch):
     def fake_sync(workspace, **kwargs):
         called["workspace_id"] = workspace
         called.update(kwargs)
+        return {}
 
     monkeypatch.setattr("app.connectors.hosted.sync_biblio_workspace", fake_sync)
     worker._sync_biblio(
@@ -82,3 +83,41 @@ def test_worker_biblio_handler_preserves_target_and_photo_modes(monkeypatch):
         "force_photos": True,
         "photos_only": True,
     }
+
+
+
+def test_worker_schedules_one_delayed_photo_retry_for_new_listing(monkeypatch):
+    workspace_id = uuid.uuid4()
+    listing_id = uuid.uuid4()
+    queued = []
+
+    monkeypatch.setenv("BIBLIO_PHOTO_RETRY_DELAY_SECONDS", "123")
+    monkeypatch.setattr(
+        "app.connectors.hosted.sync_biblio_workspace",
+        lambda workspace, **kwargs: {
+            "deferred_photo_retry_listing_ids": [str(listing_id)]
+        },
+    )
+    monkeypatch.setattr(
+        worker.jobs,
+        "enqueue",
+        lambda job_type, payload, workspace, delay_seconds=0: queued.append(
+            (job_type, payload, workspace, delay_seconds)
+        ) or uuid.uuid4(),
+    )
+
+    worker._sync_biblio({"listing_id": str(listing_id)}, workspace_id)
+
+    assert queued == [
+        (
+            "biblio_sync",
+            {
+                "listing_id": str(listing_id),
+                "photos_only": True,
+                "force_photos": False,
+                "automatic_photo_retry": True,
+            },
+            workspace_id,
+            123,
+        )
+    ]

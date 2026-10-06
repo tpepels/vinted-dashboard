@@ -166,6 +166,20 @@ def _book_id_conflict(
     ).scalar_one_or_none()
 
 
+def _biblio_photo_book_id_warning(book_id: str | None, photo_count: int) -> str | None:
+    if int(photo_count or 0) <= 0:
+        return None
+    value = str(book_id or "").strip()
+    if not value:
+        return None
+    if any(char in value for char in ("/", "\\", "'", "\x00")):
+        return (
+            "This Book ID cannot be used as a BIBLIO photo filename. "
+            "Use a Book ID without slashes, backslashes or apostrophes if you want photos uploaded."
+        )
+    return None
+
+
 def validate_biblio_candidate(
     session: Session,
     workspace_id: uuid.UUID,
@@ -205,12 +219,17 @@ def validate_biblio_candidate(
         if "unique BIBLIO Book ID" not in missing:
             missing.append("unique BIBLIO Book ID")
 
+    photo_warning = _biblio_photo_book_id_warning(
+        fields.get("book_id"),
+        int(dict(candidate.get("source") or {}).get("photo_count") or 0),
+    )
     return {
         **candidate,
         "fields": fields,
         "book_id_suggestion": suggestion,
         "missing": missing,
         "ready": not missing,
+        "photo_warning": photo_warning,
     }
 
 
@@ -407,6 +426,10 @@ def apply_biblio_overrides(
         "bibliographic_enrichment": bibliographic,
         "missing": missing,
         "ready": not missing,
+        "photo_warning": _biblio_photo_book_id_warning(
+            fields.get("book_id"),
+            int(dict(candidate.get("source") or {}).get("photo_count") or 0),
+        ),
     }
     return candidate
 
@@ -444,6 +467,7 @@ def upsert_biblio_listing(
     account, _ = get_or_create_channel_account(session, workspace, Channel.BIBLIO, {})
     now = datetime.now(timezone.utc)
     source = dict(candidate.get("source") or {})
+    previous_external_id = existing.external_id if existing is not None else None
 
     if existing is None:
         existing = models.ChannelListing(
@@ -473,7 +497,18 @@ def upsert_biblio_listing(
     if image_urls:
         photo_sync_state = (
             "queued"
-            if image_urls != previous_images or not previous_extra.get("photo_sync_signature")
+            if (
+                image_urls != previous_images
+                or not previous_extra.get("photo_sync_signature")
+                or (
+                    previous_external_id is not None
+                    and str(previous_external_id) != external_id
+                )
+                or (
+                    previous_extra.get("photo_book_id")
+                    and str(previous_extra.get("photo_book_id")) != external_id
+                )
+            )
             else previous_extra.get("photo_sync_state") or "ftp_uploaded"
         )
     else:

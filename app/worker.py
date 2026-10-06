@@ -42,15 +42,39 @@ def _check_workspace_write_access(workspace_id: uuid.UUID | None, job_type: str)
 def _sync_biblio(payload: dict, workspace_id: uuid.UUID | None) -> None:
     from app.connectors.hosted import sync_biblio_workspace
 
+    resolved_workspace = _require_workspace("biblio_sync", workspace_id)
     raw_listing_id = payload.get("listing_id")
     listing_id = uuid.UUID(str(raw_listing_id)) if raw_listing_id else None
-    sync_biblio_workspace(
-        _require_workspace("biblio_sync", workspace_id),
+    result = sync_biblio_workspace(
+        resolved_workspace,
         listing_id=listing_id,
         full_sync=bool(payload.get("full_sync")),
         force_photos=bool(payload.get("force_photos")),
         photos_only=bool(payload.get("photos_only")),
     )
+
+    # BIBLIO explicitly ignores an image if it is picked up before the
+    # matching listing becomes active. New inventory uploads therefore get
+    # one durable delayed photo-only retry. If a manual retry succeeds first,
+    # the delayed job becomes a no-op because force_photos is deliberately
+    # false.
+    if not payload.get("photos_only"):
+        delay_seconds = max(
+            0,
+            int(os.getenv("BIBLIO_PHOTO_RETRY_DELAY_SECONDS", "93600")),
+        )
+        for raw_id in result.get("deferred_photo_retry_listing_ids") or []:
+            jobs.enqueue(
+                "biblio_sync",
+                {
+                    "listing_id": str(raw_id),
+                    "photos_only": True,
+                    "force_photos": False,
+                    "automatic_photo_retry": True,
+                },
+                resolved_workspace,
+                delay_seconds=delay_seconds,
+            )
 
 
 def _sync_ebay(_payload: dict, workspace_id: uuid.UUID | None) -> None:
@@ -183,6 +207,31 @@ def run_forever() -> None:
                         )
                     except Exception:
                         logger.exception("could not record cross-channel action failure")
+            elif (
+                job.get("job_type") == "biblio_sync"
+                and str(exc) == "BIBLIO FTP sync failed"
+            ):
+                result = jobs.retry(job["id"], str(exc))
+                if result.get("will_retry"):
+                    payload = job.get("payload") or {}
+                    raw_listing_id = payload.get("listing_id")
+                    if raw_listing_id:
+                        try:
+                            from app.connectors.hosted import _set_biblio_listing_states
+                            if payload.get("photos_only"):
+                                _set_biblio_listing_states(
+                                    uuid.UUID(str(job["workspace_id"])),
+                                    [str(raw_listing_id)],
+                                    photo_state="queued",
+                                )
+                            else:
+                                _set_biblio_listing_states(
+                                    uuid.UUID(str(job["workspace_id"])),
+                                    [str(raw_listing_id)],
+                                    publish_state="queued",
+                                )
+                        except Exception:
+                            logger.exception("could not mark BIBLIO job for retry")
             else:
                 jobs.fail(job["id"], str(exc))
         else:

@@ -12,6 +12,7 @@ from app.connectors.workspace_sync import recompute_inventory_item
 from app.cross_channel import (
     acknowledge_manual_action,
     auto_link_unlinked_sales,
+    execute_action,
     plan_sale_reconciliation,
     reconcile_sale_state,
     unlinked_sale_reconciliation,
@@ -296,8 +297,8 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
         )
         session.add(item)
         session.flush()
-        listing = _listing(session, workspace_id, item, "biblio", "BOOK-1")
-        listing.external_sku = "BOOK-1"
+        listing = _listing(session, workspace_id, item, "biblio", "REMOTE-BOOK-1")
+        listing.external_sku = "LOCAL-BOOK-1"
         listing.price_cents = 1200
         listing.currency = "EUR"
         listing.extra = {"author": "John Williams", "description": "Used book"}
@@ -348,8 +349,11 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
     assert command.startswith("STOR test-")
     assert command.endswith("-deletes.txt")
     text = payload.decode("utf-8")
-    assert "BOOK-1" in text
+    assert "REMOTE-BOOK-1" in text
+    assert "LOCAL-BOOK-1" not in text
     assert "	sold	" in text
+    assert result["external_id"] == "REMOTE-BOOK-1"
+    assert result["inventory_signature"]
 
 
 def test_vinted_snapshot_exact_item_id_links_sale_and_queues_other_channel_close():
@@ -655,3 +659,66 @@ def test_auto_link_does_not_reuse_item_already_consumed_by_another_sale():
         assert result["linked"] == 0
         assert result["unmatched"] == 1
         assert session.get(models.Sale, second_id).inventory_item_id is None
+
+
+
+def test_biblio_cross_channel_completion_commits_sold_state_and_signature_together(monkeypatch):
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="MASTER-SOLD",
+            title="Sold Book",
+            category="book",
+            quantity=1,
+            status="active",
+            attributes={},
+        )
+        session.add(item)
+        session.flush()
+        _listing(session, workspace_id, item, "vinted", "V-SOLD", status="sold")
+        biblio = _listing(session, workspace_id, item, "biblio", "REMOTE-SOLD")
+        sale = _sale(session, workspace_id, item)
+        created = plan_sale_reconciliation(session, sale)
+        action = next(row for row in created if row.channel == "biblio")
+        action_id = action.id
+        listing_id = biblio.id
+
+    monkeypatch.setattr(
+        hosted,
+        "close_biblio_workspace_listing",
+        lambda workspace_id, listing_id: {
+            "remote": "delete_uploaded",
+            "external_id": "REMOTE-SOLD",
+            "deletes_filename": "delete.txt",
+            "inventory_signature": "sold-signature",
+        },
+    )
+
+    result = execute_action(action_id)
+    assert result["remote"] == "delete_uploaded"
+
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, listing_id)
+        action = session.get(CrossChannelAction, action_id)
+        assert listing.status == "sold"
+        assert listing.quantity == 0
+        assert listing.extra["inventory_sync_signature"] == "sold-signature"
+        assert listing.extra["inventory_synced_at"]
+        assert listing.extra["publish_state"] == "ftp_uploaded"
+        assert action.status == "success"
+
+
+def test_delayed_jobs_are_not_claimable_before_available_time():
+    workspace_id = _workspace()
+    job_id = jobs.enqueue(
+        "biblio_sync",
+        {"photos_only": True},
+        workspace_id,
+        delay_seconds=60,
+    )
+    assert jobs.claim_one() is None
+    with db.session_scope() as session:
+        row = session.get(BackgroundJob, job_id)
+        assert row.status == "queued"
+        assert row.available_at > NOW
