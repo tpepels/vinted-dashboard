@@ -13,6 +13,7 @@ import ftplib
 import hashlib
 import io
 import ipaddress
+import json
 import os
 import re
 import socket
@@ -2820,17 +2821,55 @@ def import_biblio_workspace(
     return {"source": Channel.BIBLIO, "items": len(rows), "active": active}
 
 
-def _biblio_rows(workspace_id: uuid.UUID) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _biblio_inventory_signature(row: dict[str, Any]) -> str:
+    payload = {
+        key: row.get(key)
+        for key in (
+            "sku",
+            "author",
+            "title",
+            "description",
+            "price_cents",
+            "isbn",
+            "quantity",
+            "status",
+        )
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _biblio_rows(
+    workspace_id: uuid.UUID,
+    *,
+    listing_id: uuid.UUID | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return BIBLIO rows with deterministic dirty-state metadata.
+
+    Before per-listing signatures existed, every successful FTP sync contained
+    every active BIBLIO row.  The latest successful run can therefore act as a
+    compatibility baseline for unchanged legacy rows so upgrading does not
+    resend the whole catalogue once.
+    """
     with db.session_scope() as session:
-        listings = session.execute(
+        query = (
             select(models.ChannelListing, models.InventoryItem)
             .join(models.InventoryItem, models.InventoryItem.id == models.ChannelListing.inventory_item_id)
             .where(
                 models.ChannelListing.workspace_id == workspace_id,
                 models.ChannelListing.channel == Channel.BIBLIO,
             )
-            .order_by(models.ChannelListing.external_id)
-        ).all()
+        )
+        if listing_id is not None:
+            query = query.where(models.ChannelListing.id == listing_id)
+        listings = session.execute(query.order_by(models.ChannelListing.external_id)).all()
+
         latest = session.execute(
             select(models.ConnectorSyncRun)
             .where(
@@ -2867,13 +2906,31 @@ def _biblio_rows(workspace_id: uuid.UUID) -> tuple[list[dict[str, Any]], list[di
                     if str(value or "").strip()
                 ][:5],
                 "photo_sync_signature": extra.get("photo_sync_signature"),
+                "photo_sync_state": extra.get("photo_sync_state"),
+                "inventory_sync_signature": extra.get("inventory_sync_signature"),
+                "inventory_synced_at": extra.get("inventory_synced_at"),
+                "publish_state": extra.get("publish_state"),
             }
+            signature = _biblio_inventory_signature(row)
+            previous_signature = extra.get("inventory_sync_signature")
+            if (
+                not previous_signature
+                and cutoff is not None
+                and listing.updated_at <= cutoff
+                and listing.last_seen_at <= cutoff
+            ):
+                # Compatibility for pre-signature successful uploads: old syncs
+                # always sent all active rows, so an unchanged row is known to
+                # have been sent already.
+                previous_signature = signature
+            row["inventory_signature"] = signature
+            row["inventory_dirty"] = signature != previous_signature
+
             if listing.status == ListingStatus.ACTIVE and int(row["quantity"] or 0) > 0:
                 active.append(row)
-            elif cutoff is None or listing.updated_at > cutoff or listing.last_seen_at > cutoff:
+            else:
                 deletes.append(row)
     return active, deletes
-
 
 def _missing_biblio(row: dict[str, Any]) -> list[str]:
     missing = []
@@ -3025,6 +3082,65 @@ def _mark_biblio_photo_sync(
             listing.extra = extra
 
 
+def _start_biblio_run(
+    workspace_id: uuid.UUID,
+    *,
+    active_count: int,
+    delete_count: int,
+    detail: dict[str, Any],
+) -> uuid.UUID:
+    started_at = datetime.now(timezone.utc)
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        if workspace is None:
+            raise RuntimeError("Workspace does not exist")
+        account, _ = get_or_create_channel_account(session, workspace, Channel.BIBLIO, {})
+        run = models.ConnectorSyncRun(
+            workspace_id=workspace_id,
+            channel_account_id=account.id,
+            channel=Channel.BIBLIO,
+            run_type="ftp_sync",
+            status=SyncRunStatus.RUNNING,
+            started_at=started_at,
+            completed_at=None,
+            active_count=active_count,
+            delete_count=delete_count,
+            detail=dict(detail),
+            error=None,
+        )
+        session.add(run)
+        session.flush()
+        return run.id
+
+
+def _update_biblio_run(
+    run_id: uuid.UUID,
+    *,
+    status: str | None = None,
+    detail: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> None:
+    with db.session_scope() as session:
+        run = session.get(models.ConnectorSyncRun, run_id)
+        if run is None:
+            return
+        if detail:
+            run.detail = {**dict(run.detail or {}), **detail}
+        if status is not None:
+            run.status = status
+            if status in {SyncRunStatus.SUCCESS, SyncRunStatus.ERROR}:
+                run.completed_at = datetime.now(timezone.utc)
+        if error is not None:
+            run.error = str(error)[:4000]
+        account = session.get(models.ChannelAccount, run.channel_account_id) if run.channel_account_id else None
+        if account is not None:
+            if status == SyncRunStatus.SUCCESS:
+                account.status = ChannelAccountStatus.CONNECTED
+                account.last_synced_at = run.completed_at or datetime.now(timezone.utc)
+            elif status == SyncRunStatus.ERROR:
+                account.status = ChannelAccountStatus.ERROR
+
+
 def _record_biblio_run(
     workspace_id: uuid.UUID,
     *,
@@ -3035,12 +3151,17 @@ def _record_biblio_run(
     detail: dict[str, Any],
     error: str | None = None,
 ) -> None:
+    """Record a completed one-shot BIBLIO action.
+
+    Full inventory syncs use the running-run helpers above so the UI can see
+    milestones while FTP work is still in progress.
+    """
     with db.session_scope() as session:
         workspace = session.get(models.Workspace, workspace_id)
         if workspace is None:
             raise RuntimeError("Workspace does not exist")
         account, _ = get_or_create_channel_account(session, workspace, Channel.BIBLIO, {})
-        account.last_synced_at = started_at
+        account.last_synced_at = datetime.now(timezone.utc)
         account.status = (
             ChannelAccountStatus.CONNECTED
             if status == SyncRunStatus.SUCCESS
@@ -3062,6 +3183,80 @@ def _record_biblio_run(
             )
         )
 
+
+def _set_biblio_listing_states(
+    workspace_id: uuid.UUID,
+    listing_ids: list[str],
+    *,
+    publish_state: str | None = None,
+    publish_error: str | None = None,
+    photo_state: str | None = None,
+    photo_error: str | None = None,
+) -> None:
+    ids = []
+    for value in listing_ids:
+        try:
+            ids.append(uuid.UUID(str(value)))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with db.session_scope() as session:
+        rows = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+                models.ChannelListing.id.in_(ids),
+            )
+        ).scalars().all()
+        for listing in rows:
+            extra = dict(listing.extra or {})
+            if publish_state is not None:
+                extra["publish_state"] = publish_state
+                if publish_state == "uploading":
+                    extra["publish_started_at"] = now
+                elif publish_state == "ftp_uploaded":
+                    extra["publish_completed_at"] = now
+            if publish_error is not None:
+                extra["publish_error"] = publish_error
+            elif publish_state in {"uploading", "ftp_uploaded"}:
+                extra.pop("publish_error", None)
+            if photo_state is not None:
+                extra["photo_sync_state"] = photo_state
+            if photo_error is not None:
+                extra["photo_sync_error"] = photo_error
+            elif photo_state in {"uploading", "ftp_uploaded", "none"}:
+                extra.pop("photo_sync_error", None)
+            listing.extra = extra
+
+
+def _mark_biblio_inventory_sync(
+    workspace_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+) -> None:
+    if not rows:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    by_id = {
+        uuid.UUID(str(row["listing_id"])): str(row["inventory_signature"])
+        for row in rows
+        if row.get("listing_id") and row.get("inventory_signature")
+    }
+    if not by_id:
+        return
+    with db.session_scope() as session:
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.id.in_(list(by_id)),
+            )
+        ).scalars().all()
+        for listing in listings:
+            extra = dict(listing.extra or {})
+            extra["inventory_sync_signature"] = by_id[listing.id]
+            extra["inventory_synced_at"] = now
+            listing.extra = extra
 
 def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
@@ -3087,14 +3282,31 @@ def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     return {"ok": True, "detail": f"Connected successfully; directory {pwd}"}
 
 
-def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+def sync_biblio_workspace(
+    workspace_id: uuid.UUID,
+    *,
+    listing_id: uuid.UUID | None = None,
+    full_sync: bool = False,
+) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
-    active, deletes = _biblio_rows(workspace_id)
-    incomplete = [(row, _missing_biblio(row)) for row in active if _missing_biblio(row)]
+    active, deletes = _biblio_rows(workspace_id, listing_id=listing_id)
+    inventory_rows = active if full_sync else [row for row in active if row.get("inventory_dirty")]
+    delete_rows = deletes if full_sync else [row for row in deletes if row.get("inventory_dirty")]
+    photo_rows = _pending_biblio_photo_rows(active)
+    selected_ids = [str(row["listing_id"]) for row in [*active, *deletes] if row.get("listing_id")]
+    photo_listing_ids = [str(row["listing_id"]) for row in photo_rows if row.get("listing_id")]
+
+    incomplete = [(row, _missing_biblio(row)) for row in inventory_rows if _missing_biblio(row)]
     if incomplete:
         examples = ", ".join(
             f"{row.get('sku') or row.get('source_id')} ({'/'.join(missing)})"
             for row, missing in incomplete[:5]
+        )
+        _set_biblio_listing_states(
+            workspace_id,
+            [str(row["listing_id"]) for row, _missing in incomplete if row.get("listing_id")],
+            publish_state="error",
+            publish_error=f"Required BIBLIO fields are missing: {examples}",
         )
         raise RuntimeError(f"BIBLIO upload blocked: required fields are missing. Examples: {examples}")
 
@@ -3104,30 +3316,77 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
         "-",
         values.get("filename_prefix", "reseller-dashboard").strip() or "reseller-dashboard",
     ).strip("-")
-    inventory_filename = f"{prefix}-{stamp}.txt" if active else None
-    deletes_filename = f"{prefix}-{stamp}-deletes.txt" if deletes else None
-    photo_rows = _pending_biblio_photo_rows(active)
-    started = datetime.now(timezone.utc)
+    inventory_filename = f"{prefix}-{stamp}.txt" if inventory_rows else None
+    deletes_filename = f"{prefix}-{stamp}-deletes.txt" if delete_rows else None
+    photo_total = sum(len(row.get("image_urls") or []) for row in photo_rows)
+    mode = "listing" if listing_id is not None else ("full" if full_sync else "incremental")
+    run_id = _start_biblio_run(
+        workspace_id,
+        active_count=len(inventory_rows),
+        delete_count=len(delete_rows),
+        detail={
+            "stage": "preparing",
+            "mode": mode,
+            "listing_id": str(listing_id) if listing_id else None,
+            "inventory_filename": inventory_filename,
+            "deletes_filename": deletes_filename,
+            "inventory_total": len(inventory_rows),
+            "deletes_total": len(delete_rows),
+            "photos_total": photo_total,
+            "photos_uploaded": 0,
+            "photos_pending_listings": len(photo_rows),
+            "photo_errors": [],
+            "message": "Preparing BIBLIO FTP upload",
+        },
+    )
+    _set_biblio_listing_states(workspace_id, selected_ids, publish_state="uploading")
+    _set_biblio_listing_states(workspace_id, photo_listing_ids, photo_state="uploading")
+
     if not inventory_filename and not deletes_filename and not photo_rows:
-        _record_biblio_run(
-            workspace_id,
+        _set_biblio_listing_states(workspace_id, selected_ids, publish_state="ftp_uploaded")
+        _update_biblio_run(
+            run_id,
             status=SyncRunStatus.SUCCESS,
-            started_at=started,
-            active_count=0,
-            delete_count=0,
-            detail={"message": "Nothing to upload"},
+            detail={
+                "stage": "complete",
+                "message": "Nothing changed - no FTP upload was required",
+            },
         )
-        return {"ok": True, "active": 0, "deletes": 0, "detail": "Nothing to upload"}
+        return {
+            "ok": True,
+            "active": 0,
+            "deletes": 0,
+            "photos_uploaded": 0,
+            "detail": "Nothing changed - no FTP upload was required",
+            "run_id": str(run_id),
+        }
 
     host = values.get("host", "ftp.biblio.com").strip() or "ftp.biblio.com"
     username = values.get("username", "").strip()
     password = values.get("password", "").strip()
     if not username or not password:
-        raise RuntimeError("BIBLIO needs username and password")
+        error = "BIBLIO needs username and password"
+        _set_biblio_listing_states(workspace_id, selected_ids, publish_state="error", publish_error=error)
+        _update_biblio_run(
+            run_id,
+            status=SyncRunStatus.ERROR,
+            detail={"stage": "failed", "message": error},
+            error=error,
+        )
+        raise RuntimeError(error)
 
     photo_synced: list[tuple[str, str, int]] = []
     photo_errors: list[str] = []
+    photo_error_by_listing: dict[str, list[str]] = {}
+    photos_uploaded = 0
     try:
+        _update_biblio_run(
+            run_id,
+            detail={
+                "stage": "connecting",
+                "message": f"Connecting to {host}",
+            },
+        )
         ftp = ftplib.FTP()
         ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
         ftp.login(username, password)
@@ -3135,74 +3394,149 @@ def sync_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
         directory = values.get("directory", "").strip()
         if directory and directory not in {".", "./"}:
             ftp.cwd(directory)
+        _update_biblio_run(
+            run_id,
+            detail={
+                "stage": "connected",
+                "message": "Connected to BIBLIO FTP",
+            },
+        )
+
         if inventory_filename:
-            ftp.storbinary(f"STOR {inventory_filename}", io.BytesIO(_biblio_tsv(active, sold=False)))
+            ftp.storbinary(
+                f"STOR {inventory_filename}",
+                io.BytesIO(_biblio_tsv(inventory_rows, sold=False)),
+            )
+            _mark_biblio_inventory_sync(workspace_id, inventory_rows)
+            _update_biblio_run(
+                run_id,
+                detail={
+                    "stage": "inventory_uploaded",
+                    "inventory_uploaded": len(inventory_rows),
+                    "message": f"Uploaded {len(inventory_rows)} inventory record(s)",
+                },
+            )
+
         if deletes_filename:
-            ftp.storbinary(f"STOR {deletes_filename}", io.BytesIO(_biblio_tsv(deletes, sold=True)))
+            ftp.storbinary(
+                f"STOR {deletes_filename}",
+                io.BytesIO(_biblio_tsv(delete_rows, sold=True)),
+            )
+            _mark_biblio_inventory_sync(workspace_id, delete_rows)
+            _update_biblio_run(
+                run_id,
+                detail={
+                    "stage": "deletes_uploaded",
+                    "deletes_uploaded": len(delete_rows),
+                    "message": f"Uploaded {len(delete_rows)} delete record(s)",
+                },
+            )
 
         for row in photo_rows:
             uploaded = 0
+            listing_key = str(row.get("listing_id") or "")
             book_id = str(row.get("sku") or row.get("source_id") or "").strip()
+            row_errors: list[str] = []
             for index, url in enumerate(row.get("image_urls") or []):
                 try:
                     filename = _biblio_photo_filename(book_id, index)
                     jpeg = _download_biblio_jpeg(url)
                     ftp.storbinary(f"STOR {filename}", io.BytesIO(jpeg))
                     uploaded += 1
+                    photos_uploaded += 1
                 except Exception as exc:
-                    photo_errors.append(f"{book_id} photo {index + 1}: {exc}")
-            if uploaded == len(row.get("image_urls") or []) and uploaded > 0:
-                photo_synced.append(
-                    (str(row["listing_id"]), str(row["photo_signature"]), uploaded)
+                    message = f"{book_id} photo {index + 1}: {exc}"
+                    photo_errors.append(message)
+                    row_errors.append(message)
+                _update_biblio_run(
+                    run_id,
+                    detail={
+                        "stage": "photos_uploading",
+                        "photos_uploaded": photos_uploaded,
+                        "photo_errors": photo_errors[:20],
+                        "message": f"Uploaded {photos_uploaded}/{photo_total} photo(s)",
+                    },
                 )
+            if row_errors:
+                photo_error_by_listing[listing_key] = row_errors
+                _set_biblio_listing_states(
+                    workspace_id,
+                    [listing_key],
+                    photo_state="error",
+                    photo_error="; ".join(row_errors)[:2000],
+                )
+            elif uploaded == len(row.get("image_urls") or []) and uploaded > 0:
+                photo_synced.append(
+                    (listing_key, str(row["photo_signature"]), uploaded)
+                )
+                _set_biblio_listing_states(
+                    workspace_id,
+                    [listing_key],
+                    photo_state="ftp_uploaded",
+                )
+
         try:
             ftp.quit()
         except Exception:
             ftp.close()
     except Exception as exc:
-        _record_biblio_run(
+        error = str(exc)
+        _set_biblio_listing_states(
             workspace_id,
+            selected_ids,
+            publish_state="error",
+            publish_error=error,
+        )
+        _update_biblio_run(
+            run_id,
             status=SyncRunStatus.ERROR,
-            started_at=started,
-            active_count=len(active),
-            delete_count=len(deletes),
             detail={
+                "stage": "failed",
                 "inventory_filename": inventory_filename,
                 "deletes_filename": deletes_filename,
-                "photos_pending": len(photo_rows),
-                "photos_uploaded": sum(count for _listing_id, _signature, count in photo_synced),
+                "photos_total": photo_total,
+                "photos_uploaded": photos_uploaded,
                 "photo_errors": photo_errors[:20],
+                "message": "BIBLIO FTP sync failed",
             },
-            error=str(exc),
+            error=error,
         )
         raise RuntimeError("BIBLIO FTP sync failed") from exc
 
     _mark_biblio_photo_sync(workspace_id, photo_synced)
+    _set_biblio_listing_states(workspace_id, selected_ids, publish_state="ftp_uploaded")
 
-    _record_biblio_run(
-        workspace_id,
+    _update_biblio_run(
+        run_id,
         status=SyncRunStatus.SUCCESS,
-        started_at=started,
-        active_count=len(active),
-        delete_count=len(deletes),
         detail={
+            "stage": "complete",
             "inventory_filename": inventory_filename,
             "deletes_filename": deletes_filename,
-            "photos_pending": len(photo_rows),
-            "photos_uploaded": sum(count for _listing_id, _signature, count in photo_synced),
+            "inventory_uploaded": len(inventory_rows),
+            "deletes_uploaded": len(delete_rows),
+            "photos_total": photo_total,
+            "photos_uploaded": photos_uploaded,
+            "photos_pending_listings": len(photo_rows),
             "photo_errors": photo_errors[:20],
+            "message": (
+                "FTP upload complete with photo warnings"
+                if photo_errors
+                else "FTP upload complete - awaiting BIBLIO processing"
+            ),
         },
     )
     return {
         "ok": True,
-        "active": len(active),
-        "deletes": len(deletes),
+        "active": len(inventory_rows),
+        "deletes": len(delete_rows),
         "inventory_filename": inventory_filename,
         "deletes_filename": deletes_filename,
-        "photos_uploaded": sum(count for _listing_id, _signature, count in photo_synced),
+        "photos_total": photo_total,
+        "photos_uploaded": photos_uploaded,
         "photo_errors": photo_errors,
+        "run_id": str(run_id),
     }
-
 
 def _workspace_or_env_ebay_values(workspace_id: uuid.UUID) -> dict[str, str]:
     if has_credentials(workspace_id, Channel.EBAY):
