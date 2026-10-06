@@ -127,25 +127,103 @@ def _clean_vinted_metadata(value: Any) -> dict[str, str]:
     return cleaned
 
 
+_VINTED_CATEGORY_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        ItemCategory.BOOK,
+        (
+            "book", "books", "livro", "livros", "livre", "livres",
+            "libro", "libros", "buch", "bücher", "ksiaz", "książ",
+        ),
+    ),
+    (
+        ItemCategory.ELECTRONICS,
+        (
+            "electronics", "electronic", "eletrónica", "eletronica",
+            "électronique", "electronique", "elettronica", "elektronik",
+            "phone", "phones", "smartphone", "tablet", "computer",
+            "computing", "audio", "headphone", "camera", "gaming console",
+        ),
+    ),
+    (
+        ItemCategory.CLOTHING,
+        (
+            "clothing", "clothes", "roupa", "vestuário", "vestuario",
+            "vêtement", "vetement", "abbigliamento", "kleidung",
+            "dress", "dresses", "shirt", "shirts", "trouser", "trousers",
+            "jeans", "jacket", "jackets", "coat", "coats", "skirt", "skirts",
+            "shoe", "shoes", "calçado", "calcado", "chaussure", "scarpe",
+            "accessories", "acessórios", "acessorios", "fashion",
+        ),
+    ),
+    (
+        ItemCategory.TOYS_GAMES,
+        (
+            "toy", "toys", "game", "games", "brinquedo", "brinquedos",
+            "jogo", "jogos", "jouet", "jouets", "jeu", "jeux",
+            "giocattoli", "spielzeug", "board game", "puzzle",
+        ),
+    ),
+    (
+        ItemCategory.SPORTS,
+        (
+            "sport", "sports", "desporto", "desportos", "sporting",
+            "fitness", "cycling", "ciclismo", "running", "football",
+        ),
+    ),
+    (
+        ItemCategory.BEAUTY,
+        (
+            "beauty", "beleza", "beauté", "beaute", "bellezza",
+            "kosmetik", "cosmetic", "cosmetics", "skincare", "make-up",
+            "makeup", "perfume", "fragrance",
+        ),
+    ),
+    (
+        ItemCategory.ART_CRAFTS,
+        (
+            "art", "arts", "craft", "crafts", "arte", "artes", "artesanato",
+            "artisanat", "hobby", "hobbies", "sewing", "knitting",
+        ),
+    ),
+    (
+        ItemCategory.MEDIA,
+        (
+            "music", "música", "musica", "film", "films", "movie", "movies",
+            "dvd", "blu-ray", "bluray", "vinyl", "record", "records",
+            "cds", "video game", "video games",
+        ),
+    ),
+    (
+        ItemCategory.COLLECTIBLES,
+        (
+            "collectible", "collectibles", "collectable", "collectables",
+            "colecionável", "colecionaveis", "collection", "memorabilia",
+            "antique", "antiques", "vintage collectible",
+        ),
+    ),
+    (
+        ItemCategory.HOME,
+        (
+            "home", "casa", "maison", "casa e jardim", "homeware",
+            "furniture", "móvel", "moveis", "móveis", "decoration", "decor",
+            "kitchen", "cozinha", "garden", "jardim", "household",
+        ),
+    ),
+)
+
+
+def classify_vinted_category(value: str | None) -> str | None:
+    text = " ".join(str(value or "").casefold().replace(">", " ").split())
+    if not text:
+        return None
+    for category, tokens in _VINTED_CATEGORY_TOKENS:
+        if any(token in text for token in tokens):
+            return category
+    return None
+
+
 def _looks_like_book_category(value: str | None) -> bool:
-    text = str(value or "").casefold()
-    return any(
-        token in text
-        for token in (
-            "book",
-            "books",
-            "livro",
-            "livros",
-            "livre",
-            "livres",
-            "libro",
-            "libros",
-            "buch",
-            "bücher",
-            "ksiaz",
-            "książ",
-        )
-    )
+    return classify_vinted_category(value) == ItemCategory.BOOK
 
 
 def _apply_vinted_metadata(
@@ -157,12 +235,12 @@ def _apply_vinted_metadata(
         return
     if not item.condition and metadata.get("condition"):
         item.condition = metadata["condition"]
-    if item.category == ItemCategory.GENERAL and (
-        metadata.get("isbn")
-        or metadata.get("author")
-        or _looks_like_book_category(metadata.get("category"))
-    ):
-        item.category = ItemCategory.BOOK
+    if item.category == ItemCategory.GENERAL:
+        inferred_category = classify_vinted_category(metadata.get("category"))
+        if inferred_category:
+            item.category = inferred_category
+        elif metadata.get("isbn") or metadata.get("author"):
+            item.category = ItemCategory.BOOK
 
     attributes = dict(item.attributes or {})
     generic_keys = ("brand", "size", "color", "material", "description", "isbn", "author", "publisher", "language")
