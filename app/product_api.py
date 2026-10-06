@@ -2857,6 +2857,7 @@ def biblio_activity(
                 "listing_id": listing_id,
                 "listing_title": listing_titles.get(listing_id) if listing_id else None,
                 "full_sync": bool(payload.get("full_sync")),
+                "photos_only": bool(payload.get("photos_only")),
                 "created_at": job.created_at.isoformat() if job.created_at else None,
                 "locked_at": job.locked_at.isoformat() if job.locked_at else None,
                 "completed_at": job.completed_at.isoformat() if job.completed_at else None,
@@ -2886,7 +2887,25 @@ def enqueue_biblio_full_sync(
 ):
     if not _biblio_configured_for_workspace(context.workspace):
         raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
-    job_id = jobs.enqueue("biblio_sync", {"full_sync": True}, context.workspace.id)
+    job_id = jobs.enqueue(
+        "biblio_sync",
+        {"full_sync": True, "force_photos": True},
+        context.workspace.id,
+    )
+    return {"ok": True, "job_id": str(job_id), "queued": True}
+
+
+@router.post("/api/app/connectors/biblio/retry-photos")
+def enqueue_biblio_photo_retry(
+    context: RequestContext = Depends(require_write_context),
+):
+    if not _biblio_configured_for_workspace(context.workspace):
+        raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
+    job_id = jobs.enqueue(
+        "biblio_sync",
+        {"photos_only": True, "force_photos": True},
+        context.workspace.id,
+    )
     return {"ok": True, "job_id": str(job_id), "queued": True}
 
 
