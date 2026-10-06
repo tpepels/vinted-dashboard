@@ -259,8 +259,8 @@ def build_biblio_candidate(
     title, title_source = _value(
         (isbn_title, "isbn"),
         (attrs.get("listing_title"), "master"),
-        (item.title, "master"),
         (vinted.title if vinted else None, "vinted"),
+        (item.title, "master"),
     )
     author, author_source = _value(
         (
