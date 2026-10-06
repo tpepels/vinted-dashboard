@@ -498,9 +498,9 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
     assert '["title", "Title", fields.title || "", sources.title, true, true]' in APP_JS
     assert '["author", "Author", fields.author || "", sources.author, true, true]' in APP_JS
     assert '["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false]' in APP_JS
-    assert '["publisher", "Publisher", enrichment.publisher || "", enrichment.publisher ? "isbn" : null, true, false]' in APP_JS
-    assert '["edition", "Edition", enrichment.edition || "", enrichment.edition ? "isbn" : null, true, false]' in APP_JS
-    assert '["publish_date", "Publish date", enrichment.publish_date || "", enrichment.publish_date ? "isbn" : null, true, false]' in APP_JS
+    assert '["publisher", "Publisher", enrichment.publisher || "", bibliographicSources.publisher || null, true, false]' in APP_JS
+    assert '["edition", "Edition", enrichment.edition || "", bibliographicSources.edition || null, true, false]' in APP_JS
+    assert '["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false]' in APP_JS
     assert 'document.querySelectorAll(".biblio-review-input").forEach' in APP_JS
     assert 'const required = field.dataset.required === "true";' in APP_JS
     assert 'payload[field.dataset.field] = value' in APP_JS
@@ -536,3 +536,43 @@ def test_biblio_ui_explains_deferred_photo_retry_and_filename_warning():
     assert "photo retry scheduled" in APP_JS
     assert "BIBLIO ignores an image if there is no active listing" in APP_JS
     assert "Photo warning:" in APP_JS
+
+
+
+def test_cross_list_preview_surfaces_all_prefilled_reusable_metadata():
+    for label in (
+        "ISBN", "Barcode", "Author", "Publisher", "Edition", "Published",
+        "Language", "Binding", "Pages", "Condition", "Brand", "Size",
+        "Colour", "Material",
+    ):
+        assert f'["{label}",' in APP_JS
+    assert '<strong>Prefilled:</strong>' in APP_JS
+    assert "data.enrichment_warning" in APP_JS
+
+
+def test_inventory_edit_form_exposes_all_reusable_identifier_and_book_fields():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    for field in (
+        "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+        "binding", "language", "publish_date", "publication_year", "pages",
+    ):
+        assert f'name="{field}"' in html
+        assert f'"{field}"' in APP_JS
+
+
+def test_quick_listing_can_capture_and_enrich_all_book_metadata():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    for field in (
+        "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+        "binding", "language", "publish_date", "publication_year", "pages",
+    ):
+        assert f'name="{field}"' in html
+    assert "async function enrichQuickBookFromIsbn()" in APP_JS
+    assert 'api("/api/app/stock-intake/barcode/lookup"' in APP_JS
+    assert 'fillBlank("binding", metadata.physical_format);' in APP_JS
+    assert 'fillBlank("pages", metadata.number_of_pages);' in APP_JS
+    assert "if (result.isbn) await enrichQuickBookFromIsbn();" in APP_JS
