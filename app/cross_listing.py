@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import db, models, publishing, stock_intake
-from app.constants import Channel, ListingStatus
+from app.constants import Channel, ItemCategory, ListingStatus
 from app.connectors import hosted
 from app.connectors.workspace_sync import record_workspace_channel_snapshot
 from app.workspace_bootstrap import clean_isbn
@@ -103,7 +103,23 @@ def build_candidate(
 
     enrichment: dict[str, Any] | None = None
     enrichment_warning: str | None = None
-    if isbn and item.category == "book":
+    existing_bibliographic = {
+        "subtitle": attrs.get("subtitle"),
+        "publisher": vmeta.get("publisher") or attrs.get("publisher"),
+        "edition": attrs.get("edition"),
+        "publish_date": (
+            attrs.get("publish_date")
+            or attrs.get("publication_date")
+            or attrs.get("publication_year")
+        ),
+        "binding": attrs.get("binding") or attrs.get("physical_format"),
+        "pages": attrs.get("pages") or attrs.get("number_of_pages"),
+    }
+    needs_isbn_enrichment = any(
+        value in (None, "", [], {})
+        for value in existing_bibliographic.values()
+    )
+    if isbn and item.category == ItemCategory.BOOK and needs_isbn_enrichment:
         try:
             enrichment = stock_intake.lookup_isbn(str(isbn))
         except (ValueError, RuntimeError) as exc:
