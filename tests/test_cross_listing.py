@@ -891,3 +891,108 @@ def test_cross_list_update_preserves_existing_remote_identity(monkeypatch):
         assert listing.inventory_item_id == item_id
         assert listing.extra["cross_list_updated_at"]
         assert listing.extra["source_channel"] == Channel.VINTED
+
+
+
+def test_cross_list_existing_store_is_update_ready_and_put_updates_it(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post(
+        "/api/auth/register",
+        json={
+            "email": "cross-list-update@example.test",
+            "password": "a-long-test-password",
+            "workspace_name": "Cross-list update",
+        },
+    )
+    assert registered.status_code == 200, registered.text
+    csrf = registered.json()["csrf_token"]
+    with db.session_scope() as session:
+        membership = session.execute(select(models.Membership)).scalar_one()
+        workspace_id = membership.workspace_id
+    item_id, source_id = _source_item(workspace_id)
+
+    saved = client.put(
+        "/api/app/connectors/woocommerce/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "values": {
+                "store_url": "https://shop.example.com",
+                "consumer_key": "ck_test",
+                "consumer_secret": "cs_test",
+            }
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    with db.session_scope() as session:
+        account = session.execute(
+            select(models.ChannelAccount).where(
+                models.ChannelAccount.workspace_id == workspace_id,
+                models.ChannelAccount.channel == Channel.WOOCOMMERCE,
+            )
+        ).scalar_one()
+        session.add(
+            models.ChannelListing(
+                workspace_id=workspace_id,
+                inventory_item_id=item_id,
+                channel_account_id=account.id,
+                channel=Channel.WOOCOMMERCE,
+                external_id="9001",
+                external_sku="VINTED-BOOK-1",
+                title="Old title",
+                price_cents=500,
+                currency="EUR",
+                status=ListingStatus.ACTIVE,
+                quantity=2,
+                url="https://shop.example/products/9001",
+                extra={},
+            )
+        )
+
+    preview = client.get(
+        f"/api/app/inventory/{item_id}/cross-list",
+        params={"source_listing_id": str(source_id)},
+    )
+    assert preview.status_code == 200, preview.text
+    woo = next(
+        row for row in preview.json()["destinations"]
+        if row["channel"] == Channel.WOOCOMMERCE
+    )
+    assert woo["status"] == "update_ready"
+    assert woo["action"] == "update"
+    assert woo["url"] == "https://shop.example/products/9001"
+
+    monkeypatch.setattr(
+        hosted,
+        "update_woocommerce_workspace_listing",
+        lambda workspace_id, external_id, candidate: {
+            "source_id": external_id,
+            "sku": candidate["fields"]["sku"],
+            "title": candidate["fields"]["title"],
+            "status": ListingStatus.ACTIVE,
+            "quantity": candidate["fields"]["quantity"],
+            "price_cents": candidate["fields"]["price_cents"],
+            "currency": candidate["fields"]["currency"],
+            "url": "https://shop.example/products/9001",
+            "description": candidate["fields"]["description"],
+        },
+    )
+    response = client.put(
+        f"/api/app/inventory/{item_id}/cross-list/woocommerce",
+        headers={"X-CSRF-Token": csrf},
+        json={"source_listing_id": str(source_id)},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["action"] == "updated"
+    assert response.json()["external_id"] == "9001"
+
+    with db.session_scope() as session:
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.WOOCOMMERCE,
+            )
+        ).scalars().all()
+        assert len(listings) == 1
+        assert listings[0].external_id == "9001"
