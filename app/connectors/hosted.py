@@ -1180,13 +1180,15 @@ def sync_woocommerce_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     }
 
 
-def close_woocommerce_workspace_listing(
+def set_woocommerce_workspace_listing_quantity(
     workspace_id: uuid.UUID,
     external_id: str,
+    quantity: int,
 ) -> dict[str, Any]:
-    """Make one WooCommerce product/variation unavailable without deleting it."""
+    """Set one WooCommerce product/variation stock quantity in place."""
     values = _credentials(workspace_id, Channel.WOOCOMMERCE)
     external_id = str(external_id or "").strip()
+    target = max(0, int(quantity or 0))
     if not external_id:
         raise RuntimeError("WooCommerce listing ID is missing")
 
@@ -1198,15 +1200,22 @@ def close_woocommerce_workspace_listing(
         ),
         None,
     )
-    if (
-        current is None
-        or int(current.get("quantity") or 0) <= 0
-        or current.get("status") != ListingStatus.ACTIVE
-    ):
+    if current is None:
+        if target == 0:
+            return {
+                "remote": "already_unavailable",
+                "external_id": external_id,
+                "quantity": 0,
+            }
+        raise RuntimeError("WooCommerce listing no longer exists")
+    current_quantity = max(0, int(current.get("quantity") or 0))
+    current_active = current.get("status") == ListingStatus.ACTIVE
+    if current_quantity == target and current_active == (target > 0):
         return {
-            "remote": "already_unavailable",
+            "remote": "already_synced",
             "external_id": external_id,
-            "quantity": 0,
+            "quantity": target,
+            "previous_quantity": current_quantity,
         }
 
     if ":" in external_id:
@@ -1224,16 +1233,33 @@ def close_woocommerce_workspace_listing(
         path,
         body={
             "manage_stock": True,
-            "stock_quantity": 0,
-            "stock_status": "outofstock",
+            "stock_quantity": target,
+            "stock_status": "instock" if target > 0 else "outofstock",
         },
     )
     return {
-        "remote": "stock_zeroed",
+        "remote": "quantity_synced",
         "external_id": external_id,
         "quantity": _woo_quantity(raw),
+        "previous_quantity": current_quantity,
     }
 
+
+def close_woocommerce_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+) -> dict[str, Any]:
+    """Make one WooCommerce product/variation unavailable without deleting it."""
+    result = set_woocommerce_workspace_listing_quantity(
+        workspace_id,
+        external_id,
+        0,
+    )
+    if result.get("remote") == "already_synced":
+        result["remote"] = "already_unavailable"
+    elif result.get("remote") == "quantity_synced":
+        result["remote"] = "stock_zeroed"
+    return result
 
 
 def _shopify_domain(values: dict[str, str]) -> str:
@@ -2039,23 +2065,23 @@ def update_shopify_workspace_listing(
     }
 
 
-def close_shopify_workspace_listing(
+def set_shopify_workspace_listing_quantity(
     workspace_id: uuid.UUID,
     external_id: str,
+    quantity: int,
     *,
     idempotency_key: str,
 ) -> dict[str, Any]:
-    """Set a Shopify variant's available inventory to zero at every location."""
+    """Set a Shopify variant's total available stock without guessing locations."""
     values = _credentials(workspace_id, Channel.SHOPIFY)
     version = str(values.get("api_version") or "2026-10").strip() or "2026-10"
     if version < "2026-04":
         raise RuntimeError(
-            "Automatic Shopify close requires Admin API version 2026-04 or newer"
+            "Automatic Shopify stock sync requires Admin API version 2026-04 or newer"
         )
     variant_id = str(external_id or "").strip()
     if not variant_id.startswith("gid://shopify/ProductVariant/"):
         raise RuntimeError("Shopify listing ID is not a ProductVariant GID")
-
     data = _shopify_graphql(
         values,
         SHOPIFY_VARIANT_INVENTORY_QUERY,
@@ -2063,30 +2089,48 @@ def close_shopify_workspace_listing(
     )
     variant = data.get("productVariant")
     if not isinstance(variant, dict):
-        return {
-            "remote": "already_unavailable",
-            "external_id": variant_id,
-            "quantity": 0,
-        }
-
-    _inventory_item_id, _levels, total_available = _shopify_inventory_snapshot(variant)
-    if total_available <= 0:
-        return {
-            "remote": "already_unavailable",
-            "external_id": variant_id,
-            "quantity": 0,
-        }
+        if int(quantity or 0) <= 0:
+            return {
+                "remote": "already_unavailable",
+                "external_id": variant_id,
+                "quantity": 0,
+            }
+        raise RuntimeError("Shopify variant no longer exists")
     stock = _set_shopify_total_inventory(
         values,
         variant,
-        0,
+        max(0, int(quantity or 0)),
         idempotency_key=str(idempotency_key),
     )
     return {
-        "remote": "stock_zeroed",
+        "remote": (
+            "already_synced"
+            if int(stock.get("locations_updated") or 0) == 0
+            else "quantity_synced"
+        ),
         "external_id": variant_id,
         **stock,
     }
+
+
+def close_shopify_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+    *,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Set a Shopify variant's available inventory to zero at every location."""
+    result = set_shopify_workspace_listing_quantity(
+        workspace_id,
+        external_id,
+        0,
+        idempotency_key=idempotency_key,
+    )
+    if result.get("remote") == "already_synced":
+        result["remote"] = "already_unavailable"
+    elif result.get("remote") == "quantity_synced":
+        result["remote"] = "stock_zeroed"
+    return result
 
 
 def sync_shopify_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
@@ -3515,11 +3559,12 @@ def update_wix_workspace_listing(
     }
 
 
-def close_wix_workspace_listing(
+def set_wix_workspace_listing_quantity(
     workspace_id: uuid.UUID,
     external_id: str,
+    quantity: int,
 ) -> dict[str, Any]:
-    """Make one Wix variant unavailable at every inventory location."""
+    """Set one Wix variant's total inventory without guessing locations."""
     values = _credentials(workspace_id, Channel.WIX)
     external_id = str(external_id or "").strip()
     if ":" not in external_id:
@@ -3527,17 +3572,38 @@ def close_wix_workspace_listing(
     product_id, variant_id = external_id.split(":", 1)
     if not product_id or not variant_id:
         raise RuntimeError("Wix listing ID is malformed")
-
-    stock = _set_wix_total_inventory(values, product_id, variant_id, 0)
+    stock = _set_wix_total_inventory(
+        values,
+        product_id,
+        variant_id,
+        max(0, int(quantity or 0)),
+    )
     return {
         "remote": (
-            "stock_zeroed"
-            if stock["locations_updated"]
-            else "already_unavailable"
+            "already_synced"
+            if int(stock.get("locations_updated") or 0) == 0
+            else "quantity_synced"
         ),
         "external_id": external_id,
         **stock,
     }
+
+
+def close_wix_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+) -> dict[str, Any]:
+    """Make one Wix variant unavailable at every inventory location."""
+    result = set_wix_workspace_listing_quantity(
+        workspace_id,
+        external_id,
+        0,
+    )
+    if result.get("remote") == "already_synced":
+        result["remote"] = "already_unavailable"
+    elif result.get("remote") == "quantity_synced":
+        result["remote"] = "stock_zeroed"
+    return result
 
 
 def test_wix_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
