@@ -644,6 +644,64 @@ def _woo_post(
     return response.json()
 
 
+CANDIDATE_DETAIL_FIELDS = (
+    ("Author", "author"),
+    ("Publisher", "publisher"),
+    ("Edition", "edition"),
+    ("Publication date", "publish_date"),
+    ("Publication year", "publication_year"),
+    ("Language", "language"),
+    ("Binding", "binding"),
+    ("Pages", "pages"),
+    ("Condition", "condition"),
+    ("Brand", "brand"),
+    ("Size", "size"),
+    ("Colour", "colour"),
+    ("Material", "material"),
+    ("ISBN", "isbn"),
+)
+
+
+def _candidate_identifier(fields: dict[str, Any]) -> tuple[str | None, str | None]:
+    isbn = str(fields.get("isbn") or "").strip()
+    if isbn:
+        return isbn, "ISBN"
+    barcode = str(fields.get("barcode") or "").strip()
+    if not barcode:
+        return None, None
+    if re.fullmatch(r"\d{12}", barcode):
+        return barcode, "UPC"
+    if re.fullmatch(r"\d{13}", barcode):
+        return barcode, "EAN"
+    return barcode, None
+
+
+def _candidate_detail_values(fields: dict[str, Any]) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    for label, key in CANDIDATE_DETAIL_FIELDS:
+        value = fields.get(key)
+        if value in (None, "", [], {}):
+            continue
+        if isinstance(value, (list, tuple, set)):
+            text = ", ".join(str(part).strip() for part in value if str(part).strip())
+        else:
+            text = str(value).strip()
+        if text:
+            rows.append((label, key, text))
+    return rows
+
+
+def _candidate_snapshot_metadata(fields: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        key: fields.get(key)
+        for _label, key in CANDIDATE_DETAIL_FIELDS
+        if fields.get(key) not in (None, "", [], {})
+    }
+    if fields.get("barcode") not in (None, ""):
+        result["barcode"] = fields.get("barcode")
+    return result
+
+
 def create_woocommerce_workspace_listing(
     workspace_id: uuid.UUID,
     candidate: dict[str, Any],
@@ -662,6 +720,20 @@ def create_woocommerce_workspace_listing(
         "stock_quantity": max(0, int(fields.get("quantity") or 0)),
         "stock_status": "instock" if int(fields.get("quantity") or 0) > 0 else "outofstock",
     }
+    identifier, _identifier_type = _candidate_identifier(fields)
+    if identifier:
+        body["global_unique_id"] = identifier
+    attributes = [
+        {
+            "name": label,
+            "visible": True,
+            "variation": False,
+            "options": [value],
+        }
+        for label, _key, value in _candidate_detail_values(fields)
+    ]
+    if attributes:
+        body["attributes"] = attributes
     if image_urls:
         body["images"] = [{"src": str(url)} for url in image_urls]
     raw = _woo_post(values, "products", body=body)
@@ -684,6 +756,11 @@ def create_woocommerce_workspace_listing(
             else None
         ),
         "description": raw.get("description") or fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "global_unique_id": raw.get("global_unique_id") or identifier,
+        "attributes": _woo_metadata(raw) or {
+            label: value for label, _key, value in _candidate_detail_values(fields)
+        },
         "image_url": (
             (raw.get("images") or [{}])[0].get("src")
             if raw.get("images")
@@ -747,6 +824,8 @@ def _fetch_woocommerce_products(values: dict[str, str]) -> list[dict[str, Any]]:
             ]
             common = {
                 "description": product.get("description") or product.get("short_description"),
+                "global_unique_id": product.get("global_unique_id"),
+                "barcode": product.get("global_unique_id"),
                 "category": " / ".join(categories) if categories else None,
                 "brand": brands[0] if brands else None,
                 "tags": [
@@ -1046,6 +1125,17 @@ def create_shopify_workspace_listing(
             }
         ],
     }
+    identifier, identifier_type = _candidate_identifier(fields)
+    if identifier:
+        api_version = str(values.get("api_version") or "")
+        if api_version >= "2026-10":
+            barcode_input: dict[str, Any] = {"value": identifier}
+            if identifier_type:
+                barcode_input["type"] = identifier_type
+            variant_input["barcodes"] = [barcode_input]
+        else:
+            variant_input["barcode"] = identifier
+
     if image_urls:
         variant_input["file"] = {
             "originalSource": str(image_urls[0]),
@@ -1066,6 +1156,31 @@ def create_shopify_workspace_listing(
         ],
         "variants": [variant_input],
     }
+    vendor = str(fields.get("brand") or fields.get("publisher") or "").strip()
+    if vendor:
+        product_input["vendor"] = vendor
+    product_type = str(fields.get("category") or "").replace("_", " ").strip().title()
+    if product_type:
+        product_input["productType"] = product_type
+    raw_tags = fields.get("tags")
+    if isinstance(raw_tags, str):
+        tags = [value.strip() for value in raw_tags.split(",") if value.strip()]
+    else:
+        tags = [str(value).strip() for value in (raw_tags or []) if str(value).strip()]
+    if tags:
+        product_input["tags"] = list(dict.fromkeys(tags))[:250]
+    metafields = [
+        {
+            "namespace": "reseller",
+            "key": key,
+            "type": "single_line_text_field",
+            "value": value,
+        }
+        for _label, key, value in _candidate_detail_values(fields)
+    ]
+    if metafields:
+        product_input["metafields"] = metafields
+
     if image_urls:
         product_input["files"] = [
             {
@@ -1114,6 +1229,8 @@ def create_shopify_workspace_listing(
         "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
         "url": product.get("onlineStoreUrl"),
         "description": fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "barcode": identifier,
         "image_url": image_urls[0] if image_urls else None,
         "attributes": {
             "product_id": product_id,
@@ -1131,6 +1248,7 @@ query ResellerVariants($cursor: String) {
       displayName
       title
       sku
+      barcode
       price
       inventoryQuantity
       availableForSale
@@ -1139,10 +1257,14 @@ query ResellerVariants($cursor: String) {
       product {
         id
         title
+        descriptionHtml
         status
         productType
         vendor
         tags
+        metafields(first: 20, namespace: "reseller") {
+          nodes { key value }
+        }
         onlineStoreUrl
         featuredMedia { preview { image { url } } }
       }
@@ -1225,6 +1347,11 @@ def _fetch_shopify_products(values: dict[str, str]) -> list[dict[str, Any]]:
                     if not variant_title or variant_title == "Default Title"
                     else f"{product_title} - {variant_title}"
                 )
+            reseller_metafields = {
+                str(row.get("key")): row.get("value")
+                for row in (((product.get("metafields") or {}).get("nodes")) or [])
+                if isinstance(row, dict) and row.get("key")
+            }
             created = _remote_datetime(variant.get("createdAt"))
             result.append(
                 {
@@ -1236,10 +1363,23 @@ def _fetch_shopify_products(values: dict[str, str]) -> list[dict[str, Any]]:
                     "price_cents": _money(variant.get("price")),
                     "currency": values.get("currency", "EUR").strip().upper() or "EUR",
                     "listed_at": created.isoformat() if created else None,
+                    "description": product.get("descriptionHtml"),
                     "category": product.get("productType") or None,
                     "brand": product.get("vendor") or None,
+                    "barcode": variant.get("barcode"),
+                    "isbn": reseller_metafields.get("isbn"),
+                    "author": reseller_metafields.get("author"),
+                    "publisher": reseller_metafields.get("publisher"),
+                    "edition": reseller_metafields.get("edition"),
+                    "publication_year": reseller_metafields.get("publication_year"),
+                    "publish_date": reseller_metafields.get("publish_date"),
+                    "language": reseller_metafields.get("language"),
+                    "condition": reseller_metafields.get("condition"),
+                    "material": reseller_metafields.get("material"),
+                    "size": reseller_metafields.get("size"),
+                    "color": reseller_metafields.get("colour"),
                     "tags": list(product.get("tags") or []),
-                    "attributes": options,
+                    "attributes": {**options, **reseller_metafields},
                     "product_type": product.get("productType") or None,
                     "url": product.get("onlineStoreUrl"),
                     "image_url": image_url,
@@ -2089,6 +2229,12 @@ def create_wix_workspace_listing(
             ]
         },
     }
+    description = str(fields.get("description") or "").strip()
+    if description:
+        product["plainDescription"] = description
+    identifier, _identifier_type = _candidate_identifier(fields)
+    if identifier:
+        product["variantsInfo"]["variants"][0]["barcode"] = identifier
     if image_urls:
         product["media"] = {
             "itemsInfo": {
@@ -2120,6 +2266,8 @@ def create_wix_workspace_listing(
             else None
         ),
         "description": fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "barcode": identifier,
         "image_url": image_urls[0] if image_urls else None,
         "attributes": {
             "product_id": product_id,
@@ -2155,7 +2303,7 @@ def _wix_query_variants(values: dict[str, str]) -> list[dict[str, Any]]:
             values,
             "stores/v3/products/query-variants",
             body={
-                "fields": ["CURRENCY"],
+                "fields": ["CURRENCY", "PLAIN_DESCRIPTION"],
                 "query": {"cursorPaging": cursor_paging},
             },
         )
@@ -2318,7 +2466,9 @@ def _fetch_wix_products(values: dict[str, str]) -> list[dict[str, Any]]:
                 "quantity": quantity,
                 "price_cents": _money(price.get("amount")) if isinstance(price, dict) else None,
                 "currency": currency,
+                "description": product.get("plainDescription"),
                 "product_type": product.get("productType"),
+                "barcode": variant.get("barcode"),
                 "attributes": attributes,
                 "image_url": _wix_variant_image(variant),
             }
