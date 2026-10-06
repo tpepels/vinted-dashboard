@@ -56,7 +56,7 @@ const chrome = {
     async query() { return []; },
     async update(id, opts) {
       if (opts.url) urls.set(id, opts.url);
-      return { id, status: "complete", url: urls.get(id) };
+      return { id, windowId: windowsCreated[windowsCreated.length - 1]?.id, status: "complete", url: urls.get(id) };
     },
     async get(id) {
       if (!urls.has(id)) throw new Error("tab missing");
