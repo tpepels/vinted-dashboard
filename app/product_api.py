@@ -198,10 +198,17 @@ class QuickListingCreateRequest(BaseModel):
     colour: str | None = None
     material: str | None = None
     condition: str | None = None
+    barcode: str | None = None
     author: str | None = None
     isbn: str | None = None
+    subtitle: str | None = None
     publisher: str | None = None
     edition: str | None = None
+    binding: str | None = None
+    language: str | None = None
+    publish_date: str | None = None
+    publication_year: int | None = None
+    pages: int | None = Field(default=None, ge=0)
     measurements: str | None = None
     waist_cm: str | None = None
     inside_leg_cm: str | None = None
