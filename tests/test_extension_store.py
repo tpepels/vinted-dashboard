@@ -125,10 +125,10 @@ def test_dev_build_can_use_local_http_and_replaces_homepage(tmp_path):
 
 def test_publish_inspection_rejects_invalid_package_and_reads_version(tmp_path):
     output = tmp_path / "store.zip"
-    build_extension.build("store", "https://dashboard.example", output, "3.4.0")
+    build_extension.build("store", "https://dashboard.example", output, "3.4.1")
     manifest = publish_store.inspect_package(output)
     assert manifest["manifest_version"] == 3
-    assert manifest["version"] == "3.4.0"
+    assert manifest["version"] == "3.4.1"
 
     bad = tmp_path / "bad.zip"
     with zipfile.ZipFile(bad, "w") as archive:
@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "3.4.0"
+    assert manifest["version"] == "3.4.1"
 
 
 
@@ -229,9 +229,9 @@ def test_content_script_uses_resumable_finite_rendered_uploaded_age_job():
 def test_bridge_reloads_stale_content_script_before_sync():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
-    assert "const BRIDGE_CONTENT_PROTOCOL=9;" in content
+    assert "const BRIDGE_CONTENT_PROTOCOL=10;" in content
     assert 'message?.type==="bridge-content-protocol"' in content
-    assert "const CONTENT_PROTOCOL=9;" in background
+    assert "const CONTENT_PROTOCOL=10;" in background
     assert "async function ensureCurrentContentScript(tab)" in background
     assert "await chrome.tabs.reload(tab.id)" in background
     assert "tab=await ensureCurrentContentScript(tab);" in background
@@ -241,8 +241,8 @@ def test_content_script_has_reinjection_guard():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "(() => {" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 9" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 9" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 10" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 10" in content
     assert content.rstrip().endswith("})();")
     assert "node scripts/test_vinted_content_idempotent.js" in workflow
 
@@ -279,11 +279,11 @@ def test_content_script_does_not_trust_generic_api_dates_for_posting_age():
 
 def test_bridge_artifact_filename_always_includes_version():
     target = Path("/tmp/reseller-chrome-bridge.zip")
-    assert build_extension.versioned_output_path(target, "3.4.0").name == (
-        "reseller-chrome-bridge-v3.4.0.zip"
+    assert build_extension.versioned_output_path(target, "3.4.1").name == (
+        "reseller-chrome-bridge-v3.4.1.zip"
     )
-    already = Path("/tmp/reseller-chrome-bridge-v3.4.0.zip")
-    assert build_extension.versioned_output_path(already, "3.4.0") == already
+    already = Path("/tmp/reseller-chrome-bridge-v3.4.1.zip")
+    assert build_extension.versioned_output_path(already, "3.4.1") == already
 
 
 def test_bridge_popup_always_shows_manifest_version():
@@ -304,13 +304,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.0.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.1.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.0"
+    assert response.headers["x-bridge-version"] == "3.4.1"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.0.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.1.zip")
     assert versioned.status_code == 200
-    assert "v3.4.0.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.1.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
@@ -354,6 +354,10 @@ def test_bridge_age_scan_is_finite_resumable_and_failures_have_cooldown():
 def test_vinted_fetches_are_paced_and_rate_limit_safe():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     assert "let lastVintedFetchAt=0;" in content
+    assert 'credentials:"include"' in content
+    assert '"X-Requested-With":"XMLHttpRequest"' in content
+    assert '"X-Platform":"web"' not in content
+    assert "r.status===403" in content
     assert "function rateLimitDelay(response,attempt)" in content
     assert "Vinted rate limited the sync." in content
     assert "error.vintedRateLimited=true" in content
