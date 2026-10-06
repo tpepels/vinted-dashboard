@@ -151,7 +151,7 @@ function assert(condition, message) {
   const second = await context.renderedUploadedAgeWave(job, items.slice(2));
   assert(Object.keys(second.ages).length === 2, "Second rendered wave did not collect both ages");
   assert(windowsCreated.length === 1, "Worker tabs were not reused");
-  assert(updated.length === 2, "Reused worker tabs should navigate to the next two items");
+  assert(updated.length === 4, "Blank worker tabs and the reused second wave should each navigate two items");
   assert(sent.filter((entry) => entry.payload.type === "read-vinted-uploaded-age").length === 4,
     "Each item page should be queried through its rendered DOM");
 
