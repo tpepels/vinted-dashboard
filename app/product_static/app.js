@@ -1289,13 +1289,17 @@ function renderBiblioActivity(activity, operational) {
     ? runs.map((run) => {
       const runStatus = biblioActivityStatus(run);
       const files = [run.inventory_filename, run.deletes_filename].filter(Boolean).map(esc).join(" · ");
+      const meta = [
+        run.upload_profile ? "profile " + esc(run.upload_profile) : "",
+        files,
+      ].filter(Boolean).join(" · ");
       const errors = (run.photo_errors || []).length
         ? '<div class="biblio-activity-errors">' + run.photo_errors.map((value) => esc(value)).join("<br>") + "</div>"
         : "";
       return '<div class="biblio-activity-run">'
         + '<div><strong>' + esc(runStatus.label) + '</strong><span>' + esc(when(run.started_at)) + "</span></div>"
         + '<p>' + esc(biblioActivityDetail(run)) + "</p>"
-        + (files ? '<small>' + files + "</small>" : "")
+        + (meta ? '<small>' + meta + "</small>" : "")
         + errors + "</div>";
     }).join("")
     : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
