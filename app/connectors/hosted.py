@@ -679,6 +679,7 @@ def _woo_post(
 
 CANDIDATE_DETAIL_FIELDS = (
     ("Author", "author"),
+    ("Subtitle", "subtitle"),
     ("Publisher", "publisher"),
     ("Edition", "edition"),
     ("Publication date", "publish_date"),
@@ -3087,7 +3088,10 @@ def import_biblio_workspace(
     # An imported BIBLIO file is a snapshot of remote state, not a set of
     # local edits waiting to be pushed back. Mark those rows as synchronized
     # so the next incremental sync does not echo the whole imported catalogue.
-    imported_active, imported_deletes = _biblio_rows(workspace_id)
+    imported_active, imported_deletes = _biblio_rows(
+        workspace_id,
+        profile=biblio_upload_profile(workspace_id),
+    )
     _mark_biblio_inventory_sync(
         workspace_id,
         [*imported_active, *imported_deletes],
@@ -3095,20 +3099,57 @@ def import_biblio_workspace(
     return {"source": Channel.BIBLIO, "items": len(rows), "active": active}
 
 
-def _biblio_inventory_signature(row: dict[str, Any]) -> str:
-    payload = {
-        key: row.get(key)
-        for key in (
-            "sku",
-            "author",
-            "title",
-            "description",
-            "price_cents",
-            "isbn",
-            "quantity",
-            "status",
-        )
-    }
+BIBLIO_UPLOAD_PROFILE_CORE = "core"
+BIBLIO_UPLOAD_PROFILE_EXTENDED = "extended"
+BIBLIO_UPLOAD_PROFILES = {
+    BIBLIO_UPLOAD_PROFILE_CORE,
+    BIBLIO_UPLOAD_PROFILE_EXTENDED,
+}
+
+BIBLIO_CORE_HEADERS = (
+    "Book ID", "Author", "Title", "Description",
+    "Price", "Status", "ISBN", "Quantity",
+)
+BIBLIO_EXTENDED_HEADERS = (
+    "Book ID", "Author", "Title", "Subtitle", "Description",
+    "Price", "Status", "ISBN", "Publisher", "Edition",
+    "Binding", "Language", "Publication Date", "Pages",
+    "Condition", "Quantity",
+)
+
+
+def _normalize_biblio_upload_profile(value: Any) -> str:
+    profile = str(value or BIBLIO_UPLOAD_PROFILE_CORE).strip().lower()
+    if profile not in BIBLIO_UPLOAD_PROFILES:
+        raise ValueError("BIBLIO upload_profile must be 'core' or 'extended'")
+    return profile
+
+
+def biblio_upload_profile(workspace_id: uuid.UUID) -> str:
+    """Return the configured BIBLIO FTP column profile without requiring it."""
+    try:
+        values = _workspace_or_env_biblio_values(workspace_id)
+    except RuntimeError:
+        return BIBLIO_UPLOAD_PROFILE_CORE
+    return _normalize_biblio_upload_profile(values.get("upload_profile"))
+
+
+def _biblio_inventory_signature(
+    row: dict[str, Any],
+    *,
+    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+) -> str:
+    profile = _normalize_biblio_upload_profile(profile)
+    keys = [
+        "sku", "author", "title", "description",
+        "price_cents", "isbn", "quantity", "status",
+    ]
+    if profile == BIBLIO_UPLOAD_PROFILE_EXTENDED:
+        keys.extend([
+            "subtitle", "publisher", "edition", "binding",
+            "language", "publish_date", "pages", "condition",
+        ])
+    payload = {key: row.get(key) for key in keys}
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -3123,14 +3164,10 @@ def _biblio_rows(
     workspace_id: uuid.UUID,
     *,
     listing_id: uuid.UUID | None = None,
+    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return BIBLIO rows with deterministic dirty-state metadata.
-
-    Before per-listing signatures existed, every successful FTP sync contained
-    every active BIBLIO row.  The latest successful run can therefore act as a
-    compatibility baseline for unchanged legacy rows so upgrading does not
-    resend the whole catalogue once.
-    """
+    """Return BIBLIO rows with deterministic, profile-aware dirty state."""
+    profile = _normalize_biblio_upload_profile(profile)
     with db.session_scope() as session:
         query = (
             select(models.ChannelListing, models.InventoryItem)
@@ -3155,9 +3192,6 @@ def _biblio_rows(
             .order_by(models.ConnectorSyncRun.completed_at.desc())
             .limit(100)
         ).scalars().all()
-        # Pre-signature BIBLIO syncs had no "mode" marker and always sent the
-        # whole active catalogue.  A new targeted/incremental run must never
-        # become the compatibility baseline for unrelated unsigned listings.
         legacy = next(
             (
                 run
@@ -3166,20 +3200,44 @@ def _biblio_rows(
             ),
             None,
         )
-        cutoff = legacy.completed_at if legacy and legacy.completed_at else None
+        cutoff = (
+            legacy.completed_at
+            if profile == BIBLIO_UPLOAD_PROFILE_CORE
+            and legacy
+            and legacy.completed_at
+            else None
+        )
 
         active: list[dict[str, Any]] = []
         deletes: list[dict[str, Any]] = []
         for listing, item in listings:
             attrs = dict(item.attributes or {})
             extra = dict(listing.extra or {})
+            bibliographic = (
+                dict(extra.get("bibliographic_enrichment") or {})
+                if isinstance(extra.get("bibliographic_enrichment"), dict)
+                else {}
+            )
             row = {
                 "source_id": listing.external_id,
                 "sku": listing.external_id or listing.external_sku or item.sku,
                 "title": listing.title or item.title,
+                "subtitle": bibliographic.get("subtitle") or attrs.get("subtitle"),
                 "author": extra.get("author") or attrs.get("author"),
                 "description": extra.get("description") or attrs.get("description") or item.notes,
                 "isbn": extra.get("isbn") or attrs.get("isbn"),
+                "publisher": bibliographic.get("publisher") or attrs.get("publisher"),
+                "edition": bibliographic.get("edition") or attrs.get("edition"),
+                "binding": bibliographic.get("binding") or attrs.get("binding") or attrs.get("physical_format"),
+                "language": bibliographic.get("language") or attrs.get("language"),
+                "publish_date": (
+                    bibliographic.get("publish_date")
+                    or attrs.get("publish_date")
+                    or attrs.get("publication_date")
+                    or attrs.get("publication_year")
+                ),
+                "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
+                "condition": bibliographic.get("condition") or item.condition,
                 "price_cents": listing.price_cents,
                 "currency": listing.currency or item.currency or "EUR",
                 "quantity": listing.quantity if listing.quantity is not None else item.quantity,
@@ -3196,7 +3254,7 @@ def _biblio_rows(
                 "inventory_synced_at": extra.get("inventory_synced_at"),
                 "publish_state": extra.get("publish_state"),
             }
-            signature = _biblio_inventory_signature(row)
+            signature = _biblio_inventory_signature(row, profile=profile)
             previous_signature = extra.get("inventory_sync_signature")
             if (
                 not previous_signature
@@ -3204,9 +3262,6 @@ def _biblio_rows(
                 and listing.updated_at <= cutoff
                 and listing.last_seen_at <= cutoff
             ):
-                # Compatibility for pre-signature successful uploads: old syncs
-                # always sent all active rows, so an unchanged row is known to
-                # have been sent already.
                 previous_signature = signature
             row["inventory_signature"] = signature
             row["inventory_dirty"] = signature != previous_signature
@@ -3216,6 +3271,7 @@ def _biblio_rows(
             else:
                 deletes.append(row)
     return active, deletes
+
 
 def _missing_biblio(row: dict[str, Any]) -> list[str]:
     missing = []
@@ -3238,11 +3294,19 @@ def _biblio_text(value: Any) -> str:
     return re.sub(r" {2,}", " ", text).strip()
 
 
-def _biblio_tsv(rows: list[dict[str, Any]], *, sold: bool) -> bytes:
+def _biblio_tsv(
+    rows: list[dict[str, Any]],
+    *,
+    sold: bool,
+    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+) -> bytes:
+    profile = _normalize_biblio_upload_profile(profile)
     output = io.StringIO(newline="")
     writer = csv.writer(output, delimiter="\t", lineterminator="\n")
     writer.writerow(
-        ["Book ID", "Author", "Title", "Description", "Price", "Status", "ISBN", "Quantity"]
+        BIBLIO_EXTENDED_HEADERS
+        if profile == BIBLIO_UPLOAD_PROFILE_EXTENDED
+        else BIBLIO_CORE_HEADERS
     )
     for row in rows:
         price = (
@@ -3250,20 +3314,39 @@ def _biblio_tsv(rows: list[dict[str, Any]], *, sold: bool) -> bytes:
             if row.get("price_cents") not in (None, "")
             else "0.00"
         )
-        writer.writerow(
-            [
-                _biblio_text(row.get("sku") or row.get("source_id") or ""),
-                _biblio_text(row.get("author") or ""),
-                _biblio_text(row.get("title") or ""),
+        start = [
+            _biblio_text(row.get("sku") or row.get("source_id") or ""),
+            _biblio_text(row.get("author") or ""),
+            _biblio_text(row.get("title") or ""),
+        ]
+        if profile == BIBLIO_UPLOAD_PROFILE_EXTENDED:
+            values = [
+                *start,
+                _biblio_text(row.get("subtitle") or ""),
+                _biblio_text(row.get("description") or ""),
+                price,
+                "sold" if sold else "for sale",
+                _biblio_text(row.get("isbn") or ""),
+                _biblio_text(row.get("publisher") or ""),
+                _biblio_text(row.get("edition") or ""),
+                _biblio_text(row.get("binding") or ""),
+                _biblio_text(row.get("language") or ""),
+                _biblio_text(row.get("publish_date") or ""),
+                _biblio_text(row.get("pages") or ""),
+                _biblio_text(row.get("condition") or ""),
+                0 if sold else max(1, int(row.get("quantity") or 1)),
+            ]
+        else:
+            values = [
+                *start,
                 _biblio_text(row.get("description") or ""),
                 price,
                 "sold" if sold else "for sale",
                 _biblio_text(row.get("isbn") or ""),
                 0 if sold else max(1, int(row.get("quantity") or 1)),
             ]
-        )
+        writer.writerow(values)
     return output.getvalue().encode("utf-8")
-
 
 BIBLIO_MAX_PHOTOS = 5
 BIBLIO_MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
