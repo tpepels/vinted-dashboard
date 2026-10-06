@@ -1233,9 +1233,13 @@ $("#biblio-publish-submit").onclick = async () => {
   const payload = { source_listing_id: current.sourceListingId || null };
   document.querySelectorAll(".biblio-review-input").forEach((field) => {
     const value = String(field.value || "").trim();
-    if (!value) return;
-    if (field.dataset.field === "price_cents") payload.price_cents = Math.round(Number(value) * 100);
-    else payload[field.dataset.field] = value;
+    const required = field.dataset.required === "true";
+    if (!value && required) return;
+    if (field.dataset.field === "price_cents") {
+      if (value) payload.price_cents = Math.round(Number(value) * 100);
+    } else {
+      payload[field.dataset.field] = value;
+    }
   });
   button.disabled = true;
   button.textContent = "Queueing BIBLIO…";
