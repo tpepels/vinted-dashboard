@@ -1,7 +1,7 @@
 (() => {
-if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 4) return;
-globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 4;
-const BRIDGE_CONTENT_PROTOCOL=4;
+if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 5) return;
+globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 5;
+const BRIDGE_CONTENT_PROTOCOL=5;
 function first(obj,...keys){if(!obj||typeof obj!=="object")return null;for(const key of keys){const v=obj[key];if(v!==undefined&&v!==null&&v!=="")return v}return null}
 function idOf(v){if(v&&typeof v==="object")v=first(v,"id","user_id");return v==null||v===""?null:String(v)}
 function nameOf(v){if(v&&typeof v==="object")v=first(v,"login","username","name","display_name");return v==null||v===""?null:String(v)}
