@@ -229,9 +229,9 @@ def test_content_script_uses_resumable_finite_rendered_uploaded_age_job():
 def test_bridge_reloads_stale_content_script_before_sync():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
-    assert "const BRIDGE_CONTENT_PROTOCOL=7;" in content
+    assert "const BRIDGE_CONTENT_PROTOCOL=8;" in content
     assert 'message?.type==="bridge-content-protocol"' in content
-    assert "const CONTENT_PROTOCOL=7;" in background
+    assert "const CONTENT_PROTOCOL=8;" in background
     assert "async function ensureCurrentContentScript(tab)" in background
     assert "await chrome.tabs.reload(tab.id)" in background
     assert "tab=await ensureCurrentContentScript(tab);" in background
@@ -241,8 +241,8 @@ def test_content_script_has_reinjection_guard():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "(() => {" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 7" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 7" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 8" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 8" in content
     assert content.rstrip().endswith("})();")
     assert "node scripts/test_vinted_content_idempotent.js" in workflow
 
