@@ -96,10 +96,17 @@ def _schema() -> dict[str, Any]:
         "colour": string,
         "material": string,
         "condition": string,
+        "barcode": string,
         "author": string,
         "isbn": string,
+        "subtitle": string,
         "publisher": string,
         "edition": string,
+        "binding": string,
+        "language": string,
+        "publish_date": string,
+        "publication_year": string,
+        "pages": string,
         "suggested_title": string,
         "suggested_description": string,
         "visible_text": string_array,
@@ -117,14 +124,16 @@ def _prompt(hints: dict[str, Any]) -> str:
     category_hint = str(hints.get("category") or "").strip()
     return (
         "Analyze these reseller listing photos. Return only evidence supported "
-        "by the images. Never invent a brand, size, material, edition, ISBN, "
+        "by the images. Never invent a brand, size, material, edition, ISBN, barcode, "
         "condition detail or defect. Use an empty string when a field cannot "
         "be established. category must be one of: book, clothing, electronics, "
         "home, collectibles, toys_games, media, sports, beauty, art_crafts, general. "
         "item_type should be a short literal noun such as jeans, jacket, book, "
         "shoes, mug. For condition, describe only visible condition in plain "
         "language; do not map it to a marketplace condition grade. "
-        "suggested_title should be concise and factual. suggested_description "
+        "For books, capture subtitle, publisher, binding/format, language, "
+        "publication date/year and page count only when visible. Capture a barcode "
+        "only when its digits are actually readable. suggested_title should be concise and factual. suggested_description "
         "should be ready to edit/paste, factual, and must not mention AI. "
         "Do not include a price. visible_text should contain useful text you "
         "can actually read from labels/covers. confidence_notes should briefly "
@@ -243,10 +252,17 @@ def normalize_analysis(result: dict[str, Any]) -> dict[str, Any]:
         "colour": str(result.get("colour") or "").strip(),
         "material": str(result.get("material") or "").strip(),
         "condition": str(result.get("condition") or "").strip(),
+        "barcode": str(result.get("barcode") or "").strip(),
         "author": str(result.get("author") or "").strip(),
         "isbn": str(result.get("isbn") or "").strip(),
+        "subtitle": str(result.get("subtitle") or "").strip(),
         "publisher": str(result.get("publisher") or "").strip(),
         "edition": str(result.get("edition") or "").strip(),
+        "binding": str(result.get("binding") or "").strip(),
+        "language": str(result.get("language") or "").strip(),
+        "publish_date": str(result.get("publish_date") or "").strip(),
+        "publication_year": str(result.get("publication_year") or "").strip(),
+        "pages": str(result.get("pages") or "").strip(),
         "suggested_title": str(result.get("suggested_title") or "").strip(),
         "suggested_description": str(result.get("suggested_description") or "").strip(),
         "visible_text": [
@@ -391,10 +407,17 @@ def create_master_item(
     elif category == ItemCategory.BOOK:
         attribute_keys.extend(
             [
+                "barcode",
                 "author",
                 "isbn",
+                "subtitle",
                 "publisher",
                 "edition",
+                "binding",
+                "language",
+                "publish_date",
+                "publication_year",
+                "pages",
             ]
         )
     attributes = {
