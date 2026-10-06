@@ -2818,6 +2818,14 @@ def import_biblio_workspace(
         full_snapshot=True,
         note=f"Imported {filename}",
     )
+    # An imported BIBLIO file is a snapshot of remote state, not a set of
+    # local edits waiting to be pushed back. Mark those rows as synchronized
+    # so the next incremental sync does not echo the whole imported catalogue.
+    imported_active, imported_deletes = _biblio_rows(workspace_id)
+    _mark_biblio_inventory_sync(
+        workspace_id,
+        [*imported_active, *imported_deletes],
+    )
     return {"source": Channel.BIBLIO, "items": len(rows), "active": active}
 
 
@@ -2901,7 +2909,7 @@ def _biblio_rows(
             extra = dict(listing.extra or {})
             row = {
                 "source_id": listing.external_id,
-                "sku": listing.external_sku or item.sku,
+                "sku": listing.external_id or listing.external_sku or item.sku,
                 "title": listing.title or item.title,
                 "author": extra.get("author") or attrs.get("author"),
                 "description": extra.get("description") or attrs.get("description") or item.notes,
@@ -3735,7 +3743,7 @@ def _biblio_listing_row(workspace_id: uuid.UUID, listing_id: uuid.UUID) -> dict[
         extra = dict(listing.extra or {})
         row = {
             "source_id": listing.external_id,
-            "sku": listing.external_sku or item.sku,
+            "sku": listing.external_id or listing.external_sku or item.sku,
             "title": listing.title or item.title,
             "author": extra.get("author") or attrs.get("author"),
             "description": extra.get("description") or attrs.get("description") or item.notes,
@@ -3798,12 +3806,6 @@ def close_biblio_workspace_listing(
         )
         raise RuntimeError("BIBLIO delete upload failed") from exc
 
-    _mark_biblio_inventory_sync(workspace_id, [row])
-    _set_biblio_listing_states(
-        workspace_id,
-        [str(listing_id)],
-        publish_state="ftp_uploaded",
-    )
     _record_biblio_run(
         workspace_id,
         status=SyncRunStatus.SUCCESS,
@@ -3816,4 +3818,5 @@ def close_biblio_workspace_listing(
         "remote": "delete_uploaded",
         "external_id": str(row.get("source_id") or ""),
         "deletes_filename": filename,
+        "inventory_signature": str(row.get("inventory_signature") or ""),
     }
