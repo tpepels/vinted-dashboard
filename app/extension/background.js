@@ -16,6 +16,7 @@ const CONTENT_PROTOCOL=7;
 let syncInFlight=null;
 let ageJobInFlight=null;
 let lastAgeNavigationAt=0;
+let ageNavigationChain=Promise.resolve();
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 async function stored(){return await chrome.storage.local.get(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_FAILURES_KEY,AGE_JOB_KEY])}
@@ -40,9 +41,13 @@ async function ensureCurrentContentScript(tab){
   return reloaded;
 }
 async function waitForAgeNavigationSlot(){
-  const delay=AGE_NAVIGATION_MIN_INTERVAL_MS-(Date.now()-lastAgeNavigationAt);
-  if(delay>0)await sleep(delay);
-  lastAgeNavigationAt=Date.now();
+  const task=ageNavigationChain.then(async()=>{
+    const delay=AGE_NAVIGATION_MIN_INTERVAL_MS-(Date.now()-lastAgeNavigationAt);
+    if(delay>0)await sleep(delay);
+    lastAgeNavigationAt=Date.now();
+  });
+  ageNavigationChain=task.catch(()=>{});
+  return task;
 }
 
 async function readRenderedAgeFromTab(tab,item){
