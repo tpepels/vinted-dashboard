@@ -232,21 +232,31 @@ async function collectVintedData(reason="periodic"){
   };
 
   const listings=new Map();
+  let secondaryRateLimited=false;
   for(const status of["active","sold","reserved","draft","closed"]){
+    if(secondaryRateLimited)break;
     try{
       const rows=await paged(`/api/v2/users/${userId}/items`,["items","user_items"],{status,order:"newest_first"});
       for(const raw of rows||[]){const row=listingRow(raw,status);if(row.id)listings.set(row.id,row)}
     }catch(error){
-      if(isRateLimitError(error))throw error;
+      // Active listings are authoritative for physical stock. Never upload a
+      // snapshot if this endpoint failed or only partially paged.
+      if(status==="active")throw error;
+      if(isRateLimitError(error))secondaryRateLimited=true;
     }
   }
-  try{
-    const rows=await paged(`/api/v2/wardrobe/${userId}/items`,["items","user_items"],{order:"newest_first"});
-    for(const raw of rows||[]){const row=listingRow(raw,null);if(!row.id)continue;const old=listings.get(row.id);if(!old||row.status==="hidden")listings.set(row.id,row)}
-  }catch(error){
-    if(isRateLimitError(error))throw error;
+  if(!secondaryRateLimited){
+    try{
+      const rows=await paged(`/api/v2/wardrobe/${userId}/items`,["items","user_items"],{order:"newest_first"});
+      for(const raw of rows||[]){const row=listingRow(raw,null);if(!row.id)continue;const old=listings.get(row.id);if(!old||row.status==="hidden")listings.set(row.id,row)}
+    }catch(error){
+      if(isRateLimitError(error))secondaryRateLimited=true;
+    }
   }
-  const detailSync=await enrichListingDetails(listings,reason);
+  const detailEligible=[...listings.values()].filter(row=>row?.id&&["active","reserved","hidden","draft"].includes(String(row.status||"active"))).length;
+  const detailSync=secondaryRateLimited
+    ? {enriched:0,attempted:0,deferred:detailEligible,rate_limited:true}
+    : await enrichListingDetails(listings,reason);
   const ageScanItems=await enrichListingDates(listings);
 
   let notifications=[];
