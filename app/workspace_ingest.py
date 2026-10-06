@@ -133,6 +133,11 @@ _VINTED_CATEGORY_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "book", "books", "livro", "livros", "livre", "livres",
             "libro", "libros", "buch", "bücher", "ksiaz", "książ",
+            "fiction", "ficção", "ficcao", "non-fiction", "nonfiction",
+            "literature", "literatura", "novel", "novels", "romance",
+            "crime", "thriller", "fantasy", "biography", "biografia",
+            "memoir", "poetry", "poesia", "textbook", "comic", "comics",
+            "manga", "banda desenhada",
         ),
     ),
     (
