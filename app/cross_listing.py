@@ -123,6 +123,7 @@ def build_candidate(
     enrichment: dict[str, Any] | None = None
     enrichment_warning: str | None = None
     existing_bibliographic = {
+        "author": metadata.get("author") or attrs.get("author"),
         "subtitle": attrs.get("subtitle"),
         "publisher": metadata.get("publisher") or attrs.get("publisher"),
         "edition": attrs.get("edition"),
