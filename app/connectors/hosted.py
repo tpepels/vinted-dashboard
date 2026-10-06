@@ -147,6 +147,33 @@ def _ebay_access_token(values: dict[str, str]) -> str:
     return token
 
 
+def _ebay_item_specifics(node: ET.Element, ns: dict[str, str]) -> dict[str, Any]:
+    attributes: dict[str, Any] = {}
+    for row in node.findall("e:ItemSpecifics/e:NameValueList", ns):
+        name = str(row.findtext("e:Name", default="", namespaces=ns) or "").strip()
+        if not name:
+            continue
+        values = [
+            str(value.text or "").strip()
+            for value in row.findall("e:Value", ns)
+            if str(value.text or "").strip()
+        ]
+        if not values:
+            continue
+        attributes[name] = values[0] if len(values) == 1 else values
+    return attributes
+
+
+def _ebay_picture_url(node: ET.Element, ns: dict[str, str]) -> str | None:
+    gallery = node.findtext("e:PictureDetails/e:GalleryURL", namespaces=ns)
+    if gallery:
+        return gallery
+    picture = node.find("e:PictureDetails/e:PictureURL", ns)
+    if picture is not None and picture.text:
+        return picture.text.strip() or None
+    return None
+
+
 def _fetch_ebay_active(values: dict[str, str]) -> list[dict[str, Any]]:
     token = _ebay_access_token(values)
     site_id = values.get("site_id", "0").strip() or "0"
@@ -196,16 +223,22 @@ def _fetch_ebay_active(values: dict[str, str]) -> list[dict[str, Any]]:
             quantity = _int(node.findtext("e:QuantityAvailable", namespaces=ns))
             if quantity is None:
                 quantity = _int(node.findtext("e:Quantity", namespaces=ns), 1)
+            attributes = _ebay_item_specifics(node, ns)
             items.append(
                 {
                     "source_id": item_id,
                     "sku": node.findtext("e:SKU", namespaces=ns),
                     "title": node.findtext("e:Title", namespaces=ns) or "Untitled",
+                    "description": node.findtext("e:Description", namespaces=ns),
                     "status": ListingStatus.ACTIVE,
                     "quantity": quantity,
                     "price_cents": _money(price_node.text if price_node is not None else None),
                     "currency": price_node.attrib.get("currencyID") if price_node is not None else None,
                     "url": node.findtext("e:ListingDetails/e:ViewItemURL", namespaces=ns),
+                    "category": node.findtext("e:PrimaryCategory/e:CategoryName", namespaces=ns),
+                    "condition": node.findtext("e:ConditionDisplayName", namespaces=ns),
+                    "attributes": attributes,
+                    "image_url": _ebay_picture_url(node, ns),
                 }
             )
         total_pages = _int(
