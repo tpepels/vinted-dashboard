@@ -420,9 +420,16 @@ def test_biblio_preflight_has_direct_stock_repair_and_book_id_override():
 
 
 def test_biblio_preflight_shows_automatic_vinted_photo_upload():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="biblio-photo-preview"' in html
     assert '["photos", "Photos"' in APP_JS
     assert '" Vinted photo"' in APP_JS
-    assert '" - upload automatically"' in APP_JS
+    assert '" - automatic BIBLIO upload"' in APP_JS
+    assert "will be uploaded automatically to BIBLIO" in APP_JS
+    assert "No manual image upload is required." in APP_JS
+    assert "source.image_urls" in APP_JS
 
 
 def test_inventory_items_always_surface_cross_list_action():
@@ -476,3 +483,10 @@ def test_biblio_review_gate_is_repaired_inside_cross_list():
     assert "Marked as Book. Review the BIBLIO fields below." in APP_JS
     assert "function reviewBiblioItem" not in APP_JS
     assert "Review BIBLIO" not in APP_JS
+
+
+
+def test_biblio_preflight_prepares_isbn_metadata_and_vinted_description():
+    assert "ISBN lookup" in APP_JS
+    assert "Preparing listing from Vinted, ISBN metadata and master data" in APP_JS
+    assert '["description", "Description", fields.description, sources.description]' in APP_JS
