@@ -6,8 +6,9 @@ const AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
 const AGE_FAILURES_KEY="vintedAgeScanFailuresV1";
 const AGE_JOB_KEY="vintedAgeBurstJobV2";
 const AGE_WORKERS=12;
+const AGE_WAVES_PER_EVENT=4;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
-const AGE_JOB_WATCHDOG_MS=90000;
+const AGE_JOB_WATCHDOG_MS=240000;
 const CONTENT_PROTOCOL=6;
 let syncInFlight=null;
 let ageJobInFlight=null;
@@ -232,36 +233,42 @@ async function processAgeJobWave(){
   if(ageJobInFlight)return ageJobInFlight;
   ageJobInFlight=(async()=>{
     const data=await chrome.storage.local.get([AGE_JOB_KEY]);
-    const job=data?.[AGE_JOB_KEY];
+    let job=data?.[AGE_JOB_KEY];
     if(!job||!Array.isArray(job.remaining)||!job.remaining.length){
       if(job)await finishAgeJob(job);
       return{ok:true,remaining:0};
     }
 
-    // If Chrome terminates the service worker mid-wave, this watchdog wakes a
-    // fresh worker and retries the same persisted batch instead of losing it.
+    // A single event handles a few bounded waves, well below Chrome's
+    // service-worker event lifetime. The persisted queue remains authoritative
+    // after every wave, so termination can only cause a retry of that wave.
     chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+AGE_JOB_WATCHDOG_MS});
-    const batch=job.remaining.slice(0,AGE_WORKERS);
+    let eventUpdated=0,eventFailed=0;
     try{
-      const ages=await renderedUploadedAgeWave(job,batch);
-      await saveAgeBatchToCache(ages);
-      const updated=await postAgeUpdates(ages);
-      const failed=await updateAgeFailures(batch,ages);
+      for(let wave=0;wave<AGE_WAVES_PER_EVENT&&job.remaining.length;wave++){
+        const batch=job.remaining.slice(0,AGE_WORKERS);
+        const ages=await renderedUploadedAgeWave(job,batch);
+        await saveAgeBatchToCache(ages);
+        const updated=await postAgeUpdates(ages);
+        const failed=await updateAgeFailures(batch,ages);
 
-      job.remaining=job.remaining.slice(batch.length);
-      job.scanned=Number(job.scanned||0)+batch.length;
-      job.updated=Number(job.updated||0)+updated;
-      job.failed=Number(job.failed||0)+failed;
-      job.last_error=null;
-      await chrome.storage.local.set({[AGE_JOB_KEY]:job});
-      await updateAgeJobStatus(job);
+        job.remaining=job.remaining.slice(batch.length);
+        job.scanned=Number(job.scanned||0)+batch.length;
+        job.updated=Number(job.updated||0)+updated;
+        job.failed=Number(job.failed||0)+failed;
+        job.last_error=null;
+        eventUpdated+=updated;
+        eventFailed+=failed;
+        await chrome.storage.local.set({[AGE_JOB_KEY]:job});
+        await updateAgeJobStatus(job);
+      }
 
       if(job.remaining.length){
-        chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+750});
-        return{ok:true,remaining:job.remaining.length,updated,failed};
+        chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+30000});
+        return{ok:true,remaining:job.remaining.length,updated:eventUpdated,failed:eventFailed};
       }
       await finishAgeJob(job);
-      return{ok:true,remaining:0,updated,failed};
+      return{ok:true,remaining:0,updated:eventUpdated,failed:eventFailed};
     }catch(error){
       job.last_error=error instanceof Error?error.message:String(error);
       await chrome.storage.local.set({[AGE_JOB_KEY]:job});
