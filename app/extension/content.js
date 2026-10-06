@@ -11,7 +11,22 @@ function exactStamp(v){const normalized=stamp(v);if(!normalized)return null;cons
 function metaText(v){if(v==null||v==="")return null;if(Array.isArray(v)){const values=v.map(metaText).filter(Boolean);return values.length?values.join(", "):null}if(typeof v==="object")v=first(v,"title","name","label","display_value","value","text");return v==null||v===""?null:String(v).trim()||null}
 function metaKey(v){return String(v||"").toLowerCase().replace(/[^a-z0-9]+/g,"")}
 function attributeValue(raw,...names){const wanted=new Set(names.map(metaKey));for(const [key,value] of Object.entries(raw||{})){if(wanted.has(metaKey(key))){const text=metaText(value);if(text)return text}}for(const group of[first(raw,"attributes","item_attributes","details","item_details"),first(raw,"item","product")]){if(!group)continue;if(Array.isArray(group)){for(const entry of group){if(!entry||typeof entry!=="object")continue;const key=first(entry,"code","key","name","title","label","type");if(!wanted.has(metaKey(key)))continue;const text=metaText(first(entry,"value","value_name","display_value","selected_value","title","name","label"));if(text)return text}}else if(typeof group==="object"){for(const [key,value] of Object.entries(group)){if(wanted.has(metaKey(key))){const text=metaText(value);if(text)return text}}}}return null}
-function listingMetadata(raw){const values={condition:attributeValue(raw,"status_title","condition_title","condition","item_condition","quality"),category:attributeValue(raw,"catalog_title","category_title","category_name","catalog","category"),brand:attributeValue(raw,"brand_title","brand_name","brand"),size:attributeValue(raw,"size_title","size_name","size"),color:attributeValue(raw,"color_title","colour_title","color_name","colour_name","color","colour","color1"),material:attributeValue(raw,"material_title","material_name","material"),description:attributeValue(raw,"description","item_description"),isbn:attributeValue(raw,"isbn","isbn13","isbn_13"),author:attributeValue(raw,"author","writer"),publisher:attributeValue(raw,"publisher","publishing_house"),language:attributeValue(raw,"language","book_language")};return Object.fromEntries(Object.entries(values).filter(([,value])=>value!=null&&value!==""))}
+function listingMetadata(raw){
+  const values={
+    condition:metaText(first(raw,"status_title","condition_title","condition","item_condition","quality"))||attributeValue(raw,"status_title","condition_title","condition","item_condition","quality"),
+    category:metaText(first(raw,"catalog_title","category_title","category_name","catalog","category","catalogs"))||attributeValue(raw,"catalog_title","category_title","category_name","catalog","category","catalogs"),
+    brand:metaText(first(raw,"brand_title","brand_name","brand"))||attributeValue(raw,"brand_title","brand_name","brand"),
+    size:metaText(first(raw,"size_title","size_name","size"))||attributeValue(raw,"size_title","size_name","size"),
+    color:metaText(first(raw,"color_title","colour_title","color_name","colour_name","color","colour","color1"))||attributeValue(raw,"color_title","colour_title","color_name","colour_name","color","colour","color1"),
+    material:metaText(first(raw,"material_title","material_name","material"))||attributeValue(raw,"material_title","material_name","material"),
+    description:metaText(first(raw,"description","item_description","itemDescription"))||attributeValue(raw,"description","item_description","itemDescription"),
+    isbn:metaText(first(raw,"isbn","isbn13","isbn_13"))||attributeValue(raw,"isbn","isbn13","isbn_13"),
+    author:metaText(first(raw,"author","writer"))||attributeValue(raw,"author","writer"),
+    publisher:metaText(first(raw,"publisher","publishing_house"))||attributeValue(raw,"publisher","publishing_house"),
+    language:metaText(first(raw,"language","book_language"))||attributeValue(raw,"language","book_language")
+  };
+  return Object.fromEntries(Object.entries(values).filter(([,value])=>value!=null&&value!==""));
+}
 function imageUrls(raw){const rows=[];for(const group of[first(raw,"photos","item_photos","images"),raw?.photo]){if(!group)continue;for(const entry of(Array.isArray(group)?group:[group])){if(!entry)continue;const url=typeof entry==="string"?entry:first(entry,"full_size_url","large_url","url","image_url");if(url&&!rows.includes(String(url)))rows.push(String(url))}}return rows}
 function listFrom(payload,keys){if(Array.isArray(payload))return payload;if(!payload||typeof payload!=="object")return[];for(const k of keys)if(Array.isArray(payload[k]))return payload[k];const d=payload.data;if(Array.isArray(d))return d;if(d&&typeof d==="object")for(const k of keys)if(Array.isArray(d[k]))return d[k];return[]}
 function closed(v){const s=String(v||"").toLowerCase().replaceAll("-","_").replaceAll(" ","_");return["cancelled","canceled","completed","complete","closed","finished","refunded","failed"].some(x=>s.includes(x))}
@@ -22,7 +37,7 @@ function notificationRow(raw){let body=first(raw,"body","text","message","descri
 
 async function fetchJson(path,params={}){const url=new URL(path,location.origin);for(const[k,v]of Object.entries(params))url.searchParams.set(k,String(v));const r=await fetch(url,{headers:{"Accept":"application/json, text/plain, */*","X-Platform":"web"}});if(r.status===404)return null;if(!r.ok)throw new Error(`Vinted returned HTTP ${r.status} for ${url.pathname}`);return await r.json()}
 const LISTED_AT_CACHE_KEY="vintedListedAtCacheV3";
-const LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV3";
+const LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV4";
 const LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
 async function enrichListingDates(listings){
   let stored={};try{stored=await chrome.storage.local.get([LISTED_AT_CACHE_KEY,LISTING_PAGE_AGE_CACHE_KEY])}catch{}
