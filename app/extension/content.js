@@ -317,7 +317,13 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
     return;
   }
   if(message?.type==="collect-vinted-data"){
-    collectVintedData(message.reason||"periodic").then(snapshot=>sendResponse({ok:true,snapshot})).catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
+    collectVintedData(message.reason||"periodic")
+      .then(snapshot=>sendResponse({ok:true,snapshot}))
+      .catch(error=>sendResponse({
+        ok:false,
+        error:error instanceof Error?error.message:String(error),
+        rate_limited:isRateLimitError(error),
+      }));
     return true;
   }
   if(message?.type==="read-vinted-uploaded-age"){
