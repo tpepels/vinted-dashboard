@@ -83,7 +83,15 @@ def is_biblio_book_candidate(
     category = str(metadata.get("category") or attrs.get("vinted_category") or "").casefold()
     return any(
         token in category
-        for token in ("book", "books", "livro", "livros", "livre", "livres", "libro", "libros", "buch", "bücher", "ksiaz", "książ")
+        for token in (
+            "book", "books", "livro", "livros", "livre", "livres",
+            "libro", "libros", "buch", "bücher", "ksiaz", "książ",
+            "fiction", "ficção", "ficcao", "non-fiction", "nonfiction",
+            "literature", "literatura", "novel", "novels", "romance",
+            "crime", "thriller", "fantasy", "biography", "biografia",
+            "memoir", "poetry", "poesia", "textbook", "comic", "comics",
+            "manga", "banda desenhada",
+        )
     )
 
 
