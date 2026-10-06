@@ -1876,14 +1876,29 @@ def today(context: RequestContext = Depends(require_context)):
         for row in stock_attention:
             title = (row.get("item") or {}).get("title") or (row.get("listing") or {}).get("title") or "Sold item"
             priority = 120 if row["status"] == "error" else 115 if row["status"] == "attention" else 90
+            action_type = row.get("action_type")
+            target_quantity = (row.get("detail") or {}).get("target_quantity")
+            if action_type == "sync_quantity":
+                label = "Sync remaining stock"
+                action_detail = (
+                    f'{row["channel"]} · set stock to {target_quantity} · {row["status"]}'
+                )
+            elif action_type == "review_restore":
+                label = "Review stock restoration"
+                action_detail = (
+                    f'{row["channel"]} · sale cancelled/refunded · {row["status"]}'
+                )
+            else:
+                label = "Close sold stock listing"
+                action_detail = f'{row["channel"]} · {row["status"]}'
             work_queue.append(
                 {
                     "id": f'stock:{row["id"]}',
                     "kind": "stock_action",
                     "priority": priority,
                     "title": title,
-                    "label": "Close sold stock listing",
-                    "detail": f'{row["channel"]} · {row["status"]}'
+                    "label": label,
+                    "detail": action_detail
                     + (f' · {row["last_error"]}' if row.get("last_error") else ""),
                     "view": "reconcile",
                     "stock_action": row,
