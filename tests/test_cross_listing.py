@@ -26,7 +26,16 @@ def _source_item(workspace_id):
             quantity=2,
             condition="very_good",
             currency="EUR",
-            attributes={"author": "Master Author"},
+            attributes={
+                "author": "Master Author",
+                "barcode": "9780140328721",
+                "edition": "Revised edition",
+                "publication_year": 1988,
+                "publish_date": "1988",
+                "binding": "Paperback",
+                "pages": 176,
+                "subtitle": "A Novel",
+            },
         )
         session.add(item)
         session.flush()
@@ -48,6 +57,8 @@ def _source_item(workspace_id):
                     "author": "Vinted Author",
                     "isbn": "9780140328721",
                     "condition": "Very good",
+                    "publisher": "Puffin",
+                    "language": "English",
                 },
                 "image_urls": [
                     "https://images1.vinted.net/t/one.webp",
@@ -80,6 +91,13 @@ def test_cross_list_candidate_uses_vinted_copy_but_master_stock():
     assert candidate["fields"]["quantity"] == 2
     assert candidate["fields"]["author"] == "Vinted Author"
     assert candidate["fields"]["isbn"] == "9780140328721"
+    assert candidate["fields"]["barcode"] == "9780140328721"
+    assert candidate["fields"]["publisher"] == "Puffin"
+    assert candidate["fields"]["edition"] == "Revised edition"
+    assert candidate["fields"]["publication_year"] == 1988
+    assert candidate["fields"]["binding"] == "Paperback"
+    assert candidate["fields"]["pages"] == 176
+    assert candidate["fields"]["language"] == "English"
     assert candidate["source"]["channel"] == Channel.VINTED
     assert candidate["source"]["photo_count"] == 2
     assert candidate["field_sources"]["quantity"] == "master"
@@ -118,6 +136,15 @@ def test_woocommerce_cross_list_create_reuses_vinted_images(monkeypatch):
             "price_cents": 725,
             "quantity": 2,
             "currency": "EUR",
+            "category": "book",
+            "condition": "Very good",
+            "author": "Author Name",
+            "isbn": "9780140328721",
+            "publisher": "Puffin",
+            "edition": "Revised edition",
+            "language": "English",
+            "binding": "Paperback",
+            "pages": 176,
         },
         "source": {
             "image_urls": [
@@ -131,6 +158,12 @@ def test_woocommerce_cross_list_create_reuses_vinted_images(monkeypatch):
     assert captured["path"] == "products"
     assert captured["body"]["regular_price"] == "7.25"
     assert captured["body"]["stock_quantity"] == 2
+    assert captured["body"]["global_unique_id"] == "9780140328721"
+    woo_attrs = {row["name"]: row["options"] for row in captured["body"]["attributes"]}
+    assert woo_attrs["ISBN"] == ["9780140328721"]
+    assert woo_attrs["Author"] == ["Author Name"]
+    assert woo_attrs["Publisher"] == ["Puffin"]
+    assert woo_attrs["Binding"] == ["Paperback"]
     assert captured["body"]["images"] == [
         {"src": "https://images1.vinted.net/t/one.webp"},
         {"src": "https://images1.vinted.net/t/two.jpg"},
@@ -182,6 +215,16 @@ def test_shopify_cross_list_create_sets_inventory_and_files(monkeypatch):
             "price_cents": 725,
             "quantity": 2,
             "currency": "EUR",
+            "category": "book",
+            "condition": "Very good",
+            "author": "Author Name",
+            "isbn": "9780140328721",
+            "publisher": "Puffin",
+            "edition": "Revised edition",
+            "language": "English",
+            "binding": "Paperback",
+            "pages": 176,
+            "tags": ["fiction", "paperback"],
         },
         "source": {"image_urls": ["https://images1.vinted.net/t/one.webp"]},
     }
@@ -230,6 +273,11 @@ def test_wix_cross_list_create_sets_inventory_and_vinted_media(monkeypatch):
             "price_cents": 725,
             "quantity": 2,
             "currency": "EUR",
+            "category": "book",
+            "condition": "Very good",
+            "author": "Author Name",
+            "isbn": "9780140328721",
+            "publisher": "Puffin",
         },
         "source": {
             "image_urls": [
@@ -244,6 +292,8 @@ def test_wix_cross_list_create_sets_inventory_and_vinted_media(monkeypatch):
     product = captured["body"]["product"]
     variant = product["variantsInfo"]["variants"][0]
     assert variant["inventoryItem"]["quantity"] == 2
+    assert variant["barcode"] == "9780140328721"
+    assert product["plainDescription"] == "Description"
     assert product["media"]["itemsInfo"]["items"] == [
         {"url": "https://images1.vinted.net/t/one.webp"},
         {"url": "https://images1.vinted.net/t/two.jpg"},
@@ -428,3 +478,55 @@ def test_cross_list_biblio_review_can_mark_sparse_general_item_as_book(monkeypat
     assert biblio_preview.status_code == 200, biblio_preview.text
     assert biblio_preview.json()["fields"]["title"] == "Sparse vintage book"
     assert "author" in biblio_preview.json()["missing"]
+
+
+
+def test_cross_list_candidate_fills_missing_book_metadata_from_isbn(monkeypatch):
+    workspace_id = _workspace("isbn-enrichment")
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="BOOK-ENRICH",
+            title="Known book",
+            category=ItemCategory.BOOK,
+            quantity=1,
+            condition="good",
+            currency="EUR",
+            attributes={"isbn": "9780140328721", "default_price_cents": 600},
+        )
+        session.add(item)
+        session.flush()
+        item_id = item.id
+
+    monkeypatch.setattr(
+        cross_listing.stock_intake,
+        "lookup_isbn",
+        lambda isbn: {
+            "isbn": isbn,
+            "title": "Known book",
+            "subtitle": "Subtitle",
+            "author": "Author Name",
+            "publisher": "Publisher Name",
+            "edition": "Second",
+            "physical_format": "Paperback",
+            "publish_date": "1988",
+            "publication_year": 1988,
+            "number_of_pages": 176,
+        },
+    )
+
+    with db.session_scope() as session:
+        candidate = cross_listing.build_candidate(
+            session,
+            workspace_id,
+            item_id,
+        )
+
+    assert candidate["fields"]["isbn"] == "9780140328721"
+    assert candidate["fields"]["subtitle"] == "Subtitle"
+    assert candidate["fields"]["author"] == "Author Name"
+    assert candidate["fields"]["publisher"] == "Publisher Name"
+    assert candidate["fields"]["edition"] == "Second"
+    assert candidate["fields"]["binding"] == "Paperback"
+    assert candidate["fields"]["publish_date"] == "1988"
+    assert candidate["fields"]["pages"] == 176
