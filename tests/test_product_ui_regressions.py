@@ -624,3 +624,14 @@ def test_cross_list_existing_writable_destinations_offer_update():
 
 def test_cross_list_update_group_is_visible_before_already_listed():
     assert 'const groupOrder = ["ready", "update", "attention", "listed", "unavailable"];' in APP_JS
+
+
+
+def test_today_and_reconcile_distinguish_lifecycle_action_types():
+    assert '"Sync remaining stock"' in APP_JS
+    assert '"Review stock restoration"' in APP_JS
+    assert 'row.action_type === "sync_quantity"' in APP_JS
+    assert '"Set stock to " + String(row.detail?.target_quantity ?? "—")' in APP_JS
+    assert 'row.action_type === "review_restore"' in APP_JS
+    assert "Stock action marked handled." in APP_JS
+    assert "Stock action queued again." in APP_JS
