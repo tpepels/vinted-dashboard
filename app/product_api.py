@@ -47,6 +47,7 @@ from app.constants import (
     ItemStatus,
     ListingStatus,
     MembershipRole,
+    SyncRunStatus,
     KNOWN_ITEM_CATEGORIES,
 )
 from app.connectors.base import Capability, connector_catalog
@@ -416,6 +417,22 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
                 "url": row.url,
                 "quantity": row.quantity,
                 "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
+                "biblio_sync": (
+                    {
+                        "state": dict(row.extra or {}).get("publish_state"),
+                        "queued_at": dict(row.extra or {}).get("publish_queued_at"),
+                        "started_at": dict(row.extra or {}).get("publish_started_at"),
+                        "completed_at": dict(row.extra or {}).get("publish_completed_at"),
+                        "error": dict(row.extra or {}).get("publish_error"),
+                        "inventory_synced_at": dict(row.extra or {}).get("inventory_synced_at"),
+                        "photo_state": dict(row.extra or {}).get("photo_sync_state"),
+                        "photo_count": dict(row.extra or {}).get("photo_count"),
+                        "photo_synced_at": dict(row.extra or {}).get("photo_synced_at"),
+                        "photo_error": dict(row.extra or {}).get("photo_sync_error"),
+                    }
+                    if row.channel == Channel.BIBLIO
+                    else None
+                ),
             }
             for row in rows
         ],
@@ -839,6 +856,22 @@ def listings(
                 "favourites": snapshot.favourites if snapshot else None,
                 "snapshot_at": (
                     snapshot.captured_at.isoformat() if snapshot else None
+                ),
+                "biblio_sync": (
+                    {
+                        "state": extra.get("publish_state"),
+                        "queued_at": extra.get("publish_queued_at"),
+                        "started_at": extra.get("publish_started_at"),
+                        "completed_at": extra.get("publish_completed_at"),
+                        "error": extra.get("publish_error"),
+                        "inventory_synced_at": extra.get("inventory_synced_at"),
+                        "photo_state": extra.get("photo_sync_state"),
+                        "photo_count": extra.get("photo_count"),
+                        "photo_synced_at": extra.get("photo_synced_at"),
+                        "photo_error": extra.get("photo_sync_error"),
+                    }
+                    if listing.channel == Channel.BIBLIO
+                    else None
                 ),
             }
         )
@@ -1557,6 +1590,14 @@ def biblio_publish(
             )
             listing_id = str(listing.id)
         job_id = jobs.enqueue("biblio_sync", {"listing_id": listing_id}, context.workspace.id)
+        with db.session_scope() as session:
+            queued_listing = session.get(models.ChannelListing, uuid.UUID(listing_id))
+            if queued_listing is not None and queued_listing.workspace_id == context.workspace.id:
+                extra = dict(queued_listing.extra or {})
+                extra["publish_job_id"] = str(job_id)
+                extra["publish_state"] = "queued"
+                extra["publish_queued_at"] = utcnow().isoformat()
+                queued_listing.extra = extra
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -2712,6 +2753,141 @@ def connectors(context: RequestContext = Depends(require_context)):
             }
         )
     return {"connectors": result}
+
+
+def _serialize_biblio_activity_run(run: models.ConnectorSyncRun) -> dict[str, Any]:
+    detail = dict(run.detail or {})
+    return {
+        "id": str(run.id),
+        "status": run.status,
+        "stage": detail.get("stage"),
+        "message": detail.get("message"),
+        "mode": detail.get("mode"),
+        "listing_id": detail.get("listing_id"),
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "active_count": run.active_count,
+        "delete_count": run.delete_count,
+        "inventory_filename": detail.get("inventory_filename"),
+        "deletes_filename": detail.get("deletes_filename"),
+        "inventory_total": detail.get("inventory_total"),
+        "inventory_uploaded": detail.get("inventory_uploaded"),
+        "deletes_total": detail.get("deletes_total"),
+        "deletes_uploaded": detail.get("deletes_uploaded"),
+        "photos_total": detail.get("photos_total"),
+        "photos_uploaded": detail.get("photos_uploaded"),
+        "photos_pending_listings": detail.get("photos_pending_listings"),
+        "photo_errors": list(detail.get("photo_errors") or []),
+        "error": run.error,
+    }
+
+
+@router.get("/api/app/connectors/biblio/activity")
+def biblio_activity(
+    limit: int = 20,
+    context: RequestContext = Depends(require_context),
+):
+    limit = max(1, min(int(limit or 20), 50))
+    with db.session_scope() as session:
+        runs = session.execute(
+            select(models.ConnectorSyncRun)
+            .where(
+                models.ConnectorSyncRun.workspace_id == context.workspace.id,
+                models.ConnectorSyncRun.channel == Channel.BIBLIO,
+                models.ConnectorSyncRun.run_type == "ftp_sync",
+            )
+            .order_by(models.ConnectorSyncRun.started_at.desc())
+            .limit(limit)
+        ).scalars().all()
+        job_rows = session.execute(
+            select(BackgroundJob)
+            .where(
+                BackgroundJob.workspace_id == context.workspace.id,
+                BackgroundJob.job_type == "biblio_sync",
+            )
+            .order_by(BackgroundJob.created_at.desc())
+            .limit(limit)
+        ).scalars().all()
+
+        listing_ids: set[uuid.UUID] = set()
+        for job in job_rows:
+            raw = dict(job.payload or {}).get("listing_id")
+            if raw:
+                try:
+                    listing_ids.add(uuid.UUID(str(raw)))
+                except ValueError:
+                    pass
+        for run in runs:
+            raw = dict(run.detail or {}).get("listing_id")
+            if raw:
+                try:
+                    listing_ids.add(uuid.UUID(str(raw)))
+                except ValueError:
+                    pass
+        listing_titles = {
+            str(row.id): row.title
+            for row in (
+                session.execute(
+                    select(models.ChannelListing).where(
+                        models.ChannelListing.workspace_id == context.workspace.id,
+                        models.ChannelListing.id.in_(listing_ids),
+                    )
+                ).scalars().all()
+                if listing_ids
+                else []
+            )
+        }
+
+    serialized_runs = []
+    for run in runs:
+        row = _serialize_biblio_activity_run(run)
+        if row.get("listing_id"):
+            row["listing_title"] = listing_titles.get(str(row["listing_id"]))
+        serialized_runs.append(row)
+
+    serialized_jobs = []
+    for job in job_rows:
+        payload = dict(job.payload or {})
+        listing_id = str(payload.get("listing_id") or "") or None
+        serialized_jobs.append(
+            {
+                "id": str(job.id),
+                "status": job.status,
+                "attempts": job.attempts,
+                "listing_id": listing_id,
+                "listing_title": listing_titles.get(listing_id) if listing_id else None,
+                "full_sync": bool(payload.get("full_sync")),
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "locked_at": job.locked_at.isoformat() if job.locked_at else None,
+                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                "error": job.last_error,
+            }
+        )
+
+    running_run = next(
+        (row for row in serialized_runs if row["status"] == SyncRunStatus.RUNNING),
+        None,
+    )
+    active_job = next(
+        (row for row in serialized_jobs if row["status"] in {"queued", "running"}),
+        None,
+    )
+    current = running_run or active_job or (serialized_runs[0] if serialized_runs else None)
+    return {
+        "current": current,
+        "runs": serialized_runs,
+        "jobs": serialized_jobs,
+    }
+
+
+@router.post("/api/app/connectors/biblio/full-sync")
+def enqueue_biblio_full_sync(
+    context: RequestContext = Depends(require_write_context),
+):
+    if not _biblio_configured_for_workspace(context.workspace):
+        raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
+    job_id = jobs.enqueue("biblio_sync", {"full_sync": True}, context.workspace.id)
+    return {"ok": True, "job_id": str(job_id), "queued": True}
 
 
 @router.put("/api/app/connectors/{channel}/credentials")
