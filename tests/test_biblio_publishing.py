@@ -982,3 +982,45 @@ def test_biblio_publish_uses_values_reviewed_in_preview_even_if_lookup_changes(m
         assert listing.extra["description"] == "Vinted description"
         item = session.get(models.InventoryItem, item_id)
         assert item.attributes["publisher"] == "Preview Publisher"
+
+
+
+def test_biblio_review_can_clear_optional_isbn_and_enrichment():
+    candidate = {
+        "fields": {
+            "sku": "BK-CLEAR",
+            "book_id": "BK-CLEAR",
+            "title": "Book",
+            "author": "Author",
+            "description": "Description",
+            "isbn": "9780140328721",
+            "price_cents": 500,
+            "currency": "EUR",
+            "quantity": 1,
+        },
+        "field_sources": {"isbn": "isbn"},
+        "bibliographic_enrichment": {
+            "publisher": "Publisher",
+            "edition": "Edition",
+            "publish_date": "2000",
+        },
+        "missing": [],
+        "ready": True,
+    }
+    result = publishing.apply_biblio_overrides(
+        candidate,
+        {
+            "isbn": "",
+            "publisher": "",
+            "edition": "",
+            "publish_date": "",
+        },
+    )
+    assert result["fields"]["isbn"] is None
+    assert result["field_sources"]["isbn"] == "review"
+    assert result["bibliographic_enrichment"] == {
+        "publisher": None,
+        "edition": None,
+        "publish_date": None,
+    }
+    assert result["ready"] is True
