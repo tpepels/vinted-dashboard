@@ -373,6 +373,14 @@ def apply_biblio_overrides(
         fields["price_cents"] = price
         sources["price_cents"] = "review"
 
+    bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
+    for key in ("publisher", "edition", "publish_date"):
+        if key not in overrides or overrides[key] is None:
+            continue
+        value = str(overrides[key]).strip()
+        if value:
+            bibliographic[key] = value
+
     if not fields.get("book_id") and fields.get("sku"):
         fields["book_id"] = fields["sku"]
         sources.setdefault("book_id", sources.get("sku") or "master")
@@ -394,6 +402,7 @@ def apply_biblio_overrides(
         **candidate,
         "fields": fields,
         "field_sources": sources,
+        "bibliographic_enrichment": bibliographic,
         "missing": missing,
         "ready": not missing,
     }
