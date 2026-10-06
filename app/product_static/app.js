@@ -1091,6 +1091,7 @@ function renderBiblioPublish(data) {
   if (!data.configured) warning = "BIBLIO is not connected yet.";
   else if (missing.length) warning = "Before publishing: " + missing.join(", ") + ".";
   else if (data.enrichment_warning) warning = "ISBN lookup warning: " + data.enrichment_warning;
+  else if (data.photo_warning) warning = "Photo warning: " + data.photo_warning;
   else warning = data.already_listed
     ? "This physical book already has a BIBLIO listing. Publishing will update it from the current source data."
     : "Ready. Publishing creates a BIBLIO listing linked to this same physical book and queues the FTP sync.";
@@ -1166,6 +1167,9 @@ function biblioListingState(sync) {
     if (sync.photo_state === "queued" || sync.photo_state === "uploading") {
       return { label: "inventory uploaded · photos pending", cls: "running", detail: "Inventory reached FTP; photos are still being sent" };
     }
+    if (sync.photo_state === "retry_scheduled") {
+      return { label: "FTP uploaded · photo retry scheduled", cls: "warn", detail: "BIBLIO may ignore photos until the listing is active; one delayed retry is scheduled" };
+    }
     return { label: "FTP uploaded", cls: "success", detail: "Transfer finished; BIBLIO processing is separate" };
   }
   return null;
@@ -1220,6 +1224,9 @@ function biblioActivityDetail(row) {
   if (row.photos_total != null) {
     parts.push("photos " + Number(row.photos_uploaded || 0) + "/" + Number(row.photos_total || 0));
   }
+  if (Number(row.photo_retry_scheduled || 0) > 0) {
+    parts.push(Number(row.photo_retry_scheduled) + " delayed photo retry scheduled");
+  }
   if (row.error) parts.push(row.error);
   return parts.join(" · ") || "BIBLIO FTP activity recorded.";
 }
@@ -1250,7 +1257,7 @@ function renderBiblioActivity(activity, operational) {
     + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry photos</button>' : "")
     + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
     + '</div><div class="biblio-activity-history hidden">'
-    + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards.</div>'
+    + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards. For a brand-new listing, the dashboard schedules one delayed photo-only retry because BIBLIO ignores an image if there is no active listing to attach it to.</div>'
     + history + "</div></div>";
 }
 
