@@ -1043,36 +1043,48 @@ function renderBiblioPublish(data) {
 
   const fields = data.fields || {};
   const sources = data.field_sources || {};
+  const bookIdValue = fields.book_id || data.book_id_suggestion || "";
   const rows = [
-    ["title", "Title", fields.title, sources.title],
-    ["author", "Author", fields.author, sources.author],
-    ["description", "Description", fields.description, sources.description],
-    ["isbn", "ISBN", fields.isbn || "Optional", sources.isbn],
-    ["price_cents", "Price", fields.price_cents == null ? null : money(fields.price_cents, fields.currency), sources.price_cents],
-    ["book_id", "Book ID", fields.book_id, sources.book_id],
-    ["quantity", "Quantity", fields.quantity, sources.quantity],
-    ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - automatic BIBLIO upload" : "No Vinted photos available", source.photo_count ? "vinted" : null],
+    ["title", "Title", fields.title || "", sources.title, true, true],
+    ["author", "Author", fields.author || "", sources.author, true, true],
+    ["description", "Description", fields.description || "", sources.description, true, true],
+    ["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false],
+    ["price_cents", "Price", fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2), sources.price_cents, true, true],
+    ["book_id", "Book ID", bookIdValue, sources.book_id, true, true],
+    ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
+    ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - automatic BIBLIO upload" : "No Vinted photos available", source.photo_count ? "vinted" : null, false, false],
   ];
-  const editableMissing = new Set(["title", "author", "description", "price_cents", "book_id"]);
-  $("#biblio-publish-fields").innerHTML = rows.map(([key, label, value, sourceName]) => {
-    const missing = value == null || value === "";
-    const display = label === "Description" && value
-      ? (String(value).length > 240 ? String(value).slice(0, 240) + "…" : String(value))
-      : value;
-    let valueHtml = '<strong>' + esc(missing ? "Missing" : display) + '</strong>';
-    if (missing && editableMissing.has(key)) {
-      valueHtml = key === "description"
-        ? '<textarea class="biblio-missing-input" data-field="description" rows="3" placeholder="Description required by BIBLIO"></textarea>'
-        : '<input class="biblio-missing-input" data-field="' + esc(key) + '"'
-          + (key === "price_cents" ? ' type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"' : ' type="text"')
-          + ' placeholder="' + esc(key === "book_id" ? (data.book_id_suggestion || "Unique BIBLIO Book ID") : label) + '">';
+  $("#biblio-publish-fields").innerHTML = rows.map(([key, label, value, sourceName, editable, required]) => {
+    const missing = required && (value == null || String(value).trim() === "");
+    let valueHtml;
+    if (editable) {
+      if (key === "description") {
+        valueHtml = '<textarea class="biblio-review-input" data-field="description" data-required="' + (required ? "true" : "false")
+          + '" rows="4" placeholder="Description required by BIBLIO">' + esc(value || "") + '</textarea>';
+      } else {
+        const type = key === "price_cents" ? "number" : "text";
+        const extra = key === "price_cents" ? ' min="0" step="0.01" inputmode="decimal"' : "";
+        const placeholder = key === "book_id" ? "Unique BIBLIO Book ID" : (required ? label : label + " (optional)");
+        valueHtml = '<input class="biblio-review-input" data-field="' + esc(key) + '" data-required="' + (required ? "true" : "false")
+          + '" type="' + type + '"' + extra + ' value="' + esc(value || "") + '" placeholder="' + esc(placeholder) + '">';
+      }
+    } else {
+      valueHtml = '<strong>' + esc(value == null || value === "" ? "—" : value) + '</strong>';
     }
     return '<div class="biblio-field ' + (missing ? "missing" : "") + '">'
       + '<span class="biblio-field-label">' + esc(label) + '</span>'
       + valueHtml
-      + (missing ? "" : biblioSourceBadge(sourceName))
+      + (sourceName ? biblioSourceBadge(sourceName) : "")
       + '</div>';
   }).join("");
+
+  const enrichment = data.bibliographic_enrichment || {};
+  if (enrichment.publisher || enrichment.edition || enrichment.publish_date) {
+    $("#biblio-publish-fields").insertAdjacentHTML("beforeend",
+      '<div class="biblio-enrichment"><span class="biblio-field-label">ISBN metadata</span><strong>'
+      + esc([enrichment.publisher, enrichment.edition, enrichment.publish_date].filter(Boolean).join(" · "))
+      + '</strong>' + biblioSourceBadge("isbn") + '</div>');
+  }
 
   const missing = data.missing || [];
   let warning = "";
@@ -1091,10 +1103,11 @@ function renderBiblioPublish(data) {
     "author", "title", "description", "price", "Book ID", "unique BIBLIO Book ID",
   ].includes(value));
   const refreshPublishState = () => {
-    const unresolvedEditable = Array.from(document.querySelectorAll(".biblio-missing-input")).some((field) => !String(field.value || "").trim());
+    const unresolvedEditable = Array.from(document.querySelectorAll(".biblio-review-input[data-required='true']"))
+      .some((field) => !String(field.value || "").trim());
     publish.disabled = !data.configured || hardMissing.length > 0 || unresolvedEditable;
   };
-  document.querySelectorAll(".biblio-missing-input").forEach((field) => {
+  document.querySelectorAll(".biblio-review-input").forEach((field) => {
     field.oninput = refreshPublishState;
   });
   refreshPublishState();
@@ -1222,7 +1235,7 @@ $("#biblio-publish-submit").onclick = async () => {
   const button = $("#biblio-publish-submit");
   if (button.disabled) return;
   const payload = { source_listing_id: current.sourceListingId || null };
-  document.querySelectorAll(".biblio-missing-input").forEach((field) => {
+  document.querySelectorAll(".biblio-review-input").forEach((field) => {
     const value = String(field.value || "").trim();
     if (!value) return;
     if (field.dataset.field === "price_cents") payload.price_cents = Math.round(Number(value) * 100);
