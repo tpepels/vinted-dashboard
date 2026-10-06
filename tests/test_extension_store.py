@@ -341,6 +341,7 @@ def test_bridge_age_scan_is_finite_resumable_and_failures_have_cooldown():
     assert "job.remaining=job.remaining.slice(batch.length);" in background
     assert "await chrome.storage.local.set({[AGE_JOB_KEY]:job});" in background
     assert "chrome.alarms.create(AGE_JOB_ALARM" in background
+    assert "sync_skipped_for_age_job:true" in background
     assert "AGE_SWEEP_ALARM" not in background
 
 
