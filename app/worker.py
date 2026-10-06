@@ -48,6 +48,8 @@ def _sync_biblio(payload: dict, workspace_id: uuid.UUID | None) -> None:
         _require_workspace("biblio_sync", workspace_id),
         listing_id=listing_id,
         full_sync=bool(payload.get("full_sync")),
+        force_photos=bool(payload.get("force_photos")),
+        photos_only=bool(payload.get("photos_only")),
     )
 
 
