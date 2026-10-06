@@ -153,15 +153,26 @@ sync it uses an already-open signed-in Vinted tab and remembers that origin for
 later periodic syncs.
 
 For active/reserved/hidden/draft listings, bridge 3.2.0 keeps a local detail
-cache for richer Vinted item metadata. When Vinted does not expose a trustworthy
-absolute posting timestamp, the bridge reads the visible `Uploaded` value from
-the **rendered** Vinted item page, for example `5 weeks ago`. A manual sync
-collects all currently missing posting ages in **one finite burst**: one minimized
-worker window uses up to 16 tabs in parallel, reuses those tabs until the queue is
-finished, then closes the window. Successful item IDs are cached permanently and
-are not rescanned. Failed pages are cooldown-marked for 24 hours on periodic
-syncs; an explicit manual sync can retry them immediately. There is no repeating
-age-sweep alarm or endless open/close cycle.
+cache for richer Vinted item metadata. Core inventory pagination is paced and
+retries HTTP 429 responses with backoff. Rich `/api/v2/items/{id}` enrichment
+is deliberately budgeted separately - up to 32 records on a manual sync and 10
+on a periodic sync, one paced request stream rather than hundreds of concurrent
+detail calls. If rich-detail enrichment is rate-limited, the complete core
+inventory snapshot still syncs and optional notification/order calls are skipped
+for that pass. If the core inventory endpoint itself remains rate-limited after
+backoff, the bridge aborts instead of sending a partial inventory snapshot.
+
+When Vinted does not expose a trustworthy absolute posting timestamp, the bridge
+reads the visible `Uploaded` value from the **rendered** Vinted item page, for
+example `5 weeks ago`. Missing ages form one finite persisted job. A single
+minimized worker window uses 12 reusable tabs; the queue is checkpointed after
+each wave and processed in bounded chunks so Chrome can terminate/restart the
+Manifest V3 service worker without losing progress. The same window is reused
+until the finite queue finishes, then it is closed. Successful item IDs are
+cached and are not rescanned. Failed pages are cooldown-marked for 24 hours on
+periodic syncs; an explicit manual sync can retry them immediately. Periodic
+inventory sync is skipped while an age job is active, so the bridge does not add
+API traffic while the rendered-page burst is still running.
 
 The dashboard and server accept Vinted relative age only when it came from the
 rendered page collector (`vinted_page_*`). Generic API-relative ages,
@@ -170,8 +181,9 @@ Bridge 3.2.0 also performs a content-script protocol handshake and reloads an
 already-open Vinted tab once when it is still running code from an older bridge.
 The content script itself is idempotent: if Chrome or the service worker injects
 it again into the same Vinted tab, a protocol guard exits before redeclaring
-cache constants or registering a second message listener. Bridge 3.2.0 bumps
-that protocol so tabs still running the 3.0.1 script are forcibly reloaded once.
+cache constants or registering a second message listener. Bridge 3.2.0 uses
+content protocol 6, so tabs still running an older bridge script are forcibly
+reloaded once.
 
 
 Age parsing is isolated in `app/extension/vinted_age.js`; the finite rendered
@@ -221,13 +233,19 @@ directly from this preflight, including Vinted source images. The created
 ChannelListing is then linked back to the same physical InventoryItem so later
 sales and stock reconciliation operate on one copy of the item.
 
-BIBLIO keeps its book-specific preflight inside the same destination panel. It
-uses Vinted title/description/ISBN/author/price first, then master data, then
-ISBN lookup for missing bibliographic facts. Older Vinted books still classified
-as `general` qualify from linked ISBN/author/book-category evidence. If a
-sparse legacy Vinted book has no such evidence, Cross-list shows **Mark as book
-& continue**; that explicit action updates the master category and opens the
-real BIBLIO preflight immediately instead of dumping the user into generic Edit.
+BIBLIO keeps its book-specific preflight inside the same destination panel.
+When an ISBN is available, ISBN metadata is preferred for bibliographic title
+and author; the Vinted description, price and photos remain the commercial
+source. Title, author, description, ISBN, publisher, edition, publish date,
+price and Book ID stay editable in the preflight even when they were prefilled.
+The POST carries those reviewed values explicitly, so a second ISBN lookup cannot
+silently replace what the user reviewed. Publisher/edition/publish-date
+enrichment is persisted onto the master item when published. Older Vinted books
+still classified as `general` qualify from linked ISBN/author/book-category
+evidence. If a sparse legacy Vinted book has no such evidence, Cross-list shows
+**Mark as book & continue**; that explicit action updates the master category and
+opens the real BIBLIO preflight immediately instead of dumping the user into
+generic Edit.
 Zero stock exposes **Edit stock**, and a conflicting BIBLIO Book ID can be
 replaced inline with a server-validated unique ID. Unlinked Vinted listings show
 **Link to inventory** and jump directly to reconciliation before any destination
