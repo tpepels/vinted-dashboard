@@ -964,6 +964,7 @@ def test_biblio_publish_uses_values_reviewed_in_preview_even_if_lookup_changes(m
             "author": reviewed["author"],
             "description": reviewed["description"],
             "isbn": reviewed["isbn"],
+            "publisher": preview.json()["bibliographic_enrichment"]["publisher"],
             "price_cents": reviewed["price_cents"],
         },
     )
@@ -979,3 +980,5 @@ def test_biblio_publish_uses_values_reviewed_in_preview_even_if_lookup_changes(m
         assert listing.title == "Preview Title"
         assert listing.extra["author"] == "Preview Author"
         assert listing.extra["description"] == "Vinted description"
+        item = session.get(models.InventoryItem, item_id)
+        assert item.attributes["publisher"] == "Preview Publisher"
