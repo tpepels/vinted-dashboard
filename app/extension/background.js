@@ -194,7 +194,18 @@ async function runSync(reason="manual"){
       snapshot.extension_version=chrome.runtime.getManifest().version;
 
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
-      const ageBurst=await runAgeBurst(ageScanItems,reason);
+      let ageBurst;
+      try{
+        ageBurst=await runAgeBurst(ageScanItems,reason);
+      }catch(error){
+        ageBurst={
+          scanned:0,
+          updated:0,
+          failed:0,
+          skipped:ageScanItems.length,
+          error:error instanceof Error?error.message:String(error),
+        };
+      }
       const status={
         ok:true,
         at:new Date().toISOString(),
@@ -207,6 +218,7 @@ async function runSync(reason="manual"){
         age_scan_updated:ageBurst.updated,
         age_scan_failed:ageBurst.failed,
         age_scan_skipped:ageBurst.skipped,
+        age_scan_error:ageBurst.error||null,
       };
       await chrome.storage.local.set({syncStatus:status});
       return status;
