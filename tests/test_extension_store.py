@@ -187,7 +187,7 @@ def test_source_extension_version_is_bumped_for_local_download():
 
 
 
-def test_content_script_uses_finite_rendered_uploaded_age_burst():
+def test_content_script_uses_resumable_finite_rendered_uploaded_age_job():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     age = (ROOT / "app" / "extension" / "vinted_age.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
@@ -204,17 +204,19 @@ def test_content_script_uses_finite_rendered_uploaded_age_burst():
     assert "function relativeAgeFromPageHtml" not in content
     assert "age_scan_items:ageScanItems" in content
     assert 'message?.type==="read-vinted-uploaded-age"' in content
-    assert "async function renderedUploadedAgesBurst(items,workerCount=AGE_WORKERS)" in background
-    assert "const AGE_WORKERS=16;" in background
+    assert 'AGE_JOB_KEY="vintedAgeBurstJobV2"' in background
+    assert "const AGE_WORKERS=12;" in background
+    assert "const AGE_WAVES_PER_EVENT=4;" in background
     assert 'AGE_FAILURES_KEY="vintedAgeScanFailuresV1"' in background
     assert 'api("/api/extension/listing-ages"' in background
-    assert "async function runAgeBurst(items,reason)" in background
+    assert "async function startAgeJob(items,reason)" in background
+    assert "async function processAgeJobWave()" in background
+    assert "async function renderedUploadedAgeWave(job,batch)" in background
     assert "chrome.windows.create({" in background
     assert 'state:"minimized"' in background
     assert "await chrome.tabs.update(tab.id,{url:target.href,active:false})" in background
-    assert "await chrome.windows.remove(workerWindow.id)" in background
+    assert "await closeAgeWorkerWindow(job)" in background
     assert "AGE_SWEEP_ALARM" not in background
-    assert "processAgeSweepWindow" not in background
     assert 'files:["vinted_age.js","content.js"]' in background
     assert "const ageScanItems=await enrichListingDates(listings);" in content
 
@@ -250,9 +252,11 @@ def test_ci_does_not_commit_a_static_fernet_key():
 def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV4"' in content
-    assert "function enrichListingDetails(listings)" in content
+    assert 'function enrichListingDetails(listings,reason="periodic")' in content
     assert "image_urls:images" in content
-    assert "await enrichListingDetails(listings);" in content
+    assert "const detailSync=await enrichListingDetails(listings,reason);" in content
+    assert 'const budget=reason==="manual"?32:10;' in content
+    assert '{minDelayMs:900,maxRetries:1}' in content
     assert '["active","reserved","hidden","draft"]' in content
 
 
@@ -328,10 +332,24 @@ def test_vinted_detail_parser_prefers_direct_category_and_description_fields():
     assert 'category:metaText(first(raw,"catalog_title","category_title","category_name","catalog","category","catalogs"))' in content
 
 
-def test_bridge_age_scan_is_finite_and_failures_have_cooldown():
+def test_bridge_age_scan_is_finite_resumable_and_failures_have_cooldown():
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
-    assert "const AGE_WORKERS=16;" in background
+    assert "const AGE_WORKERS=12;" in background
+    assert "const AGE_WAVES_PER_EVENT=4;" in background
     assert "const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;" in background
     assert 'if(reason==="manual")return clean;' in background
-    assert "age_scan_failed:ageBurst.failed" in background
+    assert "job.remaining=job.remaining.slice(batch.length);" in background
+    assert "await chrome.storage.local.set({[AGE_JOB_KEY]:job});" in background
+    assert "chrome.alarms.create(AGE_JOB_ALARM" in background
     assert "AGE_SWEEP_ALARM" not in background
+
+
+def test_vinted_fetches_are_paced_and_rate_limit_safe():
+    content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
+    assert "let lastVintedFetchAt=0;" in content
+    assert "function rateLimitDelay(response,attempt)" in content
+    assert "Vinted rate limited the sync." in content
+    assert "error.vintedRateLimited=true" in content
+    assert "if(isRateLimitError(error))throw error;" in content
+    assert 'const budget=reason==="manual"?32:10;' in content
+    assert "if(!detailSync.rate_limited)" in content
