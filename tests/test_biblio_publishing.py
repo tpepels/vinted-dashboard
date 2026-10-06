@@ -1036,3 +1036,83 @@ def test_biblio_review_can_clear_optional_isbn_and_enrichment():
         "publish_date": None,
     }
     assert result["ready"] is True
+
+
+
+def test_biblio_photo_warning_for_book_id_that_cannot_be_a_filename():
+    candidate = {
+        "fields": {
+            "sku": "BOOK-1",
+            "book_id": "BOOK/1",
+            "title": "Book",
+            "author": "Author",
+            "description": "Description",
+            "isbn": None,
+            "price_cents": 500,
+            "currency": "EUR",
+            "quantity": 1,
+        },
+        "field_sources": {},
+        "source": {
+            "photo_count": 1,
+            "image_urls": ["https://images1.vinted.net/t/one.jpg"],
+        },
+        "missing": [],
+        "ready": True,
+        "bibliographic_enrichment": {},
+    }
+
+    result = publishing.apply_biblio_overrides(candidate, {})
+
+    assert result["ready"] is True
+    assert "photo filename" in result["photo_warning"]
+
+
+def test_changing_biblio_book_id_requeues_same_photos():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        first = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        previous_extra = dict(first.extra or {})
+        previous_extra["photo_sync_signature"] = "already-uploaded"
+        previous_extra["photo_sync_state"] = "ftp_uploaded"
+        previous_extra["photo_book_id"] = first.external_id
+        first.extra = previous_extra
+        first_id = first.id
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {"book_id": "RENAMED-BOOK-ID"},
+        )
+        updated = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        assert updated.id == first_id
+        assert updated.external_id == "RENAMED-BOOK-ID"
+        assert updated.extra["photo_sync_state"] == "queued"
