@@ -763,7 +763,7 @@ function bindCrossChannelButtons(after) {
     button.onclick = async () => {
       try {
         await api("/api/app/cross-channel-actions/" + button.dataset.id + "/acknowledge", { method: "POST" });
-        flash("Manual close marked handled.");
+        flash("Stock action marked handled.");
         await after();
       } catch (error) { flash(error.message, true); }
     };
@@ -772,7 +772,7 @@ function bindCrossChannelButtons(after) {
     button.onclick = async () => {
       try {
         await api("/api/app/cross-channel-actions/" + button.dataset.id + "/retry", { method: "POST" });
-        flash("Remote close queued again.");
+        flash("Stock action queued again.");
         await after();
       } catch (error) { flash(error.message, true); }
     };
@@ -2752,7 +2752,12 @@ function renderReconciliation(data, crossData) {
         '<tr><td><div class="title">' + esc(row.item?.title || row.listing?.title || "Sold item")
         + '</div><div class="sub">' + esc(row.item?.sku || "") + '</div></td>'
         + '<td>' + esc(row.sale?.channel || "") + '<div class="sub">' + esc(row.sale?.external_order_id || "") + '</div></td>'
-        + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + '</span><div class="sub">' + esc(row.listing?.title || "") + '</div></td>'
+        + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + '</span><div class="sub">' + esc(row.listing?.title || "") + '</div>'
+        + '<div class="sub">' + esc(
+          row.action_type === "sync_quantity"
+            ? "Set stock to " + String(row.detail?.target_quantity ?? "—")
+            : (row.action_type === "review_restore" ? "Review restoration" : "Close listing")
+        ) + '</div></td>'
         + '<td>' + esc(row.status) + (row.last_error ? '<div class="sub error">' + esc(row.last_error) + '</div>' : "") + '</td>'
         + '<td>' + esc(row.attempts) + '</td><td class="row-actions">' + crossChannelActionControls(row) + '</td></tr>'
       ).join("")
