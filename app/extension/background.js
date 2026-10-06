@@ -149,7 +149,7 @@ async function ensureAgeWorkerTabs(job,batch){
   if(job.window_id!=null&&ids.length>=batch.length){
     try{
       const tabs=await Promise.all(ids.slice(0,batch.length).map(id=>chrome.tabs.get(id)));
-      if(tabs.every(tab=>tab&&tab.id!=null))return tabs;
+      if(tabs.every(tab=>tab&&tab.id!=null&&tab.windowId===job.window_id))return tabs;
     }catch{}
   }
 
@@ -159,7 +159,10 @@ async function ensureAgeWorkerTabs(job,batch){
     focused:false,
     state:"minimized",
   });
-  const tabs=Array.isArray(workerWindow?.tabs)?workerWindow.tabs:[];
+  let tabs=Array.isArray(workerWindow?.tabs)?workerWindow.tabs:[];
+  if(tabs.length!==batch.length&&workerWindow?.id!=null){
+    try{tabs=await chrome.tabs.query({windowId:workerWindow.id})}catch{}
+  }
   if(tabs.length!==batch.length){
     if(workerWindow?.id!=null){
       try{await chrome.windows.remove(workerWindow.id)}catch{}
