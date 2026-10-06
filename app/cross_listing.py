@@ -6,6 +6,7 @@ photos, while the physical InventoryItem remains the stock authority.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +26,16 @@ DIRECT_CREATE_CHANNELS = {
     Channel.SHOPIFY,
     Channel.WIX,
 }
+
+
+def _isbn_from_book_barcode(value: Any) -> str | None:
+    raw = re.sub(r"[^0-9Xx]", "", str(value or ""))
+    if not (
+        (len(raw) == 13 and raw.startswith(("978", "979")))
+        or len(raw) == 10
+    ):
+        return None
+    return clean_isbn(raw)
 
 
 def _value(*choices: tuple[Any, str]) -> tuple[Any, str | None]:
@@ -94,6 +105,14 @@ def build_candidate(
     isbn, isbn_source = _value(
         (clean_isbn(metadata.get("isbn")), "vinted"),
         (clean_isbn(attrs.get("isbn")), "master"),
+        (
+            _isbn_from_book_barcode(metadata.get("barcode")),
+            "vinted_barcode",
+        ) if item.category == ItemCategory.BOOK else (None, "vinted_barcode"),
+        (
+            _isbn_from_book_barcode(attrs.get("barcode")),
+            "master_barcode",
+        ) if item.category == ItemCategory.BOOK else (None, "master_barcode"),
     )
     barcode, barcode_source = _value(
         (metadata.get("barcode"), "vinted"),
