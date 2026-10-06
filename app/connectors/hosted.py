@@ -677,6 +677,34 @@ def _woo_post(
     return response.json()
 
 
+def _woo_put(
+    values: dict[str, str],
+    path: str,
+    *,
+    body: dict[str, Any],
+) -> Any:
+    response = requests.put(
+        _woocommerce_base(values) + "/wp-json/wc/v3/" + path.lstrip("/"),
+        headers={
+            **_woocommerce_headers(values),
+            "Content-Type": "application/json",
+        },
+        json=body,
+        timeout=45,
+    )
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            detail = str((response.json() or {}).get("message") or "")
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            f"WooCommerce update failed ({response.status_code})"
+            + (f": {detail}" if detail else "")
+        )
+    return response.json()
+
+
 CANDIDATE_DETAIL_FIELDS = (
     ("Author", "author"),
     ("Subtitle", "subtitle"),
@@ -1052,6 +1080,61 @@ def sync_woocommerce_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
         "source": Channel.WOOCOMMERCE,
         **listing_result,
         **order_result,
+    }
+
+
+def close_woocommerce_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+) -> dict[str, Any]:
+    """Make one WooCommerce product/variation unavailable without deleting it."""
+    values = _credentials(workspace_id, Channel.WOOCOMMERCE)
+    external_id = str(external_id or "").strip()
+    if not external_id:
+        raise RuntimeError("WooCommerce listing ID is missing")
+
+    current = next(
+        (
+            row
+            for row in _fetch_woocommerce_products(values)
+            if str(row.get("source_id") or "") == external_id
+        ),
+        None,
+    )
+    if (
+        current is None
+        or int(current.get("quantity") or 0) <= 0
+        or current.get("status") != ListingStatus.ACTIVE
+    ):
+        return {
+            "remote": "already_unavailable",
+            "external_id": external_id,
+            "quantity": 0,
+        }
+
+    if ":" in external_id:
+        product_id, variation_id = external_id.split(":", 1)
+        if not product_id.isdigit() or not variation_id.isdigit():
+            raise RuntimeError("WooCommerce variation listing ID is malformed")
+        path = f"products/{product_id}/variations/{variation_id}"
+    else:
+        if not external_id.isdigit():
+            raise RuntimeError("WooCommerce product listing ID is malformed")
+        path = f"products/{external_id}"
+
+    raw = _woo_put(
+        values,
+        path,
+        body={
+            "manage_stock": True,
+            "stock_quantity": 0,
+            "stock_status": "outofstock",
+        },
+    )
+    return {
+        "remote": "stock_zeroed",
+        "external_id": external_id,
+        "quantity": _woo_quantity(raw),
     }
 
 
@@ -1547,6 +1630,137 @@ def test_shopify_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
         "detail": "Shopify product and order scopes are readable.",
         "variants_visible": len(((variants.get("productVariants") or {}).get("nodes") or [])),
         "orders_visible": len(((orders.get("orders") or {}).get("nodes") or [])),
+    }
+
+
+SHOPIFY_VARIANT_INVENTORY_QUERY = """
+query ResellerVariantInventory($id: ID!) {
+  productVariant(id: $id) {
+    id
+    inventoryItem {
+      id
+      inventoryLevels(first: 100) {
+        nodes {
+          location { id }
+          quantities(names: ["available"]) { name quantity }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+SHOPIFY_SET_INVENTORY_MUTATION = """
+mutation ResellerSetInventory(
+  $input: InventorySetQuantitiesInput!,
+  $idempotencyKey: String!
+) {
+  inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
+    inventoryAdjustmentGroup {
+      changes { name delta quantityAfterChange }
+    }
+    userErrors { code field message }
+  }
+}
+"""
+
+
+def close_shopify_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+    *,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Set a Shopify variant's available inventory to zero at every location."""
+    values = _credentials(workspace_id, Channel.SHOPIFY)
+    version = str(values.get("api_version") or "2026-10").strip() or "2026-10"
+    if version < "2026-04":
+        raise RuntimeError(
+            "Automatic Shopify close requires Admin API version 2026-04 or newer"
+        )
+    variant_id = str(external_id or "").strip()
+    if not variant_id.startswith("gid://shopify/ProductVariant/"):
+        raise RuntimeError("Shopify listing ID is not a ProductVariant GID")
+
+    data = _shopify_graphql(
+        values,
+        SHOPIFY_VARIANT_INVENTORY_QUERY,
+        variables={"id": variant_id},
+    )
+    variant = data.get("productVariant")
+    if not isinstance(variant, dict):
+        return {
+            "remote": "already_unavailable",
+            "external_id": variant_id,
+            "quantity": 0,
+        }
+
+    inventory_item = variant.get("inventoryItem") or {}
+    inventory_item_id = str(inventory_item.get("id") or "").strip()
+    levels = ((inventory_item.get("inventoryLevels") or {}).get("nodes") or [])
+    quantities: list[dict[str, Any]] = []
+    total_available = 0
+    for level in levels:
+        if not isinstance(level, dict):
+            continue
+        location_id = str((level.get("location") or {}).get("id") or "").strip()
+        if not location_id:
+            continue
+        available = next(
+            (
+                _int(row.get("quantity"), 0) or 0
+                for row in (level.get("quantities") or [])
+                if isinstance(row, dict)
+                and str(row.get("name") or "") == "available"
+            ),
+            0,
+        )
+        total_available += max(0, available)
+        if available > 0:
+            quantities.append(
+                {
+                    "inventoryItemId": inventory_item_id,
+                    "locationId": location_id,
+                    "quantity": 0,
+                    "changeFromQuantity": available,
+                }
+            )
+
+    if not inventory_item_id or not quantities:
+        return {
+            "remote": "already_unavailable",
+            "external_id": variant_id,
+            "quantity": 0,
+        }
+
+    result = _shopify_graphql(
+        values,
+        SHOPIFY_SET_INVENTORY_MUTATION,
+        variables={
+            "input": {
+                "name": "available",
+                "reason": "correction",
+                "quantities": quantities,
+            },
+            "idempotencyKey": str(idempotency_key),
+        },
+    )
+    payload = result.get("inventorySetQuantities") or {}
+    errors = payload.get("userErrors") or []
+    if errors:
+        detail = "; ".join(
+            str(row.get("message") or "Shopify inventory error")
+            for row in errors
+            if isinstance(row, dict)
+        )
+        raise RuntimeError(f"Shopify inventory close failed: {detail}")
+    return {
+        "remote": "stock_zeroed",
+        "external_id": variant_id,
+        "quantity": 0,
+        "previous_quantity": total_available,
+        "locations_updated": len(quantities),
     }
 
 
@@ -2285,6 +2499,45 @@ def _wix_post(
     return payload if isinstance(payload, dict) else {}
 
 
+def _wix_get(values: dict[str, str], path: str) -> dict[str, Any]:
+    response = requests.get(
+        f"{WIX_API_BASE}/{path.lstrip('/')}",
+        headers=_wix_headers(values),
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Wix API request failed ({response.status_code})")
+    payload = response.json() or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _wix_patch(
+    values: dict[str, str],
+    path: str,
+    *,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    response = requests.patch(
+        f"{WIX_API_BASE}/{path.lstrip('/')}",
+        headers=_wix_headers(values),
+        json=body,
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            payload = response.json() or {}
+            detail = str(payload.get("message") or payload.get("details") or "")
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            f"Wix inventory update failed ({response.status_code})"
+            + (f": {detail}" if detail else "")
+        )
+    payload = response.json() or {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def create_wix_workspace_listing(
     workspace_id: uuid.UUID,
     candidate: dict[str, Any],
@@ -2713,6 +2966,98 @@ def _fetch_wix_orders(values: dict[str, str]) -> list[dict[str, Any]]:
         if not cursor:
             break
     return result
+
+
+def close_wix_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+) -> dict[str, Any]:
+    """Make one Wix variant unavailable at every inventory location."""
+    values = _credentials(workspace_id, Channel.WIX)
+    external_id = str(external_id or "").strip()
+    if ":" not in external_id:
+        raise RuntimeError("Wix listing ID must contain product and variant IDs")
+    product_id, variant_id = external_id.split(":", 1)
+    if not product_id or not variant_id:
+        raise RuntimeError("Wix listing ID is malformed")
+
+    rows = [
+        row
+        for row in _wix_query_inventory(values)
+        if str(row.get("productId") or "") == product_id
+        and str(row.get("variantId") or "") == variant_id
+    ]
+    if not rows:
+        return {
+            "remote": "already_unavailable",
+            "external_id": external_id,
+            "quantity": 0,
+        }
+
+    updates = 0
+    previous_quantity = 0
+    for row in rows:
+        tracked = bool(row.get("trackQuantity"))
+        quantity = _int(row.get("quantity"), 0) or 0
+        preorder = row.get("preorderInfo") or {}
+        preorder_enabled = bool(
+            preorder.get("enabled")
+            if isinstance(preorder, dict)
+            else False
+        )
+        in_stock = bool(row.get("inStock")) or str(
+            row.get("availabilityStatus") or ""
+        ).upper() in {"IN_STOCK", "PREORDER"}
+        previous_quantity += max(0, quantity)
+
+        if tracked and quantity <= 0 and not preorder_enabled:
+            continue
+        if not tracked and not in_stock:
+            continue
+
+        inventory_id = str(row.get("id") or "").strip()
+        revision = str(row.get("revision") or "").strip()
+        if not inventory_id:
+            raise RuntimeError("Wix inventory row is missing its ID")
+        if not revision:
+            current = _wix_get(
+                values,
+                f"stores/v3/inventory-items/{inventory_id}",
+            ).get("inventoryItem") or {}
+            revision = str(current.get("revision") or "").strip()
+            if not revision:
+                raise RuntimeError("Wix inventory row is missing its revision")
+            row = {**row, **current}
+            tracked = bool(row.get("trackQuantity"))
+
+        update: dict[str, Any] = {
+            "id": inventory_id,
+            "revision": revision,
+        }
+        if tracked:
+            update["quantity"] = 0
+            if preorder_enabled:
+                update["preorderInfo"] = {"enabled": False}
+        else:
+            update["inStock"] = False
+
+        _wix_patch(
+            values,
+            f"stores/v3/inventory-items/{inventory_id}",
+            body={
+                "inventoryItem": update,
+                "reason": "MANUAL",
+            },
+        )
+        updates += 1
+
+    return {
+        "remote": "stock_zeroed" if updates else "already_unavailable",
+        "external_id": external_id,
+        "quantity": 0,
+        "previous_quantity": previous_quantity,
+        "locations_updated": updates,
+    }
 
 
 def test_wix_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
