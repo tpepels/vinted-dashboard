@@ -250,10 +250,11 @@ async function collectVintedData(reason="periodic"){
   const ageScanItems=await enrichListingDates(listings);
 
   let notifications=[];
-  for(const path of["/api/v2/notifications","/web/api/notifications/notifications"]){try{const payload=await fetchJson(path,{page:1,per_page:100});if(payload!==null){notifications=listFrom(payload,["notifications","items","entries"]).map(notificationRow).filter(row=>row.category==="favorite").map(row=>({id:row.id,category:row.category,item_id:row.item_id,item_title:row.item_title,actor:row.actor,occurred_at:row.occurred_at}));break}}catch{}}
-
   const orders=[];
-  for(const[type,direction]of[["sold","sell"],["purchased","buy"]]){try{const rows=await paged("/api/v2/my_orders",["my_orders","orders","items"],{type,status:"all"},100);for(const raw of rows||[])orders.push(orderRow(raw,direction))}catch{}}
+  if(!detailSync.rate_limited){
+    for(const path of["/api/v2/notifications","/web/api/notifications/notifications"]){try{const payload=await fetchJson(path,{page:1,per_page:100});if(payload!==null){notifications=listFrom(payload,["notifications","items","entries"]).map(notificationRow).filter(row=>row.category==="favorite").map(row=>({id:row.id,category:row.category,item_id:row.item_id,item_title:row.item_title,actor:row.actor,occurred_at:row.occurred_at}));break}}catch{}}
+    for(const[type,direction]of[["sold","sell"],["purchased","buy"]]){try{const rows=await paged("/api/v2/my_orders",["my_orders","orders","items"],{type,status:"all"},100);for(const raw of rows||[])orders.push(orderRow(raw,direction))}catch{}}
+  }
 
   return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems,detail_sync:detailSync};
 }
