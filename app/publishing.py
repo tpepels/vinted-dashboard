@@ -482,7 +482,10 @@ def apply_biblio_overrides(
         if key not in overrides or overrides[key] is None:
             continue
         value = str(overrides[key]).strip()
-        bibliographic[key] = value or None
+        if key == "pages":
+            bibliographic[key] = int(value) if value else None
+        else:
+            bibliographic[key] = value or None
         bibliographic_sources[key] = "review"
 
     if not fields.get("book_id") and fields.get("sku"):
