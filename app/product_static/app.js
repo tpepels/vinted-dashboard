@@ -32,6 +32,8 @@ const state = {
   biblioPublish: null,
   biblioActivity: null,
   biblioActivityTimer: null,
+  biblioInventoryTimer: null,
+  biblioListingsTimer: null,
   crossList: null,
   connectors: [],
   barcodeStream: null,
@@ -1253,6 +1255,10 @@ function renderBiblioActivity(activity, operational) {
 }
 
 async function inventory() {
+  if (state.biblioInventoryTimer) {
+    clearTimeout(state.biblioInventoryTimer);
+    state.biblioInventoryTimer = null;
+  }
   const q = encodeURIComponent($("#inventory-q").value.trim());
   const status = encodeURIComponent($("#inventory-status").value);
   const data = await api("/api/app/inventory?q=" + q + "&status=" + status);
@@ -1311,6 +1317,17 @@ async function inventory() {
     };
   }
   updateInventorySelection();
+  const biblioPending = state.inventoryItems.some((item) =>
+    (item.listings || []).some((listing) =>
+      listing.channel === "biblio"
+      && ["queued", "uploading"].includes(String(listing.biblio_sync?.state || ""))
+    )
+  );
+  if (biblioPending && state.view === "inventory") {
+    state.biblioInventoryTimer = setTimeout(() => {
+      if (state.view === "inventory") inventory();
+    }, 2500);
+  }
 }
 
 $("#close-cross-list").onclick = () => {
@@ -2807,9 +2824,22 @@ function listingComparator(sort) {
 }
 
 async function listings() {
+  if (state.biblioListingsTimer) {
+    clearTimeout(state.biblioListingsTimer);
+    state.biblioListingsTimer = null;
+  }
   const data = await api("/api/app/listings");
   state.listings = data.listings || [];
   renderListings();
+  const biblioPending = state.listings.some((row) =>
+    row.channel === "biblio"
+    && ["queued", "uploading"].includes(String(row.biblio_sync?.state || ""))
+  );
+  if (biblioPending && state.view === "listings") {
+    state.biblioListingsTimer = setTimeout(() => {
+      if (state.view === "listings") listings();
+    }, 2500);
+  }
 }
 
 function renderListingStats(rows, duplicates) {
