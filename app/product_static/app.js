@@ -2178,7 +2178,46 @@ function renderQuickRequired() {
   });
 }
 
-function applyQuickAnalysis(data) {
+async function enrichQuickBookFromIsbn() {
+  const form = $("#quick-listing-form");
+  const isbnField = form.elements.namedItem("isbn");
+  const isbn = String(isbnField?.value || "").trim();
+  if (!isbn) return;
+  try {
+    const data = await api("/api/app/stock-intake/barcode/lookup", {
+      method: "POST",
+      body: JSON.stringify({ code: isbn }),
+    });
+    if (data.kind !== "isbn" || !data.metadata) return;
+    const metadata = data.metadata || {};
+    const fillBlank = (name, value) => {
+      const field = form.elements.namedItem(name);
+      if (!field || value == null || String(value).trim() === "") return;
+      if (!String(field.value || "").trim()) field.value = value;
+    };
+    fillBlank("quick_category", "book");
+    fillBlank("barcode", data.isbn || isbn);
+    fillBlank("author", metadata.author);
+    fillBlank("subtitle", metadata.subtitle);
+    fillBlank("publisher", metadata.publisher);
+    fillBlank("edition", metadata.edition);
+    fillBlank("binding", metadata.physical_format);
+    fillBlank("publish_date", metadata.publish_date);
+    fillBlank("publication_year", metadata.publication_year);
+    fillBlank("pages", metadata.number_of_pages);
+    const title = [metadata.title, metadata.subtitle].filter(Boolean).join(": ");
+    fillBlank("title", title);
+    if (data.metadata_warning) {
+      $("#quick-confidence").textContent = data.metadata_warning;
+    }
+    renderQuickRequired();
+  } catch (_error) {
+    // ISBN enrichment is opportunistic; the detected/entered ISBN remains
+    // available even when the metadata provider cannot be reached.
+  }
+}
+
+async function applyQuickAnalysis(data) {
   const result = data.analysis || {};
   const form = $("#quick-listing-form");
   const mapping = {
@@ -2189,16 +2228,24 @@ function applyQuickAnalysis(data) {
     colour: "colour",
     material: "material",
     condition: "condition",
+    barcode: "barcode",
     author: "author",
     isbn: "isbn",
+    subtitle: "subtitle",
     publisher: "publisher",
     edition: "edition",
+    binding: "binding",
+    language: "language",
+    publish_date: "publish_date",
+    publication_year: "publication_year",
+    pages: "pages",
     suggested_title: "title",
     suggested_description: "description",
   };
   Object.entries(mapping).forEach(([source, target]) => {
     if (result[source]) setFormValue(form, target, result[source]);
   });
+  if (result.isbn) await enrichQuickBookFromIsbn();
   state.quickAnalysisUsed = true;
   state.quickRequiredValues = {};
   const notes = result.confidence_notes || [];
@@ -2324,6 +2371,11 @@ $("#quick-category-hint").onchange = () => {
 };
 $("#quick-item-type").oninput = renderQuickRequired;
 
+const quickIsbnField = $("#quick-listing-form").elements.namedItem("isbn");
+if (quickIsbnField) {
+  quickIsbnField.onchange = () => enrichQuickBookFromIsbn();
+}
+
 $("#quick-analyze").onclick = async () => {
   const files = Array.from($("#quick-photos").files || []);
   if (!files.length) return flash("Choose at least one photo.", true);
@@ -2340,7 +2392,7 @@ $("#quick-analyze").onclick = async () => {
       method: "POST",
       body,
     });
-    applyQuickAnalysis(result);
+    await applyQuickAnalysis(result);
     $("#quick-ai-status").textContent = "Analysis applied · review every detected field";
   } catch (error) {
     $("#quick-ai-status").textContent = error.message;
@@ -2369,10 +2421,17 @@ $("#quick-listing-form").onsubmit = async (event) => {
     colour: String(raw.colour || "").trim() || null,
     material: String(raw.material || "").trim() || null,
     condition: String(raw.condition || "").trim() || null,
+    barcode: String(raw.barcode || "").trim() || null,
     author: String(raw.author || "").trim() || null,
     isbn: String(raw.isbn || "").trim() || null,
+    subtitle: String(raw.subtitle || "").trim() || null,
     publisher: String(raw.publisher || "").trim() || null,
     edition: String(raw.edition || "").trim() || null,
+    binding: String(raw.binding || "").trim() || null,
+    language: String(raw.language || "").trim() || null,
+    publish_date: String(raw.publish_date || "").trim() || null,
+    publication_year: raw.publication_year ? Number(raw.publication_year) : null,
+    pages: raw.pages ? Number(raw.pages) : null,
     measurements: String(raw.measurements || "").trim() || null,
     waist_cm: String(raw.waist_cm || "").trim() || null,
     inside_leg_cm: String(raw.inside_leg_cm || "").trim() || null,
