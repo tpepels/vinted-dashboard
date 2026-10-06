@@ -2820,6 +2820,7 @@ def _serialize_biblio_activity_run(run: models.ConnectorSyncRun) -> dict[str, An
         "stage": detail.get("stage"),
         "message": detail.get("message"),
         "mode": detail.get("mode"),
+        "upload_profile": detail.get("upload_profile"),
         "listing_id": detail.get("listing_id"),
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
