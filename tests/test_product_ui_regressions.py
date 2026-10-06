@@ -498,6 +498,9 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
     assert '["title", "Title", fields.title || "", sources.title, true, true]' in APP_JS
     assert '["author", "Author", fields.author || "", sources.author, true, true]' in APP_JS
     assert '["isbn", "ISBN", fields.isbn || "", sources.isbn, true, false]' in APP_JS
+    assert '["publisher", "Publisher", enrichment.publisher || "", enrichment.publisher ? "isbn" : null, true, false]' in APP_JS
+    assert '["edition", "Edition", enrichment.edition || "", enrichment.edition ? "isbn" : null, true, false]' in APP_JS
+    assert '["publish_date", "Publish date", enrichment.publish_date || "", enrichment.publish_date ? "isbn" : null, true, false]' in APP_JS
     assert 'document.querySelectorAll(".biblio-review-input").forEach' in APP_JS
     assert 'payload[field.dataset.field] = value' in APP_JS
     assert "bibliographic_enrichment" in APP_JS
