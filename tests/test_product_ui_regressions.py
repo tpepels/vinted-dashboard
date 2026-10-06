@@ -576,3 +576,29 @@ def test_quick_listing_can_capture_and_enrich_all_book_metadata():
     assert 'fillBlank("binding", metadata.physical_format);' in APP_JS
     assert 'fillBlank("pages", metadata.number_of_pages);' in APP_JS
     assert "if (result.isbn) await enrichQuickBookFromIsbn();" in APP_JS
+
+
+
+def test_biblio_review_exposes_every_supported_prefilled_book_field():
+    for row in (
+        '["subtitle", "Subtitle", enrichment.subtitle || "", bibliographicSources.subtitle || null, true, false]',
+        '["publisher", "Publisher", enrichment.publisher || "", bibliographicSources.publisher || null, true, false]',
+        '["edition", "Edition", enrichment.edition || "", bibliographicSources.edition || null, true, false]',
+        '["binding", "Binding", enrichment.binding || "", bibliographicSources.binding || null, true, false]',
+        '["language", "Language", enrichment.language || "", bibliographicSources.language || null, true, false]',
+        '["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false]',
+        '["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false]',
+        '["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false]',
+    ):
+        assert row in APP_JS
+    assert 'master_barcode: "Master barcode"' in APP_JS
+    assert 'vinted_barcode: "Vinted barcode"' in APP_JS
+    assert 'review: "Reviewed"' in APP_JS
+
+
+def test_biblio_upload_profile_is_explicit_and_safe_by_default():
+    assert '["upload_profile", "Upload profile (core or extended)", "core", "text"]' in APP_JS
+    assert "Use upload profile core for the existing 8-column BIBLIO filter" in APP_JS
+    assert 'data.upload_profile === "core"' in APP_JS
+    assert "optional bibliographic fields are retained locally" in APP_JS
+    assert "Extended BIBLIO profile will send" in APP_JS
