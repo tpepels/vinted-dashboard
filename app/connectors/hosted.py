@@ -3287,51 +3287,85 @@ def _fetch_wix_orders(values: dict[str, str]) -> list[dict[str, Any]]:
     return result
 
 
-def close_wix_workspace_listing(
-    workspace_id: uuid.UUID,
-    external_id: str,
-) -> dict[str, Any]:
-    """Make one Wix variant unavailable at every inventory location."""
-    values = _credentials(workspace_id, Channel.WIX)
-    external_id = str(external_id or "").strip()
-    if ":" not in external_id:
-        raise RuntimeError("Wix listing ID must contain product and variant IDs")
-    product_id, variant_id = external_id.split(":", 1)
-    if not product_id or not variant_id:
-        raise RuntimeError("Wix listing ID is malformed")
-
-    rows = [
+def _wix_inventory_rows_for_variant(
+    values: dict[str, str],
+    product_id: str,
+    variant_id: str,
+) -> list[dict[str, Any]]:
+    return [
         row
         for row in _wix_query_inventory(values)
         if str(row.get("productId") or "") == product_id
         and str(row.get("variantId") or "") == variant_id
     ]
+
+
+def _set_wix_total_inventory(
+    values: dict[str, str],
+    product_id: str,
+    variant_id: str,
+    target_quantity: int,
+) -> dict[str, Any]:
+    target_quantity = max(0, int(target_quantity or 0))
+    rows = _wix_inventory_rows_for_variant(values, product_id, variant_id)
     if not rows:
+        if target_quantity == 0:
+            return {
+                "previous_quantity": 0,
+                "quantity": 0,
+                "locations_updated": 0,
+            }
+        raise RuntimeError(
+            "Wix variant has no inventory item. Configure its inventory in Wix first."
+        )
+
+    tracked_rows = [row for row in rows if bool(row.get("trackQuantity"))]
+    untracked_rows = [row for row in rows if not bool(row.get("trackQuantity"))]
+    current_total = sum(max(0, _int(row.get("quantity"), 0) or 0) for row in tracked_rows)
+    if untracked_rows and any(bool(row.get("inStock")) for row in untracked_rows):
+        current_total = max(current_total, 1)
+
+    if target_quantity == current_total and not (
+        target_quantity == 0
+        and any(
+            bool((row.get("preorderInfo") or {}).get("enabled"))
+            for row in rows
+            if isinstance(row.get("preorderInfo") or {}, dict)
+        )
+    ):
         return {
-            "remote": "already_unavailable",
-            "external_id": external_id,
-            "quantity": 0,
+            "previous_quantity": current_total,
+            "quantity": target_quantity,
+            "locations_updated": 0,
         }
 
+    if target_quantity > 0 and len(rows) != 1:
+        raise RuntimeError(
+            "Wix stock spans multiple locations. "
+            "Choose one inventory location in Wix before syncing a non-zero quantity."
+        )
+    if target_quantity > 1 and untracked_rows:
+        raise RuntimeError(
+            "Wix inventory is configured as in-stock only, so an exact quantity above 1 cannot be synced."
+        )
+
     updates = 0
-    previous_quantity = 0
     for row in rows:
         tracked = bool(row.get("trackQuantity"))
-        quantity = _int(row.get("quantity"), 0) or 0
+        current_quantity = max(0, _int(row.get("quantity"), 0) or 0)
         preorder = row.get("preorderInfo") or {}
         preorder_enabled = bool(
             preorder.get("enabled")
             if isinstance(preorder, dict)
             else False
         )
-        in_stock = bool(row.get("inStock")) or str(
-            row.get("availabilityStatus") or ""
-        ).upper() in {"IN_STOCK", "PREORDER"}
-        previous_quantity += max(0, quantity)
+        desired = target_quantity if len(rows) == 1 else 0
 
-        if tracked and quantity <= 0 and not preorder_enabled:
+        if tracked and current_quantity == desired and not (
+            desired == 0 and preorder_enabled
+        ):
             continue
-        if not tracked and not in_stock:
+        if not tracked and bool(row.get("inStock")) == (desired > 0):
             continue
 
         inventory_id = str(row.get("id") or "").strip()
@@ -3354,11 +3388,11 @@ def close_wix_workspace_listing(
             "revision": revision,
         }
         if tracked:
-            update["quantity"] = 0
-            if preorder_enabled:
+            update["quantity"] = desired
+            if desired == 0 and preorder_enabled:
                 update["preorderInfo"] = {"enabled": False}
         else:
-            update["inStock"] = False
+            update["inStock"] = desired > 0
 
         _wix_patch(
             values,
@@ -3371,11 +3405,132 @@ def close_wix_workspace_listing(
         updates += 1
 
     return {
-        "remote": "stock_zeroed" if updates else "already_unavailable",
-        "external_id": external_id,
-        "quantity": 0,
-        "previous_quantity": previous_quantity,
+        "previous_quantity": current_total,
+        "quantity": target_quantity,
         "locations_updated": updates,
+    }
+
+
+def update_wix_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    """Update a Wix product safely without replacing its variant arrays."""
+    values = _credentials(workspace_id, Channel.WIX)
+    external_id = str(external_id or "").strip()
+    if ":" not in external_id:
+        raise RuntimeError("Wix listing ID must contain product and variant IDs")
+    product_id, variant_id = external_id.split(":", 1)
+    if not product_id or not variant_id:
+        raise RuntimeError("Wix listing ID is malformed")
+    fields = dict(candidate.get("fields") or {})
+
+    product_payload = _wix_get(values, f"stores/v3/products/{product_id}")
+    product = product_payload.get("product") or {}
+    revision = str(product.get("revision") or "").strip()
+    if not product:
+        raise RuntimeError("Wix product no longer exists")
+    if not revision:
+        raise RuntimeError("Wix product is missing its revision")
+
+    update_product: dict[str, Any] = {
+        "id": product_id,
+        "revision": revision,
+        "name": str(fields.get("title") or "").strip(),
+        "visible": True,
+    }
+    description = str(fields.get("description") or "").strip()
+    update_product["plainDescription"] = description
+    updated_payload = _wix_patch(
+        values,
+        f"stores/v3/products/{product_id}",
+        body={"product": update_product},
+    )
+    updated_product = updated_payload.get("product") or product
+
+    product_variants = [
+        row
+        for row in _wix_query_variants(values)
+        if str((row.get("productData") or {}).get("productId") or "") == product_id
+    ]
+    if len(product_variants) != 1:
+        raise RuntimeError(
+            "Wix price sync is only enabled for single-variant products. "
+            "Update this multi-variant product in Wix."
+        )
+    amount = f"{int(fields.get('price_cents') or 0) / 100:.2f}"
+    price_job = _wix_post(
+        values,
+        "stores/v3/bulk/products/update-variants-by-filter",
+        body={
+            "filter": {"id": product_id},
+            "variant": {
+                "price": {
+                    "actualPrice": {"amount": amount},
+                }
+            },
+        },
+    )
+
+    stock = _set_wix_total_inventory(
+        values,
+        product_id,
+        variant_id,
+        int(fields.get("quantity") or 0),
+    )
+    quantity = int(stock["quantity"])
+    source = dict(candidate.get("source") or {})
+    image_urls = list(source.get("image_urls") or [])[:5]
+    identifier, _identifier_type = _candidate_identifier(fields)
+    return {
+        "source_id": external_id,
+        "sku": fields.get("sku"),
+        "title": updated_product.get("name") or fields.get("title"),
+        "status": ListingStatus.ACTIVE if quantity > 0 else ListingStatus.INACTIVE,
+        "quantity": quantity,
+        "price_cents": int(fields.get("price_cents") or 0),
+        "currency": str(fields.get("currency") or values.get("currency") or "EUR").upper(),
+        "url": (
+            (updated_product.get("url") or {}).get("url")
+            if isinstance(updated_product.get("url"), dict)
+            else updated_product.get("url")
+        ),
+        "description": fields.get("description"),
+        **_candidate_snapshot_metadata(fields),
+        "barcode": identifier,
+        "image_url": image_urls[0] if image_urls else None,
+        "attributes": {
+            "product_id": product_id,
+            "variant_id": variant_id,
+            "price_job_id": price_job.get("jobId"),
+            "inventory_locations_updated": stock["locations_updated"],
+        },
+    }
+
+
+def close_wix_workspace_listing(
+    workspace_id: uuid.UUID,
+    external_id: str,
+) -> dict[str, Any]:
+    """Make one Wix variant unavailable at every inventory location."""
+    values = _credentials(workspace_id, Channel.WIX)
+    external_id = str(external_id or "").strip()
+    if ":" not in external_id:
+        raise RuntimeError("Wix listing ID must contain product and variant IDs")
+    product_id, variant_id = external_id.split(":", 1)
+    if not product_id or not variant_id:
+        raise RuntimeError("Wix listing ID is malformed")
+
+    stock = _set_wix_total_inventory(values, product_id, variant_id, 0)
+    return {
+        "remote": (
+            "stock_zeroed"
+            if stock["locations_updated"]
+            else "already_unavailable"
+        ),
+        "external_id": external_id,
+        **stock,
     }
 
 
