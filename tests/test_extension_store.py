@@ -350,6 +350,7 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert "function rateLimitDelay(response,attempt)" in content
     assert "Vinted rate limited the sync." in content
     assert "error.vintedRateLimited=true" in content
-    assert "if(isRateLimitError(error))throw error;" in content
+    assert 'if(status==="active")throw error;' in content
+    assert "secondaryRateLimited=true" in content
     assert 'const budget=reason==="manual"?32:10;' in content
     assert "if(!detailSync.rate_limited)" in content
