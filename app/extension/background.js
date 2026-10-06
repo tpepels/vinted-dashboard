@@ -290,7 +290,11 @@ async function processAgeJobWave(){
     let eventUpdated=0,eventFailed=0;
     try{
       for(let wave=0;wave<AGE_WAVES_PER_EVENT&&job.remaining.length;wave++){
-        const batch=job.remaining.slice(0,AGE_WORKERS);
+        const adaptiveWorkers=Math.max(
+          1,
+          AGE_WORKERS-Math.min(AGE_WORKERS-1,Number(job.rate_limit_hits||0)),
+        );
+        const batch=job.remaining.slice(0,adaptiveWorkers);
         const waveResult=await renderedUploadedAgeWave(job,batch);
         const ages=waveResult.ages||{};
         await saveAgeBatchToCache(ages);
