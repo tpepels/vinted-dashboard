@@ -1383,7 +1383,8 @@ function renderBiblioActivity(activity, operational) {
       + esc(health.remote_unverified || 0) + ' unverified · '
       + esc(health.photo_attention || 0) + ' photo attention · '
       + esc(health.publish_attention || 0) + ' publish attention'
-      + (safety.ftp_host_locked ? ' · FTP host locked' : '')
+      + (safety.ftps_required ? ' · FTPS/TLS required' : '')
+      + (safety.ftp_host_locked ? ' · host locked' : '')
       + '</div>';
   const history = runs.length
     ? runs.map((run) => {
