@@ -3444,6 +3444,44 @@ def _biblio_inventory_signature(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _biblio_enriched_value(
+    extra: dict[str, Any],
+    bibliographic: dict[str, Any],
+    key: str,
+    *fallbacks: Any,
+) -> Any:
+    sources = (
+        dict(extra.get("bibliographic_sources") or {})
+        if isinstance(extra.get("bibliographic_sources"), dict)
+        else {}
+    )
+    if sources.get(key) == "review":
+        return bibliographic.get(key)
+    value = bibliographic.get(key)
+    if value not in (None, ""):
+        return value
+    for fallback in fallbacks:
+        if fallback not in (None, ""):
+            return fallback
+    return None
+
+
+def _biblio_field_value(
+    extra: dict[str, Any],
+    attrs: dict[str, Any],
+    key: str,
+) -> Any:
+    sources = (
+        dict(extra.get("field_sources") or {})
+        if isinstance(extra.get("field_sources"), dict)
+        else {}
+    )
+    if sources.get(key) == "review":
+        return extra.get(key)
+    value = extra.get(key)
+    return value if value not in (None, "") else attrs.get(key)
+
+
 def _biblio_rows(
     workspace_id: uuid.UUID,
     *,
@@ -3506,32 +3544,48 @@ def _biblio_rows(
                 "source_id": listing.external_id,
                 "sku": listing.external_id or listing.external_sku or item.sku,
                 "title": listing.title or item.title,
-                "subtitle": bibliographic.get("subtitle") or attrs.get("subtitle"),
+                "subtitle": _biblio_enriched_value(extra, bibliographic, "subtitle", attrs.get("subtitle")),
                 "author": extra.get("author") or attrs.get("author"),
                 "description": extra.get("description") or attrs.get("description") or item.notes,
-                "isbn": extra.get("isbn") or attrs.get("isbn"),
-                "publisher": bibliographic.get("publisher") or attrs.get("publisher"),
-                "edition": bibliographic.get("edition") or attrs.get("edition"),
-                "binding": bibliographic.get("binding") or attrs.get("binding") or attrs.get("physical_format"),
-                "language": bibliographic.get("language") or attrs.get("language"),
-                "publish_date": (
-                    bibliographic.get("publish_date")
-                    or attrs.get("publish_date")
-                    or attrs.get("publication_date")
-                    or attrs.get("publication_year")
+                "isbn": _biblio_field_value(extra, attrs, "isbn"),
+                "publisher": _biblio_enriched_value(extra, bibliographic, "publisher", attrs.get("publisher")),
+                "edition": _biblio_enriched_value(extra, bibliographic, "edition", attrs.get("edition")),
+                "binding": _biblio_enriched_value(
+                    extra, bibliographic, "binding", attrs.get("binding"), attrs.get("physical_format")
                 ),
-                "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
-                "condition": bibliographic.get("condition") or item.condition,
-                "publication_place": attrs.get("publication_place") or attrs.get("place_of_publication"),
-                "first_edition": attrs.get("first_edition"),
-                "signed": attrs.get("signed"),
-                "dust_jacket_present": attrs.get("dust_jacket_present") or attrs.get("dj_present"),
-                "dust_jacket_condition": attrs.get("dust_jacket_condition") or attrs.get("dj_condition"),
-                "dust_jacket_description": attrs.get("dust_jacket_description") or attrs.get("dj_description"),
-                "illustrator": attrs.get("illustrator"),
-                "keywords": attrs.get("keywords"),
+                "language": _biblio_enriched_value(extra, bibliographic, "language", attrs.get("language")),
+                "publish_date": _biblio_enriched_value(
+                    extra, bibliographic, "publish_date",
+                    attrs.get("publish_date"), attrs.get("publication_date"), attrs.get("publication_year")
+                ),
+                "pages": _biblio_enriched_value(
+                    extra, bibliographic, "pages", attrs.get("pages"), attrs.get("number_of_pages")
+                ),
+                "condition": _biblio_enriched_value(extra, bibliographic, "condition", item.condition),
+                "publication_place": _biblio_enriched_value(
+                    extra, bibliographic, "publication_place",
+                    attrs.get("publication_place"), attrs.get("place_of_publication")
+                ),
+                "first_edition": _biblio_enriched_value(extra, bibliographic, "first_edition", attrs.get("first_edition")),
+                "signed": _biblio_enriched_value(extra, bibliographic, "signed", attrs.get("signed")),
+                "dust_jacket_present": _biblio_enriched_value(
+                    extra, bibliographic, "dust_jacket_present",
+                    attrs.get("dust_jacket_present"), attrs.get("dj_present")
+                ),
+                "dust_jacket_condition": _biblio_enriched_value(
+                    extra, bibliographic, "dust_jacket_condition",
+                    attrs.get("dust_jacket_condition"), attrs.get("dj_condition")
+                ),
+                "dust_jacket_description": _biblio_enriched_value(
+                    extra, bibliographic, "dust_jacket_description",
+                    attrs.get("dust_jacket_description"), attrs.get("dj_description")
+                ),
+                "illustrator": _biblio_enriched_value(extra, bibliographic, "illustrator", attrs.get("illustrator")),
+                "keywords": _biblio_enriched_value(extra, bibliographic, "keywords", attrs.get("keywords")),
                 **{
-                    f"catalog_{index}": attrs.get(f"catalog_{index}")
+                    f"catalog_{index}": _biblio_enriched_value(
+                        extra, bibliographic, f"catalog_{index}", attrs.get(f"catalog_{index}")
+                    )
                     for index in range(1, 9)
                 },
                 "price_cents": listing.price_cents,
@@ -4504,32 +4558,48 @@ def _biblio_listing_row(
             "source_id": listing.external_id,
             "sku": listing.external_id or listing.external_sku or item.sku,
             "title": listing.title or item.title,
-            "subtitle": bibliographic.get("subtitle") or attrs.get("subtitle"),
+            "subtitle": _biblio_enriched_value(extra, bibliographic, "subtitle", attrs.get("subtitle")),
             "author": extra.get("author") or attrs.get("author"),
             "description": extra.get("description") or attrs.get("description") or item.notes,
-            "isbn": extra.get("isbn") or attrs.get("isbn"),
-            "publisher": bibliographic.get("publisher") or attrs.get("publisher"),
-            "edition": bibliographic.get("edition") or attrs.get("edition"),
-            "binding": bibliographic.get("binding") or attrs.get("binding") or attrs.get("physical_format"),
-            "language": bibliographic.get("language") or attrs.get("language"),
-            "publish_date": (
-                bibliographic.get("publish_date")
-                or attrs.get("publish_date")
-                or attrs.get("publication_date")
-                or attrs.get("publication_year")
+            "isbn": _biblio_field_value(extra, attrs, "isbn"),
+            "publisher": _biblio_enriched_value(extra, bibliographic, "publisher", attrs.get("publisher")),
+            "edition": _biblio_enriched_value(extra, bibliographic, "edition", attrs.get("edition")),
+            "binding": _biblio_enriched_value(
+                extra, bibliographic, "binding", attrs.get("binding"), attrs.get("physical_format")
             ),
-            "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
-            "condition": bibliographic.get("condition") or item.condition,
-            "publication_place": attrs.get("publication_place") or attrs.get("place_of_publication"),
-            "first_edition": attrs.get("first_edition"),
-            "signed": attrs.get("signed"),
-            "dust_jacket_present": attrs.get("dust_jacket_present") or attrs.get("dj_present"),
-            "dust_jacket_condition": attrs.get("dust_jacket_condition") or attrs.get("dj_condition"),
-            "dust_jacket_description": attrs.get("dust_jacket_description") or attrs.get("dj_description"),
-            "illustrator": attrs.get("illustrator"),
-            "keywords": attrs.get("keywords"),
+            "language": _biblio_enriched_value(extra, bibliographic, "language", attrs.get("language")),
+            "publish_date": _biblio_enriched_value(
+                extra, bibliographic, "publish_date",
+                attrs.get("publish_date"), attrs.get("publication_date"), attrs.get("publication_year")
+            ),
+            "pages": _biblio_enriched_value(
+                extra, bibliographic, "pages", attrs.get("pages"), attrs.get("number_of_pages")
+            ),
+            "condition": _biblio_enriched_value(extra, bibliographic, "condition", item.condition),
+            "publication_place": _biblio_enriched_value(
+                extra, bibliographic, "publication_place",
+                attrs.get("publication_place"), attrs.get("place_of_publication")
+            ),
+            "first_edition": _biblio_enriched_value(extra, bibliographic, "first_edition", attrs.get("first_edition")),
+            "signed": _biblio_enriched_value(extra, bibliographic, "signed", attrs.get("signed")),
+            "dust_jacket_present": _biblio_enriched_value(
+                extra, bibliographic, "dust_jacket_present",
+                attrs.get("dust_jacket_present"), attrs.get("dj_present")
+            ),
+            "dust_jacket_condition": _biblio_enriched_value(
+                extra, bibliographic, "dust_jacket_condition",
+                attrs.get("dust_jacket_condition"), attrs.get("dj_condition")
+            ),
+            "dust_jacket_description": _biblio_enriched_value(
+                extra, bibliographic, "dust_jacket_description",
+                attrs.get("dust_jacket_description"), attrs.get("dj_description")
+            ),
+            "illustrator": _biblio_enriched_value(extra, bibliographic, "illustrator", attrs.get("illustrator")),
+            "keywords": _biblio_enriched_value(extra, bibliographic, "keywords", attrs.get("keywords")),
             **{
-                f"catalog_{index}": attrs.get(f"catalog_{index}")
+                f"catalog_{index}": _biblio_enriched_value(
+                    extra, bibliographic, f"catalog_{index}", attrs.get(f"catalog_{index}")
+                )
                 for index in range(1, 9)
             },
             "price_cents": listing.price_cents,
