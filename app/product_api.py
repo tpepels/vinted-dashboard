@@ -58,6 +58,7 @@ from app.connectors.hosted import (
     ebay_configured,
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
+    verify_biblio_workspace,
     test_biblio_workspace,
     test_bigcommerce_workspace,
     test_depop_workspace,
@@ -3055,12 +3056,19 @@ def save_connector_credentials(
         if channel == Channel.BIBLIO:
             if not str(merged.get("username") or "").strip() or not str(merged.get("password") or "").strip():
                 raise HTTPException(status_code=400, detail="BIBLIO needs username and password")
+            requested_host = str(merged.get("host") or "ftp.biblio.com").strip().lower().rstrip(".")
+            if requested_host not in {"", "ftp.biblio.com"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="BIBLIO FTP host is fixed to ftp.biblio.com",
+                )
             requested_profile = str(merged.get("upload_profile") or "extended").strip().lower()
             if requested_profile not in {"core", "extended"}:
                 raise HTTPException(
                     status_code=400,
                     detail="BIBLIO upload profile must be core or extended",
                 )
+            merged["host"] = "ftp.biblio.com"
             # Extended is canonical. Promote legacy saved "core" values when
             # connector settings are next saved.
             merged["upload_profile"] = "extended"
@@ -3464,9 +3472,35 @@ def enqueue_connector_sync(
     return {"ok": True, "job_id": str(job_id), "queued": True}
 
 
+@router.post("/api/app/connectors/biblio/verify")
+async def biblio_workspace_verify(
+    file: UploadFile = File(...),
+    context: RequestContext = Depends(require_context),
+):
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = content.decode("latin-1")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Could not decode BIBLIO inventory file") from exc
+    try:
+        rows = parse_biblio_inventory(text, currency="EUR")
+        result = verify_biblio_workspace(
+            context.workspace.id,
+            rows,
+            filename=file.filename or "BIBLIO inventory",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
 @router.post("/api/app/connectors/biblio/import")
 async def biblio_workspace_import(
     file: UploadFile = File(...),
+    authoritative: bool = Form(False),
     context: RequestContext = Depends(require_write_context),
 ):
     content = await file.read()
@@ -3483,39 +3517,11 @@ async def biblio_workspace_import(
             context.workspace.id,
             rows,
             filename=file.filename or "BIBLIO inventory",
+            authoritative=bool(authoritative),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, **result}
-
-
-@router.post("/api/app/connectors/{channel}/test-connection")
-def generic_connector_test(
-    channel: str,
-    context: RequestContext = Depends(require_write_context),
-):
-    if channel == Channel.ETSY:
-        tester = test_etsy_workspace
-    elif channel == Channel.WOOCOMMERCE:
-        tester = test_woocommerce_workspace
-    elif channel == Channel.SHOPIFY:
-        tester = test_shopify_workspace
-    elif channel == Channel.BIGCOMMERCE:
-        tester = test_bigcommerce_workspace
-    elif channel == Channel.SQUARESPACE:
-        tester = test_squarespace_workspace
-    elif channel == Channel.WIX:
-        tester = test_wix_workspace
-    elif channel == Channel.DEPOP:
-        tester = test_depop_workspace
-    else:
-        raise HTTPException(status_code=400, detail="This connector has no generic connection test")
-    if not has_workspace_connector_credentials(context.workspace.id, channel):
-        raise HTTPException(status_code=400, detail=f"{channel} credentials are not configured")
-    try:
-        return tester(context.workspace.id)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/app/connectors/biblio/test")
