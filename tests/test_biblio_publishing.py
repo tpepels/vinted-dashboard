@@ -1204,6 +1204,18 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
     assert invalid.status_code == 400
     assert "core or extended" in invalid.json()["detail"]
 
+    bad_host = client.put(
+        "/api/app/connectors/biblio/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {
+            "username": "seller",
+            "password": "secret",
+            "host": "evil.example",
+        }},
+    )
+    assert bad_host.status_code == 400
+    assert "ftp.biblio.com" in bad_host.json()["detail"]
+
     valid = client.put(
         "/api/app/connectors/biblio/credentials",
         headers={"X-CSRF-Token": csrf},
@@ -1226,6 +1238,7 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
         ).scalar_one()
         stored = decrypt_json(credential.encrypted_payload)
     assert stored["upload_profile"] == "extended"
+    assert stored["host"] == "ftp.biblio.com"
     assert hosted.biblio_upload_profile(workspace_id) == "extended"
 
     connectors = client.get("/api/app/connectors")
