@@ -3716,7 +3716,11 @@ def sync_biblio_workspace(
         and not row.get("inventory_synced_at")
         and row.get("listing_id")
     }
-    selected_ids = [str(row["listing_id"]) for row in [*active, *deletes] if row.get("listing_id")]
+    selected_ids = [
+        str(row["listing_id"])
+        for row in [*inventory_rows, *delete_rows]
+        if row.get("listing_id")
+    ]
     photo_listing_ids = [str(row["listing_id"]) for row in photo_rows if row.get("listing_id")]
 
     incomplete = [(row, _missing_biblio(row)) for row in inventory_rows if _missing_biblio(row)]
@@ -3732,6 +3736,28 @@ def sync_biblio_workspace(
             publish_error=f"Required BIBLIO fields are missing: {examples}",
         )
         raise RuntimeError(f"BIBLIO upload blocked: required fields are missing. Examples: {examples}")
+
+    if not inventory_rows and not delete_rows and not photo_rows:
+        # A normal incremental sync is intentionally a no-op when nothing
+        # changed. Do not create a fake FTP activity run or mark unrelated
+        # listings as uploading. A targeted publish/update may have queued its
+        # own local state before this check, so close that state cleanly.
+        if listing_id is not None and not photos_only:
+            _set_biblio_listing_states(
+                workspace_id,
+                [str(listing_id)],
+                publish_state="ftp_uploaded",
+            )
+        return {
+            "ok": True,
+            "active": 0,
+            "deletes": 0,
+            "photos_uploaded": 0,
+            "upload_profile": upload_profile,
+            "detail": "Nothing changed - no FTP upload was required",
+            "run_id": None,
+            "noop": True,
+        }
 
     stamp = _biblio_upload_stamp()
     prefix = re.sub(
@@ -3771,27 +3797,6 @@ def sync_biblio_workspace(
     if not photos_only:
         _set_biblio_listing_states(workspace_id, selected_ids, publish_state="uploading")
     _set_biblio_listing_states(workspace_id, photo_listing_ids, photo_state="uploading")
-
-    if not inventory_filename and not deletes_filename and not photo_rows:
-        if not photos_only:
-            _set_biblio_listing_states(workspace_id, selected_ids, publish_state="ftp_uploaded")
-        _update_biblio_run(
-            run_id,
-            status=SyncRunStatus.SUCCESS,
-            detail={
-                "stage": "complete",
-                "message": "Nothing changed - no FTP upload was required",
-            },
-        )
-        return {
-            "ok": True,
-            "active": 0,
-            "deletes": 0,
-            "photos_uploaded": 0,
-            "upload_profile": upload_profile,
-            "detail": "Nothing changed - no FTP upload was required",
-            "run_id": str(run_id),
-        }
 
     host = values.get("host", "ftp.biblio.com").strip() or "ftp.biblio.com"
     username = values.get("username", "").strip()
