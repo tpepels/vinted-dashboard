@@ -31,7 +31,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 
 from app import db, models
-from app.constants import Channel, ChannelAccountStatus, ListingStatus, SyncRunStatus
+from app.constants import Channel, ChannelAccountStatus, ItemStatus, ListingStatus, SyncRunStatus
 from app.crypto import decrypt_json
 from app.product_models import ConnectorCredential
 from app.workspace_bootstrap import BOOTSTRAP_WORKSPACE_SLUG, get_or_create_channel_account
@@ -69,6 +69,34 @@ def _is_bootstrap_workspace(workspace_id: uuid.UUID) -> bool:
     with db.session_scope() as session:
         workspace = session.get(models.Workspace, workspace_id)
         return bool(workspace and workspace.slug == BOOTSTRAP_WORKSPACE_SLUG)
+
+
+BIBLIO_FTP_HOST = "ftp.biblio.com"
+
+def _safe_biblio_directory(value: Any) -> str:
+    directory = str(value or "").strip()
+    if directory in {"", ".", "./"}:
+        return ""
+    normalized = directory.strip("/")
+    parts = [part for part in normalized.split("/") if part]
+    if not parts or any(part in {".", ".."} for part in parts):
+        raise RuntimeError("BIBLIO FTP directory must be a safe relative path")
+    if not all(re.fullmatch(r"[A-Za-z0-9._ -]+", part) for part in parts):
+        raise RuntimeError("BIBLIO FTP directory contains unsupported characters")
+    return "/".join(parts)
+
+
+def _harden_biblio_values(values: dict[str, str]) -> dict[str, str]:
+    hardened = {str(k): str(v) for k, v in values.items()}
+    configured_host = str(hardened.get("host") or BIBLIO_FTP_HOST).strip().lower().rstrip(".")
+    if configured_host not in {"", BIBLIO_FTP_HOST}:
+        raise RuntimeError(
+            "Refusing BIBLIO credentials for an unexpected FTP host; "
+            "BIBLIO documents ftp.biblio.com as the seller FTP host"
+        )
+    hardened["host"] = BIBLIO_FTP_HOST
+    hardened["directory"] = _safe_biblio_directory(hardened.get("directory"))
+    return hardened
 
 
 def biblio_configured(workspace_id: uuid.UUID) -> bool:
@@ -4033,15 +4061,15 @@ def _workspace_or_env_ebay_values(workspace_id: uuid.UUID) -> dict[str, str]:
 
 def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
     if has_credentials(workspace_id, Channel.BIBLIO):
-        return _credentials(workspace_id, Channel.BIBLIO)
+        return _harden_biblio_values(_credentials(workspace_id, Channel.BIBLIO))
     if not _is_bootstrap_workspace(workspace_id):
         raise RuntimeError("BIBLIO credentials are not configured for this workspace")
     username = os.getenv("BIBLIO_FTP_USERNAME", "").strip()
     password = os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
     if not username or not password:
         raise RuntimeError("BIBLIO credentials are not configured")
-    return {
-        "host": os.getenv("BIBLIO_FTP_HOST", "ftp.biblio.com").strip() or "ftp.biblio.com",
+    return _harden_biblio_values({
+        "host": BIBLIO_FTP_HOST,
         "username": username,
         "password": password,
         "directory": os.getenv("BIBLIO_FTP_DIRECTORY", "").strip(),
@@ -4049,8 +4077,8 @@ def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
         "filename_prefix": os.getenv("BIBLIO_FTP_FILENAME_PREFIX", "reseller-dashboard").strip()
         or "reseller-dashboard",
         "upload_profile": os.getenv("BIBLIO_FTP_UPLOAD_PROFILE", "extended").strip()
-        or "core",
-    }
+        or "extended",
+    })
 
 
 def close_ebay_workspace_listing(workspace_id: uuid.UUID, external_id: str) -> dict[str, Any]:
