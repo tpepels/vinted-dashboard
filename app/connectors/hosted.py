@@ -3208,7 +3208,11 @@ BIBLIO_EXTENDED_HEADERS = (
     "Book ID", "Author", "Title", "Subtitle", "Description",
     "Price", "Status", "ISBN", "Publisher", "Edition",
     "Binding", "Language", "Publication Date", "Pages",
-    "Condition", "Quantity",
+    "Condition", "Publication Place", "First Edition", "Signed",
+    "DJ Present", "DJ Condition", "DJ Description", "Illustrator", "Keywords",
+    "Catalog 1", "Catalog 2", "Catalog 3", "Catalog 4",
+    "Catalog 5", "Catalog 6", "Catalog 7", "Catalog 8",
+    "Quantity",
 )
 
 
@@ -3231,7 +3235,12 @@ def biblio_upload_profile(workspace_id: uuid.UUID) -> str:
 BIBLIO_VERIFY_FIELDS = (
     "title", "author", "subtitle", "description", "price_cents", "isbn",
     "publisher", "edition", "binding", "language", "publish_date", "pages",
-    "condition", "quantity", "status",
+    "condition", "publication_place", "first_edition", "signed",
+    "dust_jacket_present", "dust_jacket_condition", "dust_jacket_description",
+    "illustrator", "keywords",
+    "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+    "catalog_5", "catalog_6", "catalog_7", "catalog_8",
+    "quantity", "status",
 )
 
 
@@ -3243,6 +3252,15 @@ def _biblio_compare_value(field: str, value: Any) -> Any:
             return int(float(str(value).strip()))
         except (TypeError, ValueError):
             return str(value).strip().casefold()
+    if field in {"first_edition", "signed", "dust_jacket_present"}:
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().casefold()
+        if text in {"yes", "y", "true", "1", "present"}:
+            return True
+        if text in {"no", "n", "false", "0", "absent"}:
+            return False
+        return text
     text = re.sub(r"\s+", " ", str(value).strip())
     if field == "isbn":
         return re.sub(r"[^0-9Xx]", "", text).upper() or None
@@ -3394,6 +3412,11 @@ def _biblio_inventory_signature(
         keys.extend([
             "subtitle", "publisher", "edition", "binding",
             "language", "publish_date", "pages", "condition",
+            "publication_place", "first_edition", "signed",
+            "dust_jacket_present", "dust_jacket_condition",
+            "dust_jacket_description", "illustrator", "keywords",
+            "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+            "catalog_5", "catalog_6", "catalog_7", "catalog_8",
         ])
     payload = {key: row.get(key) for key in keys}
     encoded = json.dumps(
@@ -3484,6 +3507,18 @@ def _biblio_rows(
                 ),
                 "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
                 "condition": bibliographic.get("condition") or item.condition,
+                "publication_place": attrs.get("publication_place") or attrs.get("place_of_publication"),
+                "first_edition": attrs.get("first_edition"),
+                "signed": attrs.get("signed"),
+                "dust_jacket_present": attrs.get("dust_jacket_present") or attrs.get("dj_present"),
+                "dust_jacket_condition": attrs.get("dust_jacket_condition") or attrs.get("dj_condition"),
+                "dust_jacket_description": attrs.get("dust_jacket_description") or attrs.get("dj_description"),
+                "illustrator": attrs.get("illustrator"),
+                "keywords": attrs.get("keywords"),
+                **{
+                    f"catalog_{index}": attrs.get(f"catalog_{index}")
+                    for index in range(1, 9)
+                },
                 "price_cents": listing.price_cents,
                 "currency": listing.currency or item.currency or "EUR",
                 "quantity": listing.quantity if listing.quantity is not None else item.quantity,
@@ -3540,6 +3575,19 @@ def _biblio_text(value: Any) -> str:
     return re.sub(r" {2,}", " ", text).strip()
 
 
+def _biblio_bool(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "Y" if value else "N"
+    text = str(value).strip().casefold()
+    if text in {"yes", "y", "true", "1", "present"}:
+        return "Y"
+    if text in {"no", "n", "false", "0", "absent"}:
+        return "N"
+    return _biblio_text(value)
+
+
 def _biblio_tsv(
     rows: list[dict[str, Any]],
     *,
@@ -3580,6 +3628,18 @@ def _biblio_tsv(
                 _biblio_text(row.get("publish_date") or ""),
                 _biblio_text(row.get("pages") or ""),
                 _biblio_text(row.get("condition") or ""),
+                _biblio_text(row.get("publication_place") or ""),
+                _biblio_bool(row.get("first_edition")),
+                _biblio_bool(row.get("signed")),
+                _biblio_bool(row.get("dust_jacket_present")),
+                _biblio_text(row.get("dust_jacket_condition") or ""),
+                _biblio_text(row.get("dust_jacket_description") or ""),
+                _biblio_text(row.get("illustrator") or ""),
+                _biblio_text(row.get("keywords") or ""),
+                *[
+                    _biblio_text(row.get(f"catalog_{index}") or "")
+                    for index in range(1, 9)
+                ],
                 0 if sold else max(1, int(row.get("quantity") or 1)),
             ]
         else:
@@ -4398,6 +4458,18 @@ def _biblio_listing_row(
             ),
             "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
             "condition": bibliographic.get("condition") or item.condition,
+            "publication_place": attrs.get("publication_place") or attrs.get("place_of_publication"),
+            "first_edition": attrs.get("first_edition"),
+            "signed": attrs.get("signed"),
+            "dust_jacket_present": attrs.get("dust_jacket_present") or attrs.get("dj_present"),
+            "dust_jacket_condition": attrs.get("dust_jacket_condition") or attrs.get("dj_condition"),
+            "dust_jacket_description": attrs.get("dust_jacket_description") or attrs.get("dj_description"),
+            "illustrator": attrs.get("illustrator"),
+            "keywords": attrs.get("keywords"),
+            **{
+                f"catalog_{index}": attrs.get(f"catalog_{index}")
+                for index in range(1, 9)
+            },
             "price_cents": listing.price_cents,
             "currency": listing.currency or item.currency or "EUR",
             "quantity": 0,
