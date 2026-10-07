@@ -639,8 +639,9 @@ def apply_biblio_overrides(
         bibliographic[key] = str(overrides[key]).strip() or None
         bibliographic_sources[key] = "review"
 
-    if "pages" in overrides and overrides["pages"] is not None:
-        value = str(overrides["pages"]).strip()
+    if "pages" in overrides:
+        raw_pages = overrides["pages"]
+        value = "" if raw_pages is None else str(raw_pages).strip()
         bibliographic["pages"] = int(value) if value else None
         bibliographic_sources["pages"] = "review"
 
