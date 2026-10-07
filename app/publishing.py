@@ -41,6 +41,19 @@ def _value(*choices: tuple[Any, str]) -> tuple[Any, str | None]:
     return None, None
 
 
+def _optional_bool(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().casefold()
+    if text in {"yes", "y", "true", "1", "present"}:
+        return True
+    if text in {"no", "n", "false", "0", "absent"}:
+        return False
+    raise ValueError(f"Invalid BIBLIO boolean value: {value}")
+
+
 def _vinted_source(
     session: Session,
     workspace_id: uuid.UUID,
@@ -385,6 +398,42 @@ def build_biblio_candidate(
         (vmeta.get("condition"), "vinted"),
         (item.condition, "master"),
     )
+    publication_place, publication_place_source = _value(
+        (attrs.get("publication_place"), "master"),
+        (attrs.get("place_of_publication"), "master"),
+    )
+    first_edition, first_edition_source = _value(
+        (attrs.get("first_edition"), "master"),
+    )
+    signed, signed_source = _value(
+        (attrs.get("signed"), "master"),
+    )
+    dust_jacket_present, dust_jacket_present_source = _value(
+        (attrs.get("dust_jacket_present"), "master"),
+        (attrs.get("dj_present"), "master"),
+    )
+    dust_jacket_condition, dust_jacket_condition_source = _value(
+        (attrs.get("dust_jacket_condition"), "master"),
+        (attrs.get("dj_condition"), "master"),
+    )
+    dust_jacket_description, dust_jacket_description_source = _value(
+        (attrs.get("dust_jacket_description"), "master"),
+        (attrs.get("dj_description"), "master"),
+    )
+    illustrator, illustrator_source = _value(
+        (attrs.get("illustrator"), "master"),
+    )
+    keywords, keywords_source = _value(
+        (attrs.get("keywords"), "master"),
+    )
+    catalog_values: dict[str, Any] = {}
+    catalog_sources: dict[str, str | None] = {}
+    for index in range(1, 9):
+        key = f"catalog_{index}"
+        value, source_name = _value((attrs.get(key), "master"))
+        catalog_values[key] = value
+        catalog_sources[key] = source_name
+
     enrichment_fields = {
         "subtitle": subtitle,
         "publisher": publisher,
@@ -394,6 +443,15 @@ def build_biblio_candidate(
         "pages": pages,
         "publish_date": publish_date,
         "condition": condition,
+        "publication_place": publication_place,
+        "first_edition": _optional_bool(first_edition),
+        "signed": _optional_bool(signed),
+        "dust_jacket_present": _optional_bool(dust_jacket_present),
+        "dust_jacket_condition": dust_jacket_condition,
+        "dust_jacket_description": dust_jacket_description,
+        "illustrator": illustrator,
+        "keywords": keywords,
+        **catalog_values,
     }
     bibliographic_sources = {
         "subtitle": subtitle_source,
@@ -404,6 +462,15 @@ def build_biblio_candidate(
         "pages": pages_source,
         "publish_date": publish_date_source,
         "condition": condition_source,
+        "publication_place": publication_place_source,
+        "first_edition": first_edition_source,
+        "signed": signed_source,
+        "dust_jacket_present": dust_jacket_present_source,
+        "dust_jacket_condition": dust_jacket_condition_source,
+        "dust_jacket_description": dust_jacket_description_source,
+        "illustrator": illustrator_source,
+        "keywords": keywords_source,
+        **catalog_sources,
     }
 
     existing = _existing_biblio(session, workspace_id, item.id)
@@ -501,17 +568,29 @@ def apply_biblio_overrides(
 
     bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
     bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
-    for key in (
+    text_bibliographic_fields = (
         "subtitle", "publisher", "edition", "binding",
-        "language", "pages", "publish_date", "condition",
-    ):
+        "language", "publish_date", "condition", "publication_place",
+        "dust_jacket_condition", "dust_jacket_description",
+        "illustrator", "keywords",
+        "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+        "catalog_5", "catalog_6", "catalog_7", "catalog_8",
+    )
+    for key in text_bibliographic_fields:
         if key not in overrides or overrides[key] is None:
             continue
-        value = str(overrides[key]).strip()
-        if key == "pages":
-            bibliographic[key] = int(value) if value else None
-        else:
-            bibliographic[key] = value or None
+        bibliographic[key] = str(overrides[key]).strip() or None
+        bibliographic_sources[key] = "review"
+
+    if "pages" in overrides and overrides["pages"] is not None:
+        value = str(overrides["pages"]).strip()
+        bibliographic["pages"] = int(value) if value else None
+        bibliographic_sources["pages"] = "review"
+
+    for key in ("first_edition", "signed", "dust_jacket_present"):
+        if key not in overrides:
+            continue
+        bibliographic[key] = _optional_bool(overrides[key])
         bibliographic_sources[key] = "review"
 
     if not fields.get("book_id") and fields.get("sku"):
@@ -661,6 +740,7 @@ def upsert_biblio_listing(
         "image_urls": image_urls,
         "image_source": source.get("channel") if image_urls else None,
         "bibliographic_enrichment": dict(candidate.get("bibliographic_enrichment") or {}),
+        "bibliographic_sources": dict(candidate.get("bibliographic_sources") or {}),
         "cross_listed_at": now.isoformat(),
         "publish_state": "queued",
         "publish_queued_at": now.isoformat(),
@@ -680,17 +760,35 @@ def upsert_biblio_listing(
         attrs["default_price_cents"] = int(fields["price_cents"])
     bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
     bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
+    supported_bibliographic = {
+        "subtitle", "publisher", "edition", "binding",
+        "language", "pages", "publish_date", "condition",
+        "publication_place", "first_edition", "signed",
+        "dust_jacket_present", "dust_jacket_condition",
+        "dust_jacket_description", "illustrator", "keywords",
+        "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+        "catalog_5", "catalog_6", "catalog_7", "catalog_8",
+    }
     for key, value in bibliographic.items():
-        if (
-            key in {
-                "subtitle", "publisher", "edition", "binding",
-                "language", "pages", "publish_date", "condition",
-            }
-            and value not in (None, "")
-            and not attrs.get(key)
-        ):
+        if key not in supported_bibliographic:
+            continue
+        source_name = bibliographic_sources.get(key) or "unknown"
+        if source_name == "review":
+            if value in (None, ""):
+                attrs.pop(key, None)
+                attrs.pop(f"{key}_source", None)
+            else:
+                attrs[key] = value
+                attrs[f"{key}_source"] = source_name
+        elif value not in (None, "") and key not in attrs:
             attrs[key] = value
-            attrs[f"{key}_source"] = bibliographic_sources.get(key) or "unknown"
+            attrs[f"{key}_source"] = source_name
+    if bibliographic_sources.get("condition") == "review":
+        item.condition = (
+            str(bibliographic.get("condition")).strip()
+            if bibliographic.get("condition") not in (None, "")
+            else None
+        )
     item.attributes = attrs
     session.flush()
     return existing
