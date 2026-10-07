@@ -17,6 +17,7 @@ import json
 import os
 import re
 import socket
+import ssl
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -77,13 +78,9 @@ def _safe_biblio_directory(value: Any) -> str:
     directory = str(value or "").strip()
     if directory in {"", ".", "./"}:
         return ""
-    normalized = directory.strip("/")
-    parts = [part for part in normalized.split("/") if part]
-    if not parts or any(part in {".", ".."} for part in parts):
-        raise RuntimeError("BIBLIO FTP directory must be a safe relative path")
-    if not all(re.fullmatch(r"[A-Za-z0-9._ -]+", part) for part in parts):
-        raise RuntimeError("BIBLIO FTP directory contains unsupported characters")
-    return "/".join(parts)
+    raise RuntimeError(
+        "BIBLIO FTP directory must be blank or ./; refusing to upload outside the seller root"
+    )
 
 
 def _harden_biblio_values(values: dict[str, str]) -> dict[str, str]:
@@ -3324,6 +3321,7 @@ def analyze_biblio_workspace(
             {"book_id": external_id, "fields": fields}
             for external_id, fields in list(mismatches.items())[:50]
         ],
+        "_remote_only_ids": remote_only,
         "_mismatch_fields_by_id": mismatches,
     }
 
@@ -3347,7 +3345,7 @@ def _mark_biblio_remote_verification(
         for key, value in dict(analysis.get("_mismatch_fields_by_id") or {}).items()
         if str(key)
     }
-    remote_only_ids = set(str(value) for value in analysis.get("remote_only_ids") or [])
+    remote_only_ids = set(str(value) for value in analysis.get("_remote_only_ids") or [])
     with db.session_scope() as session:
         listings = session.execute(
             select(models.ChannelListing).where(
@@ -3909,15 +3907,21 @@ def _connect_biblio_ftp(values: dict[str, str]) -> ftplib.FTP_TLS:
     password = values.get("password", "").strip()
     if not username or not password:
         raise RuntimeError("BIBLIO needs username and password")
-    ftp = ftplib.FTP_TLS()
+
+    # Do not rely on ftplib's implementation defaults. Require normal public-CA
+    # certificate and hostname verification and refuse obsolete TLS versions.
+    context = ssl.create_default_context()
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    if hasattr(ssl, "TLSVersion"):
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+
+    ftp = ftplib.FTP_TLS(context=context)
     ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
     ftp.auth()
     ftp.login(username, password)
     ftp.prot_p()
     ftp.set_pasv(True)
-    directory = values.get("directory", "").strip()
-    if directory and directory not in {".", "./"}:
-        ftp.cwd(directory)
     return ftp
 
 
