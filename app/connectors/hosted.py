@@ -3119,19 +3119,19 @@ BIBLIO_EXTENDED_HEADERS = (
 
 
 def _normalize_biblio_upload_profile(value: Any) -> str:
-    profile = str(value or BIBLIO_UPLOAD_PROFILE_CORE).strip().lower()
+    profile = str(value or BIBLIO_UPLOAD_PROFILE_EXTENDED).strip().lower()
     if profile not in BIBLIO_UPLOAD_PROFILES:
         raise ValueError("BIBLIO upload_profile must be 'core' or 'extended'")
     return profile
 
 
 def biblio_upload_profile(workspace_id: uuid.UUID) -> str:
-    """Return the configured BIBLIO FTP column profile without requiring it."""
-    try:
-        values = _workspace_or_env_biblio_values(workspace_id)
-    except RuntimeError:
-        return BIBLIO_UPLOAD_PROFILE_CORE
-    return _normalize_biblio_upload_profile(values.get("upload_profile"))
+    """Return the effective BIBLIO FTP profile.
+
+    Extended is canonical. Legacy saved core values are promoted automatically
+    so existing installations send the richer BIBLIO field set after upgrade.
+    """
+    return BIBLIO_UPLOAD_PROFILE_EXTENDED
 
 
 def _biblio_inventory_signature(
@@ -3688,7 +3688,7 @@ def sync_biblio_workspace(
     photos_only: bool = False,
 ) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
-    upload_profile = _normalize_biblio_upload_profile(values.get("upload_profile"))
+    upload_profile = biblio_upload_profile(workspace_id)
     active, deletes = _biblio_rows(
         workspace_id,
         listing_id=listing_id,
@@ -4048,7 +4048,7 @@ def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
         "timeout_seconds": os.getenv("BIBLIO_FTP_TIMEOUT_SECONDS", "20").strip() or "20",
         "filename_prefix": os.getenv("BIBLIO_FTP_FILENAME_PREFIX", "reseller-dashboard").strip()
         or "reseller-dashboard",
-        "upload_profile": os.getenv("BIBLIO_FTP_UPLOAD_PROFILE", "core").strip()
+        "upload_profile": os.getenv("BIBLIO_FTP_UPLOAD_PROFILE", "extended").strip()
         or "core",
     }
 
@@ -4160,7 +4160,7 @@ def close_biblio_workspace_listing(
     cannot accidentally publish unrelated inventory changes.
     """
     values = _workspace_or_env_biblio_values(workspace_id)
-    upload_profile = _normalize_biblio_upload_profile(values.get("upload_profile"))
+    upload_profile = biblio_upload_profile(workspace_id)
     row = _biblio_listing_row(workspace_id, listing_id, profile=upload_profile)
     stamp = _biblio_upload_stamp()
     prefix = re.sub(
