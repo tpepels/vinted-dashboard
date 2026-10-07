@@ -318,6 +318,7 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
     )
 
     class FakeFTP:
+        def __init__(self, *args, **kwargs): pass
         uploads = {}
 
         def connect(self, host, timeout=20):
