@@ -314,8 +314,9 @@ document.addEventListener("click", (event) => {
 
 function redactClientText(value) {
   return String(value ?? "")
-    .replace(/(bearer\\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
-    .replace(/(password|passwd|secret|token|api[_-]?key|client[_-]?secret)([=:\\s]+)([^\\s,;]+)/gi, "$1$2[REDACTED]");
+    .replace(/(authorization:\s*(?:bearer|basic)\s+)\S+/gi, "$1[REDACTED]")
+    .replace(/(bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
+    .replace(/\b(password|passwd|secret|token|api[_-]?key|client[_-]?secret|refresh[_-]?token|access[_-]?token)(\s*[=:]\s*)([^\s,;]+)/gi, "$1$2[REDACTED]");
 }
 
 function diagnosticLog(level, event, detail = "") {
