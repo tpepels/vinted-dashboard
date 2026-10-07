@@ -119,7 +119,7 @@ ETSY_OAUTH_CALLBACK_PATH = "/api/app/connectors/etsy/oauth/callback"
 
 CONNECTOR_PREFILL_KEYS: dict[str, tuple[str, ...]] = {
     Channel.BIBLIO: (
-        "host", "username", "directory", "filename_prefix", "upload_profile",
+        "username", "filename_prefix", "upload_profile",
     ),
     Channel.EBAY: ("client_id", "site_id", "compatibility_level"),
     Channel.ETSY: ("keystring", "shop_id", "order_days", "currency"),
@@ -3554,7 +3554,7 @@ def enqueue_connector_sync(
 @router.post("/api/app/connectors/biblio/verify")
 async def biblio_workspace_verify(
     file: UploadFile = File(...),
-    context: RequestContext = Depends(require_context),
+    context: RequestContext = Depends(require_write_context),
 ):
     content = await file.read()
     try:
