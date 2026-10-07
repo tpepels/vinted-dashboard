@@ -182,7 +182,8 @@ def test_workspace_biblio_sync_uploads_master_listing(monkeypatch):
     assert result["deletes"] == 0
     payload = FakeFTP.uploads[result["inventory_filename"]].decode("utf-8")
     assert payload.startswith("Book ID\tAuthor\tTitle\tSubtitle\tDescription")
-    assert "\tCondition\tQuantity\n" in payload
+    assert "\tCondition\tPublication Place\tFirst Edition\tSigned\tDJ Present" in payload
+    assert "\tCatalog 8\tQuantity\n" in payload
     assert "BK-1\tJohn Williams\tStoner" in payload
     assert "\t12.00\tfor sale\t9780099561545\t" in payload
     assert payload.rstrip().endswith("\t1")
