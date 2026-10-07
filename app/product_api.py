@@ -900,7 +900,13 @@ def listings(
                 "biblio_details": (
                     {
                         "source": "local_submission",
-                        "remote_verified": False,
+                        "remote_verified": bool(extra.get("remote_verified")),
+                        "remote_verified_at": extra.get("remote_verified_at"),
+                        "remote_verified_source": extra.get("remote_verified_source"),
+                        "remote_verified_status": extra.get("remote_verified_status"),
+                        "remote_matches_local": extra.get("remote_matches_local"),
+                        "remote_mismatch_fields": list(extra.get("remote_mismatch_fields") or []),
+                        "remote_missing_at": extra.get("remote_missing_at"),
                         "author": extra.get("author") or linked_attrs.get("author"),
                         "isbn": extra.get("isbn") or linked_attrs.get("isbn"),
                         "description": extra.get("description") or linked_attrs.get("description") or (
