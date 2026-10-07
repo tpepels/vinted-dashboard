@@ -3755,6 +3755,7 @@ def diagnostics_download(
     content = build_bundle(
         browser_logs=payload.browser_logs,
         snapshot=snapshot,
+        include_server_logs=not is_production(),
     )
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
     return Response(
