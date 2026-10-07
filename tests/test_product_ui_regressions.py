@@ -534,6 +534,7 @@ def test_biblio_inventory_and_listing_rows_show_publication_state():
     assert "function biblioListingDetails(row)" in APP_JS
     assert "Submitted locally by FTP; not yet verified" in APP_JS
     assert "Verified in BIBLIO inventory" in APP_JS
+    assert "Remote verification is stale" in APP_JS
     assert "remote_mismatch_fields" in APP_JS
 
 
