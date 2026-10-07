@@ -3902,6 +3902,7 @@ def _biblio_upload_stamp() -> str:
 
 
 def _connect_biblio_ftp(values: dict[str, str]) -> ftplib.FTP_TLS:
+    values = _harden_biblio_values(values)
     host = values.get("host", BIBLIO_FTP_HOST).strip() or BIBLIO_FTP_HOST
     username = values.get("username", "").strip()
     password = values.get("password", "").strip()
