@@ -43,6 +43,9 @@ const state = {
   barcodeMisses: 0,
   barcodeCameraLatch: null,
   barcodeCameraClearFrames: 0,
+  browserLogs: [],
+  diagnosticsTimer: null,
+  diagnosticsDevConsole: false,
 };
 
 const importFields = [
@@ -309,6 +312,41 @@ document.addEventListener("click", (event) => {
   sortTableByHeader(header);
 });
 
+function redactClientText(value) {
+  return String(value ?? "")
+    .replace(/(bearer\\s+)[A-Za-z0-9._~+\\-/=]+/gi, "$1[REDACTED]")
+    .replace(/(password|passwd|secret|token|api[_-]?key|client[_-]?secret)([=:\\s]+)([^\\s,;]+)/gi, "$1$2[REDACTED]");
+}
+
+function diagnosticLog(level, event, detail = "") {
+  const row = {
+    at: new Date().toISOString(),
+    level: String(level || "info").toLowerCase(),
+    event: redactClientText(event),
+    detail: redactClientText(detail),
+  };
+  state.browserLogs.push(row);
+  if (state.browserLogs.length > 1000) state.browserLogs.splice(0, state.browserLogs.length - 1000);
+}
+
+window.addEventListener("error", (event) => {
+  diagnosticLog("error", "browser.error", event.message || "Unhandled browser error");
+});
+window.addEventListener("unhandledrejection", (event) => {
+  diagnosticLog("error", "browser.unhandledrejection", event.reason?.message || event.reason || "Unhandled promise rejection");
+});
+
+const originalConsoleError = console.error.bind(console);
+const originalConsoleWarn = console.warn.bind(console);
+console.error = (...args) => {
+  diagnosticLog("error", "console.error", args.map(redactClientText).join(" "));
+  originalConsoleError(...args);
+};
+console.warn = (...args) => {
+  diagnosticLog("warn", "console.warn", args.map(redactClientText).join(" "));
+  originalConsoleWarn(...args);
+};
+
 function csrf() {
   if (state.me?.csrf_token) return state.me.csrf_token;
   const hit = document.cookie.split("; ").find((value) => value.startsWith("reseller_csrf="));
@@ -324,19 +362,35 @@ function flash(message, error = false) {
 
 async function api(url, options = {}) {
   const headers = Object.assign({}, options.headers || {});
+  const method = String(options.method || "GET").toUpperCase();
+  const path = (() => {
+    try { return new URL(url, window.location.origin).pathname; } catch { return String(url); }
+  })();
   if (options.method && !["GET", "HEAD"].includes(options.method)) {
     headers["X-CSRF-Token"] = csrf();
   }
   if (options.body && !(options.body instanceof FormData) && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  const response = await fetch(url, Object.assign(
-    { credentials: "same-origin" },
-    options,
-    { headers },
-  ));
+  const started = performance.now();
+  if (!path.startsWith("/api/app/diagnostics/logs")) diagnosticLog("info", "api.request", method + " " + path);
+  let response;
+  try {
+    response = await fetch(url, Object.assign(
+      { credentials: "same-origin" },
+      options,
+      { headers },
+    ));
+  } catch (error) {
+    diagnosticLog("error", "api.network_error", method + " " + path + " · " + (error?.message || error));
+    throw error;
+  }
   const type = response.headers.get("content-type") || "";
   const body = type.includes("application/json") ? await response.json() : await response.text();
+  const duration = Math.round(performance.now() - started);
+  if (!path.startsWith("/api/app/diagnostics/logs")) {
+    diagnosticLog(response.ok ? "info" : "error", "api.response", method + " " + path + " · HTTP " + response.status + " · " + duration + "ms");
+  }
   if (!response.ok) {
     throw new Error(body?.detail || body || ("HTTP " + response.status));
   }
@@ -451,6 +505,10 @@ $$(".nav").forEach((button) => {
 
 async function selectView(view) {
   if (view !== "inventory" && state.barcodeStream) stopBarcodeCamera();
+  if (view !== "settings" && state.diagnosticsTimer) {
+    clearInterval(state.diagnosticsTimer);
+    state.diagnosticsTimer = null;
+  }
   state.view = view;
   $$(".nav").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === view));
@@ -4180,6 +4238,99 @@ async function pair(button) {
   }
 }
 
+function diagnosticsSummaryHtml(data) {
+  const worker = data?.worker || {};
+  const jobs = data?.jobs || [];
+  const failedJobs = jobs.filter((row) => row.status === "failed" || row.error).length;
+  const connectorRuns = data?.connector_runs || [];
+  const failedRuns = connectorRuns.filter((row) => row.status === "error" || row.status === "failed" || row.error).length;
+  return '<div class="diagnostics-pills">'
+    + '<span>Environment <strong>' + esc(data?.runtime?.environment || "unknown") + '</strong></span>'
+    + '<span>Worker <strong>' + esc(worker.healthy ? "healthy" : "unhealthy") + '</strong></span>'
+    + '<span>Recent job errors <strong>' + esc(failedJobs) + '</strong></span>'
+    + '<span>Connector errors <strong>' + esc(failedRuns) + '</strong></span>'
+    + '</div>';
+}
+
+function formatDiagnostics(data) {
+  const lines = [];
+  (data?.logs || []).forEach((row) => lines.push("[" + (row.source || "server") + "] " + (row.line || "")));
+  (data?.jobs || []).slice().reverse().forEach((row) => {
+    lines.push("[job] " + (row.created_at || "") + " " + row.type + " " + row.status
+      + (row.error ? " · " + row.error : ""));
+  });
+  (data?.connector_runs || []).slice().reverse().forEach((row) => {
+    lines.push("[connector] " + (row.started_at || "") + " " + row.channel + "/" + row.type + " " + row.status
+      + (row.error ? " · " + row.error : ""));
+  });
+  state.browserLogs.forEach((row) => {
+    lines.push("[browser] " + row.at + " " + row.level.toUpperCase() + " " + row.event
+      + (row.detail ? " · " + row.detail : ""));
+  });
+  return lines.slice(-700).join("\n");
+}
+
+async function refreshDiagnostics() {
+  if (!state.diagnosticsDevConsole || state.view !== "settings") return;
+  try {
+    const data = await api("/api/app/diagnostics/logs?limit=350");
+    $("#diagnostics-summary").innerHTML = diagnosticsSummaryHtml(data);
+    $("#diagnostics-log-window").textContent = formatDiagnostics(data);
+    $("#diagnostics-log-window").scrollTop = $("#diagnostics-log-window").scrollHeight;
+    $("#diagnostics-live-status").textContent = "Updated " + new Date().toLocaleTimeString();
+  } catch (error) {
+    $("#diagnostics-live-status").textContent = error.message;
+  }
+}
+
+async function loadDiagnostics() {
+  const data = await api("/api/app/diagnostics/status");
+  $("#diagnostics-summary").innerHTML = diagnosticsSummaryHtml(data);
+  state.diagnosticsDevConsole = Boolean(data.dev_console);
+  $("#diagnostics-live").classList.toggle("hidden", !state.diagnosticsDevConsole);
+  $("#diagnostics-refresh").classList.toggle("hidden", !state.diagnosticsDevConsole);
+  if (state.diagnosticsDevConsole) {
+    await refreshDiagnostics();
+    if (state.diagnosticsTimer) clearInterval(state.diagnosticsTimer);
+    state.diagnosticsTimer = setInterval(refreshDiagnostics, 2500);
+  }
+}
+
+async function downloadDiagnostics() {
+  diagnosticLog("info", "diagnostics.download", "Preparing diagnostics bundle");
+  const response = await fetch("/api/app/diagnostics/download", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrf(),
+    },
+    body: JSON.stringify({ browser_logs: state.browserLogs.slice(-1000) }),
+  });
+  if (!response.ok) {
+    let detail = "Could not download diagnostics";
+    try {
+      const body = await response.json();
+      detail = body.detail || detail;
+    } catch {}
+    diagnosticLog("error", "diagnostics.download_failed", "HTTP " + response.status);
+    throw new Error(detail);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/i);
+  const filename = match?.[1] || "reseller-dashboard-diagnostics.zip";
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  diagnosticLog("info", "diagnostics.download_complete", filename);
+}
+
 async function settings() {
   const data = await api("/api/app/settings");
   $("#settings-name").value = data.workspace.name;
@@ -4193,6 +4344,7 @@ async function settings() {
       + (data.security.derived_encryption_key
         ? '<p class="muted">Configure APP_ENCRYPTION_KEY before hosting for real customers.</p>'
         : "");
+  await loadDiagnostics();
   const button = $("#billing-action");
   if (button) {
     button.onclick = async () => {
@@ -4208,6 +4360,16 @@ async function settings() {
     };
   }
 }
+
+$("#diagnostics-refresh").onclick = () => refreshDiagnostics();
+$("#diagnostics-download").onclick = async () => {
+  try {
+    await downloadDiagnostics();
+    flash("Diagnostics bundle downloaded.");
+  } catch (error) {
+    flash(error.message, true);
+  }
+};
 
 $("#delete-workspace").onclick = async () => {
   const expected = state.me?.workspace?.slug || "";
