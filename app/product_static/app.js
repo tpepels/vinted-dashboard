@@ -1150,6 +1150,7 @@ function renderBiblioPublish(data) {
   const enrichment = data.bibliographic_enrichment || {};
   const bibliographicSources = data.bibliographic_sources || {};
   const bookIdValue = fields.book_id || data.book_id_suggestion || "";
+  const bookIdEditable = !data.book_id_locked;
   const rows = [
     ["title", "Title", fields.title || "", sources.title, true, true],
     ["author", "Author", fields.author || "", sources.author, true, true],
@@ -1164,7 +1165,7 @@ function renderBiblioPublish(data) {
     ["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false],
     ["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false],
     ["price_cents", "Price", fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2), sources.price_cents, true, true],
-    ["book_id", "Book ID", bookIdValue, sources.book_id, true, true],
+    ["book_id", data.book_id_locked ? "Book ID (locked after first upload)" : "Book ID", bookIdValue, sources.book_id, bookIdEditable, true],
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
     ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - automatic BIBLIO upload" : "No Vinted photos available", source.photo_count ? "vinted" : null, false, false],
   ];
@@ -1202,6 +1203,7 @@ function renderBiblioPublish(data) {
   else if (data.photo_warning) warning = "Photo warning: " + data.photo_warning;
   else warning = data.already_listed
     ? "Ready to update using the extended BIBLIO format, including the optional bibliographic fields shown above."
+      + (data.book_id_locked ? " Book ID is locked because changing it after upload could leave a duplicate remote listing." : "")
     : "Ready. The extended BIBLIO format will send the optional bibliographic fields shown above.";
   $("#biblio-publish-warning").textContent = warning;
 
