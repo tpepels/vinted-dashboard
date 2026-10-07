@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.bridge_api import router as bridge_router
+from app.diagnostics import setup_diagnostics
 from app.bridge_package import (
     bridge_filename,
     extension_source_version,
@@ -33,6 +34,7 @@ from app.runtime_config import (
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_NAME = os.getenv("APP_NAME", "Reseller Dashboard").strip() or "Reseller Dashboard"
+setup_diagnostics("web")
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
 app.mount(

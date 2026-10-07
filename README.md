@@ -379,6 +379,29 @@ bootstrap workspace.
 Either set \`EBAY_OAUTH_TOKEN\`, or configure refreshable OAuth with
 \`EBAY_CLIENT_ID\`, \`EBAY_CLIENT_SECRET\` and \`EBAY_REFRESH_TOKEN\`.
 
+## Diagnostics and support logs
+
+**Settings → Diagnostics** provides a redacted diagnostics download on every
+deployment. The ZIP contains browser/API events, workspace-scoped background
+jobs and connector runs, runtime posture and worker health. In development it
+also contains the rotating web/worker process logs from the shared `data/`
+volume.
+
+The live log console is intentionally development-only. Production does not
+serve raw process logs because one web/worker process may handle multiple
+workspaces; production downloads therefore remain workspace-scoped. Secrets
+matching configured password/token/key variables and common authorization
+formats are redacted before process logs are written and again when a bundle is
+built. User-entered titles and marketplace identifiers can still appear in a
+diagnostics bundle, so users should inspect it before sharing it externally.
+
+Optional log retention controls:
+
+```env
+DIAGNOSTICS_LOG_MAX_BYTES=2097152
+DIAGNOSTICS_LOG_BACKUPS=3
+```
+
 ## Authentication, security and billing
 
 The hosted app uses:

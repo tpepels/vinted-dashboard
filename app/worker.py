@@ -8,9 +8,11 @@ import time
 import uuid
 
 from app import jobs
+from app.diagnostics import setup_diagnostics
 
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+setup_diagnostics("worker")
 logger = logging.getLogger("reseller-worker")
 POLL_SECONDS = max(1, int(os.getenv("WORKER_POLL_SECONDS", "5")))
 HEARTBEAT_SECONDS = max(10, int(os.getenv("WORKER_HEARTBEAT_SECONDS", "30")))
@@ -190,6 +192,13 @@ def run_forever() -> None:
         if job is None:
             time.sleep(POLL_SECONDS)
             continue
+        logger.info(
+            "job started id=%s type=%s workspace=%s attempt=%s",
+            job.get("id"),
+            job.get("job_type"),
+            job.get("workspace_id"),
+            job.get("attempts"),
+        )
         try:
             handle(job)
         except Exception as exc:
@@ -236,6 +245,12 @@ def run_forever() -> None:
                 jobs.fail(job["id"], str(exc))
         else:
             jobs.complete(job["id"])
+            logger.info(
+                "job completed id=%s type=%s workspace=%s",
+                job.get("id"),
+                job.get("job_type"),
+                job.get("workspace_id"),
+            )
 
 
 if __name__ == "__main__":
