@@ -1066,6 +1066,75 @@ def test_biblio_review_can_clear_optional_isbn_and_enrichment():
 
 
 
+def test_reviewed_biblio_optional_clears_remain_authoritative_in_ftp_and_future_preview():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        attrs = dict(item.attributes or {})
+        attrs["isbn"] = "9780140328721"
+        attrs["publisher"] = "Old Publisher"
+        attrs["first_edition"] = False
+        item.attributes = attrs
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {
+                "isbn": "",
+                "publisher": "",
+                "first_edition": True,
+                "signed": False,
+                "publication_place": "Porto",
+                "catalog_1": "Modern Fiction",
+            },
+        )
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        listing_id = listing.id
+        assert listing.extra["field_sources"]["isbn"] == "review"
+        assert listing.extra["bibliographic_sources"]["publisher"] == "review"
+        assert listing.extra["bibliographic_sources"]["first_edition"] == "review"
+
+    active, _deletes = hosted._biblio_rows(workspace_id, listing_id=listing_id)
+    assert len(active) == 1
+    row = active[0]
+    assert row["isbn"] is None
+    assert row["publisher"] is None
+    assert row["first_edition"] is True
+    assert row["signed"] is False
+    assert row["publication_place"] == "Porto"
+    assert row["catalog_1"] == "Modern Fiction"
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        assert candidate["fields"]["isbn"] is None
+        assert candidate["field_sources"]["isbn"] == "review"
+        assert candidate["bibliographic_enrichment"]["publisher"] is None
+        assert candidate["bibliographic_sources"]["publisher"] == "review"
+        assert candidate["bibliographic_enrichment"]["first_edition"] is True
+        assert candidate["bibliographic_enrichment"]["signed"] is False
+        assert candidate["bibliographic_enrichment"]["publication_place"] == "Porto"
+        assert candidate["bibliographic_enrichment"]["catalog_1"] == "Modern Fiction"
+
+
 def test_biblio_photo_warning_for_book_id_that_cannot_be_a_filename():
     candidate = {
         "fields": {
