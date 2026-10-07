@@ -413,7 +413,9 @@ def test_biblio_preflight_has_direct_stock_repair_and_book_id_override():
     ).read_text(encoding="utf-8")
     assert 'id="biblio-edit-stock"' in html
     assert 'id="biblio-edit-book"' not in html
-    assert '["book_id", "Book ID", bookIdValue, sources.book_id, true, true]' in APP_JS
+    assert 'const bookIdEditable = !data.book_id_locked;' in APP_JS
+    assert '"Book ID (locked after first upload)"' in APP_JS
+    assert "changing it after upload could leave a duplicate remote listing" in APP_JS
     assert '"unique BIBLIO Book ID"' in APP_JS
     assert 'data.book_id_suggestion' in APP_JS
     assert 'missing.includes("available stock")' in APP_JS
