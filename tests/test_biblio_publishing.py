@@ -1315,6 +1315,83 @@ def test_biblio_update_invalidates_previous_remote_verification_immediately():
         assert listing.extra["remote_stale_since"]
 
 
+def test_biblio_change_sync_refreshes_vinted_fields_but_preserves_reviewed_values():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        source = session.get(models.ChannelListing, source_listing_id)
+        source_extra = dict(source.extra or {})
+        metadata = dict(source_extra.get("metadata") or {})
+        metadata["publisher"] = "Source Publisher"
+        source_extra["metadata"] = metadata
+        source.extra = source_extra
+
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {
+                "description": "Reviewed description",
+                "publisher": "Reviewed Publisher",
+            },
+        )
+        biblio = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        biblio_id = biblio.id
+
+    with db.session_scope() as session:
+        source = session.get(models.ChannelListing, source_listing_id)
+        source.title = "Updated Vinted title"
+        source.price_cents = 925
+        source_extra = dict(source.extra or {})
+        metadata = dict(source_extra.get("metadata") or {})
+        metadata["author"] = "Updated Author"
+        metadata["description"] = "Updated Vinted description"
+        metadata["publisher"] = "Updated Source Publisher"
+        source_extra["metadata"] = metadata
+        source_extra["image_urls"] = [
+            "https://images1.vinted.net/t/updated-one.jpg",
+            "https://images1.vinted.net/t/updated-two.jpg",
+            "https://images1.vinted.net/t/updated-three.jpg",
+        ]
+        source.extra = source_extra
+
+    changed = hosted._refresh_biblio_linked_sources(
+        workspace_id,
+        listing_id=biblio_id,
+    )
+    assert changed == 1
+
+    with db.session_scope() as session:
+        biblio = session.get(models.ChannelListing, biblio_id)
+        extra = dict(biblio.extra or {})
+        assert biblio.title == "Updated Vinted title"
+        assert biblio.price_cents == 925
+        assert extra["author"] == "Updated Author"
+        assert extra["description"] == "Reviewed description"
+        assert extra["bibliographic_enrichment"]["publisher"] == "Reviewed Publisher"
+        assert extra["bibliographic_sources"]["publisher"] == "review"
+        assert len(extra["image_urls"]) == 3
+        assert extra["photo_sync_state"] == "queued"
+
+    active, _deletes = hosted._biblio_rows(workspace_id, listing_id=biblio_id)
+    assert len(active) == 1
+    assert active[0]["inventory_dirty"] is True
+    assert active[0]["description"] == "Reviewed description"
+    assert active[0]["publisher"] == "Reviewed Publisher"
+
+
 def test_biblio_candidate_prefills_isbn_from_valid_master_book_barcode():
     workspace_id = _workspace()
     with db.session_scope() as session:
