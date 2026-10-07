@@ -312,6 +312,14 @@ def _row_payload(
                 attributes[key] = number
             else:
                 errors.append(f"invalid {key.replace('_', ' ')}")
+        elif key in {"first_edition", "signed", "dust_jacket_present"}:
+            text = str(value).strip().casefold()
+            if text in {"yes", "y", "true", "1", "present"}:
+                attributes[key] = True
+            elif text in {"no", "n", "false", "0", "absent"}:
+                attributes[key] = False
+            else:
+                errors.append(f"invalid {key.replace('_', ' ')}")
         else:
             attributes[key] = str(value).strip()
 
