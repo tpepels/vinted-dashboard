@@ -60,7 +60,6 @@ const connectorSchemas = {
     fields: [
       ["username", "FTP username", "", "text"],
       ["password", "FTP password", "", "password"],
-      ["directory", "FTP directory", "", "text"],
       ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
     ],
   },
@@ -1383,8 +1382,8 @@ function renderBiblioActivity(activity, operational) {
       + esc(health.remote_unverified || 0) + ' unverified · '
       + esc(health.photo_attention || 0) + ' photo attention · '
       + esc(health.publish_attention || 0) + ' publish attention'
-      + (safety.ftps_required ? ' · FTPS/TLS required' : '')
-      + (safety.ftp_host_locked ? ' · host locked' : '')
+      + (safety.ftps_required ? ' · verified FTPS/TLS required' : '')
+      + (safety.ftp_host_locked ? ' · host/root locked' : '')
       + '</div>';
   const history = runs.length
     ? runs.map((run) => {
