@@ -308,7 +308,7 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
         hosted,
         "_workspace_or_env_biblio_values",
         lambda _workspace_id: {
-            "host": "ftp.test",
+            "host": "ftp.biblio.com",
             "username": "seller",
             "password": "secret",
             "directory": "",
@@ -322,7 +322,7 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
         uploads = {}
 
         def connect(self, host, timeout=20):
-            assert host == "ftp.test"
+            assert host == "ftp.biblio.com"
 
         def auth(self):
             return None
