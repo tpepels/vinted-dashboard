@@ -514,6 +514,21 @@
           <div class="card form"><h2>Billing</h2><div id="billing"></div></div>
         </div>
         <div class="card form"><h2>Your data</h2><a class="btn" href="/api/app/account/export">Download account data</a><p class="muted">Your inventory, listings and sales remain exportable.</p></div>
+        <div id="diagnostics-card" class="card form">
+          <div class="card-head inline-head">
+            <div><p class="eyebrow">SUPPORT</p><h2>Diagnostics</h2></div>
+            <div class="actions compact">
+              <button id="diagnostics-refresh" class="btn hidden" type="button">Refresh logs</button>
+              <button id="diagnostics-download" class="btn primary" type="button">Download logs</button>
+            </div>
+          </div>
+          <p class="muted">Download a redacted diagnostics bundle you can inspect or send for support. It includes recent browser events, web/worker logs, background jobs, connector runs and runtime health. User-entered titles and identifiers may still appear.</p>
+          <div id="diagnostics-summary" class="diagnostics-summary"></div>
+          <div id="diagnostics-live" class="hidden">
+            <div class="diagnostics-live-head"><strong>Development log</strong><span id="diagnostics-live-status" class="muted"></span></div>
+            <pre id="diagnostics-log-window" class="diagnostics-log-window" aria-live="polite"></pre>
+          </div>
+        </div>
         <div class="card form"><h2>Delete workspace</h2><p class="muted">This permanently deletes this workspace and its marketplace data. Download an export first.</p><label>Type <code id="delete-workspace-slug"></code> to confirm<input id="delete-workspace-confirm" autocomplete="off"></label><button id="delete-workspace" class="btn danger" type="button">Delete workspace permanently</button></div>
       </section>
     </main>
