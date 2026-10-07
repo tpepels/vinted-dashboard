@@ -3364,6 +3364,15 @@ def _mark_biblio_remote_verification(
         if str(key)
     }
     remote_only_ids = set(str(value) for value in analysis.get("_remote_only_ids") or [])
+    current_active, _current_deletes = _biblio_rows(
+        workspace_id,
+        profile=biblio_upload_profile(workspace_id),
+    )
+    current_signature_by_id = {
+        str(row.get("source_id") or row.get("sku") or "").strip(): str(row.get("inventory_signature") or "")
+        for row in current_active
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
     with db.session_scope() as session:
         listings = session.execute(
             select(models.ChannelListing).where(
@@ -3387,6 +3396,9 @@ def _mark_biblio_remote_verification(
                     None if external_id in remote_only_ids else not bool(mismatches)
                 )
                 extra["remote_mismatch_fields"] = mismatches
+                extra["remote_verified_inventory_signature"] = current_signature_by_id.get(external_id)
+                extra["remote_verification_stale"] = False
+                extra.pop("remote_stale_since", None)
                 extra.pop("remote_missing_at", None)
             elif authoritative:
                 extra["remote_verified"] = False
@@ -3394,6 +3406,9 @@ def _mark_biblio_remote_verification(
                 extra["remote_verified_source"] = filename
                 extra["remote_matches_local"] = False
                 extra["remote_mismatch_fields"] = ["missing_from_biblio_active_inventory"]
+                extra["remote_verified_inventory_signature"] = current_signature_by_id.get(external_id)
+                extra["remote_verification_stale"] = False
+                extra.pop("remote_stale_since", None)
                 extra["remote_missing_at"] = verified_at.isoformat()
             listing.extra = extra
 
@@ -3950,7 +3965,15 @@ def _mark_biblio_inventory_sync(
         ).scalars().all()
         for listing in listings:
             extra = dict(listing.extra or {})
-            extra["inventory_sync_signature"] = by_id[listing.id]
+            signature = by_id[listing.id]
+            verified_signature = str(extra.get("remote_verified_inventory_signature") or "")
+            if verified_signature and verified_signature != signature:
+                extra["remote_verified"] = False
+                extra["remote_matches_local"] = None
+                extra["remote_mismatch_fields"] = []
+                extra["remote_verification_stale"] = True
+                extra["remote_stale_since"] = now
+            extra["inventory_sync_signature"] = signature
             extra["inventory_synced_at"] = now
             listing.extra = extra
 
