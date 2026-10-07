@@ -49,8 +49,11 @@ const importFields = [
   "", "sku", "title", "category", "quantity", "condition", "cost", "price",
   "currency", "location", "notes", "barcode", "author", "isbn", "subtitle",
   "publisher", "edition", "binding", "language", "publish_date",
-  "publication_year", "pages", "brand", "size", "colour", "material",
-  "measurements",
+  "publication_year", "pages", "publication_place", "first_edition", "signed",
+  "dust_jacket_present", "dust_jacket_condition", "dust_jacket_description",
+  "illustrator", "keywords", "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+  "catalog_5", "catalog_6", "catalog_7", "catalog_8",
+  "brand", "size", "colour", "material", "measurements",
 ];
 
 const connectorSchemas = {
