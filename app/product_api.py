@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake
+from app.diagnostics import build_bundle, recent_logs, redact_text
 from app.bridge_package import extension_source_version
 from app.connectors.biblio_format import parse_biblio_inventory
 from app.auth import (
@@ -100,7 +101,7 @@ from app.product_models import (
 )
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
 from app.purchase_costs import apply_purchase_cost, purchase_cost_suggestions
-from app.runtime_config import public_app_origin
+from app.runtime_config import is_production, public_app_origin, safe_runtime_summary
 from app.stock_policy import sale_counts_as_sold
 from app.strategy import strategy_settings
 from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
@@ -165,6 +166,10 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class DiagnosticsDownloadRequest(BaseModel):
+    browser_logs: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
 
 
 class InventoryCreateRequest(BaseModel):
@@ -3657,6 +3662,111 @@ def biblio_workspace_test(
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+
+def _diagnostics_snapshot(workspace_id: uuid.UUID) -> dict[str, Any]:
+    with db.session_scope() as session:
+        job_rows = session.execute(
+            select(BackgroundJob).where(
+                BackgroundJob.workspace_id == workspace_id
+            ).order_by(BackgroundJob.created_at.desc()).limit(50)
+        ).scalars().all()
+        run_rows = session.execute(
+            select(models.ConnectorSyncRun).where(
+                models.ConnectorSyncRun.workspace_id == workspace_id
+            ).order_by(models.ConnectorSyncRun.started_at.desc()).limit(50)
+        ).scalars().all()
+    try:
+        from app.service_status import status as service_status
+        worker = service_status(
+            "worker",
+            max_age_seconds=max(
+                30,
+                int(os.getenv("WORKER_HEARTBEAT_MAX_AGE_SECONDS", "90")),
+            ),
+        )
+    except Exception:
+        worker = {"service": "worker", "healthy": False, "last_seen_at": None}
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "runtime": safe_runtime_summary(),
+        "worker": worker,
+        "jobs": [
+            {
+                "id": str(row.id),
+                "type": row.job_type,
+                "status": row.status,
+                "attempts": row.attempts,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "available_at": row.available_at.isoformat() if row.available_at else None,
+                "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                "error": redact_text(row.last_error) if row.last_error else None,
+            }
+            for row in job_rows
+        ],
+        "connector_runs": [
+            {
+                "id": str(row.id),
+                "channel": row.channel,
+                "type": row.run_type,
+                "status": row.status,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                "items": row.item_count,
+                "active": row.active_count,
+                "deletes": row.delete_count,
+                "error": redact_text(row.error) if row.error else None,
+            }
+            for row in run_rows
+        ],
+    }
+
+
+@router.get("/api/app/diagnostics/status")
+def diagnostics_status(context: RequestContext = Depends(require_context)):
+    snapshot = _diagnostics_snapshot(context.workspace.id)
+    return {
+        "ok": True,
+        "dev_console": not is_production(),
+        **snapshot,
+    }
+
+
+@router.get("/api/app/diagnostics/logs")
+def diagnostics_logs(
+    limit: int = 300,
+    context: RequestContext = Depends(require_context),
+):
+    if is_production():
+        raise HTTPException(status_code=404, detail="Live logs are disabled in production")
+    return {
+        "ok": True,
+        "logs": recent_logs(limit=max(20, min(int(limit), 1000))),
+        **_diagnostics_snapshot(context.workspace.id),
+    }
+
+
+@router.post("/api/app/diagnostics/download")
+def diagnostics_download(
+    payload: DiagnosticsDownloadRequest,
+    context: RequestContext = Depends(require_context),
+):
+    snapshot = _diagnostics_snapshot(context.workspace.id)
+    content = build_bundle(
+        browser_logs=payload.browser_logs,
+        snapshot=snapshot,
+    )
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="reseller-dashboard-diagnostics-{stamp}.zip"'
+            ),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/api/app/settings")
