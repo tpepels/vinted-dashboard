@@ -46,6 +46,8 @@ const state = {
   browserLogs: [],
   diagnosticsTimer: null,
   diagnosticsDevConsole: false,
+  diagnosticsRows: [],
+  diagnosticsLevelFilter: new Set(["error"]),
 };
 
 const importFields = [
@@ -4257,22 +4259,59 @@ function diagnosticsSummaryHtml(data) {
     + '</div>';
 }
 
+function diagnosticsSeverity(value, fallback = "info") {
+  const normalized = String(value || "").toLowerCase();
+  if (/\b(error|critical|fatal|exception|traceback|failed|failure)\b/.test(normalized)) return "error";
+  if (/\b(warn|warning|degraded|retry|retrying)\b/.test(normalized)) return "warning";
+  return fallback;
+}
+
 function formatDiagnostics(data) {
-  const lines = [];
-  (data?.logs || []).forEach((row) => lines.push("[" + (row.source || "server") + "] " + (row.line || "")));
+  const rows = [];
+  (data?.logs || []).forEach((row) => {
+    rows.push({
+      severity: diagnosticsSeverity(row.line),
+      text: "[" + (row.source || "server") + "] " + (row.line || ""),
+    });
+  });
   (data?.jobs || []).slice().reverse().forEach((row) => {
-    lines.push("[job] " + (row.created_at || "") + " " + row.type + " " + row.status
-      + (row.error ? " · " + row.error : ""));
+    rows.push({
+      severity: row.error ? "error" : diagnosticsSeverity(row.status),
+      text: "[job] " + (row.created_at || "") + " " + row.type + " " + row.status
+        + (row.error ? " · " + row.error : ""),
+    });
   });
   (data?.connector_runs || []).slice().reverse().forEach((row) => {
-    lines.push("[connector] " + (row.started_at || "") + " " + row.channel + "/" + row.type + " " + row.status
-      + (row.error ? " · " + row.error : ""));
+    rows.push({
+      severity: row.error ? "error" : diagnosticsSeverity(row.status),
+      text: "[connector] " + (row.started_at || "") + " " + row.channel + "/" + row.type + " " + row.status
+        + (row.error ? " · " + row.error : ""),
+    });
   });
   state.browserLogs.forEach((row) => {
-    lines.push("[browser] " + row.at + " " + row.level.toUpperCase() + " " + row.event
-      + (row.detail ? " · " + row.detail : ""));
+    rows.push({
+      severity: diagnosticsSeverity(row.level),
+      text: "[browser] " + row.at + " " + row.level.toUpperCase() + " " + row.event
+        + (row.detail ? " · " + row.detail : ""),
+    });
   });
-  return lines.slice(-700).join("\n");
+  return rows.slice(-700);
+}
+
+function renderDiagnosticsRows() {
+  const logWindow = $("#diagnostics-log-window");
+  if (!logWindow) return;
+  const visible = state.diagnosticsRows.filter((row) => state.diagnosticsLevelFilter.has(row.severity));
+  if (!visible.length) {
+    logWindow.innerHTML = '<div class="diagnostics-log-empty">No matching log entries.</div>';
+    return;
+  }
+  logWindow.innerHTML = visible.map((row) =>
+    '<div class="diagnostics-log-line diagnostics-log-' + row.severity + '">'
+      + '<span class="diagnostics-log-level">' + esc(row.severity.toUpperCase()) + '</span>'
+      + '<span class="diagnostics-log-text">' + esc(row.text) + '</span>'
+    + '</div>'
+  ).join("");
 }
 
 async function refreshDiagnostics() {
@@ -4280,7 +4319,8 @@ async function refreshDiagnostics() {
   try {
     const data = await api("/api/app/diagnostics/logs?limit=350");
     $("#diagnostics-summary").innerHTML = diagnosticsSummaryHtml(data);
-    $("#diagnostics-log-window").textContent = formatDiagnostics(data);
+    state.diagnosticsRows = formatDiagnostics(data);
+    renderDiagnosticsRows();
     $("#diagnostics-log-window").scrollTop = $("#diagnostics-log-window").scrollHeight;
     $("#diagnostics-live-status").textContent = "Updated " + new Date().toLocaleTimeString();
   } catch (error) {
@@ -4372,6 +4412,21 @@ async function settings() {
 }
 
 $("#diagnostics-refresh").onclick = () => refreshDiagnostics();
+$$("[data-diagnostics-level]").forEach((button) => {
+  button.onclick = () => {
+    const level = button.dataset.diagnosticsLevel;
+    if (!["error", "warning", "info"].includes(level)) return;
+    if (state.diagnosticsLevelFilter.has(level)) {
+      state.diagnosticsLevelFilter.delete(level);
+    } else {
+      state.diagnosticsLevelFilter.add(level);
+    }
+    button.classList.toggle("active", state.diagnosticsLevelFilter.has(level));
+    button.setAttribute("aria-pressed", state.diagnosticsLevelFilter.has(level) ? "true" : "false");
+    renderDiagnosticsRows();
+    $("#diagnostics-log-window").scrollTop = $("#diagnostics-log-window").scrollHeight;
+  };
+});
 $("#diagnostics-download").onclick = async () => {
   try {
     await downloadDiagnostics();

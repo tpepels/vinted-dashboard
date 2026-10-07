@@ -699,6 +699,10 @@ def test_diagnostics_controls_and_dev_log_console_are_wired():
     assert 'id="diagnostics-download"' in html
     assert 'id="diagnostics-live"' in html
     assert 'id="diagnostics-log-window"' in html
+    assert 'data-diagnostics-level="error"' in html
+    assert 'data-diagnostics-level="warning"' in html
+    assert 'data-diagnostics-level="info"' in html
+    assert 'aria-pressed="true">Errors' in html
     assert 'api("/api/app/diagnostics/status")' in APP_JS
     assert 'api("/api/app/diagnostics/logs?limit=350")' in APP_JS
     assert 'fetch("/api/app/diagnostics/download"' in APP_JS
@@ -706,3 +710,7 @@ def test_diagnostics_controls_and_dev_log_console_are_wired():
     assert 'window.addEventListener("error"' in APP_JS
     assert 'window.addEventListener("unhandledrejection"' in APP_JS
     assert "diagnosticsDevConsole" in APP_JS
+    assert 'diagnosticsLevelFilter: new Set(["error"])' in APP_JS
+    assert "function diagnosticsSeverity" in APP_JS
+    assert "function renderDiagnosticsRows" in APP_JS
+    assert 'diagnostics-log-' in APP_JS
