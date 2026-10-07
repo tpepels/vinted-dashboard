@@ -404,6 +404,10 @@ function metric(label, value, sub) {
 }
 
 function authScreen(which) {
+  if (state.diagnosticsTimer) {
+    clearInterval(state.diagnosticsTimer);
+    state.diagnosticsTimer = null;
+  }
   $("#auth").classList.remove("hidden");
   $("#shell").classList.add("hidden");
   $("#login").classList.toggle("hidden", which === "register");
@@ -4344,7 +4348,12 @@ async function settings() {
       + (data.security.derived_encryption_key
         ? '<p class="muted">Configure APP_ENCRYPTION_KEY before hosting for real customers.</p>'
         : "");
-  await loadDiagnostics();
+  try {
+    await loadDiagnostics();
+  } catch (error) {
+    $("#diagnostics-summary").innerHTML = '<p class="error">' + esc(error.message) + '</p>';
+    diagnosticLog("error", "diagnostics.status_failed", error.message);
+  }
   const button = $("#billing-action");
   if (button) {
     button.onclick = async () => {
