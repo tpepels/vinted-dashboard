@@ -12,11 +12,14 @@ def test_biblio_env_credentials_are_bootstrap_only(monkeypatch):
     monkeypatch.setenv("BIBLIO_FTP_USERNAME", "seller")
     monkeypatch.setenv("BIBLIO_FTP_PASSWORD", "secret")
     monkeypatch.setenv("BIBLIO_FTP_HOST", "ftp.example.test")
+    monkeypatch.setenv("BIBLIO_FTP_AUTO_SYNC", "true")
 
     values = hosted._workspace_or_env_biblio_values(workspace_id)
     assert values["username"] == "seller"
     assert values["password"] == "secret"
     assert values["host"] == "ftp.biblio.com"
+    assert values["auto_sync"] == "true"
+    assert hosted.biblio_auto_sync_enabled(workspace_id) is True
 
     monkeypatch.setattr(hosted, "_is_bootstrap_workspace", lambda _workspace_id: False)
     with pytest.raises(RuntimeError, match="this workspace"):
