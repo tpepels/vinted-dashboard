@@ -65,6 +65,7 @@ const connectorSchemas = {
       ["password", "FTP password", "", "password"],
       ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
       ["allow_plain_ftp", "Allow legacy plain FTP if verified FTPS is unavailable (credentials and uploads are unencrypted in transit)", "", "checkbox"],
+      ["auto_sync", "Automatically sync changed BIBLIO listings after Vinted browser updates", "", "checkbox"],
     ],
   },
   ebay: {
