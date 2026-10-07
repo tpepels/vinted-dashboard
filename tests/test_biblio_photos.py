@@ -157,6 +157,7 @@ def test_biblio_sync_uploads_inventory_and_vinted_photos(monkeypatch):
     stored: list[tuple[str, bytes]] = []
 
     class FakeFTP:
+        def __init__(self, *args, **kwargs): pass
         def connect(self, host, timeout=20):
             return None
 
@@ -262,6 +263,7 @@ def test_partial_biblio_photo_failure_is_retried_later(monkeypatch):
     monkeypatch.setattr(hosted, "_download_biblio_jpeg", download)
 
     class FakeFTP:
+        def __init__(self, *args, **kwargs): pass
         def connect(self, host, timeout=20): pass
         def auth(self): pass
         def login(self, username, password): pass
@@ -448,6 +450,7 @@ def test_photo_only_retry_resends_photos_without_inventory(monkeypatch):
     stored = []
 
     class FakeFTP:
+        def __init__(self, *args, **kwargs): pass
         def connect(self, host, timeout=20): pass
         def auth(self): pass
         def login(self, username, password): pass
@@ -564,6 +567,7 @@ def test_first_inventory_upload_defers_final_photo_signature(monkeypatch):
     monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg-data")
 
     class FakeFTP:
+        def __init__(self, *args, **kwargs): pass
         def connect(self, host, timeout=20): pass
         def auth(self): pass
         def login(self, username, password): pass
