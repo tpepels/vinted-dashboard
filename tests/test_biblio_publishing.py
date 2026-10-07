@@ -1239,6 +1239,7 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
         stored = decrypt_json(credential.encrypted_payload)
     assert stored["upload_profile"] == "extended"
     assert stored["host"] == "ftp.biblio.com"
+    assert stored["allow_plain_ftp"] == "false"
     assert hosted.biblio_upload_profile(workspace_id) == "extended"
 
     connectors = client.get("/api/app/connectors")
@@ -1249,6 +1250,7 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
     )
     assert biblio["saved_values"]["username"] == "seller"
     assert biblio["saved_values"]["upload_profile"] == "extended"
+    assert biblio["saved_values"]["allow_plain_ftp"] == "false"
     assert "password" not in biblio["saved_values"]
 
 
