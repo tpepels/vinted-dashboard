@@ -119,7 +119,7 @@ ETSY_OAUTH_CALLBACK_PATH = "/api/app/connectors/etsy/oauth/callback"
 
 CONNECTOR_PREFILL_KEYS: dict[str, tuple[str, ...]] = {
     Channel.BIBLIO: (
-        "username", "filename_prefix", "upload_profile",
+        "username", "filename_prefix", "upload_profile", "allow_plain_ftp",
     ),
     Channel.EBAY: ("client_id", "site_id", "compatibility_level"),
     Channel.ETSY: ("keystring", "shop_id", "order_days", "currency"),
@@ -3004,8 +3004,8 @@ def biblio_activity(
             "publish_attention": len(publish_problem),
             "last_remote_verification_at": max(verified_times) if verified_times else None,
             "safety": {
-                "ftps_required": True,
-                "transport": "FTPS explicit TLS",
+                "ftps_preferred": True,
+                "plain_ftp_requires_opt_in": True,
                 "ftp_host_locked": True,
                 "ftp_root_locked": True,
                 "ftp_host": "ftp.biblio.com",
@@ -3156,6 +3156,12 @@ def save_connector_credentials(
                     detail="BIBLIO upload profile must be core or extended",
                 )
             merged["host"] = "ftp.biblio.com"
+            merged["allow_plain_ftp"] = (
+                "true"
+                if str(merged.get("allow_plain_ftp") or "").strip().lower()
+                in {"1", "true", "yes", "on"}
+                else "false"
+            )
             # Extended is canonical. Promote legacy saved "core" values when
             # connector settings are next saved.
             merged["upload_profile"] = "extended"
