@@ -906,6 +906,8 @@ def listings(
                         "remote_verified_status": extra.get("remote_verified_status"),
                         "remote_matches_local": extra.get("remote_matches_local"),
                         "remote_mismatch_fields": list(extra.get("remote_mismatch_fields") or []),
+                        "remote_verification_stale": bool(extra.get("remote_verification_stale")),
+                        "remote_stale_since": extra.get("remote_stale_since"),
                         "remote_missing_at": extra.get("remote_missing_at"),
                         "author": extra.get("author") or linked_attrs.get("author"),
                         "isbn": extra.get("isbn") or linked_attrs.get("isbn"),
@@ -2959,6 +2961,10 @@ def biblio_activity(
             row for row in active_biblio
             if bool(dict(row.extra or {}).get("remote_verified"))
         ]
+        stale_verification = [
+            row for row in active_biblio
+            if bool(dict(row.extra or {}).get("remote_verification_stale"))
+        ]
         verified_matches = [
             row for row in verified
             if dict(row.extra or {}).get("remote_matches_local") is True
@@ -2993,6 +2999,7 @@ def biblio_activity(
             "remote_verified_mismatching": len(verified_mismatches),
             "remote_verified_uncompared": len(verified_uncompared),
             "remote_unverified": max(0, len(active_biblio) - len(verified)),
+            "remote_verification_stale": len(stale_verification),
             "photo_attention": len(photo_problem),
             "publish_attention": len(publish_problem),
             "last_remote_verification_at": max(verified_times) if verified_times else None,
