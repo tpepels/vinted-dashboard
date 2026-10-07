@@ -4048,10 +4048,10 @@ $("#test-connector").onclick = async () => {
 };
 
 $("#test-biblio").onclick = async () => {
-  $("#connector-config-status").textContent = "Testing FTP…";
+  $("#connector-config-status").textContent = "Testing secure FTPS…";
   try {
     const result = await api("/api/app/connectors/biblio/test", { method: "POST" });
-    $("#connector-config-status").textContent = result.detail || "BIBLIO FTP connection succeeded.";
+    $("#connector-config-status").textContent = result.detail || "BIBLIO secure FTPS connection succeeded.";
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
   }
