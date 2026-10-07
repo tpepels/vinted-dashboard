@@ -363,13 +363,16 @@ BIBLIO_FTP_ALLOW_PLAIN=false
 BIBLIO_FTP_AUTO_SYNC=false
 \`\`\`
 
-Publishing a book queues its own targeted BIBLIO sync. By default, later local
-edits are kept as pending changes until **Sync changes** is used in Connections,
-where the dashboard shows the exact changed-record and delete counts first.
-Optionally enable **Automatically sync changed BIBLIO listings after Vinted
-browser updates** in Connections (or set `BIBLIO_FTP_AUTO_SYNC=true` for the
-bootstrap workspace). Automatic jobs are deduplicated and the incremental sync
-still exits before FTP when nothing is dirty.
+Publishing a book queues its own targeted BIBLIO sync. By default, later
+changes remain pending until **Sync changes** is used in Connections. Optional
+**Automatically sync changed BIBLIO listings after Vinted browser updates**
+queues one deduplicated incremental job after a successful Vinted refresh.
+Before calculating the BIBLIO fingerprint, that job refreshes fields whose
+recorded source is Vinted or master inventory while preserving reviewed and
+ISBN-derived values. If no inventory or photo fingerprint changed, the job
+finishes without opening an FTP connection or uploading a file. The environment
+fallback uses `BIBLIO_FTP_AUTO_SYNC=true` to enable the same behavior for the
+bootstrap workspace.
 
 ### eBay personal setup
 
