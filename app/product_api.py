@@ -2939,6 +2939,71 @@ def biblio_activity(
             )
         }
 
+        biblio_listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+            )
+        ).scalars().all()
+        active_biblio = [
+            row for row in biblio_listings
+            if row.status == ListingStatus.ACTIVE and int(row.quantity or 0) > 0
+        ]
+        verified = [
+            row for row in active_biblio
+            if bool(dict(row.extra or {}).get("remote_verified"))
+        ]
+        verified_matches = [
+            row for row in verified
+            if dict(row.extra or {}).get("remote_matches_local") is True
+        ]
+        verified_mismatches = [
+            row for row in verified
+            if dict(row.extra or {}).get("remote_matches_local") is False
+        ]
+        photo_problem = [
+            row for row in active_biblio
+            if str(dict(row.extra or {}).get("photo_sync_state") or "")
+            in {"queued", "uploading", "retry_scheduled", "error"}
+        ]
+        publish_problem = [
+            row for row in active_biblio
+            if str(dict(row.extra or {}).get("publish_state") or "")
+            in {"queued", "uploading", "error"}
+        ]
+        verified_times = [
+            str(dict(row.extra or {}).get("remote_verified_at") or "")
+            for row in biblio_listings
+            if str(dict(row.extra or {}).get("remote_verified_at") or "")
+        ]
+        health = {
+            "active_listings": len(active_biblio),
+            "remote_verified": len(verified),
+            "remote_verified_matching": len(verified_matches),
+            "remote_verified_mismatching": len(verified_mismatches),
+            "remote_unverified": max(0, len(active_biblio) - len(verified)),
+            "photo_attention": len(photo_problem),
+            "publish_attention": len(publish_problem),
+            "last_remote_verification_at": max(verified_times) if verified_times else None,
+            "safety": {
+                "ftp_host_locked": True,
+                "ftp_host": "ftp.biblio.com",
+                "upload_profile": biblio_upload_profile(context.workspace.id),
+                "incremental_change_only": True,
+                "verification_non_destructive": True,
+                "authoritative_import_requires_opt_in": True,
+                "remote_delete_requires_sold_out": True,
+            },
+            "orders": {
+                "automation_available": False,
+                "status": "requires_biblio_enablement",
+                "detail": (
+                    "BIBLIO Bulk Order Management must be enabled on the seller account "
+                    "and its private protocol documentation supplied before order automation can be implemented safely."
+                ),
+            },
+        }
+
     serialized_runs = []
     for run in runs:
         row = _serialize_biblio_activity_run(run)
@@ -2997,6 +3062,7 @@ def biblio_activity(
         "current": current,
         "runs": serialized_runs,
         "jobs": serialized_jobs,
+        "health": health,
     }
 
 
