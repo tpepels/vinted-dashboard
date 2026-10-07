@@ -120,7 +120,7 @@ ETSY_OAUTH_CALLBACK_PATH = "/api/app/connectors/etsy/oauth/callback"
 
 CONNECTOR_PREFILL_KEYS: dict[str, tuple[str, ...]] = {
     Channel.BIBLIO: (
-        "username", "filename_prefix", "upload_profile", "allow_plain_ftp",
+        "username", "filename_prefix", "upload_profile", "allow_plain_ftp", "auto_sync",
     ),
     Channel.EBAY: ("client_id", "site_id", "compatibility_level"),
     Channel.ETSY: ("keystring", "shop_id", "order_days", "currency"),
@@ -3183,6 +3183,12 @@ def save_connector_credentials(
                 in {"1", "true", "yes", "on"}
                 else "false"
             )
+            merged["auto_sync"] = (
+                "true"
+                if str(merged.get("auto_sync") or "").strip().lower()
+                in {"1", "true", "yes", "on"}
+                else "false"
+            )
             # Extended is canonical. Promote legacy saved "core" values when
             # connector settings are next saved.
             merged["upload_profile"] = "extended"
@@ -3582,7 +3588,11 @@ def enqueue_connector_sync(
             status_code=400,
             detail=f"{channel} credentials are not configured",
         )
-    job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
+    job_id = (
+        jobs.enqueue_unique("biblio_sync", {}, context.workspace.id)
+        if channel == Channel.BIBLIO
+        else jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
+    )
     return {"ok": True, "job_id": str(job_id), "queued": True}
 
 
