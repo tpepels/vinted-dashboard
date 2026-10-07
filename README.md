@@ -271,9 +271,16 @@ BIBLIO during the FTP sync. The BIBLIO preflight shows the actual Vinted image
 thumbnails and explicitly states that they will upload automatically. The server
 downloads only trusted Vinted HTTPS image URLs, converts them to JPG, enforces
 BIBLIO's basic image requirements, and uploads them as `BookID.jpg`,
-`BookID_1.jpg`, etc. Successful photo sets are fingerprinted so unchanged
-photos are not re-uploaded on every sync; partial failures remain pending for
-retry.
+`BookID_1.jpg`, etc. BIBLIO must have the seller account configured for that
+multiple-photo filename convention before secondary images will attach.
+Successful photo sets are fingerprinted so unchanged photos are not re-uploaded
+on every sync; partial failures remain pending for retry.
+
+The BIBLIO connector is primarily an outbound FTP connector. It has no live
+listing/readback API, so Listings shows the locally submitted BIBLIO metadata
+and FTP state rather than pretending those values were confirmed remotely.
+A BIBLIO inventory download can still be imported manually to reconcile the
+dashboard with BIBLIO's processed active inventory.
 
 Vinted taxonomy is used to set the broad master category automatically when an
 item is first synced or still classified as `general`. This covers books,
