@@ -46,6 +46,22 @@ CANONICAL_FIELDS = (
     "publish_date",
     "publication_year",
     "pages",
+    "publication_place",
+    "first_edition",
+    "signed",
+    "dust_jacket_present",
+    "dust_jacket_condition",
+    "dust_jacket_description",
+    "illustrator",
+    "keywords",
+    "catalog_1",
+    "catalog_2",
+    "catalog_3",
+    "catalog_4",
+    "catalog_5",
+    "catalog_6",
+    "catalog_7",
+    "catalog_8",
     "brand",
     "size",
     "colour",
@@ -78,6 +94,22 @@ FIELD_ALIASES: dict[str, set[str]] = {
     "publish_date": {"publish date", "publication date", "date published"},
     "publication_year": {"publication year", "year", "published"},
     "pages": {"pages", "page count", "number of pages"},
+    "publication_place": {"publication place", "place of publication"},
+    "first_edition": {"first edition", "first_edition"},
+    "signed": {"signed"},
+    "dust_jacket_present": {"dj present", "dust jacket present", "jacket present"},
+    "dust_jacket_condition": {"dj condition", "dust jacket condition", "jacket condition"},
+    "dust_jacket_description": {"dj description", "dust jacket description", "jacket description"},
+    "illustrator": {"illustrator", "illustrated by"},
+    "keywords": {"keywords", "keyword"},
+    "catalog_1": {"catalog 1", "catalog1", "catalog_1"},
+    "catalog_2": {"catalog 2", "catalog2", "catalog_2"},
+    "catalog_3": {"catalog 3", "catalog3", "catalog_3"},
+    "catalog_4": {"catalog 4", "catalog4", "catalog_4"},
+    "catalog_5": {"catalog 5", "catalog5", "catalog_5"},
+    "catalog_6": {"catalog 6", "catalog6", "catalog_6"},
+    "catalog_7": {"catalog 7", "catalog7", "catalog_7"},
+    "catalog_8": {"catalog 8", "catalog8", "catalog_8"},
     "brand": {"brand", "make"},
     "size": {"size"},
     "colour": {"colour", "color"},
@@ -88,6 +120,10 @@ FIELD_ALIASES: dict[str, set[str]] = {
 ATTRIBUTE_FIELDS = {
     "barcode", "author", "isbn", "subtitle", "publisher", "edition",
     "binding", "language", "publish_date", "publication_year", "pages",
+    "publication_place", "first_edition", "signed", "dust_jacket_present",
+    "dust_jacket_condition", "dust_jacket_description", "illustrator", "keywords",
+    "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+    "catalog_5", "catalog_6", "catalog_7", "catalog_8",
     "brand", "size", "colour", "material", "measurements",
 }
 
@@ -274,6 +310,14 @@ def _row_payload(
             number = _int(value, None)
             if number is not None and number >= 0:
                 attributes[key] = number
+            else:
+                errors.append(f"invalid {key.replace('_', ' ')}")
+        elif key in {"first_edition", "signed", "dust_jacket_present"}:
+            text = str(value).strip().casefold()
+            if text in {"yes", "y", "true", "1", "present"}:
+                attributes[key] = True
+            elif text in {"no", "n", "false", "0", "absent"}:
+                attributes[key] = False
             else:
                 errors.append(f"invalid {key.replace('_', ' ')}")
         else:
@@ -493,8 +537,11 @@ EXPORT_HEADERS = [
     "SKU", "Title", "Category", "Quantity", "Condition", "Cost", "Price",
     "Currency", "Location", "Notes", "Barcode", "Author", "ISBN", "Subtitle",
     "Publisher", "Edition", "Binding", "Language", "Publish Date",
-    "Publication Year", "Pages", "Brand", "Size", "Colour", "Material",
-    "Measurements", "Status",
+    "Publication Year", "Pages", "Publication Place", "First Edition", "Signed",
+    "DJ Present", "DJ Condition", "DJ Description", "Illustrator", "Keywords",
+    "Catalog 1", "Catalog 2", "Catalog 3", "Catalog 4",
+    "Catalog 5", "Catalog 6", "Catalog 7", "Catalog 8",
+    "Brand", "Size", "Colour", "Material", "Measurements", "Status",
 ]
 
 
@@ -527,6 +574,22 @@ def inventory_export_rows(items: Iterable[models.InventoryItem]) -> list[dict[st
             "Publish Date": attrs.get("publish_date", ""),
             "Publication Year": attrs.get("publication_year", ""),
             "Pages": attrs.get("pages", ""),
+            "Publication Place": attrs.get("publication_place", ""),
+            "First Edition": attrs.get("first_edition", ""),
+            "Signed": attrs.get("signed", ""),
+            "DJ Present": attrs.get("dust_jacket_present", ""),
+            "DJ Condition": attrs.get("dust_jacket_condition", ""),
+            "DJ Description": attrs.get("dust_jacket_description", ""),
+            "Illustrator": attrs.get("illustrator", ""),
+            "Keywords": attrs.get("keywords", ""),
+            "Catalog 1": attrs.get("catalog_1", ""),
+            "Catalog 2": attrs.get("catalog_2", ""),
+            "Catalog 3": attrs.get("catalog_3", ""),
+            "Catalog 4": attrs.get("catalog_4", ""),
+            "Catalog 5": attrs.get("catalog_5", ""),
+            "Catalog 6": attrs.get("catalog_6", ""),
+            "Catalog 7": attrs.get("catalog_7", ""),
+            "Catalog 8": attrs.get("catalog_8", ""),
             "Brand": attrs.get("brand", ""),
             "Size": attrs.get("size", ""),
             "Colour": attrs.get("colour", ""),

@@ -41,6 +41,38 @@ def enqueue(
         return job.id
 
 
+def enqueue_unique(
+    job_type: str,
+    payload: dict[str, Any],
+    workspace_id: uuid.UUID | None = None,
+    *,
+    delay_seconds: int = 0,
+) -> uuid.UUID:
+    """Queue a job unless the same workspace/type/payload is already pending."""
+    normalized_payload = dict(payload or {})
+    with db.session_scope() as session:
+        existing = session.execute(
+            select(BackgroundJob).where(
+                BackgroundJob.workspace_id == workspace_id,
+                BackgroundJob.job_type == job_type,
+                BackgroundJob.status.in_(["queued", "running"]),
+            )
+        ).scalars().all()
+        for row in existing:
+            if dict(row.payload or {}) == normalized_payload:
+                return row.id
+        job = BackgroundJob(
+            workspace_id=workspace_id,
+            job_type=job_type,
+            payload=normalized_payload,
+            status="queued",
+            available_at=utcnow() + timedelta(seconds=max(0, int(delay_seconds or 0))),
+        )
+        session.add(job)
+        session.flush()
+        return job.id
+
+
 def claim_one() -> dict[str, Any] | None:
     with db.session_scope() as session:
         job = session.execute(

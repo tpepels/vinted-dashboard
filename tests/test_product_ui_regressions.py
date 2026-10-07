@@ -413,7 +413,9 @@ def test_biblio_preflight_has_direct_stock_repair_and_book_id_override():
     ).read_text(encoding="utf-8")
     assert 'id="biblio-edit-stock"' in html
     assert 'id="biblio-edit-book"' not in html
-    assert '["book_id", "Book ID", bookIdValue, sources.book_id, true, true]' in APP_JS
+    assert 'const bookIdEditable = !data.book_id_locked;' in APP_JS
+    assert '"Book ID (locked after first upload)"' in APP_JS
+    assert "changing it after upload could leave a duplicate remote listing" in APP_JS
     assert '"unique BIBLIO Book ID"' in APP_JS
     assert 'data.book_id_suggestion' in APP_JS
     assert 'missing.includes("available stock")' in APP_JS
@@ -532,8 +534,10 @@ def test_biblio_inventory_and_listing_rows_show_publication_state():
     assert "photo error" in APP_JS
 
     assert "function biblioListingDetails(row)" in APP_JS
-    assert "Submitted locally by FTP" in APP_JS
-    assert "BIBLIO does not provide listing readback" in APP_JS
+    assert "Submitted locally by FTP; not yet verified" in APP_JS
+    assert "Verified in BIBLIO inventory" in APP_JS
+    assert "Remote verification is stale" in APP_JS
+    assert "remote_mismatch_fields" in APP_JS
 
 
 
@@ -596,11 +600,24 @@ def test_biblio_review_exposes_every_supported_prefilled_book_field():
         '["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false]',
         '["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false]',
         '["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false]',
+        '["publication_place", "Publication place", enrichment.publication_place || "", bibliographicSources.publication_place || null, true, false]',
+        '["first_edition", "First edition", enrichment.first_edition ?? "", bibliographicSources.first_edition || null, true, false]',
+        '["signed", "Signed", enrichment.signed ?? "", bibliographicSources.signed || null, true, false]',
+        '["dust_jacket_present", "Dust jacket present", enrichment.dust_jacket_present ?? "", bibliographicSources.dust_jacket_present || null, true, false]',
+        '["dust_jacket_condition", "Dust jacket condition", enrichment.dust_jacket_condition || "", bibliographicSources.dust_jacket_condition || null, true, false]',
+        '["dust_jacket_description", "Dust jacket description", enrichment.dust_jacket_description || "", bibliographicSources.dust_jacket_description || null, true, false]',
+        '["illustrator", "Illustrator", enrichment.illustrator || "", bibliographicSources.illustrator || null, true, false]',
+        '["keywords", "Keywords", enrichment.keywords || "", bibliographicSources.keywords || null, true, false]',
+        '["catalog_1", "Catalog 1", enrichment.catalog_1 || "", bibliographicSources.catalog_1 || null, true, false]',
+        '["catalog_8", "Catalog 8", enrichment.catalog_8 || "", bibliographicSources.catalog_8 || null, true, false]',
     ):
         assert row in APP_JS
     assert 'master_barcode: "Master barcode"' in APP_JS
     assert 'vinted_barcode: "Vinted barcode"' in APP_JS
     assert 'review: "Reviewed"' in APP_JS
+    assert 'data-type="boolean"' in APP_JS
+    assert ">Not set</option>" in APP_JS
+    assert 'payload[field.dataset.field] = value === "" ? null : value === "true";' in APP_JS
 
 
 def test_biblio_extended_upload_profile_is_automatic():
@@ -608,6 +625,28 @@ def test_biblio_extended_upload_profile_is_automatic():
     assert "The extended BIBLIO format is used automatically" in APP_JS
     assert 'data.upload_profile === "core"' not in APP_JS
     assert "The extended BIBLIO format will send" in APP_JS
+
+
+def test_biblio_connection_is_host_pinned_and_import_is_safe_by_default():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert '["host", "FTP host"' not in APP_JS
+    assert "FTP is locked to BIBLIO's documented ftp.biblio.com host" in APP_JS
+    assert '"allow_plain_ftp"' in APP_JS
+    assert '"auto_sync"' in APP_JS
+    assert "Automatically sync changed BIBLIO listings after Vinted browser updates" in APP_JS
+    assert "legacy plain FTP" in APP_JS
+    assert "plain FTP requires opt-in" in APP_JS
+    assert 'id="verify-biblio"' in html
+    assert 'id="biblio-import-authoritative"' in html
+    assert '"/api/app/connectors/biblio/verify"' in APP_JS
+    assert "Verification is read-only" in html
+    assert "complete active-inventory download" in html
+    assert "mark local BIBLIO listings missing from it inactive" in APP_JS
+    assert "BIBLIO health:" in APP_JS
+    assert "changed records pending" in APP_JS
+    assert "deletes pending" in APP_JS
 
 
 

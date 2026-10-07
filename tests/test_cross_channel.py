@@ -308,7 +308,7 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
         hosted,
         "_workspace_or_env_biblio_values",
         lambda _workspace_id: {
-            "host": "ftp.test",
+            "host": "ftp.biblio.com",
             "username": "seller",
             "password": "secret",
             "directory": "",
@@ -318,13 +318,20 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
     )
 
     class FakeFTP:
+        def __init__(self, *args, **kwargs): pass
         uploads = {}
 
         def connect(self, host, timeout=20):
-            assert host == "ftp.test"
+            assert host == "ftp.biblio.com"
+
+        def auth(self):
+            return None
 
         def login(self, username, password):
             assert (username, password) == ("seller", "secret")
+
+        def prot_p(self):
+            return None
 
         def set_pasv(self, enabled):
             assert enabled is True
@@ -341,7 +348,7 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
         def close(self):
             return None
 
-    monkeypatch.setattr(hosted.ftplib, "FTP", FakeFTP)
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FakeFTP)
     result = hosted.close_biblio_workspace_listing(workspace_id, listing_id)
     assert result["remote"] == "delete_uploaded"
     assert len(FakeFTP.uploads) == 1
@@ -354,6 +361,51 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
     assert "	sold	" in text
     assert result["external_id"] == "REMOTE-BOOK-1"
     assert result["inventory_signature"]
+
+
+def test_biblio_close_refuses_delete_while_master_stock_remains(monkeypatch):
+    workspace_id = _workspace()
+    with db.session_scope() as session:
+        item = models.InventoryItem(
+            workspace_id=workspace_id,
+            sku="BOOK-SAFE",
+            title="Still available",
+            category="book",
+            quantity=1,
+            status="active",
+            attributes={"author": "Author"},
+        )
+        session.add(item)
+        session.flush()
+        listing = _listing(session, workspace_id, item, "biblio", "REMOTE-SAFE")
+        listing.price_cents = 1000
+        listing.currency = "EUR"
+        listing.extra = {"author": "Author", "description": "Description"}
+        listing_id = listing.id
+
+    monkeypatch.setattr(
+        hosted,
+        "_workspace_or_env_biblio_values",
+        lambda _workspace_id: {
+            "host": "ftp.biblio.com",
+            "username": "seller",
+            "password": "secret",
+            "directory": "",
+            "filename_prefix": "test",
+            "timeout_seconds": "20",
+        },
+    )
+    monkeypatch.setattr(
+        hosted.ftplib,
+        "FTP",
+        lambda: (_ for _ in ()).throw(AssertionError("FTP must not open")),
+    )
+
+    try:
+        hosted.close_biblio_workspace_listing(workspace_id, listing_id)
+        assert False, "expected sold-out safety guard"
+    except RuntimeError as exc:
+        assert "not sold out" in str(exc)
 
 
 def test_vinted_snapshot_exact_item_id_links_sale_and_queues_other_channel_close():

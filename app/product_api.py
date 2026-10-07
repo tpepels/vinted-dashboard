@@ -53,11 +53,13 @@ from app.constants import (
 from app.connectors.base import Capability, connector_catalog
 from app.connectors.hosted import (
     biblio_configured,
+    biblio_pending_changes,
     biblio_upload_profile,
     exchange_etsy_authorization_code,
     ebay_configured,
     has_credentials as has_workspace_connector_credentials,
     import_biblio_workspace,
+    verify_biblio_workspace,
     test_biblio_workspace,
     test_bigcommerce_workspace,
     test_depop_workspace,
@@ -118,7 +120,7 @@ ETSY_OAUTH_CALLBACK_PATH = "/api/app/connectors/etsy/oauth/callback"
 
 CONNECTOR_PREFILL_KEYS: dict[str, tuple[str, ...]] = {
     Channel.BIBLIO: (
-        "host", "username", "directory", "filename_prefix", "upload_profile",
+        "username", "filename_prefix", "upload_profile", "allow_plain_ftp", "auto_sync",
     ),
     Channel.EBAY: ("client_id", "site_id", "compatibility_level"),
     Channel.ETSY: ("keystring", "shop_id", "order_days", "currency"),
@@ -253,6 +255,22 @@ class BiblioPublishRequest(BaseModel):
     pages: int | None = Field(default=None, ge=0)
     publish_date: str | None = None
     condition: str | None = None
+    publication_place: str | None = None
+    first_edition: bool | None = None
+    signed: bool | None = None
+    dust_jacket_present: bool | None = None
+    dust_jacket_condition: str | None = None
+    dust_jacket_description: str | None = None
+    illustrator: str | None = None
+    keywords: str | None = None
+    catalog_1: str | None = None
+    catalog_2: str | None = None
+    catalog_3: str | None = None
+    catalog_4: str | None = None
+    catalog_5: str | None = None
+    catalog_6: str | None = None
+    catalog_7: str | None = None
+    catalog_8: str | None = None
     price_cents: int | None = Field(default=None, ge=0)
 
 
@@ -899,7 +917,15 @@ def listings(
                 "biblio_details": (
                     {
                         "source": "local_submission",
-                        "remote_verified": False,
+                        "remote_verified": bool(extra.get("remote_verified")),
+                        "remote_verified_at": extra.get("remote_verified_at"),
+                        "remote_verified_source": extra.get("remote_verified_source"),
+                        "remote_verified_status": extra.get("remote_verified_status"),
+                        "remote_matches_local": extra.get("remote_matches_local"),
+                        "remote_mismatch_fields": list(extra.get("remote_mismatch_fields") or []),
+                        "remote_verification_stale": bool(extra.get("remote_verification_stale")),
+                        "remote_stale_since": extra.get("remote_stale_since"),
+                        "remote_missing_at": extra.get("remote_missing_at"),
                         "author": extra.get("author") or linked_attrs.get("author"),
                         "isbn": extra.get("isbn") or linked_attrs.get("isbn"),
                         "description": extra.get("description") or linked_attrs.get("description") or (
@@ -1584,7 +1610,7 @@ def cross_list_publish(
                 item_id,
                 source_listing_id=payload.source_listing_id,
             )
-        overrides = payload.model_dump(exclude_none=True)
+        overrides = payload.model_dump(exclude_unset=True)
         overrides.pop("source_listing_id", None)
         if overrides:
             candidate = cross_listing.apply_overrides(candidate, overrides)
@@ -2862,6 +2888,7 @@ def _serialize_biblio_activity_run(run: models.ConnectorSyncRun) -> dict[str, An
         "message": detail.get("message"),
         "mode": detail.get("mode"),
         "upload_profile": detail.get("upload_profile"),
+        "transport": detail.get("transport"),
         "listing_id": detail.get("listing_id"),
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
@@ -2938,6 +2965,87 @@ def biblio_activity(
             )
         }
 
+        biblio_listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+            )
+        ).scalars().all()
+        active_biblio = [
+            row for row in biblio_listings
+            if row.status == ListingStatus.ACTIVE and int(row.quantity or 0) > 0
+        ]
+        verified = [
+            row for row in active_biblio
+            if bool(dict(row.extra or {}).get("remote_verified"))
+        ]
+        stale_verification = [
+            row for row in active_biblio
+            if bool(dict(row.extra or {}).get("remote_verification_stale"))
+        ]
+        verified_matches = [
+            row for row in verified
+            if dict(row.extra or {}).get("remote_matches_local") is True
+        ]
+        verified_mismatches = [
+            row for row in verified
+            if dict(row.extra or {}).get("remote_matches_local") is False
+        ]
+        verified_uncompared = [
+            row for row in verified
+            if dict(row.extra or {}).get("remote_matches_local") is None
+        ]
+        photo_problem = [
+            row for row in active_biblio
+            if str(dict(row.extra or {}).get("photo_sync_state") or "")
+            in {"queued", "uploading", "retry_scheduled", "error"}
+        ]
+        publish_problem = [
+            row for row in active_biblio
+            if str(dict(row.extra or {}).get("publish_state") or "")
+            in {"queued", "uploading", "error"}
+        ]
+        verified_times = [
+            str(dict(row.extra or {}).get("remote_verified_at") or "")
+            for row in biblio_listings
+            if str(dict(row.extra or {}).get("remote_verified_at") or "")
+        ]
+        pending_changes = biblio_pending_changes(context.workspace.id)
+        health = {
+            "active_listings": len(active_biblio),
+            "inventory_changes_pending": int(pending_changes.get("inventory") or 0),
+            "deletes_pending": int(pending_changes.get("deletes") or 0),
+            "remote_verified": len(verified),
+            "remote_verified_matching": len(verified_matches),
+            "remote_verified_mismatching": len(verified_mismatches),
+            "remote_verified_uncompared": len(verified_uncompared),
+            "remote_unverified": max(0, len(active_biblio) - len(verified)),
+            "remote_verification_stale": len(stale_verification),
+            "photo_attention": len(photo_problem),
+            "publish_attention": len(publish_problem),
+            "last_remote_verification_at": max(verified_times) if verified_times else None,
+            "safety": {
+                "ftps_preferred": True,
+                "plain_ftp_requires_opt_in": True,
+                "ftp_host_locked": True,
+                "ftp_root_locked": True,
+                "ftp_host": "ftp.biblio.com",
+                "upload_profile": biblio_upload_profile(context.workspace.id),
+                "incremental_change_only": True,
+                "verification_non_destructive": True,
+                "authoritative_import_requires_opt_in": True,
+                "remote_delete_requires_sold_out": True,
+            },
+            "orders": {
+                "automation_available": False,
+                "status": "requires_biblio_enablement",
+                "detail": (
+                    "BIBLIO Bulk Order Management must be enabled on the seller account "
+                    "and its private protocol documentation supplied before order automation can be implemented safely."
+                ),
+            },
+        }
+
     serialized_runs = []
     for run in runs:
         row = _serialize_biblio_activity_run(run)
@@ -2996,6 +3104,7 @@ def biblio_activity(
         "current": current,
         "runs": serialized_runs,
         "jobs": serialized_jobs,
+        "health": health,
     }
 
 
@@ -3055,12 +3164,31 @@ def save_connector_credentials(
         if channel == Channel.BIBLIO:
             if not str(merged.get("username") or "").strip() or not str(merged.get("password") or "").strip():
                 raise HTTPException(status_code=400, detail="BIBLIO needs username and password")
+            requested_host = str(merged.get("host") or "ftp.biblio.com").strip().lower().rstrip(".")
+            if requested_host not in {"", "ftp.biblio.com"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="BIBLIO FTP host is fixed to ftp.biblio.com",
+                )
             requested_profile = str(merged.get("upload_profile") or "extended").strip().lower()
             if requested_profile not in {"core", "extended"}:
                 raise HTTPException(
                     status_code=400,
                     detail="BIBLIO upload profile must be core or extended",
                 )
+            merged["host"] = "ftp.biblio.com"
+            merged["allow_plain_ftp"] = (
+                "true"
+                if str(merged.get("allow_plain_ftp") or "").strip().lower()
+                in {"1", "true", "yes", "on"}
+                else "false"
+            )
+            merged["auto_sync"] = (
+                "true"
+                if str(merged.get("auto_sync") or "").strip().lower()
+                in {"1", "true", "yes", "on"}
+                else "false"
+            )
             # Extended is canonical. Promote legacy saved "core" values when
             # connector settings are next saved.
             merged["upload_profile"] = "extended"
@@ -3460,13 +3588,43 @@ def enqueue_connector_sync(
             status_code=400,
             detail=f"{channel} credentials are not configured",
         )
-    job_id = jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
+    job_id = (
+        jobs.enqueue_unique("biblio_sync", {}, context.workspace.id)
+        if channel == Channel.BIBLIO
+        else jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
+    )
     return {"ok": True, "job_id": str(job_id), "queued": True}
+
+
+@router.post("/api/app/connectors/biblio/verify")
+async def biblio_workspace_verify(
+    file: UploadFile = File(...),
+    context: RequestContext = Depends(require_write_context),
+):
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = content.decode("latin-1")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Could not decode BIBLIO inventory file") from exc
+    try:
+        rows = parse_biblio_inventory(text, currency="EUR")
+        result = verify_biblio_workspace(
+            context.workspace.id,
+            rows,
+            filename=file.filename or "BIBLIO inventory",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
 
 
 @router.post("/api/app/connectors/biblio/import")
 async def biblio_workspace_import(
     file: UploadFile = File(...),
+    authoritative: bool = Form(False),
     context: RequestContext = Depends(require_write_context),
 ):
     content = await file.read()
@@ -3483,39 +3641,11 @@ async def biblio_workspace_import(
             context.workspace.id,
             rows,
             filename=file.filename or "BIBLIO inventory",
+            authoritative=bool(authoritative),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, **result}
-
-
-@router.post("/api/app/connectors/{channel}/test-connection")
-def generic_connector_test(
-    channel: str,
-    context: RequestContext = Depends(require_write_context),
-):
-    if channel == Channel.ETSY:
-        tester = test_etsy_workspace
-    elif channel == Channel.WOOCOMMERCE:
-        tester = test_woocommerce_workspace
-    elif channel == Channel.SHOPIFY:
-        tester = test_shopify_workspace
-    elif channel == Channel.BIGCOMMERCE:
-        tester = test_bigcommerce_workspace
-    elif channel == Channel.SQUARESPACE:
-        tester = test_squarespace_workspace
-    elif channel == Channel.WIX:
-        tester = test_wix_workspace
-    elif channel == Channel.DEPOP:
-        tester = test_depop_workspace
-    else:
-        raise HTTPException(status_code=400, detail="This connector has no generic connection test")
-    if not has_workspace_connector_credentials(context.workspace.id, channel):
-        raise HTTPException(status_code=400, detail=f"{channel} credentials are not configured")
-    try:
-        return tester(context.workspace.id)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/app/connectors/biblio/test")

@@ -1066,6 +1066,75 @@ def test_biblio_review_can_clear_optional_isbn_and_enrichment():
 
 
 
+def test_reviewed_biblio_optional_clears_remain_authoritative_in_ftp_and_future_preview():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        attrs = dict(item.attributes or {})
+        attrs["isbn"] = "9780140328721"
+        attrs["publisher"] = "Old Publisher"
+        attrs["first_edition"] = False
+        item.attributes = attrs
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {
+                "isbn": "",
+                "publisher": "",
+                "first_edition": True,
+                "signed": False,
+                "publication_place": "Porto",
+                "catalog_1": "Modern Fiction",
+            },
+        )
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        listing_id = listing.id
+        assert listing.extra["field_sources"]["isbn"] == "review"
+        assert listing.extra["bibliographic_sources"]["publisher"] == "review"
+        assert listing.extra["bibliographic_sources"]["first_edition"] == "review"
+
+    active, _deletes = hosted._biblio_rows(workspace_id, listing_id=listing_id)
+    assert len(active) == 1
+    row = active[0]
+    assert row["isbn"] is None
+    assert row["publisher"] is None
+    assert row["first_edition"] is True
+    assert row["signed"] is False
+    assert row["publication_place"] == "Porto"
+    assert row["catalog_1"] == "Modern Fiction"
+
+    with db.session_scope() as session:
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        assert candidate["fields"]["isbn"] is None
+        assert candidate["field_sources"]["isbn"] == "review"
+        assert candidate["bibliographic_enrichment"]["publisher"] is None
+        assert candidate["bibliographic_sources"]["publisher"] == "review"
+        assert candidate["bibliographic_enrichment"]["first_edition"] is True
+        assert candidate["bibliographic_enrichment"]["signed"] is False
+        assert candidate["bibliographic_enrichment"]["publication_place"] == "Porto"
+        assert candidate["bibliographic_enrichment"]["catalog_1"] == "Modern Fiction"
+
+
 def test_biblio_photo_warning_for_book_id_that_cannot_be_a_filename():
     candidate = {
         "fields": {
@@ -1146,6 +1215,183 @@ def test_changing_biblio_book_id_requeues_same_photos():
 
 
 
+def test_biblio_book_id_is_locked_after_successful_inventory_upload():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        extra = dict(listing.extra or {})
+        extra["inventory_synced_at"] = "2026-10-07T10:00:00+00:00"
+        extra["inventory_sync_signature"] = "remote-synced"
+        listing.extra = extra
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        assert candidate["book_id_locked"] is True
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {"book_id": "UNSAFE-RENAMED-ID"},
+        )
+        try:
+            publishing.upsert_biblio_listing(
+                session,
+                workspace,
+                item_id,
+                candidate,
+            )
+            assert False, "expected uploaded Book ID lock"
+        except ValueError as exc:
+            assert "cannot be changed after its first successful inventory upload" in str(exc)
+
+
+def test_biblio_update_invalidates_previous_remote_verification_immediately():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        extra = dict(listing.extra or {})
+        extra["remote_verified"] = True
+        extra["remote_verified_at"] = "2026-10-07T10:00:00+00:00"
+        extra["remote_matches_local"] = True
+        listing.extra = extra
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {"title": "Changed after verification"},
+        )
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        assert listing.extra["remote_verified"] is False
+        assert listing.extra["remote_matches_local"] is None
+        assert listing.extra["remote_verification_stale"] is True
+        assert listing.extra["remote_stale_since"]
+
+
+def test_biblio_change_sync_refreshes_vinted_fields_but_preserves_reviewed_values():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        source = session.get(models.ChannelListing, source_listing_id)
+        source_extra = dict(source.extra or {})
+        metadata = dict(source_extra.get("metadata") or {})
+        metadata["publisher"] = "Source Publisher"
+        source_extra["metadata"] = metadata
+        source.extra = source_extra
+
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {
+                "description": "Reviewed description",
+                "publisher": "Reviewed Publisher",
+            },
+        )
+        biblio = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        biblio_id = biblio.id
+
+    with db.session_scope() as session:
+        source = session.get(models.ChannelListing, source_listing_id)
+        source.title = "Updated Vinted title"
+        source.price_cents = 925
+        source_extra = dict(source.extra or {})
+        metadata = dict(source_extra.get("metadata") or {})
+        metadata["author"] = "Updated Author"
+        metadata["description"] = "Updated Vinted description"
+        metadata["publisher"] = "Updated Source Publisher"
+        source_extra["metadata"] = metadata
+        source_extra["image_urls"] = [
+            "https://images1.vinted.net/t/updated-one.jpg",
+            "https://images1.vinted.net/t/updated-two.jpg",
+            "https://images1.vinted.net/t/updated-three.jpg",
+        ]
+        source.extra = source_extra
+
+    changed = hosted._refresh_biblio_linked_sources(
+        workspace_id,
+        listing_id=biblio_id,
+    )
+    assert changed == 1
+
+    with db.session_scope() as session:
+        biblio = session.get(models.ChannelListing, biblio_id)
+        extra = dict(biblio.extra or {})
+        assert biblio.title == "Updated Vinted title"
+        assert biblio.price_cents == 925
+        assert extra["author"] == "Updated Author"
+        assert extra["description"] == "Reviewed description"
+        assert extra["bibliographic_enrichment"]["publisher"] == "Reviewed Publisher"
+        assert extra["bibliographic_sources"]["publisher"] == "review"
+        assert len(extra["image_urls"]) == 3
+        assert extra["photo_sync_state"] == "queued"
+
+    active, _deletes = hosted._biblio_rows(workspace_id, listing_id=biblio_id)
+    assert len(active) == 1
+    assert active[0]["inventory_dirty"] is True
+    assert active[0]["description"] == "Reviewed description"
+    assert active[0]["publisher"] == "Reviewed Publisher"
+
+
 def test_biblio_candidate_prefills_isbn_from_valid_master_book_barcode():
     workspace_id = _workspace()
     with db.session_scope() as session:
@@ -1204,6 +1450,18 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
     assert invalid.status_code == 400
     assert "core or extended" in invalid.json()["detail"]
 
+    bad_host = client.put(
+        "/api/app/connectors/biblio/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {
+            "username": "seller",
+            "password": "secret",
+            "host": "evil.example",
+        }},
+    )
+    assert bad_host.status_code == 400
+    assert "ftp.biblio.com" in bad_host.json()["detail"]
+
     valid = client.put(
         "/api/app/connectors/biblio/credentials",
         headers={"X-CSRF-Token": csrf},
@@ -1211,6 +1469,7 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
             "username": "seller",
             "password": "secret",
             "upload_profile": "core",
+            "auto_sync": "true",
         }},
     )
     assert valid.status_code == 200, valid.text
@@ -1226,6 +1485,10 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
         ).scalar_one()
         stored = decrypt_json(credential.encrypted_payload)
     assert stored["upload_profile"] == "extended"
+    assert stored["host"] == "ftp.biblio.com"
+    assert stored["allow_plain_ftp"] == "false"
+    assert stored["auto_sync"] == "true"
+    assert hosted.biblio_auto_sync_enabled(workspace_id) is True
     assert hosted.biblio_upload_profile(workspace_id) == "extended"
 
     connectors = client.get("/api/app/connectors")
@@ -1236,6 +1499,8 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
     )
     assert biblio["saved_values"]["username"] == "seller"
     assert biblio["saved_values"]["upload_profile"] == "extended"
+    assert biblio["saved_values"]["allow_plain_ftp"] == "false"
+    assert biblio["saved_values"]["auto_sync"] == "true"
     assert "password" not in biblio["saved_values"]
 
 

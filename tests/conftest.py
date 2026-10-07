@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from app import db
+from app import auth, db
 
 
 @pytest.fixture(autouse=True)
 def _isolated_orm_database():
     db.init_engine("sqlite://")
     db.create_all()
+    auth.rate_limiter._events.clear()
     yield
+    auth.rate_limiter._events.clear()

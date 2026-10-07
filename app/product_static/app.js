@@ -49,20 +49,23 @@ const importFields = [
   "", "sku", "title", "category", "quantity", "condition", "cost", "price",
   "currency", "location", "notes", "barcode", "author", "isbn", "subtitle",
   "publisher", "edition", "binding", "language", "publish_date",
-  "publication_year", "pages", "brand", "size", "colour", "material",
-  "measurements",
+  "publication_year", "pages", "publication_place", "first_edition", "signed",
+  "dust_jacket_present", "dust_jacket_condition", "dust_jacket_description",
+  "illustrator", "keywords", "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+  "catalog_5", "catalog_6", "catalog_7", "catalog_8",
+  "brand", "size", "colour", "material", "measurements",
 ];
 
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. Only changed inventory is sent by FTP. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
+    help: "Book connector. FTP is locked to BIBLIO's documented ftp.biblio.com host/root. The connector tries verified FTPS first. Because BIBLIO publicly documents standard FTP rather than FTPS, legacy plain FTP is available only with explicit opt-in and is otherwise refused. Only changed inventory is sent. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
     fields: [
-      ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
       ["password", "FTP password", "", "password"],
-      ["directory", "FTP directory", "", "text"],
       ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
+      ["allow_plain_ftp", "Allow legacy plain FTP if verified FTPS is unavailable (credentials and uploads are unencrypted in transit)", "", "checkbox"],
+      ["auto_sync", "Automatically sync changed BIBLIO listings after Vinted browser updates", "", "checkbox"],
     ],
   },
   ebay: {
@@ -1148,6 +1151,7 @@ function renderBiblioPublish(data) {
   const enrichment = data.bibliographic_enrichment || {};
   const bibliographicSources = data.bibliographic_sources || {};
   const bookIdValue = fields.book_id || data.book_id_suggestion || "";
+  const bookIdEditable = !data.book_id_locked;
   const rows = [
     ["title", "Title", fields.title || "", sources.title, true, true],
     ["author", "Author", fields.author || "", sources.author, true, true],
@@ -1161,8 +1165,24 @@ function renderBiblioPublish(data) {
     ["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false],
     ["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false],
     ["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false],
+    ["publication_place", "Publication place", enrichment.publication_place || "", bibliographicSources.publication_place || null, true, false],
+    ["first_edition", "First edition", enrichment.first_edition ?? "", bibliographicSources.first_edition || null, true, false],
+    ["signed", "Signed", enrichment.signed ?? "", bibliographicSources.signed || null, true, false],
+    ["dust_jacket_present", "Dust jacket present", enrichment.dust_jacket_present ?? "", bibliographicSources.dust_jacket_present || null, true, false],
+    ["dust_jacket_condition", "Dust jacket condition", enrichment.dust_jacket_condition || "", bibliographicSources.dust_jacket_condition || null, true, false],
+    ["dust_jacket_description", "Dust jacket description", enrichment.dust_jacket_description || "", bibliographicSources.dust_jacket_description || null, true, false],
+    ["illustrator", "Illustrator", enrichment.illustrator || "", bibliographicSources.illustrator || null, true, false],
+    ["keywords", "Keywords", enrichment.keywords || "", bibliographicSources.keywords || null, true, false],
+    ["catalog_1", "Catalog 1", enrichment.catalog_1 || "", bibliographicSources.catalog_1 || null, true, false],
+    ["catalog_2", "Catalog 2", enrichment.catalog_2 || "", bibliographicSources.catalog_2 || null, true, false],
+    ["catalog_3", "Catalog 3", enrichment.catalog_3 || "", bibliographicSources.catalog_3 || null, true, false],
+    ["catalog_4", "Catalog 4", enrichment.catalog_4 || "", bibliographicSources.catalog_4 || null, true, false],
+    ["catalog_5", "Catalog 5", enrichment.catalog_5 || "", bibliographicSources.catalog_5 || null, true, false],
+    ["catalog_6", "Catalog 6", enrichment.catalog_6 || "", bibliographicSources.catalog_6 || null, true, false],
+    ["catalog_7", "Catalog 7", enrichment.catalog_7 || "", bibliographicSources.catalog_7 || null, true, false],
+    ["catalog_8", "Catalog 8", enrichment.catalog_8 || "", bibliographicSources.catalog_8 || null, true, false],
     ["price_cents", "Price", fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2), sources.price_cents, true, true],
-    ["book_id", "Book ID", bookIdValue, sources.book_id, true, true],
+    ["book_id", data.book_id_locked ? "Book ID (locked after first upload)" : "Book ID", bookIdValue, sources.book_id, bookIdEditable, true],
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
     ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - automatic BIBLIO upload" : "No Vinted photos available", source.photo_count ? "vinted" : null, false, false],
   ];
@@ -1170,9 +1190,19 @@ function renderBiblioPublish(data) {
     const missing = required && (value == null || String(value).trim() === "");
     let valueHtml;
     if (editable) {
-      if (key === "description") {
-        valueHtml = '<textarea class="biblio-review-input" data-field="description" data-required="' + (required ? "true" : "false")
-          + '" rows="4" placeholder="Description required by BIBLIO">' + esc(value || "") + '</textarea>';
+      const booleanField = ["first_edition", "signed", "dust_jacket_present"].includes(key);
+      if (booleanField) {
+        const selected = value === true ? "true" : (value === false ? "false" : "");
+        valueHtml = '<select class="biblio-review-input" data-field="' + esc(key)
+          + '" data-type="boolean" data-required="' + (required ? "true" : "false") + '">'
+          + '<option value=""' + (selected === "" ? " selected" : "") + '>Not set</option>'
+          + '<option value="true"' + (selected === "true" ? " selected" : "") + '>Yes</option>'
+          + '<option value="false"' + (selected === "false" ? " selected" : "") + '>No</option>'
+          + '</select>';
+      } else if (key === "description" || key === "dust_jacket_description") {
+        valueHtml = '<textarea class="biblio-review-input" data-field="' + esc(key) + '" data-required="' + (required ? "true" : "false")
+          + '" rows="4" placeholder="' + esc(key === "description" ? "Description required by BIBLIO" : "Dust jacket description (optional)") + '">'
+          + esc(value || "") + '</textarea>';
       } else {
         const type = key === "price_cents" || key === "pages" ? "number" : "text";
         const extra = key === "price_cents"
@@ -1200,6 +1230,7 @@ function renderBiblioPublish(data) {
   else if (data.photo_warning) warning = "Photo warning: " + data.photo_warning;
   else warning = data.already_listed
     ? "Ready to update using the extended BIBLIO format, including the optional bibliographic fields shown above."
+      + (data.book_id_locked ? " Book ID is locked because changing it after upload could leave a duplicate remote listing." : "")
     : "Ready. The extended BIBLIO format will send the optional bibliographic fields shown above.";
   $("#biblio-publish-warning").textContent = warning;
 
@@ -1305,11 +1336,23 @@ function biblioListingDetails(row) {
   if (details.publisher) parts.push("Publisher: " + details.publisher);
   if (details.edition) parts.push("Edition: " + details.edition);
   if (details.isbn) parts.push("ISBN: " + details.isbn);
-  if (!parts.length) {
-    return '<div class="sub">BIBLIO FTP listing - no remote readback available</div>';
+  let verification = "Submitted locally by FTP; not yet verified from a BIBLIO inventory download.";
+  if (details.remote_verification_stale) {
+    verification = "Remote verification is stale because this listing changed locally after the last BIBLIO download.";
+  } else if (details.remote_verified) {
+    if (details.remote_matches_local === true) {
+      verification = "Verified in BIBLIO inventory" + (details.remote_verified_at ? " · " + when(details.remote_verified_at) : "");
+    } else {
+      const fields = (details.remote_mismatch_fields || []).join(", ");
+      verification = "Verified in BIBLIO, but remote data differs" + (fields ? ": " + fields : "");
+    }
+  } else if (details.remote_missing_at) {
+    verification = "Missing from the last complete BIBLIO active-inventory snapshot.";
   }
-  return '<div class="sub">' + esc(parts.join(" · ")) + '</div>'
-    + '<div class="sub">Submitted locally by FTP; BIBLIO does not provide listing readback to this connector.</div>';
+  const metadata = parts.length
+    ? '<div class="sub">' + esc(parts.join(" · ")) + '</div>'
+    : '<div class="sub">BIBLIO FTP listing</div>';
+  return metadata + '<div class="sub">' + esc(verification) + '</div>';
 }
 
 function biblioActivityStatus(row) {
@@ -1362,12 +1405,32 @@ function renderBiblioActivity(activity, operational) {
   const current = activity?.current || null;
   const status = biblioActivityStatus(current);
   const runs = activity?.runs || [];
+  const health = activity?.health || {};
+  const safety = health.safety || {};
+  const healthHtml = health.active_listings == null
+    ? ""
+    : '<div class="biblio-activity-note"><strong>BIBLIO health:</strong> '
+      + esc(health.active_listings || 0) + ' active · '
+      + esc(health.inventory_changes_pending || 0) + ' changed records pending · '
+      + esc(health.deletes_pending || 0) + ' deletes pending · '
+      + esc(health.remote_verified_matching || 0) + ' verified/matching · '
+      + esc(health.remote_verified_mismatching || 0) + ' mismatching · '
+      + esc(health.remote_verified_uncompared || 0) + ' remote-only · '
+      + esc(health.remote_unverified || 0) + ' unverified · '
+      + esc(health.remote_verification_stale || 0) + ' stale verification · '
+      + esc(health.photo_attention || 0) + ' photo attention · '
+      + esc(health.publish_attention || 0) + ' publish attention'
+      + (safety.ftps_preferred ? ' · verified FTPS preferred' : '')
+      + (safety.plain_ftp_requires_opt_in ? ' · plain FTP requires opt-in' : '')
+      + (safety.ftp_host_locked ? ' · host/root locked' : '')
+      + '</div>';
   const history = runs.length
     ? runs.map((run) => {
       const runStatus = biblioActivityStatus(run);
       const files = [run.inventory_filename, run.deletes_filename].filter(Boolean).map(esc).join(" · ");
       const meta = [
         run.upload_profile ? "profile " + esc(run.upload_profile) : "",
+        run.transport ? "transport " + esc(run.transport === "ftps" ? "FTPS/TLS" : run.transport) : "",
         files,
       ].filter(Boolean).join(" · ");
       const errors = (run.photo_errors || []).length
@@ -1381,6 +1444,7 @@ function renderBiblioActivity(activity, operational) {
     }).join("")
     : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
   return '<div class="biblio-activity-compact">'
+    + healthHtml
     + '<div class="biblio-activity-current"><span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
     + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
     + '<div class="actions biblio-activity-actions">'
@@ -1389,6 +1453,7 @@ function renderBiblioActivity(activity, operational) {
     + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
     + '</div><div class="biblio-activity-history hidden">'
     + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards. For a brand-new listing, the dashboard schedules one delayed photo-only retry because BIBLIO ignores an image if there is no active listing to attach it to.</div>'
+    + '<div class="biblio-activity-note"><strong>Orders:</strong> automatic BIBLIO order handling remains disabled until BIBLIO enables Bulk Order Management for the seller account and supplies its private protocol documentation.</div>'
     + history + "</div></div>";
 }
 
@@ -1498,6 +1563,10 @@ $("#biblio-publish-submit").onclick = async () => {
     if (!value && required) return;
     if (field.dataset.field === "price_cents") {
       if (value) payload.price_cents = Math.round(Number(value) * 100);
+    } else if (field.dataset.field === "pages") {
+      payload.pages = value === "" ? null : Number(value);
+    } else if (field.dataset.type === "boolean") {
+      payload[field.dataset.field] = value === "" ? null : value === "true";
     } else {
       payload[field.dataset.field] = value;
     }
@@ -3927,6 +3996,11 @@ function openConnectorConfig(channel, connector) {
   const savedValues = connector?.saved_values || {};
   $("#connector-fields").innerHTML = schema.fields.map(([name, label, placeholder, type]) => {
     const value = type === "password" ? "" : (savedValues[name] ?? "");
+    if (type === "checkbox") {
+      const checked = ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+      return '<label class="checkline"><input name="' + esc(name) + '" type="checkbox" value="true"'
+        + (checked ? " checked" : "") + '> ' + esc(label) + '</label>';
+    }
     return '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
       + '" placeholder="' + esc(placeholder) + '" value="' + esc(value) + '"></label>';
   }).join("");
@@ -3953,6 +4027,9 @@ $("#connector-config").onsubmit = async (event) => {
   const values = {};
   new FormData(event.currentTarget).forEach((value, key) => {
     if (String(value).trim()) values[key] = String(value).trim();
+  });
+  (connectorSchemas[channel]?.fields || []).forEach(([name, _label, _placeholder, type]) => {
+    if (type === "checkbox" && !(name in values)) values[name] = "false";
   });
   try {
     const saved = await api("/api/app/connectors/" + channel + "/credentials", {
@@ -4020,10 +4097,45 @@ $("#test-connector").onclick = async () => {
 };
 
 $("#test-biblio").onclick = async () => {
-  $("#connector-config-status").textContent = "Testing FTP…";
+  $("#connector-config-status").textContent = "Testing BIBLIO transfer security…";
   try {
     const result = await api("/api/app/connectors/biblio/test", { method: "POST" });
-    $("#connector-config-status").textContent = result.detail || "BIBLIO FTP connection succeeded.";
+    $("#connector-config-status").textContent = result.detail || "BIBLIO connection succeeded.";
+  } catch (error) {
+    $("#connector-config-status").textContent = error.message;
+  }
+};
+
+function biblioInventoryForm(file, authoritative = false) {
+  const form = new FormData();
+  form.append("file", file);
+  if (authoritative) form.append("authoritative", "true");
+  return form;
+}
+
+function biblioReconciliationText(result) {
+  const parts = [
+    (result.matched_clean || 0) + " matching",
+    (result.mismatched || 0) + " mismatching",
+    (result.remote_only || 0) + " remote-only",
+    (result.missing_local || 0) + " local-only",
+  ];
+  return parts.join(" · ");
+}
+
+$("#verify-biblio").onclick = async () => {
+  const file = $("#biblio-import-file").files[0];
+  if (!file) return flash("Choose a BIBLIO inventory download first.", true);
+  $("#connector-config-status").textContent = "Verifying BIBLIO inventory without changing local stock…";
+  try {
+    const result = await api("/api/app/connectors/biblio/verify", {
+      method: "POST",
+      body: biblioInventoryForm(file),
+    });
+    $("#connector-config-status").textContent = "Verified " + result.remote_active
+      + " active BIBLIO listings · " + biblioReconciliationText(result) + ".";
+    flash("BIBLIO verification complete; no inventory was changed.");
+    await connections();
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
   }
@@ -4031,14 +4143,23 @@ $("#test-biblio").onclick = async () => {
 
 $("#import-biblio").onclick = async () => {
   const file = $("#biblio-import-file").files[0];
-  if (!file) return flash("Choose a BIBLIO inventory file first.", true);
-  const form = new FormData();
-  form.append("file", file);
-  $("#connector-config-status").textContent = "Importing BIBLIO inventory…";
+  if (!file) return flash("Choose a BIBLIO inventory download first.", true);
+  const authoritative = Boolean($("#biblio-import-authoritative")?.checked);
+  if (authoritative && !window.confirm(
+    "This will treat the file as BIBLIO's COMPLETE active inventory and mark local BIBLIO listings missing from it inactive. Continue?"
+  )) return;
+  $("#connector-config-status").textContent = authoritative
+    ? "Applying complete BIBLIO active-inventory snapshot…"
+    : "Safely merging BIBLIO inventory; omitted local rows will not be deactivated…";
   try {
-    const result = await api("/api/app/connectors/biblio/import", { method: "POST", body: form });
-    $("#connector-config-status").textContent = "Imported " + result.items + " BIBLIO listings · " + result.active + " active.";
-    flash("BIBLIO inventory imported.");
+    const result = await api("/api/app/connectors/biblio/import", {
+      method: "POST",
+      body: biblioInventoryForm(file, authoritative),
+    });
+    $("#connector-config-status").textContent = (authoritative ? "Applied complete snapshot. " : "Merged inventory. ")
+      + biblioReconciliationText(result) + ".";
+    flash(authoritative ? "BIBLIO snapshot reconciled." : "BIBLIO inventory merged safely.");
+    await connections();
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
   }

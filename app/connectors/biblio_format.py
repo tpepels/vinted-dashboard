@@ -23,6 +23,7 @@ _HEADER_ALIASES = {
         "item number",
     },
     "title": {"title"},
+    "subtitle": {"subtitle"},
     "author": {"author"},
     "isbn": {"isbn", "isbn10", "isbn13", "isbn-10", "isbn-13"},
     "price": {"price", "asking price"},
@@ -40,6 +41,33 @@ _HEADER_ALIASES = {
         "date published", "published",
     },
     "publication_year": {"publication year", "publication_year", "year published"},
+    "publication_place": {
+        "publication place", "publication_place", "place of publication",
+        "place_of_publication", "published in",
+    },
+    "first_edition": {"first edition", "first_edition", "first edition boolean"},
+    "signed": {"signed", "signed boolean"},
+    "dust_jacket_present": {
+        "dj present", "dj_present", "dust jacket present", "dust_jacket_present",
+        "jacket present",
+    },
+    "dust_jacket_condition": {
+        "dj condition", "dj_condition", "dust jacket condition",
+        "dust_jacket_condition", "jacket condition",
+    },
+    "dust_jacket_description": {
+        "dj description", "dj_description", "dust jacket description",
+        "dust_jacket_description", "jacket description",
+    },
+    "illustrator": {"illustrator", "illustrated by"},
+    "keywords": {"keywords", "keyword"},
+    **{
+        f"catalog_{index}": {
+            f"catalog {index}", f"catalog{index}", f"catalog_{index}",
+            f"catalogue {index}", f"catalogue{index}",
+        }
+        for index in range(1, 9)
+    },
 }
 
 
@@ -75,6 +103,17 @@ def _int(value: Any, default: int | None = None) -> int | None:
         return int(float(str(value).strip()))
     except (TypeError, ValueError):
         return default
+
+
+def _bool(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip().casefold()
+    if text in {"yes", "y", "true", "1", "present"}:
+        return True
+    if text in {"no", "n", "false", "0", "absent"}:
+        return False
+    return None
 
 
 def parse_biblio_inventory(
@@ -132,6 +171,7 @@ def parse_biblio_inventory(
                 "sku": sku,
                 "isbn": raw.get(fields.get("isbn", "")),
                 "title": title,
+                "subtitle": raw.get(fields.get("subtitle", "")),
                 "author": raw.get(fields.get("author", "")),
                 "description": raw.get(fields.get("description", "")),
                 "publisher": raw.get(fields.get("publisher", "")),
@@ -142,10 +182,23 @@ def parse_biblio_inventory(
                 "pages": _int(raw.get(fields.get("pages", ""))),
                 "publish_date": raw.get(fields.get("publish_date", "")),
                 "publication_year": _int(raw.get(fields.get("publication_year", ""))),
+                "publication_place": raw.get(fields.get("publication_place", "")),
+                "first_edition": _bool(raw.get(fields.get("first_edition", ""))),
+                "signed": _bool(raw.get(fields.get("signed", ""))),
+                "dust_jacket_present": _bool(raw.get(fields.get("dust_jacket_present", ""))),
+                "dust_jacket_condition": raw.get(fields.get("dust_jacket_condition", "")),
+                "dust_jacket_description": raw.get(fields.get("dust_jacket_description", "")),
+                "illustrator": raw.get(fields.get("illustrator", "")),
+                "keywords": raw.get(fields.get("keywords", "")),
+                **{
+                    f"catalog_{index}": raw.get(fields.get(f"catalog_{index}", ""))
+                    for index in range(1, 9)
+                },
                 "status": status,
                 "quantity": quantity,
                 "price_cents": _money(raw.get(fields.get("price", ""))),
                 "currency": currency,
+                "_source_fields": sorted(fields.keys()),
             }
         )
     return rows

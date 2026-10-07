@@ -41,6 +41,19 @@ def _value(*choices: tuple[Any, str]) -> tuple[Any, str | None]:
     return None, None
 
 
+def _optional_bool(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().casefold()
+    if text in {"yes", "y", "true", "1", "present"}:
+        return True
+    if text in {"no", "n", "false", "0", "absent"}:
+        return False
+    raise ValueError(f"Invalid BIBLIO boolean value: {value}")
+
+
 def _vinted_source(
     session: Session,
     workspace_id: uuid.UUID,
@@ -277,15 +290,46 @@ def build_biblio_candidate(
     attrs = dict(item.attributes or {})
     vextra = dict(vinted.extra or {}) if vinted else {}
     vmeta = dict(vextra.get("metadata") or {}) if isinstance(vextra.get("metadata"), dict) else {}
+    existing = _existing_biblio(session, workspace_id, item.id)
+    existing_extra = dict(existing.extra or {}) if existing is not None else {}
+    existing_field_sources = (
+        dict(existing_extra.get("field_sources") or {})
+        if isinstance(existing_extra.get("field_sources"), dict)
+        else {}
+    )
+    existing_bibliographic = (
+        dict(existing_extra.get("bibliographic_enrichment") or {})
+        if isinstance(existing_extra.get("bibliographic_enrichment"), dict)
+        else {}
+    )
+    existing_bibliographic_sources = (
+        dict(existing_extra.get("bibliographic_sources") or {})
+        if isinstance(existing_extra.get("bibliographic_sources"), dict)
+        else {}
+    )
+
+    def reviewed_bibliographic(
+        key: str,
+        *choices: tuple[Any, str],
+    ) -> tuple[Any, str | None]:
+        if existing_bibliographic_sources.get(key) == "review":
+            return existing_bibliographic.get(key), "review"
+        return _value(*choices)
+
     if not is_biblio_book_candidate(item, vinted):
         raise ValueError("Only book inventory can be published to BIBLIO")
 
-    isbn, isbn_source = _value(
-        (clean_isbn(vmeta.get("isbn")), "vinted"),
-        (clean_isbn(attrs.get("isbn")), "master"),
-        (_isbn_from_book_barcode(vmeta.get("barcode")), "vinted_barcode"),
-        (_isbn_from_book_barcode(attrs.get("barcode")), "master_barcode"),
-    )
+    if existing_field_sources.get("isbn") == "review":
+        reviewed_isbn = existing_extra.get("isbn")
+        isbn = clean_isbn(reviewed_isbn) if reviewed_isbn not in (None, "") else None
+        isbn_source = "review"
+    else:
+        isbn, isbn_source = _value(
+            (clean_isbn(vmeta.get("isbn")), "vinted"),
+            (clean_isbn(attrs.get("isbn")), "master"),
+            (_isbn_from_book_barcode(vmeta.get("barcode")), "vinted_barcode"),
+            (_isbn_from_book_barcode(attrs.get("barcode")), "master_barcode"),
+        )
 
     enrichment: dict[str, Any] | None = None
     enrichment_warning: str | None = None
@@ -302,38 +346,51 @@ def build_biblio_candidate(
         if subtitle and subtitle.casefold() not in isbn_title.casefold():
             isbn_title = f"{isbn_title}: {subtitle}"
 
-    title, title_source = _value(
-        (isbn_title, "isbn"),
-        (attrs.get("listing_title"), "master"),
-        (vinted.title if vinted else None, "vinted"),
-        (item.title, "master"),
-    )
-    author, author_source = _value(
-        (
-            str(enrichment.get("author") or "").strip() if enrichment else None,
-            "isbn",
-        ),
-        (vmeta.get("author"), "vinted"),
-        (attrs.get("author"), "master"),
-    )
-    description, description_source = _value(
-        (vmeta.get("description"), "vinted"),
-        (attrs.get("vinted_description"), "vinted"),
-        (attrs.get("listing_description"), "master"),
-        (attrs.get("description"), "master"),
-        (item.notes, "master"),
-    )
-    price_cents, price_source = _value(
-        (vinted.price_cents if vinted else None, "vinted"),
-        (attrs.get("default_price_cents"), "master"),
-    )
+    if existing_field_sources.get("title") == "review" and existing is not None:
+        title, title_source = existing.title, "review"
+    else:
+        title, title_source = _value(
+            (isbn_title, "isbn"),
+            (attrs.get("listing_title"), "master"),
+            (vinted.title if vinted else None, "vinted"),
+            (item.title, "master"),
+        )
+    if existing_field_sources.get("author") == "review":
+        author, author_source = existing_extra.get("author"), "review"
+    else:
+        author, author_source = _value(
+            (
+                str(enrichment.get("author") or "").strip() if enrichment else None,
+                "isbn",
+            ),
+            (vmeta.get("author"), "vinted"),
+            (attrs.get("author"), "master"),
+        )
+    if existing_field_sources.get("description") == "review":
+        description, description_source = existing_extra.get("description"), "review"
+    else:
+        description, description_source = _value(
+            (vmeta.get("description"), "vinted"),
+            (attrs.get("vinted_description"), "vinted"),
+            (attrs.get("listing_description"), "master"),
+            (attrs.get("description"), "master"),
+            (item.notes, "master"),
+        )
+    if existing_field_sources.get("price_cents") == "review" and existing is not None:
+        price_cents, price_source = existing.price_cents, "review"
+    else:
+        price_cents, price_source = _value(
+            (vinted.price_cents if vinted else None, "vinted"),
+            (attrs.get("default_price_cents"), "master"),
+        )
     currency, currency_source = _value(
         (vinted.currency if vinted else None, "vinted"),
         (item.currency, "master"),
         ("EUR", "default"),
     )
 
-    publisher, publisher_source = _value(
+    publisher, publisher_source = reviewed_bibliographic(
+        "publisher",
         (vmeta.get("publisher"), "vinted"),
         (attrs.get("publisher"), "master"),
         (
@@ -341,14 +398,16 @@ def build_biblio_candidate(
             "isbn",
         ),
     )
-    edition, edition_source = _value(
+    edition, edition_source = reviewed_bibliographic(
+        "edition",
         (attrs.get("edition"), "master"),
         (
             str(enrichment.get("edition") or "").strip() if enrichment else None,
             "isbn",
         ),
     )
-    publish_date, publish_date_source = _value(
+    publish_date, publish_date_source = reviewed_bibliographic(
+        "publish_date",
         (attrs.get("publish_date"), "master"),
         (attrs.get("publication_date"), "master"),
         (attrs.get("publication_year"), "master"),
@@ -357,14 +416,16 @@ def build_biblio_candidate(
             "isbn",
         ),
     )
-    subtitle, subtitle_source = _value(
+    subtitle, subtitle_source = reviewed_bibliographic(
+        "subtitle",
         (attrs.get("subtitle"), "master"),
         (
             str(enrichment.get("subtitle") or "").strip() if enrichment else None,
             "isbn",
         ),
     )
-    binding, binding_source = _value(
+    binding, binding_source = reviewed_bibliographic(
+        "binding",
         (attrs.get("binding"), "master"),
         (attrs.get("physical_format"), "master"),
         (
@@ -372,19 +433,66 @@ def build_biblio_candidate(
             "isbn",
         ),
     )
-    language, language_source = _value(
+    language, language_source = reviewed_bibliographic(
+        "language",
         (vmeta.get("language"), "vinted"),
         (attrs.get("language"), "master"),
     )
-    pages, pages_source = _value(
+    pages, pages_source = reviewed_bibliographic(
+        "pages",
         (attrs.get("pages"), "master"),
         (attrs.get("number_of_pages"), "master"),
         ((enrichment or {}).get("number_of_pages"), "isbn"),
     )
-    condition, condition_source = _value(
+    condition, condition_source = reviewed_bibliographic(
+        "condition",
         (vmeta.get("condition"), "vinted"),
         (item.condition, "master"),
     )
+    publication_place, publication_place_source = reviewed_bibliographic(
+        "publication_place",
+        (attrs.get("publication_place"), "master"),
+        (attrs.get("place_of_publication"), "master"),
+    )
+    first_edition, first_edition_source = reviewed_bibliographic(
+        "first_edition",
+        (attrs.get("first_edition"), "master"),
+    )
+    signed, signed_source = reviewed_bibliographic(
+        "signed",
+        (attrs.get("signed"), "master"),
+    )
+    dust_jacket_present, dust_jacket_present_source = reviewed_bibliographic(
+        "dust_jacket_present",
+        (attrs.get("dust_jacket_present"), "master"),
+        (attrs.get("dj_present"), "master"),
+    )
+    dust_jacket_condition, dust_jacket_condition_source = reviewed_bibliographic(
+        "dust_jacket_condition",
+        (attrs.get("dust_jacket_condition"), "master"),
+        (attrs.get("dj_condition"), "master"),
+    )
+    dust_jacket_description, dust_jacket_description_source = reviewed_bibliographic(
+        "dust_jacket_description",
+        (attrs.get("dust_jacket_description"), "master"),
+        (attrs.get("dj_description"), "master"),
+    )
+    illustrator, illustrator_source = reviewed_bibliographic(
+        "illustrator",
+        (attrs.get("illustrator"), "master"),
+    )
+    keywords, keywords_source = reviewed_bibliographic(
+        "keywords",
+        (attrs.get("keywords"), "master"),
+    )
+    catalog_values: dict[str, Any] = {}
+    catalog_sources: dict[str, str | None] = {}
+    for index in range(1, 9):
+        key = f"catalog_{index}"
+        value, source_name = reviewed_bibliographic(key, (attrs.get(key), "master"))
+        catalog_values[key] = value
+        catalog_sources[key] = source_name
+
     enrichment_fields = {
         "subtitle": subtitle,
         "publisher": publisher,
@@ -394,6 +502,15 @@ def build_biblio_candidate(
         "pages": pages,
         "publish_date": publish_date,
         "condition": condition,
+        "publication_place": publication_place,
+        "first_edition": _optional_bool(first_edition),
+        "signed": _optional_bool(signed),
+        "dust_jacket_present": _optional_bool(dust_jacket_present),
+        "dust_jacket_condition": dust_jacket_condition,
+        "dust_jacket_description": dust_jacket_description,
+        "illustrator": illustrator,
+        "keywords": keywords,
+        **catalog_values,
     }
     bibliographic_sources = {
         "subtitle": subtitle_source,
@@ -404,9 +521,17 @@ def build_biblio_candidate(
         "pages": pages_source,
         "publish_date": publish_date_source,
         "condition": condition_source,
+        "publication_place": publication_place_source,
+        "first_edition": first_edition_source,
+        "signed": signed_source,
+        "dust_jacket_present": dust_jacket_present_source,
+        "dust_jacket_condition": dust_jacket_condition_source,
+        "dust_jacket_description": dust_jacket_description_source,
+        "illustrator": illustrator_source,
+        "keywords": keywords_source,
+        **catalog_sources,
     }
 
-    existing = _existing_biblio(session, workspace_id, item.id)
     book_id = existing.external_id if existing else item.sku
     image_urls = _source_image_urls(
         item,
@@ -447,6 +572,13 @@ def build_biblio_candidate(
         "ready": False,
         "existing_biblio_listing_id": str(existing.id) if existing else None,
         "already_listed": bool(existing and existing.status == ListingStatus.ACTIVE),
+        "book_id_locked": bool(
+            existing
+            and (
+                existing_extra.get("inventory_synced_at")
+                or existing_extra.get("inventory_sync_signature")
+            )
+        ),
         "source": {
             "channel": Channel.VINTED if vinted else "master",
             "listing_id": str(vinted.id) if vinted else None,
@@ -493,17 +625,30 @@ def apply_biblio_overrides(
 
     bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
     bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
-    for key in (
+    text_bibliographic_fields = (
         "subtitle", "publisher", "edition", "binding",
-        "language", "pages", "publish_date", "condition",
-    ):
+        "language", "publish_date", "condition", "publication_place",
+        "dust_jacket_condition", "dust_jacket_description",
+        "illustrator", "keywords",
+        "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+        "catalog_5", "catalog_6", "catalog_7", "catalog_8",
+    )
+    for key in text_bibliographic_fields:
         if key not in overrides or overrides[key] is None:
             continue
-        value = str(overrides[key]).strip()
-        if key == "pages":
-            bibliographic[key] = int(value) if value else None
-        else:
-            bibliographic[key] = value or None
+        bibliographic[key] = str(overrides[key]).strip() or None
+        bibliographic_sources[key] = "review"
+
+    if "pages" in overrides:
+        raw_pages = overrides["pages"]
+        value = "" if raw_pages is None else str(raw_pages).strip()
+        bibliographic["pages"] = int(value) if value else None
+        bibliographic_sources["pages"] = "review"
+
+    for key in ("first_edition", "signed", "dust_jacket_present"):
+        if key not in overrides:
+            continue
+        bibliographic[key] = _optional_bool(overrides[key])
         bibliographic_sources[key] = "review"
 
     if not fields.get("book_id") and fields.get("sku"):
@@ -573,6 +718,19 @@ def upsert_biblio_listing(
     now = datetime.now(timezone.utc)
     source = dict(candidate.get("source") or {})
     previous_external_id = existing.external_id if existing is not None else None
+    if (
+        existing is not None
+        and str(previous_external_id or "") != external_id
+    ):
+        remote_state = dict(existing.extra or {})
+        if (
+            remote_state.get("inventory_synced_at")
+            or remote_state.get("inventory_sync_signature")
+        ):
+            raise ValueError(
+                "BIBLIO Book ID cannot be changed after its first successful inventory upload; "
+                "changing it would risk leaving the old remote listing active"
+            )
 
     if existing is None:
         existing = models.ChannelListing(
@@ -619,8 +777,17 @@ def upsert_biblio_listing(
     else:
         photo_sync_state = "none"
 
+    had_remote_verification = bool(
+        previous_extra.get("remote_verified")
+        or previous_extra.get("remote_verified_at")
+    )
     existing.extra = {
         **previous_extra,
+        "remote_verified": False if had_remote_verification else previous_extra.get("remote_verified", False),
+        "remote_matches_local": None if had_remote_verification else previous_extra.get("remote_matches_local"),
+        "remote_mismatch_fields": [] if had_remote_verification else list(previous_extra.get("remote_mismatch_fields") or []),
+        "remote_verification_stale": True if had_remote_verification else bool(previous_extra.get("remote_verification_stale")),
+        "remote_stale_since": now.isoformat() if had_remote_verification else previous_extra.get("remote_stale_since"),
         "author": fields.get("author"),
         "description": fields.get("description"),
         "isbn": fields.get("isbn"),
@@ -631,6 +798,7 @@ def upsert_biblio_listing(
         "image_urls": image_urls,
         "image_source": source.get("channel") if image_urls else None,
         "bibliographic_enrichment": dict(candidate.get("bibliographic_enrichment") or {}),
+        "bibliographic_sources": dict(candidate.get("bibliographic_sources") or {}),
         "cross_listed_at": now.isoformat(),
         "publish_state": "queued",
         "publish_queued_at": now.isoformat(),
@@ -650,17 +818,35 @@ def upsert_biblio_listing(
         attrs["default_price_cents"] = int(fields["price_cents"])
     bibliographic = dict(candidate.get("bibliographic_enrichment") or {})
     bibliographic_sources = dict(candidate.get("bibliographic_sources") or {})
+    supported_bibliographic = {
+        "subtitle", "publisher", "edition", "binding",
+        "language", "pages", "publish_date", "condition",
+        "publication_place", "first_edition", "signed",
+        "dust_jacket_present", "dust_jacket_condition",
+        "dust_jacket_description", "illustrator", "keywords",
+        "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+        "catalog_5", "catalog_6", "catalog_7", "catalog_8",
+    }
     for key, value in bibliographic.items():
-        if (
-            key in {
-                "subtitle", "publisher", "edition", "binding",
-                "language", "pages", "publish_date", "condition",
-            }
-            and value not in (None, "")
-            and not attrs.get(key)
-        ):
+        if key not in supported_bibliographic:
+            continue
+        source_name = bibliographic_sources.get(key) or "unknown"
+        if source_name == "review":
+            if value in (None, ""):
+                attrs.pop(key, None)
+                attrs.pop(f"{key}_source", None)
+            else:
+                attrs[key] = value
+                attrs[f"{key}_source"] = source_name
+        elif value not in (None, "") and key not in attrs:
             attrs[key] = value
-            attrs[f"{key}_source"] = bibliographic_sources.get(key) or "unknown"
+            attrs[f"{key}_source"] = source_name
+    if bibliographic_sources.get("condition") == "review":
+        item.condition = (
+            str(bibliographic.get("condition")).strip()
+            if bibliographic.get("condition") not in (None, "")
+            else None
+        )
     item.attributes = attrs
     session.flush()
     return existing

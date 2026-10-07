@@ -224,6 +224,18 @@ def _apply_generic_metadata(
         "binding": _remote_value(item, "binding", "format", "physical_format"),
         "pages": _remote_value(item, "pages", "page_count", "number_of_pages"),
         "subtitle": _remote_value(item, "subtitle"),
+        "publication_place": _remote_value(item, "publication_place", "place_of_publication"),
+        "first_edition": _remote_value(item, "first_edition"),
+        "signed": _remote_value(item, "signed"),
+        "dust_jacket_present": _remote_value(item, "dust_jacket_present", "dj_present"),
+        "dust_jacket_condition": _remote_value(item, "dust_jacket_condition", "dj_condition"),
+        "dust_jacket_description": _remote_value(item, "dust_jacket_description", "dj_description"),
+        "illustrator": _remote_value(item, "illustrator"),
+        "keywords": _remote_value(item, "keywords"),
+        **{
+            f"catalog_{index}": _remote_value(item, f"catalog_{index}", f"catalog{index}")
+            for index in range(1, 9)
+        },
         "brand": _remote_value(item, "brand", "brand_name", "vendor"),
         "size": _remote_value(item, "size"),
         "colour": _remote_value(item, "colour", "color"),
@@ -239,7 +251,11 @@ def _apply_generic_metadata(
         "category", "condition", "brand", "size", "color", "colour", "material",
         "description", "image_url", "tags", "attributes", "product_type", "taxonomy_id",
         "author", "publisher", "edition", "publication_year", "publish_date",
-        "language", "binding", "pages", "subtitle",
+        "language", "binding", "pages", "subtitle", "publication_place",
+        "first_edition", "signed", "dust_jacket_present", "dust_jacket_condition",
+        "dust_jacket_description", "illustrator", "keywords",
+        "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+        "catalog_5", "catalog_6", "catalog_7", "catalog_8",
         "isbn", "barcode", "global_unique_id",
     ):
         value = item.get(key)
@@ -257,7 +273,11 @@ def _apply_generic_metadata(
     attrs = dict(inventory_item.attributes or {})
     for key in (
         "author", "publisher", "edition", "publication_year", "publish_date",
-        "language", "binding", "pages", "subtitle",
+        "language", "binding", "pages", "subtitle", "publication_place",
+        "first_edition", "signed", "dust_jacket_present", "dust_jacket_condition",
+        "dust_jacket_description", "illustrator", "keywords",
+        "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+        "catalog_5", "catalog_6", "catalog_7", "catalog_8",
         "brand", "size", "colour", "material", "description",
         "isbn", "barcode",
     ):

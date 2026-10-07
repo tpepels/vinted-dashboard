@@ -142,14 +142,21 @@ def test_workspace_biblio_sync_uploads_master_listing(monkeypatch):
         )
 
     class FakeFTP:
+        def __init__(self, *args, **kwargs): pass
         uploads = {}
 
         def connect(self, host, timeout=20):
             assert host == "ftp.biblio.com"
 
+        def auth(self):
+            return None
+
         def login(self, username, password):
             assert username == "seller"
             assert password == "secret"
+
+        def prot_p(self):
+            return None
 
         def set_pasv(self, value):
             assert value is True
@@ -169,13 +176,14 @@ def test_workspace_biblio_sync_uploads_master_listing(monkeypatch):
         def pwd(self):
             return "/"
 
-    monkeypatch.setattr(hosted.ftplib, "FTP", FakeFTP)
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FakeFTP)
     result = hosted.sync_biblio_workspace(workspace_id)
     assert result["active"] == 1
     assert result["deletes"] == 0
     payload = FakeFTP.uploads[result["inventory_filename"]].decode("utf-8")
     assert payload.startswith("Book ID\tAuthor\tTitle\tSubtitle\tDescription")
-    assert "\tCondition\tQuantity\n" in payload
+    assert "\tCondition\tPublication Place\tFirst Edition\tSigned\tDJ Present" in payload
+    assert "\tCatalog 8\tQuantity\n" in payload
     assert "BK-1\tJohn Williams\tStoner" in payload
     assert "\t12.00\tfor sale\t9780099561545\t" in payload
     assert payload.rstrip().endswith("\t1")

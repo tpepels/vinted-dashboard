@@ -267,9 +267,10 @@ replaced inline with a server-validated unique ID. Unlinked Vinted listings show
 can be published.
 
 BIBLIO uploads use the extended column format automatically. Legacy connector
-settings that still say `core` are promoted at runtime, so condition, subtitle,
-publisher, edition, binding, language, publication date and pages are included
-without requiring a settings migration.
+settings that still say `core` are promoted at runtime. The format includes
+condition, subtitle, publisher, edition, binding, language, publication date,
+pages, publication place, first-edition/signed/dust-jacket flags and details,
+illustrator, keywords and up to eight catalog fields when those values exist.
 
 When the Vinted source carries photos, up to twelve are copied automatically to
 BIBLIO during the FTP sync. The BIBLIO preflight shows the actual Vinted image
@@ -281,11 +282,31 @@ multiple-photo filename convention before secondary images will attach.
 Successful photo sets are fingerprinted so unchanged photos are not re-uploaded
 on every sync; partial failures remain pending for retry.
 
-The BIBLIO connector is primarily an outbound FTP connector. It has no live
-listing/readback API, so Listings shows the locally submitted BIBLIO metadata
-and FTP state rather than pretending those values were confirmed remotely.
-A BIBLIO inventory download can still be imported manually to reconcile the
-dashboard with BIBLIO's processed active inventory.
+The BIBLIO connector is primarily an outbound FTP connector. It has no public
+live listing/readback API. Listings therefore distinguishes locally submitted
+metadata from remote verification. A BIBLIO **Download listings** file can be
+uploaded in read-only verification mode to compare remote active inventory with
+the dashboard without changing stock. A normal import merges present records
+without deactivating omitted local listings. Only the explicitly-authoritative
+complete-snapshot option may mark local BIBLIO listings missing from the file
+inactive.
+
+For production safety, BIBLIO transfers first attempt explicit-TLS FTPS with
+public-CA certificate and hostname verification and a minimum of TLS 1.2.
+BIBLIO's public help documents standard FTP rather than promising FTPS, so
+unencrypted plain FTP is refused by default and is available only through an
+explicit legacy-FTP opt-in. Credentials are pinned to BIBLIO's documented
+`ftp.biblio.com` host and the remote directory is pinned to the seller FTP
+root. Remote sold/delete uploads are refused while the linked master item still
+has stock, unchanged inventory and photos remain idempotent, and connector
+health reports verified/mismatching/unverified rows plus photo and publication
+attention states.
+
+BIBLIO also documents a Bulk Order Management interface, but its protocol is
+private and is supplied only after BIBLIO enables it for a seller account.
+Automatic BIBLIO order ingestion/fulfillment therefore remains disabled until
+that account feature is enabled and its protocol documentation is available;
+the connector does not guess undocumented order formats.
 
 Vinted taxonomy is used to set the broad master category automatically when an
 item is first synced or still classified as `general`. This covers books,
@@ -334,16 +355,24 @@ for the migrated personal/bootstrap workspace.
 ### BIBLIO personal setup
 
 \`\`\`env
-BIBLIO_CURRENCY=EUR
 BIBLIO_FTP_HOST=ftp.biblio.com
 BIBLIO_FTP_USERNAME=
 BIBLIO_FTP_PASSWORD=
 BIBLIO_FTP_DIRECTORY=
+BIBLIO_FTP_ALLOW_PLAIN=false
 BIBLIO_FTP_AUTO_SYNC=false
 \`\`\`
 
-Keep the first upload manual and verify it in BIBLIOdirect before enabling
-automatic FTP sync.
+Publishing a book queues its own targeted BIBLIO sync. By default, later
+changes remain pending until **Sync changes** is used in Connections. Optional
+**Automatically sync changed BIBLIO listings after Vinted browser updates**
+queues one deduplicated incremental job after a successful Vinted refresh.
+Before calculating the BIBLIO fingerprint, that job refreshes fields whose
+recorded source is Vinted or master inventory while preserving reviewed and
+ISBN-derived values. If no inventory or photo fingerprint changed, the job
+finishes without opening an FTP connection or uploading a file. The environment
+fallback uses `BIBLIO_FTP_AUTO_SYNC=true` to enable the same behavior for the
+bootstrap workspace.
 
 ### eBay personal setup
 

@@ -12,11 +12,14 @@ def test_biblio_env_credentials_are_bootstrap_only(monkeypatch):
     monkeypatch.setenv("BIBLIO_FTP_USERNAME", "seller")
     monkeypatch.setenv("BIBLIO_FTP_PASSWORD", "secret")
     monkeypatch.setenv("BIBLIO_FTP_HOST", "ftp.example.test")
+    monkeypatch.setenv("BIBLIO_FTP_AUTO_SYNC", "true")
 
     values = hosted._workspace_or_env_biblio_values(workspace_id)
     assert values["username"] == "seller"
     assert values["password"] == "secret"
-    assert values["host"] == "ftp.example.test"
+    assert values["host"] == "ftp.biblio.com"
+    assert values["auto_sync"] == "true"
+    assert hosted.biblio_auto_sync_enabled(workspace_id) is True
 
     monkeypatch.setattr(hosted, "_is_bootstrap_workspace", lambda _workspace_id: False)
     with pytest.raises(RuntimeError, match="this workspace"):
@@ -51,3 +54,144 @@ def test_workspace_connector_credentials_always_win_over_env(monkeypatch):
     values = hosted._workspace_or_env_biblio_values(workspace_id)
     assert values["username"] == "workspace"
     assert values["password"] == "workspace-secret"
+
+
+
+def test_biblio_connection_prefers_verified_ftps_and_private_data_channel(monkeypatch):
+    calls = []
+
+    class FakeTLS:
+        def __init__(self, *args, **kwargs):
+            context = kwargs.get("context")
+            calls.append((
+                "context",
+                bool(context and context.check_hostname),
+                getattr(context, "verify_mode", None),
+                getattr(context, "minimum_version", None),
+            ))
+
+        def connect(self, host, timeout=20):
+            calls.append(("connect", host, timeout))
+
+        def auth(self):
+            calls.append(("auth",))
+
+        def login(self, username, password):
+            calls.append(("login", username, password))
+
+        def prot_p(self):
+            calls.append(("prot_p",))
+
+        def set_pasv(self, enabled):
+            calls.append(("pasv", enabled))
+
+        def cwd(self, directory):
+            calls.append(("cwd", directory))
+
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FakeTLS)
+    ftp = hosted._connect_biblio_ftp({
+        "host": "ftp.biblio.com",
+        "username": "seller",
+        "password": "secret",
+        "directory": "",
+        "timeout_seconds": "20",
+    })
+
+    assert isinstance(ftp, FakeTLS)
+    assert calls[0][0] == "context"
+    assert calls[0][1] is True
+    assert calls[0][2] == hosted.ssl.CERT_REQUIRED
+    if hasattr(hosted.ssl, "TLSVersion"):
+        assert calls[0][3] >= hosted.ssl.TLSVersion.TLSv1_2
+    assert calls[1:] == [
+        ("connect", "ftp.biblio.com", 20),
+        ("auth",),
+        ("login", "seller", "secret"),
+        ("prot_p",),
+        ("pasv", True),
+    ]
+
+
+
+def test_biblio_directory_is_locked_to_seller_root():
+    assert hosted._safe_biblio_directory("") == ""
+    assert hosted._safe_biblio_directory(".") == ""
+    assert hosted._safe_biblio_directory("./") == ""
+    with pytest.raises(RuntimeError, match="blank or"):
+        hosted._safe_biblio_directory("uploads")
+    with pytest.raises(RuntimeError, match="blank or"):
+        hosted._safe_biblio_directory("../elsewhere")
+
+
+
+def test_biblio_connection_refuses_plain_ftp_without_explicit_opt_in(monkeypatch):
+    class FailingTLS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def connect(self, host, timeout=20):
+            raise OSError("AUTH TLS unavailable")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FailingTLS)
+    monkeypatch.setattr(
+        hosted.ftplib,
+        "FTP",
+        lambda: (_ for _ in ()).throw(AssertionError("plain FTP must not be attempted")),
+    )
+
+    with pytest.raises(RuntimeError, match="Plain FTP fallback is disabled"):
+        hosted._connect_biblio_ftp({
+            "host": "ftp.biblio.com",
+            "username": "seller",
+            "password": "secret",
+            "directory": "",
+            "timeout_seconds": "20",
+        })
+
+
+def test_biblio_connection_allows_plain_ftp_only_after_explicit_opt_in(monkeypatch):
+    calls = []
+
+    class FailingTLS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def connect(self, host, timeout=20):
+            raise OSError("AUTH TLS unavailable")
+
+        def close(self):
+            calls.append(("tls_close",))
+
+    class FakePlain:
+        def connect(self, host, timeout=20):
+            calls.append(("plain_connect", host, timeout))
+
+        def login(self, username, password):
+            calls.append(("plain_login", username, password))
+
+        def set_pasv(self, enabled):
+            calls.append(("plain_pasv", enabled))
+
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FailingTLS)
+    monkeypatch.setattr(hosted.ftplib, "FTP", FakePlain)
+
+    ftp = hosted._connect_biblio_ftp({
+        "host": "ftp.biblio.com",
+        "username": "seller",
+        "password": "secret",
+        "directory": "",
+        "timeout_seconds": "20",
+        "allow_plain_ftp": "true",
+    })
+
+    assert isinstance(ftp, FakePlain)
+    assert getattr(ftp, "_biblio_transport") == "plain_ftp"
+    assert calls == [
+        ("tls_close",),
+        ("plain_connect", "ftp.biblio.com", 20),
+        ("plain_login", "seller", "secret"),
+        ("plain_pasv", True),
+    ]

@@ -17,6 +17,7 @@ import json
 import os
 import re
 import socket
+import ssl
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -31,7 +32,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 
 from app import db, models
-from app.constants import Channel, ChannelAccountStatus, ListingStatus, SyncRunStatus
+from app.constants import Channel, ChannelAccountStatus, ItemStatus, ListingStatus, SyncRunStatus
 from app.crypto import decrypt_json
 from app.product_models import ConnectorCredential
 from app.workspace_bootstrap import BOOTSTRAP_WORKSPACE_SLUG, get_or_create_channel_account
@@ -71,6 +72,30 @@ def _is_bootstrap_workspace(workspace_id: uuid.UUID) -> bool:
         return bool(workspace and workspace.slug == BOOTSTRAP_WORKSPACE_SLUG)
 
 
+BIBLIO_FTP_HOST = "ftp.biblio.com"
+
+def _safe_biblio_directory(value: Any) -> str:
+    directory = str(value or "").strip()
+    if directory in {"", ".", "./"}:
+        return ""
+    raise RuntimeError(
+        "BIBLIO FTP directory must be blank or ./; refusing to upload outside the seller root"
+    )
+
+
+def _harden_biblio_values(values: dict[str, str]) -> dict[str, str]:
+    hardened = {str(k): str(v) for k, v in values.items()}
+    configured_host = str(hardened.get("host") or BIBLIO_FTP_HOST).strip().lower().rstrip(".")
+    if configured_host not in {"", BIBLIO_FTP_HOST}:
+        raise RuntimeError(
+            "Refusing BIBLIO credentials for an unexpected FTP host; "
+            "BIBLIO documents ftp.biblio.com as the seller FTP host"
+        )
+    hardened["host"] = BIBLIO_FTP_HOST
+    hardened["directory"] = _safe_biblio_directory(hardened.get("directory"))
+    return hardened
+
+
 def biblio_configured(workspace_id: uuid.UUID) -> bool:
     if has_credentials(workspace_id, Channel.BIBLIO):
         return True
@@ -80,6 +105,14 @@ def biblio_configured(workspace_id: uuid.UUID) -> bool:
         os.getenv("BIBLIO_FTP_USERNAME", "").strip()
         and os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
     )
+
+
+def biblio_auto_sync_enabled(workspace_id: uuid.UUID) -> bool:
+    try:
+        values = _workspace_or_env_biblio_values(workspace_id)
+    except RuntimeError:
+        return False
+    return _biblio_truthy(values.get("auto_sync"))
 
 
 def ebay_configured(workspace_id: uuid.UUID) -> bool:
@@ -3073,30 +3106,99 @@ def import_biblio_workspace(
     rows: list[dict[str, Any]],
     *,
     filename: str = "BIBLIO inventory",
+    authoritative: bool = False,
 ) -> dict[str, Any]:
+    """Merge a BIBLIO inventory download into the workspace safely.
+
+    The default merge is intentionally non-destructive: rows present in the
+    file are upserted, but local BIBLIO rows omitted from the file are not
+    deactivated. Set authoritative only for a complete BIBLIO active-inventory
+    download when missing rows should be treated as remotely absent.
+    """
     if not rows:
         raise ValueError("No BIBLIO inventory rows could be read")
-    active = sum(1 for row in rows if str(row.get("status") or "active").lower() == "active")
+    analysis = analyze_biblio_workspace(workspace_id, rows)
+    synced_at = datetime.now(timezone.utc)
     record_workspace_channel_snapshot(
         workspace_id,
         Channel.BIBLIO,
         rows,
-        synced_at=datetime.now(timezone.utc),
-        full_snapshot=True,
-        note=f"Imported {filename}",
+        synced_at=synced_at,
+        full_snapshot=bool(authoritative),
+        note=(
+            f"Imported complete BIBLIO snapshot {filename}"
+            if authoritative
+            else f"Merged BIBLIO inventory {filename}"
+        ),
     )
-    # An imported BIBLIO file is a snapshot of remote state, not a set of
-    # local edits waiting to be pushed back. Mark those rows as synchronized
-    # so the next incremental sync does not echo the whole imported catalogue.
+    _mark_biblio_remote_verification(
+        workspace_id,
+        rows,
+        analysis,
+        filename=filename,
+        verified_at=synced_at,
+        authoritative=bool(authoritative),
+    )
+
+    imported_ids = {
+        str(row.get("source_id") or row.get("sku") or "").strip()
+        for row in rows
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
     imported_active, imported_deletes = _biblio_rows(
         workspace_id,
         profile=biblio_upload_profile(workspace_id),
     )
-    _mark_biblio_inventory_sync(
+    sync_rows = [*imported_active, *imported_deletes]
+    if not authoritative:
+        sync_rows = [
+            row for row in sync_rows
+            if str(row.get("source_id") or row.get("sku") or "").strip() in imported_ids
+        ]
+    _mark_biblio_inventory_sync(workspace_id, sync_rows)
+    public_analysis = {
+        key: value for key, value in analysis.items()
+        if not str(key).startswith("_")
+    }
+    return {
+        "source": Channel.BIBLIO,
+        "items": len(rows),
+        "active": analysis["remote_active"],
+        "authoritative": bool(authoritative),
+        **public_analysis,
+    }
+
+
+def verify_biblio_workspace(
+    workspace_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+    *,
+    filename: str = "BIBLIO inventory",
+) -> dict[str, Any]:
+    """Compare a BIBLIO download without changing listing/master state."""
+    if not rows:
+        raise ValueError("No BIBLIO inventory rows could be read")
+    analysis = analyze_biblio_workspace(workspace_id, rows)
+    _mark_biblio_remote_verification(
         workspace_id,
-        [*imported_active, *imported_deletes],
+        rows,
+        analysis,
+        filename=filename,
+        verified_at=datetime.now(timezone.utc),
+        authoritative=False,
     )
-    return {"source": Channel.BIBLIO, "items": len(rows), "active": active}
+    public_analysis = {
+        key: value for key, value in analysis.items()
+        if not str(key).startswith("_")
+    }
+    return {
+        "source": Channel.BIBLIO,
+        "items": len(rows),
+        "active": analysis["remote_active"],
+        "authoritative": False,
+        "verification_only": True,
+        **public_analysis,
+    }
 
 
 BIBLIO_UPLOAD_PROFILE_CORE = "core"
@@ -3114,7 +3216,11 @@ BIBLIO_EXTENDED_HEADERS = (
     "Book ID", "Author", "Title", "Subtitle", "Description",
     "Price", "Status", "ISBN", "Publisher", "Edition",
     "Binding", "Language", "Publication Date", "Pages",
-    "Condition", "Quantity",
+    "Condition", "Publication Place", "First Edition", "Signed",
+    "DJ Present", "DJ Condition", "DJ Description", "Illustrator", "Keywords",
+    "Catalog 1", "Catalog 2", "Catalog 3", "Catalog 4",
+    "Catalog 5", "Catalog 6", "Catalog 7", "Catalog 8",
+    "Quantity",
 )
 
 
@@ -3134,6 +3240,187 @@ def biblio_upload_profile(workspace_id: uuid.UUID) -> str:
     return BIBLIO_UPLOAD_PROFILE_EXTENDED
 
 
+BIBLIO_VERIFY_FIELDS = (
+    "title", "author", "subtitle", "description", "price_cents", "isbn",
+    "publisher", "edition", "binding", "language", "publish_date", "pages",
+    "condition", "publication_place", "first_edition", "signed",
+    "dust_jacket_present", "dust_jacket_condition", "dust_jacket_description",
+    "illustrator", "keywords",
+    "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+    "catalog_5", "catalog_6", "catalog_7", "catalog_8",
+    "quantity", "status",
+)
+
+
+def _biblio_compare_value(field: str, value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    if field in {"price_cents", "pages", "quantity"}:
+        try:
+            return int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return str(value).strip().casefold()
+    if field in {"first_edition", "signed", "dust_jacket_present"}:
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().casefold()
+        if text in {"yes", "y", "true", "1", "present"}:
+            return True
+        if text in {"no", "n", "false", "0", "absent"}:
+            return False
+        return text
+    text = re.sub(r"\s+", " ", str(value).strip())
+    if field == "isbn":
+        return re.sub(r"[^0-9Xx]", "", text).upper() or None
+    if field == "status":
+        lowered = text.casefold()
+        return "active" if lowered in {"active", "for sale", "forsale"} else lowered
+    return text.casefold()
+
+
+def _biblio_remote_mismatches(
+    expected: dict[str, Any],
+    remote: dict[str, Any],
+) -> list[str]:
+    present = set(remote.get("_source_fields") or BIBLIO_VERIFY_FIELDS)
+    if "price" in present:
+        present.add("price_cents")
+    if "publication_year" in present:
+        present.add("publish_date")
+    comparable = [
+        field for field in BIBLIO_VERIFY_FIELDS
+        if field in present
+    ]
+    return [
+        field
+        for field in comparable
+        if _biblio_compare_value(field, expected.get(field))
+        != _biblio_compare_value(field, remote.get(field))
+    ]
+
+
+def analyze_biblio_workspace(
+    workspace_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    local_active, _local_deletes = _biblio_rows(
+        workspace_id,
+        profile=biblio_upload_profile(workspace_id),
+    )
+    local_by_id = {
+        str(row.get("source_id") or row.get("sku") or "").strip(): row
+        for row in local_active
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
+    remote_active_rows = [
+        row for row in rows
+        if str(row.get("status") or ListingStatus.ACTIVE).lower() == ListingStatus.ACTIVE
+        and int(row.get("quantity") or 0) > 0
+    ]
+    remote_by_id = {
+        str(row.get("source_id") or row.get("sku") or "").strip(): row
+        for row in remote_active_rows
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
+    shared = sorted(set(local_by_id) & set(remote_by_id))
+    mismatches = {
+        external_id: _biblio_remote_mismatches(
+            local_by_id[external_id],
+            remote_by_id[external_id],
+        )
+        for external_id in shared
+    }
+    mismatches = {key: value for key, value in mismatches.items() if value}
+    remote_only = sorted(set(remote_by_id) - set(local_by_id))
+    missing_local = sorted(set(local_by_id) - set(remote_by_id))
+    return {
+        "local_active": len(local_by_id),
+        "remote_active": len(remote_by_id),
+        "matched": len(shared),
+        "matched_clean": len(shared) - len(mismatches),
+        "mismatched": len(mismatches),
+        "remote_only": len(remote_only),
+        "missing_local": len(missing_local),
+        "remote_only_ids": remote_only[:50],
+        "missing_local_ids": missing_local[:50],
+        "mismatch_samples": [
+            {"book_id": external_id, "fields": fields}
+            for external_id, fields in list(mismatches.items())[:50]
+        ],
+        "_remote_only_ids": remote_only,
+        "_mismatch_fields_by_id": mismatches,
+    }
+
+
+def _mark_biblio_remote_verification(
+    workspace_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    *,
+    filename: str,
+    verified_at: datetime,
+    authoritative: bool,
+) -> None:
+    remote_by_id = {
+        str(row.get("source_id") or row.get("sku") or "").strip(): row
+        for row in rows
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
+    mismatch_by_id = {
+        str(key): list(value or [])
+        for key, value in dict(analysis.get("_mismatch_fields_by_id") or {}).items()
+        if str(key)
+    }
+    remote_only_ids = set(str(value) for value in analysis.get("_remote_only_ids") or [])
+    current_active, _current_deletes = _biblio_rows(
+        workspace_id,
+        profile=biblio_upload_profile(workspace_id),
+    )
+    current_signature_by_id = {
+        str(row.get("source_id") or row.get("sku") or "").strip(): str(row.get("inventory_signature") or "")
+        for row in current_active
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
+    with db.session_scope() as session:
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+            )
+        ).scalars().all()
+        for listing in listings:
+            external_id = str(listing.external_id or listing.external_sku or "").strip()
+            extra = dict(listing.extra or {})
+            if external_id in remote_by_id:
+                remote = remote_by_id[external_id]
+                mismatches = mismatch_by_id.get(external_id, [])
+                extra["remote_verified"] = True
+                extra["remote_verified_at"] = verified_at.isoformat()
+                extra["remote_verified_source"] = filename
+                extra["remote_verified_status"] = str(
+                    remote.get("status") or ListingStatus.ACTIVE
+                )
+                extra["remote_matches_local"] = (
+                    None if external_id in remote_only_ids else not bool(mismatches)
+                )
+                extra["remote_mismatch_fields"] = mismatches
+                extra["remote_verified_inventory_signature"] = current_signature_by_id.get(external_id)
+                extra["remote_verification_stale"] = False
+                extra.pop("remote_stale_since", None)
+                extra.pop("remote_missing_at", None)
+            elif authoritative:
+                extra["remote_verified"] = False
+                extra["remote_verified_at"] = verified_at.isoformat()
+                extra["remote_verified_source"] = filename
+                extra["remote_matches_local"] = False
+                extra["remote_mismatch_fields"] = ["missing_from_biblio_active_inventory"]
+                extra["remote_verified_inventory_signature"] = current_signature_by_id.get(external_id)
+                extra["remote_verification_stale"] = False
+                extra.pop("remote_stale_since", None)
+                extra["remote_missing_at"] = verified_at.isoformat()
+            listing.extra = extra
+
+
 def _biblio_inventory_signature(
     row: dict[str, Any],
     *,
@@ -3148,6 +3435,11 @@ def _biblio_inventory_signature(
         keys.extend([
             "subtitle", "publisher", "edition", "binding",
             "language", "publish_date", "pages", "condition",
+            "publication_place", "first_edition", "signed",
+            "dust_jacket_present", "dust_jacket_condition",
+            "dust_jacket_description", "illustrator", "keywords",
+            "catalog_1", "catalog_2", "catalog_3", "catalog_4",
+            "catalog_5", "catalog_6", "catalog_7", "catalog_8",
         ])
     payload = {key: row.get(key) for key in keys}
     encoded = json.dumps(
@@ -3158,6 +3450,44 @@ def _biblio_inventory_signature(
         default=str,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _biblio_enriched_value(
+    extra: dict[str, Any],
+    bibliographic: dict[str, Any],
+    key: str,
+    *fallbacks: Any,
+) -> Any:
+    sources = (
+        dict(extra.get("bibliographic_sources") or {})
+        if isinstance(extra.get("bibliographic_sources"), dict)
+        else {}
+    )
+    if sources.get(key) == "review":
+        return bibliographic.get(key)
+    value = bibliographic.get(key)
+    if value not in (None, ""):
+        return value
+    for fallback in fallbacks:
+        if fallback not in (None, ""):
+            return fallback
+    return None
+
+
+def _biblio_field_value(
+    extra: dict[str, Any],
+    attrs: dict[str, Any],
+    key: str,
+) -> Any:
+    sources = (
+        dict(extra.get("field_sources") or {})
+        if isinstance(extra.get("field_sources"), dict)
+        else {}
+    )
+    if sources.get(key) == "review":
+        return extra.get(key)
+    value = extra.get(key)
+    return value if value not in (None, "") else attrs.get(key)
 
 
 def _biblio_rows(
@@ -3222,22 +3552,50 @@ def _biblio_rows(
                 "source_id": listing.external_id,
                 "sku": listing.external_id or listing.external_sku or item.sku,
                 "title": listing.title or item.title,
-                "subtitle": bibliographic.get("subtitle") or attrs.get("subtitle"),
+                "subtitle": _biblio_enriched_value(extra, bibliographic, "subtitle", attrs.get("subtitle")),
                 "author": extra.get("author") or attrs.get("author"),
                 "description": extra.get("description") or attrs.get("description") or item.notes,
-                "isbn": extra.get("isbn") or attrs.get("isbn"),
-                "publisher": bibliographic.get("publisher") or attrs.get("publisher"),
-                "edition": bibliographic.get("edition") or attrs.get("edition"),
-                "binding": bibliographic.get("binding") or attrs.get("binding") or attrs.get("physical_format"),
-                "language": bibliographic.get("language") or attrs.get("language"),
-                "publish_date": (
-                    bibliographic.get("publish_date")
-                    or attrs.get("publish_date")
-                    or attrs.get("publication_date")
-                    or attrs.get("publication_year")
+                "isbn": _biblio_field_value(extra, attrs, "isbn"),
+                "publisher": _biblio_enriched_value(extra, bibliographic, "publisher", attrs.get("publisher")),
+                "edition": _biblio_enriched_value(extra, bibliographic, "edition", attrs.get("edition")),
+                "binding": _biblio_enriched_value(
+                    extra, bibliographic, "binding", attrs.get("binding"), attrs.get("physical_format")
                 ),
-                "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
-                "condition": bibliographic.get("condition") or item.condition,
+                "language": _biblio_enriched_value(extra, bibliographic, "language", attrs.get("language")),
+                "publish_date": _biblio_enriched_value(
+                    extra, bibliographic, "publish_date",
+                    attrs.get("publish_date"), attrs.get("publication_date"), attrs.get("publication_year")
+                ),
+                "pages": _biblio_enriched_value(
+                    extra, bibliographic, "pages", attrs.get("pages"), attrs.get("number_of_pages")
+                ),
+                "condition": _biblio_enriched_value(extra, bibliographic, "condition", item.condition),
+                "publication_place": _biblio_enriched_value(
+                    extra, bibliographic, "publication_place",
+                    attrs.get("publication_place"), attrs.get("place_of_publication")
+                ),
+                "first_edition": _biblio_enriched_value(extra, bibliographic, "first_edition", attrs.get("first_edition")),
+                "signed": _biblio_enriched_value(extra, bibliographic, "signed", attrs.get("signed")),
+                "dust_jacket_present": _biblio_enriched_value(
+                    extra, bibliographic, "dust_jacket_present",
+                    attrs.get("dust_jacket_present"), attrs.get("dj_present")
+                ),
+                "dust_jacket_condition": _biblio_enriched_value(
+                    extra, bibliographic, "dust_jacket_condition",
+                    attrs.get("dust_jacket_condition"), attrs.get("dj_condition")
+                ),
+                "dust_jacket_description": _biblio_enriched_value(
+                    extra, bibliographic, "dust_jacket_description",
+                    attrs.get("dust_jacket_description"), attrs.get("dj_description")
+                ),
+                "illustrator": _biblio_enriched_value(extra, bibliographic, "illustrator", attrs.get("illustrator")),
+                "keywords": _biblio_enriched_value(extra, bibliographic, "keywords", attrs.get("keywords")),
+                **{
+                    f"catalog_{index}": _biblio_enriched_value(
+                        extra, bibliographic, f"catalog_{index}", attrs.get(f"catalog_{index}")
+                    )
+                    for index in range(1, 9)
+                },
                 "price_cents": listing.price_cents,
                 "currency": listing.currency or item.currency or "EUR",
                 "quantity": listing.quantity if listing.quantity is not None else item.quantity,
@@ -3273,6 +3631,18 @@ def _biblio_rows(
     return active, deletes
 
 
+def biblio_pending_changes(workspace_id: uuid.UUID) -> dict[str, int]:
+    """Return the exact inventory work an incremental BIBLIO sync would send."""
+    active, deletes = _biblio_rows(
+        workspace_id,
+        profile=biblio_upload_profile(workspace_id),
+    )
+    return {
+        "inventory": sum(1 for row in active if bool(row.get("inventory_dirty"))),
+        "deletes": sum(1 for row in deletes if bool(row.get("inventory_dirty"))),
+    }
+
+
 def _missing_biblio(row: dict[str, Any]) -> list[str]:
     missing = []
     for key, label in (
@@ -3292,6 +3662,19 @@ def _biblio_text(value: Any) -> str:
     text = str(value or "").replace("\x00", "")
     text = re.sub(r"[\t\r\n]+", " ", text)
     return re.sub(r" {2,}", " ", text).strip()
+
+
+def _biblio_bool(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool):
+        return "Y" if value else "N"
+    text = str(value).strip().casefold()
+    if text in {"yes", "y", "true", "1", "present"}:
+        return "Y"
+    if text in {"no", "n", "false", "0", "absent"}:
+        return "N"
+    return _biblio_text(value)
 
 
 def _biblio_tsv(
@@ -3334,6 +3717,18 @@ def _biblio_tsv(
                 _biblio_text(row.get("publish_date") or ""),
                 _biblio_text(row.get("pages") or ""),
                 _biblio_text(row.get("condition") or ""),
+                _biblio_text(row.get("publication_place") or ""),
+                _biblio_bool(row.get("first_edition")),
+                _biblio_bool(row.get("signed")),
+                _biblio_bool(row.get("dust_jacket_present")),
+                _biblio_text(row.get("dust_jacket_condition") or ""),
+                _biblio_text(row.get("dust_jacket_description") or ""),
+                _biblio_text(row.get("illustrator") or ""),
+                _biblio_text(row.get("keywords") or ""),
+                *[
+                    _biblio_text(row.get(f"catalog_{index}") or "")
+                    for index in range(1, 9)
+                ],
                 0 if sold else max(1, int(row.get("quantity") or 1)),
             ]
         else:
@@ -3644,7 +4039,15 @@ def _mark_biblio_inventory_sync(
         ).scalars().all()
         for listing in listings:
             extra = dict(listing.extra or {})
-            extra["inventory_sync_signature"] = by_id[listing.id]
+            signature = by_id[listing.id]
+            verified_signature = str(extra.get("remote_verified_inventory_signature") or "")
+            if verified_signature and verified_signature != signature:
+                extra["remote_verified"] = False
+                extra["remote_matches_local"] = None
+                extra["remote_mismatch_fields"] = []
+                extra["remote_verification_stale"] = True
+                extra["remote_stale_since"] = now
+            extra["inventory_sync_signature"] = signature
             extra["inventory_synced_at"] = now
             listing.extra = extra
 
@@ -3655,28 +4058,267 @@ def _biblio_upload_stamp() -> str:
     return f"{stamp}-{uuid.uuid4().hex[:10]}"
 
 
-def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
-    values = _workspace_or_env_biblio_values(workspace_id)
-    host = values.get("host", "ftp.biblio.com").strip() or "ftp.biblio.com"
+def _biblio_truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _connect_biblio_ftp(values: dict[str, str]) -> ftplib.FTP:
+    values = _harden_biblio_values(values)
+    host = values.get("host", BIBLIO_FTP_HOST).strip() or BIBLIO_FTP_HOST
     username = values.get("username", "").strip()
     password = values.get("password", "").strip()
     if not username or not password:
         raise RuntimeError("BIBLIO needs username and password")
-    ftp = ftplib.FTP()
+
+    # Prefer explicit-TLS FTPS with normal public-CA and hostname validation.
+    # BIBLIO's public help currently documents standard FTP, not FTPS, so a
+    # legacy plain-FTP fallback is available only after explicit opt-in.
+    context = ssl.create_default_context()
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    if hasattr(ssl, "TLSVersion"):
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+
+    tls_ftp = None
     try:
-        ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
-        ftp.login(username, password)
-        ftp.set_pasv(True)
-        directory = values.get("directory", "").strip()
-        if directory and directory not in {".", "./"}:
-            ftp.cwd(directory)
+        tls_ftp = ftplib.FTP_TLS(context=context)
+        tls_ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
+        tls_ftp.auth()
+        tls_ftp.login(username, password)
+        tls_ftp.prot_p()
+        tls_ftp.set_pasv(True)
+        setattr(tls_ftp, "_biblio_transport", "ftps")
+        return tls_ftp
+    except Exception as tls_exc:
+        if tls_ftp is not None:
+            try:
+                tls_ftp.close()
+            except Exception:
+                pass
+        if not _biblio_truthy(values.get("allow_plain_ftp")):
+            raise RuntimeError(
+                "BIBLIO did not accept verified FTPS. Plain FTP fallback is disabled "
+                "because FTP credentials and uploads are not encrypted in transit. "
+                "Enable legacy plain FTP explicitly only if your BIBLIO account does "
+                "not support FTPS."
+            ) from tls_exc
+
+    ftp = ftplib.FTP()
+    ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
+    ftp.login(username, password)
+    ftp.set_pasv(True)
+    setattr(ftp, "_biblio_transport", "plain_ftp")
+    return ftp
+
+
+def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _workspace_or_env_biblio_values(workspace_id)
+    ftp = _connect_biblio_ftp(values)
+    transport = str(getattr(ftp, "_biblio_transport", "unknown"))
+    try:
         pwd = ftp.pwd()
     finally:
         try:
             ftp.quit()
         except Exception:
             ftp.close()
-    return {"ok": True, "detail": f"Connected successfully; directory {pwd}"}
+    detail = (
+        f"Connected securely with FTPS; directory {pwd}"
+        if transport == "ftps"
+        else f"Connected using explicitly enabled legacy plain FTP; directory {pwd}"
+    )
+    return {"ok": True, "detail": detail, "transport": transport}
+
+
+def _refresh_biblio_linked_sources(
+    workspace_id: uuid.UUID,
+    *,
+    listing_id: uuid.UUID | None = None,
+) -> int:
+    """Refresh non-reviewed BIBLIO fields from the linked Vinted/master source."""
+    changed_count = 0
+    with db.session_scope() as session:
+        query = (
+            select(models.ChannelListing, models.InventoryItem)
+            .join(
+                models.InventoryItem,
+                models.InventoryItem.id == models.ChannelListing.inventory_item_id,
+            )
+            .where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+            )
+        )
+        if listing_id is not None:
+            query = query.where(models.ChannelListing.id == listing_id)
+        pairs = session.execute(query).all()
+
+        for listing, item in pairs:
+            extra = dict(listing.extra or {})
+            if str(extra.get("source_channel") or "") != Channel.VINTED:
+                continue
+            raw_source_id = str(extra.get("source_listing_id") or "").strip()
+            if not raw_source_id:
+                continue
+            try:
+                source_id = uuid.UUID(raw_source_id)
+            except ValueError:
+                continue
+            source = session.get(models.ChannelListing, source_id)
+            if (
+                source is None
+                or source.workspace_id != workspace_id
+                or source.channel != Channel.VINTED
+            ):
+                continue
+
+            source_extra = dict(source.extra or {})
+            source_meta = (
+                dict(source_extra.get("metadata") or {})
+                if isinstance(source_extra.get("metadata"), dict)
+                else {}
+            )
+            attrs = dict(item.attributes or {})
+            field_sources = (
+                dict(extra.get("field_sources") or {})
+                if isinstance(extra.get("field_sources"), dict)
+                else {}
+            )
+            bibliographic = (
+                dict(extra.get("bibliographic_enrichment") or {})
+                if isinstance(extra.get("bibliographic_enrichment"), dict)
+                else {}
+            )
+            bibliographic_sources = (
+                dict(extra.get("bibliographic_sources") or {})
+                if isinstance(extra.get("bibliographic_sources"), dict)
+                else {}
+            )
+            changed = False
+
+            def update_listing_attr(name: str, value: Any) -> None:
+                nonlocal changed
+                if value in (None, ""):
+                    return
+                if getattr(listing, name) != value:
+                    setattr(listing, name, value)
+                    changed = True
+
+            def update_extra(name: str, value: Any) -> None:
+                nonlocal changed
+                if value in (None, ""):
+                    return
+                if extra.get(name) != value:
+                    extra[name] = value
+                    changed = True
+
+            if field_sources.get("title") == "vinted":
+                update_listing_attr("title", source.title)
+            elif field_sources.get("title") == "master":
+                update_listing_attr("title", attrs.get("listing_title") or item.title)
+
+            if field_sources.get("author") == "vinted":
+                update_extra("author", source_meta.get("author"))
+            elif field_sources.get("author") == "master":
+                update_extra("author", attrs.get("author"))
+
+            if field_sources.get("description") == "vinted":
+                update_extra("description", source_meta.get("description"))
+            elif field_sources.get("description") == "master":
+                update_extra(
+                    "description",
+                    attrs.get("listing_description") or attrs.get("description") or item.notes,
+                )
+
+            if field_sources.get("price_cents") == "vinted":
+                if source.price_cents is not None:
+                    update_listing_attr("price_cents", source.price_cents)
+            elif field_sources.get("price_cents") == "master":
+                default_price = attrs.get("default_price_cents")
+                if default_price is not None:
+                    update_listing_attr("price_cents", int(default_price))
+
+            if field_sources.get("currency") == "vinted" and source.currency:
+                update_listing_attr("currency", source.currency)
+
+            if field_sources.get("isbn") == "vinted":
+                update_extra("isbn", source_meta.get("isbn"))
+            elif field_sources.get("isbn") == "master":
+                update_extra("isbn", attrs.get("isbn"))
+
+            master_bibliographic = {
+                "subtitle": attrs.get("subtitle"),
+                "publisher": attrs.get("publisher"),
+                "edition": attrs.get("edition"),
+                "binding": attrs.get("binding") or attrs.get("physical_format"),
+                "language": attrs.get("language"),
+                "pages": attrs.get("pages") or attrs.get("number_of_pages"),
+                "publish_date": (
+                    attrs.get("publish_date")
+                    or attrs.get("publication_date")
+                    or attrs.get("publication_year")
+                ),
+                "condition": item.condition,
+                "publication_place": attrs.get("publication_place") or attrs.get("place_of_publication"),
+                "first_edition": attrs.get("first_edition"),
+                "signed": attrs.get("signed"),
+                "dust_jacket_present": attrs.get("dust_jacket_present") or attrs.get("dj_present"),
+                "dust_jacket_condition": attrs.get("dust_jacket_condition") or attrs.get("dj_condition"),
+                "dust_jacket_description": attrs.get("dust_jacket_description") or attrs.get("dj_description"),
+                "illustrator": attrs.get("illustrator"),
+                "keywords": attrs.get("keywords"),
+                **{
+                    f"catalog_{index}": attrs.get(f"catalog_{index}")
+                    for index in range(1, 9)
+                },
+            }
+            vinted_bibliographic = {
+                "publisher": source_meta.get("publisher"),
+                "language": source_meta.get("language"),
+                "condition": source_meta.get("condition"),
+            }
+            for key, source_name in bibliographic_sources.items():
+                if source_name == "review" or source_name == "isbn":
+                    continue
+                if source_name == "vinted":
+                    value = vinted_bibliographic.get(key)
+                elif source_name == "master":
+                    value = master_bibliographic.get(key)
+                else:
+                    continue
+                if bibliographic.get(key) != value:
+                    bibliographic[key] = value
+                    changed = True
+
+            current_quantity = int(item.quantity or 0)
+            if listing.quantity != current_quantity:
+                listing.quantity = current_quantity
+                changed = True
+
+            source_images = [
+                str(value).strip()
+                for value in (source_extra.get("image_urls") or [])
+                if str(value or "").strip()
+            ][:BIBLIO_MAX_PHOTOS]
+            if source_images and source_images != list(extra.get("image_urls") or []):
+                extra["image_urls"] = source_images
+                extra["image_source"] = Channel.VINTED
+                extra["photo_sync_state"] = "queued"
+                changed = True
+
+            if changed:
+                extra["bibliographic_enrichment"] = bibliographic
+                extra["bibliographic_sources"] = bibliographic_sources
+                if extra.get("remote_verified") or extra.get("remote_verified_at"):
+                    extra["remote_verified"] = False
+                    extra["remote_matches_local"] = None
+                    extra["remote_mismatch_fields"] = []
+                    extra["remote_verification_stale"] = True
+                    extra["remote_stale_since"] = datetime.now(timezone.utc).isoformat()
+                listing.extra = extra
+                changed_count += 1
+
+    return changed_count
 
 
 def sync_biblio_workspace(
@@ -3689,6 +4331,7 @@ def sync_biblio_workspace(
 ) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
     upload_profile = biblio_upload_profile(workspace_id)
+    _refresh_biblio_linked_sources(workspace_id, listing_id=listing_id)
     active, deletes = _biblio_rows(
         workspace_id,
         listing_id=listing_id,
@@ -3831,18 +4474,17 @@ def sync_biblio_workspace(
                 "message": f"Connecting to {host}",
             },
         )
-        ftp = ftplib.FTP()
-        ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
-        ftp.login(username, password)
-        ftp.set_pasv(True)
-        directory = values.get("directory", "").strip()
-        if directory and directory not in {".", "./"}:
-            ftp.cwd(directory)
+        ftp = _connect_biblio_ftp(values)
         _update_biblio_run(
             run_id,
             detail={
                 "stage": "connected",
-                "message": "Connected to BIBLIO FTP",
+                "transport": str(getattr(ftp, "_biblio_transport", "unknown")),
+                "message": (
+                    "Connected securely to BIBLIO FTPS"
+                    if getattr(ftp, "_biblio_transport", "") == "ftps"
+                    else "Connected to BIBLIO using explicitly enabled legacy plain FTP"
+                ),
             },
         )
 
@@ -4033,15 +4675,15 @@ def _workspace_or_env_ebay_values(workspace_id: uuid.UUID) -> dict[str, str]:
 
 def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
     if has_credentials(workspace_id, Channel.BIBLIO):
-        return _credentials(workspace_id, Channel.BIBLIO)
+        return _harden_biblio_values(_credentials(workspace_id, Channel.BIBLIO))
     if not _is_bootstrap_workspace(workspace_id):
         raise RuntimeError("BIBLIO credentials are not configured for this workspace")
     username = os.getenv("BIBLIO_FTP_USERNAME", "").strip()
     password = os.getenv("BIBLIO_FTP_PASSWORD", "").strip()
     if not username or not password:
         raise RuntimeError("BIBLIO credentials are not configured")
-    return {
-        "host": os.getenv("BIBLIO_FTP_HOST", "ftp.biblio.com").strip() or "ftp.biblio.com",
+    return _harden_biblio_values({
+        "host": BIBLIO_FTP_HOST,
         "username": username,
         "password": password,
         "directory": os.getenv("BIBLIO_FTP_DIRECTORY", "").strip(),
@@ -4049,8 +4691,10 @@ def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
         "filename_prefix": os.getenv("BIBLIO_FTP_FILENAME_PREFIX", "reseller-dashboard").strip()
         or "reseller-dashboard",
         "upload_profile": os.getenv("BIBLIO_FTP_UPLOAD_PROFILE", "extended").strip()
-        or "core",
-    }
+        or "extended",
+        "allow_plain_ftp": os.getenv("BIBLIO_FTP_ALLOW_PLAIN", "false").strip() or "false",
+        "auto_sync": os.getenv("BIBLIO_FTP_AUTO_SYNC", "false").strip() or "false",
+    })
 
 
 def close_ebay_workspace_listing(workspace_id: uuid.UUID, external_id: str) -> dict[str, Any]:
@@ -4113,6 +4757,10 @@ def _biblio_listing_row(
         item = session.get(models.InventoryItem, listing.inventory_item_id)
         if item is None:
             raise RuntimeError("BIBLIO master inventory item no longer exists")
+        if int(item.quantity or 0) > 0 or str(item.status or "") != ItemStatus.SOLD:
+            raise RuntimeError(
+                "Refusing BIBLIO delete because the master inventory item is not sold out"
+            )
         attrs = dict(item.attributes or {})
         extra = dict(listing.extra or {})
         bibliographic = (
@@ -4124,22 +4772,50 @@ def _biblio_listing_row(
             "source_id": listing.external_id,
             "sku": listing.external_id or listing.external_sku or item.sku,
             "title": listing.title or item.title,
-            "subtitle": bibliographic.get("subtitle") or attrs.get("subtitle"),
+            "subtitle": _biblio_enriched_value(extra, bibliographic, "subtitle", attrs.get("subtitle")),
             "author": extra.get("author") or attrs.get("author"),
             "description": extra.get("description") or attrs.get("description") or item.notes,
-            "isbn": extra.get("isbn") or attrs.get("isbn"),
-            "publisher": bibliographic.get("publisher") or attrs.get("publisher"),
-            "edition": bibliographic.get("edition") or attrs.get("edition"),
-            "binding": bibliographic.get("binding") or attrs.get("binding") or attrs.get("physical_format"),
-            "language": bibliographic.get("language") or attrs.get("language"),
-            "publish_date": (
-                bibliographic.get("publish_date")
-                or attrs.get("publish_date")
-                or attrs.get("publication_date")
-                or attrs.get("publication_year")
+            "isbn": _biblio_field_value(extra, attrs, "isbn"),
+            "publisher": _biblio_enriched_value(extra, bibliographic, "publisher", attrs.get("publisher")),
+            "edition": _biblio_enriched_value(extra, bibliographic, "edition", attrs.get("edition")),
+            "binding": _biblio_enriched_value(
+                extra, bibliographic, "binding", attrs.get("binding"), attrs.get("physical_format")
             ),
-            "pages": bibliographic.get("pages") or attrs.get("pages") or attrs.get("number_of_pages"),
-            "condition": bibliographic.get("condition") or item.condition,
+            "language": _biblio_enriched_value(extra, bibliographic, "language", attrs.get("language")),
+            "publish_date": _biblio_enriched_value(
+                extra, bibliographic, "publish_date",
+                attrs.get("publish_date"), attrs.get("publication_date"), attrs.get("publication_year")
+            ),
+            "pages": _biblio_enriched_value(
+                extra, bibliographic, "pages", attrs.get("pages"), attrs.get("number_of_pages")
+            ),
+            "condition": _biblio_enriched_value(extra, bibliographic, "condition", item.condition),
+            "publication_place": _biblio_enriched_value(
+                extra, bibliographic, "publication_place",
+                attrs.get("publication_place"), attrs.get("place_of_publication")
+            ),
+            "first_edition": _biblio_enriched_value(extra, bibliographic, "first_edition", attrs.get("first_edition")),
+            "signed": _biblio_enriched_value(extra, bibliographic, "signed", attrs.get("signed")),
+            "dust_jacket_present": _biblio_enriched_value(
+                extra, bibliographic, "dust_jacket_present",
+                attrs.get("dust_jacket_present"), attrs.get("dj_present")
+            ),
+            "dust_jacket_condition": _biblio_enriched_value(
+                extra, bibliographic, "dust_jacket_condition",
+                attrs.get("dust_jacket_condition"), attrs.get("dj_condition")
+            ),
+            "dust_jacket_description": _biblio_enriched_value(
+                extra, bibliographic, "dust_jacket_description",
+                attrs.get("dust_jacket_description"), attrs.get("dj_description")
+            ),
+            "illustrator": _biblio_enriched_value(extra, bibliographic, "illustrator", attrs.get("illustrator")),
+            "keywords": _biblio_enriched_value(extra, bibliographic, "keywords", attrs.get("keywords")),
+            **{
+                f"catalog_{index}": _biblio_enriched_value(
+                    extra, bibliographic, f"catalog_{index}", attrs.get(f"catalog_{index}")
+                )
+                for index in range(1, 9)
+            },
             "price_cents": listing.price_cents,
             "currency": listing.currency or item.currency or "EUR",
             "quantity": 0,
@@ -4171,17 +4847,10 @@ def close_biblio_workspace_listing(
     filename = f"{prefix}-{stamp}-deletes.txt"
     started = datetime.now(timezone.utc)
 
+    transport = "unknown"
     try:
-        ftp = ftplib.FTP()
-        ftp.connect(
-            values.get("host", "ftp.biblio.com").strip() or "ftp.biblio.com",
-            timeout=_int(values.get("timeout_seconds"), 20) or 20,
-        )
-        ftp.login(values.get("username", ""), values.get("password", ""))
-        ftp.set_pasv(True)
-        directory = values.get("directory", "").strip()
-        if directory and directory not in {".", "./"}:
-            ftp.cwd(directory)
+        ftp = _connect_biblio_ftp(values)
+        transport = str(getattr(ftp, "_biblio_transport", "unknown"))
         ftp.storbinary(
             f"STOR {filename}",
             io.BytesIO(_biblio_tsv([row], sold=True, profile=upload_profile)),
@@ -4201,6 +4870,7 @@ def close_biblio_workspace_listing(
                 "deletes_filename": filename,
                 "cross_channel": True,
                 "upload_profile": upload_profile,
+                "transport": transport,
             },
             error=str(exc),
         )
@@ -4216,6 +4886,7 @@ def close_biblio_workspace_listing(
             "deletes_filename": filename,
             "cross_channel": True,
             "upload_profile": upload_profile,
+            "transport": transport,
         },
     )
     return {
@@ -4223,5 +4894,6 @@ def close_biblio_workspace_listing(
         "external_id": str(row.get("source_id") or ""),
         "deletes_filename": filename,
         "upload_profile": upload_profile,
+        "transport": transport,
         "inventory_signature": str(row.get("inventory_signature") or ""),
     }
