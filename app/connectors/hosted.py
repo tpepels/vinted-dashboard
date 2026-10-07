@@ -3247,7 +3247,7 @@ def _biblio_rows(
                     str(value).strip()
                     for value in (extra.get("image_urls") or [])
                     if str(value or "").strip()
-                ][:5],
+                ][:BIBLIO_MAX_PHOTOS],
                 "photo_sync_signature": extra.get("photo_sync_signature"),
                 "photo_sync_state": extra.get("photo_sync_state"),
                 "inventory_sync_signature": extra.get("inventory_sync_signature"),
@@ -3348,7 +3348,7 @@ def _biblio_tsv(
         writer.writerow(values)
     return output.getvalue().encode("utf-8")
 
-BIBLIO_MAX_PHOTOS = 5
+BIBLIO_MAX_PHOTOS = 12
 BIBLIO_MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024
 
 
