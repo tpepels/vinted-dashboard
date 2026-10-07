@@ -142,6 +142,7 @@ def test_workspace_biblio_sync_uploads_master_listing(monkeypatch):
         )
 
     class FakeFTP:
+        def __init__(self, *args, **kwargs): pass
         uploads = {}
 
         def connect(self, host, timeout=20):
