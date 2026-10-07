@@ -3151,12 +3151,16 @@ def import_biblio_workspace(
             if str(row.get("source_id") or row.get("sku") or "").strip() in imported_ids
         ]
     _mark_biblio_inventory_sync(workspace_id, sync_rows)
+    public_analysis = {
+        key: value for key, value in analysis.items()
+        if not str(key).startswith("_")
+    }
     return {
         "source": Channel.BIBLIO,
         "items": len(rows),
         "active": analysis["remote_active"],
         "authoritative": bool(authoritative),
-        **analysis,
+        **public_analysis,
     }
 
 
@@ -3178,13 +3182,17 @@ def verify_biblio_workspace(
         verified_at=datetime.now(timezone.utc),
         authoritative=False,
     )
+    public_analysis = {
+        key: value for key, value in analysis.items()
+        if not str(key).startswith("_")
+    }
     return {
         "source": Channel.BIBLIO,
         "items": len(rows),
         "active": analysis["remote_active"],
         "authoritative": False,
         "verification_only": True,
-        **analysis,
+        **public_analysis,
     }
 
 
@@ -3312,6 +3320,7 @@ def analyze_biblio_workspace(
             {"book_id": external_id, "fields": fields}
             for external_id, fields in list(mismatches.items())[:50]
         ],
+        "_mismatch_fields_by_id": mismatches,
     }
 
 
@@ -3330,9 +3339,9 @@ def _mark_biblio_remote_verification(
         if str(row.get("source_id") or row.get("sku") or "").strip()
     }
     mismatch_by_id = {
-        str(row.get("book_id") or ""): list(row.get("fields") or [])
-        for row in analysis.get("mismatch_samples") or []
-        if str(row.get("book_id") or "")
+        str(key): list(value or [])
+        for key, value in dict(analysis.get("_mismatch_fields_by_id") or {}).items()
+        if str(key)
     }
     with db.session_scope() as session:
         listings = session.execute(
