@@ -43,6 +43,24 @@ def test_biblio_photo_filename_matches_book_id():
     assert hosted._biblio_photo_filename("BK-100", 0) == "BK-100.jpg"
     assert hosted._biblio_photo_filename("BK-100", 1) == "BK-100_1.jpg"
     assert hosted._biblio_photo_filename("BK-100", 4) == "BK-100_4.jpg"
+    assert hosted._biblio_photo_filename("BK-100", 11) == "BK-100_11.jpg"
+
+
+def test_biblio_photo_queue_keeps_up_to_twelve_images():
+    urls = [f"https://images1.vinted.net/t/{index}.jpg" for index in range(15)]
+    row = {
+        "source_id": "BK-12",
+        "sku": "BK-12",
+        "listing_id": str(uuid.uuid4()),
+        "image_urls": urls,
+        "photo_sync_signature": None,
+    }
+
+    pending = hosted._pending_biblio_photo_rows([row])
+
+    assert hosted.BIBLIO_MAX_PHOTOS == 12
+    assert len(pending) == 1
+    assert pending[0]["image_urls"] == urls[:12]
 
 
 def test_biblio_photo_filename_rejects_unsafe_book_id():
@@ -316,8 +334,65 @@ def test_incremental_biblio_sync_skips_unchanged_inventory(monkeypatch):
     assert result["photos_uploaded"] == 0
     assert "Nothing changed" in result["detail"]
     assert inventory_marks == []
-    assert any(kwargs.get("status") == "success" for _args, kwargs in updates)
-    assert any(kwargs.get("publish_state") == "ftp_uploaded" for _args, kwargs in states)
+    assert result["run_id"] is None
+    assert result["noop"] is True
+    assert updates == []
+    assert states == []
+
+
+def test_targeted_unchanged_biblio_publish_closes_only_its_local_state(monkeypatch):
+    listing_id = uuid.uuid4()
+    active = [{
+        "source_id": "BK-TARGET",
+        "sku": "BK-TARGET",
+        "title": "Book",
+        "author": "Author",
+        "description": "Description",
+        "isbn": None,
+        "price_cents": 600,
+        "currency": "EUR",
+        "quantity": 1,
+        "status": "active",
+        "listing_id": str(listing_id),
+        "image_urls": [],
+        "photo_sync_signature": None,
+        "inventory_signature": "same",
+        "inventory_sync_signature": "same",
+        "inventory_dirty": False,
+    }]
+    monkeypatch.setattr(
+        hosted,
+        "_workspace_or_env_biblio_values",
+        lambda workspace_id: {
+            "host": "ftp.biblio.com",
+            "username": "seller",
+            "password": "secret",
+            "directory": "",
+            "filename_prefix": "test",
+        },
+    )
+    monkeypatch.setattr(
+        hosted,
+        "_biblio_rows",
+        lambda workspace_id, listing_id=None, profile="core": (active, []),
+    )
+    monkeypatch.setattr(
+        hosted.ftplib,
+        "FTP",
+        lambda: (_ for _ in ()).throw(AssertionError("FTP should not be opened")),
+    )
+    _run_id, updates, states, inventory_marks = _stub_progress(monkeypatch)
+
+    result = hosted.sync_biblio_workspace(uuid.uuid4(), listing_id=listing_id)
+
+    assert result["noop"] is True
+    assert result["run_id"] is None
+    assert inventory_marks == []
+    assert updates == []
+    assert len(states) == 1
+    args, kwargs = states[0]
+    assert args[1] == [str(listing_id)]
+    assert kwargs.get("publish_state") == "ftp_uploaded"
 
 
 def test_photo_only_retry_resends_photos_without_inventory(monkeypatch):

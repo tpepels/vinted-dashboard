@@ -255,6 +255,7 @@ def test_publish_endpoint_creates_linked_biblio_listing_and_queues_ftp(monkeypat
             title="Master title",
             category=ItemCategory.BOOK,
             quantity=1,
+            condition="very_good",
             currency="EUR",
             attributes={},
         )
@@ -323,6 +324,19 @@ def test_publish_endpoint_creates_linked_biblio_listing_and_queues_ftp(monkeypat
     assert current["status"] == "queued"
     assert current["listing_id"] == str(listing.id)
     assert current["listing_title"] == "Clean ISBN Title"
+
+    listing_rows = client.get("/api/app/listings")
+    assert listing_rows.status_code == 200, listing_rows.text
+    biblio_row = next(
+        row for row in listing_rows.json()["listings"]
+        if row["channel"] == Channel.BIBLIO
+    )
+    assert biblio_row["biblio_details"]["source"] == "local_submission"
+    assert biblio_row["biblio_details"]["remote_verified"] is False
+    assert biblio_row["biblio_details"]["author"] == "Source Author"
+    assert biblio_row["biblio_details"]["publisher"] == "Publisher"
+    assert biblio_row["biblio_details"]["isbn"] == "9780140328721"
+    assert biblio_row["biblio_details"]["condition"] == "very_good"
 
 
 

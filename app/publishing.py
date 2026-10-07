@@ -169,7 +169,7 @@ def _source_image_urls(
             value = str(attrs.get(key) or "").strip()
             if value:
                 urls.append(value)
-    return list(dict.fromkeys(urls))[:5]
+    return list(dict.fromkeys(urls))[:12]
 
 
 def _book_id_conflict(
@@ -597,7 +597,7 @@ def upsert_biblio_listing(
     existing.quantity = max(1, int(fields.get("quantity") or 1))
     existing.last_seen_at = now
     previous_extra = dict(existing.extra or {})
-    image_urls = list(source.get("image_urls") or [])[:5]
+    image_urls = list(source.get("image_urls") or [])[:12]
     previous_images = list(previous_extra.get("image_urls") or [])
     if image_urls:
         photo_sync_state = (

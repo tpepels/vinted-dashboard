@@ -789,6 +789,13 @@ def listings(
     now = datetime.now(timezone.utc)
     for listing, snapshot in rows:
         extra = dict(listing.extra or {})
+        linked_item = item_by_id.get(listing.inventory_item_id)
+        linked_attrs = dict(linked_item.attributes or {}) if linked_item is not None else {}
+        biblio_enrichment = (
+            dict(extra.get("bibliographic_enrichment") or {})
+            if isinstance(extra.get("bibliographic_enrichment"), dict)
+            else {}
+        )
         listed_at = extra.get("listed_at")
         listed_at_source = (
             str(extra.get("listed_at_source") or "vinted")
@@ -888,6 +895,43 @@ def listings(
                 "favourites": snapshot.favourites if snapshot else None,
                 "snapshot_at": (
                     snapshot.captured_at.isoformat() if snapshot else None
+                ),
+                "biblio_details": (
+                    {
+                        "source": "local_submission",
+                        "remote_verified": False,
+                        "author": extra.get("author") or linked_attrs.get("author"),
+                        "isbn": extra.get("isbn") or linked_attrs.get("isbn"),
+                        "description": extra.get("description") or linked_attrs.get("description") or (
+                            linked_item.notes if linked_item is not None else None
+                        ),
+                        "subtitle": biblio_enrichment.get("subtitle") or linked_attrs.get("subtitle"),
+                        "publisher": biblio_enrichment.get("publisher") or linked_attrs.get("publisher"),
+                        "edition": biblio_enrichment.get("edition") or linked_attrs.get("edition"),
+                        "binding": (
+                            biblio_enrichment.get("binding")
+                            or linked_attrs.get("binding")
+                            or linked_attrs.get("physical_format")
+                        ),
+                        "language": biblio_enrichment.get("language") or linked_attrs.get("language"),
+                        "publish_date": (
+                            biblio_enrichment.get("publish_date")
+                            or linked_attrs.get("publish_date")
+                            or linked_attrs.get("publication_date")
+                            or linked_attrs.get("publication_year")
+                        ),
+                        "pages": (
+                            biblio_enrichment.get("pages")
+                            or linked_attrs.get("pages")
+                            or linked_attrs.get("number_of_pages")
+                        ),
+                        "condition": (
+                            biblio_enrichment.get("condition")
+                            or (linked_item.condition if linked_item is not None else None)
+                        ),
+                    }
+                    if listing.channel == Channel.BIBLIO
+                    else None
                 ),
                 "biblio_sync": (
                     {

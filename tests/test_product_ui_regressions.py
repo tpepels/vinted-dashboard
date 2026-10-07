@@ -428,6 +428,7 @@ def test_biblio_preflight_shows_automatic_vinted_photo_upload():
     assert '" Vinted photo"' in APP_JS
     assert '" - automatic BIBLIO upload"' in APP_JS
     assert "will be uploaded automatically to BIBLIO" in APP_JS
+    assert "slice(0, 12)" in APP_JS
     assert "No manual image upload is required." in APP_JS
     assert "source.image_urls" in APP_JS
 
@@ -530,12 +531,18 @@ def test_biblio_inventory_and_listing_rows_show_publication_state():
     assert '"FTP uploaded"' in APP_JS
     assert "photo error" in APP_JS
 
+    assert "function biblioListingDetails(row)" in APP_JS
+    assert "Submitted locally by FTP" in APP_JS
+    assert "BIBLIO does not provide listing readback" in APP_JS
+
 
 
 def test_biblio_ui_explains_deferred_photo_retry_and_filename_warning():
     assert "photo retry scheduled" in APP_JS
     assert "BIBLIO ignores an image if there is no active listing" in APP_JS
     assert "Photo warning:" in APP_JS
+    assert "BookID.jpg, BookID_1.jpg, BookID_2.jpg" in APP_JS
+    assert "Multiple photos require BIBLIO to map" in APP_JS
 
 
 
@@ -600,7 +607,7 @@ def test_biblio_upload_profile_is_explicit_and_safe_by_default():
     assert '["upload_profile", "Upload profile (core or extended)", "core", "text"]' in APP_JS
     assert "Use upload profile core for the existing 8-column BIBLIO filter" in APP_JS
     assert 'data.upload_profile === "core"' in APP_JS
-    assert "optional bibliographic fields are retained locally" in APP_JS
+    assert "condition, subtitle, publisher, edition, binding, language, publication date and pages are NOT sent" in APP_JS
     assert "Extended BIBLIO profile will send" in APP_JS
 
 
