@@ -3260,6 +3260,10 @@ def _biblio_remote_mismatches(
     remote: dict[str, Any],
 ) -> list[str]:
     present = set(remote.get("_source_fields") or BIBLIO_VERIFY_FIELDS)
+    if "price" in present:
+        present.add("price_cents")
+    if "publication_year" in present:
+        present.add("publish_date")
     comparable = [
         field for field in BIBLIO_VERIFY_FIELDS
         if field in present
@@ -3343,6 +3347,7 @@ def _mark_biblio_remote_verification(
         for key, value in dict(analysis.get("_mismatch_fields_by_id") or {}).items()
         if str(key)
     }
+    remote_only_ids = set(str(value) for value in analysis.get("remote_only_ids") or [])
     with db.session_scope() as session:
         listings = session.execute(
             select(models.ChannelListing).where(
@@ -3362,7 +3367,9 @@ def _mark_biblio_remote_verification(
                 extra["remote_verified_status"] = str(
                     remote.get("status") or ListingStatus.ACTIVE
                 )
-                extra["remote_matches_local"] = not bool(mismatches)
+                extra["remote_matches_local"] = (
+                    None if external_id in remote_only_ids else not bool(mismatches)
+                )
                 extra["remote_mismatch_fields"] = mismatches
                 extra.pop("remote_missing_at", None)
             elif authoritative:
