@@ -314,7 +314,7 @@ document.addEventListener("click", (event) => {
 
 function redactClientText(value) {
   return String(value ?? "")
-    .replace(/(bearer\\s+)[A-Za-z0-9._~+\\-/=]+/gi, "$1[REDACTED]")
+    .replace(/(bearer\\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
     .replace(/(password|passwd|secret|token|api[_-]?key|client[_-]?secret)([=:\\s]+)([^\\s,;]+)/gi, "$1$2[REDACTED]");
 }
 
