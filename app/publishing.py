@@ -407,6 +407,7 @@ def build_biblio_candidate(
     }
 
     existing = _existing_biblio(session, workspace_id, item.id)
+    existing_extra = dict(existing.extra or {}) if existing is not None else {}
     book_id = existing.external_id if existing else item.sku
     image_urls = _source_image_urls(
         item,
@@ -447,6 +448,13 @@ def build_biblio_candidate(
         "ready": False,
         "existing_biblio_listing_id": str(existing.id) if existing else None,
         "already_listed": bool(existing and existing.status == ListingStatus.ACTIVE),
+        "book_id_locked": bool(
+            existing
+            and (
+                existing_extra.get("inventory_synced_at")
+                or existing_extra.get("inventory_sync_signature")
+            )
+        ),
         "source": {
             "channel": Channel.VINTED if vinted else "master",
             "listing_id": str(vinted.id) if vinted else None,
@@ -573,6 +581,19 @@ def upsert_biblio_listing(
     now = datetime.now(timezone.utc)
     source = dict(candidate.get("source") or {})
     previous_external_id = existing.external_id if existing is not None else None
+    if (
+        existing is not None
+        and str(previous_external_id or "") != external_id
+    ):
+        remote_state = dict(existing.extra or {})
+        if (
+            remote_state.get("inventory_synced_at")
+            or remote_state.get("inventory_sync_signature")
+        ):
+            raise ValueError(
+                "BIBLIO Book ID cannot be changed after its first successful inventory upload; "
+                "changing it would risk leaving the old remote listing active"
+            )
 
     if existing is None:
         existing = models.ChannelListing(
@@ -619,8 +640,17 @@ def upsert_biblio_listing(
     else:
         photo_sync_state = "none"
 
+    had_remote_verification = bool(
+        previous_extra.get("remote_verified")
+        or previous_extra.get("remote_verified_at")
+    )
     existing.extra = {
         **previous_extra,
+        "remote_verified": False if had_remote_verification else previous_extra.get("remote_verified", False),
+        "remote_matches_local": None if had_remote_verification else previous_extra.get("remote_matches_local"),
+        "remote_mismatch_fields": [] if had_remote_verification else list(previous_extra.get("remote_mismatch_fields") or []),
+        "remote_verification_stale": True if had_remote_verification else bool(previous_extra.get("remote_verification_stale")),
+        "remote_stale_since": now.isoformat() if had_remote_verification else previous_extra.get("remote_stale_since"),
         "author": fields.get("author"),
         "description": fields.get("description"),
         "isbn": fields.get("isbn"),
