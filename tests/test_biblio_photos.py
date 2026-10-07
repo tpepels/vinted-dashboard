@@ -648,6 +648,16 @@ def test_biblio_extended_profile_sends_all_prefilled_book_fields():
             "publish_date": "2000",
             "pages": 200,
             "condition": "Very good",
+            "publication_place": "New York",
+            "first_edition": True,
+            "signed": False,
+            "dust_jacket_present": True,
+            "dust_jacket_condition": "Good",
+            "dust_jacket_description": "Light wear",
+            "illustrator": "Illustrator",
+            "keywords": "fiction,modern",
+            "catalog_1": "Modern Fiction",
+            "catalog_8": "Featured",
             "quantity": 1,
         }],
         sold=False,
@@ -658,10 +668,14 @@ def test_biblio_extended_profile_sends_all_prefilled_book_fields():
         "Book ID", "Author", "Title", "Subtitle", "Description",
         "Price", "Status", "ISBN", "Publisher", "Edition",
         "Binding", "Language", "Publication Date", "Pages",
-        "Condition", "Quantity",
+        "Condition", "Publication Place", "First Edition", "Signed",
+        "DJ Present", "DJ Condition", "DJ Description", "Illustrator", "Keywords",
+        "Catalog 1", "Catalog 2", "Catalog 3", "Catalog 4",
+        "Catalog 5", "Catalog 6", "Catalog 7", "Catalog 8",
+        "Quantity",
     ]
     values = row.split("\t")
-    assert len(values) == 16
+    assert len(values) == 32
     assert values[3] == "Subtitle"
     assert values[8] == "Publisher"
     assert values[9] == "First"
@@ -670,6 +684,15 @@ def test_biblio_extended_profile_sends_all_prefilled_book_fields():
     assert values[12] == "2000"
     assert values[13] == "200"
     assert values[14] == "Very good"
+    assert values[15] == "New York"
+    assert values[16:19] == ["Y", "N", "Y"]
+    assert values[19] == "Good"
+    assert values[20] == "Light wear"
+    assert values[21] == "Illustrator"
+    assert values[22] == "fiction,modern"
+    assert values[23] == "Modern Fiction"
+    assert values[30] == "Featured"
+    assert values[31] == "1"
 
 
 def test_biblio_optional_metadata_only_changes_extended_signature():
