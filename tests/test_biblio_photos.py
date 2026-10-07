@@ -43,6 +43,24 @@ def test_biblio_photo_filename_matches_book_id():
     assert hosted._biblio_photo_filename("BK-100", 0) == "BK-100.jpg"
     assert hosted._biblio_photo_filename("BK-100", 1) == "BK-100_1.jpg"
     assert hosted._biblio_photo_filename("BK-100", 4) == "BK-100_4.jpg"
+    assert hosted._biblio_photo_filename("BK-100", 11) == "BK-100_11.jpg"
+
+
+def test_biblio_photo_queue_keeps_up_to_twelve_images():
+    urls = [f"https://images1.vinted.net/t/{index}.jpg" for index in range(15)]
+    row = {
+        "source_id": "BK-12",
+        "sku": "BK-12",
+        "listing_id": str(uuid.uuid4()),
+        "image_urls": urls,
+        "photo_sync_signature": None,
+    }
+
+    pending = hosted._pending_biblio_photo_rows([row])
+
+    assert hosted.BIBLIO_MAX_PHOTOS == 12
+    assert len(pending) == 1
+    assert pending[0]["image_urls"] == urls[:12]
 
 
 def test_biblio_photo_filename_rejects_unsafe_book_id():
