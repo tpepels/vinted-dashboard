@@ -3000,6 +3000,7 @@ def biblio_activity(
                 "ftps_required": True,
                 "transport": "FTPS explicit TLS",
                 "ftp_host_locked": True,
+                "ftp_root_locked": True,
                 "ftp_host": "ftp.biblio.com",
                 "upload_profile": biblio_upload_profile(context.workspace.id),
                 "incremental_change_only": True,
