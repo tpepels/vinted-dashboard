@@ -160,7 +160,13 @@ def test_biblio_sync_uploads_inventory_and_vinted_photos(monkeypatch):
         def connect(self, host, timeout=20):
             return None
 
+        def auth(self):
+            return None
+
         def login(self, username, password):
+            return None
+
+        def prot_p(self):
             return None
 
         def set_pasv(self, value):
@@ -178,7 +184,7 @@ def test_biblio_sync_uploads_inventory_and_vinted_photos(monkeypatch):
         def close(self):
             return None
 
-    monkeypatch.setattr(hosted.ftplib, "FTP", FakeFTP)
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FakeFTP)
 
     marked = []
     monkeypatch.setattr(
@@ -257,14 +263,16 @@ def test_partial_biblio_photo_failure_is_retried_later(monkeypatch):
 
     class FakeFTP:
         def connect(self, host, timeout=20): pass
+        def auth(self): pass
         def login(self, username, password): pass
+        def prot_p(self): pass
         def set_pasv(self, value): pass
         def cwd(self, directory): pass
         def storbinary(self, command, handle): handle.read()
         def quit(self): pass
         def close(self): pass
 
-    monkeypatch.setattr(hosted.ftplib, "FTP", FakeFTP)
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FakeFTP)
     marked = []
     monkeypatch.setattr(
         hosted,
@@ -441,7 +449,9 @@ def test_photo_only_retry_resends_photos_without_inventory(monkeypatch):
 
     class FakeFTP:
         def connect(self, host, timeout=20): pass
+        def auth(self): pass
         def login(self, username, password): pass
+        def prot_p(self): pass
         def set_pasv(self, value): pass
         def cwd(self, directory): pass
         def storbinary(self, command, handle):
@@ -449,7 +459,7 @@ def test_photo_only_retry_resends_photos_without_inventory(monkeypatch):
         def quit(self): pass
         def close(self): pass
 
-    monkeypatch.setattr(hosted.ftplib, "FTP", FakeFTP)
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FakeFTP)
     marked = []
     monkeypatch.setattr(
         hosted,
@@ -555,14 +565,16 @@ def test_first_inventory_upload_defers_final_photo_signature(monkeypatch):
 
     class FakeFTP:
         def connect(self, host, timeout=20): pass
+        def auth(self): pass
         def login(self, username, password): pass
+        def prot_p(self): pass
         def set_pasv(self, value): pass
         def cwd(self, directory): pass
         def storbinary(self, command, handle): handle.read()
         def quit(self): pass
         def close(self): pass
 
-    monkeypatch.setattr(hosted.ftplib, "FTP", FakeFTP)
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FakeFTP)
     marked = []
     monkeypatch.setattr(
         hosted,
