@@ -2812,10 +2812,7 @@ def connectors(context: RequestContext = Depends(require_context)):
                 if value not in (None, ""):
                     saved_values[key] = str(value)
         if channel == Channel.BIBLIO:
-            saved_values.setdefault(
-                "upload_profile",
-                biblio_upload_profile(context.workspace.id),
-            )
+            saved_values["upload_profile"] = biblio_upload_profile(context.workspace.id)
 
         result.append(
             {
@@ -3058,13 +3055,15 @@ def save_connector_credentials(
         if channel == Channel.BIBLIO:
             if not str(merged.get("username") or "").strip() or not str(merged.get("password") or "").strip():
                 raise HTTPException(status_code=400, detail="BIBLIO needs username and password")
-            upload_profile = str(merged.get("upload_profile") or "core").strip().lower()
-            if upload_profile not in {"core", "extended"}:
+            requested_profile = str(merged.get("upload_profile") or "extended").strip().lower()
+            if requested_profile not in {"core", "extended"}:
                 raise HTTPException(
                     status_code=400,
                     detail="BIBLIO upload profile must be core or extended",
                 )
-            merged["upload_profile"] = upload_profile
+            # Extended is canonical. Promote legacy saved "core" values when
+            # connector settings are next saved.
+            merged["upload_profile"] = "extended"
         elif channel == Channel.EBAY:
             direct = bool(str(merged.get("oauth_token") or "").strip())
             refreshable = all(
