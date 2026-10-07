@@ -266,6 +266,11 @@ replaced inline with a server-validated unique ID. Unlinked Vinted listings show
 **Link to inventory** and jump directly to reconciliation before any destination
 can be published.
 
+BIBLIO uploads use the extended column format automatically. Legacy connector
+settings that still say `core` are promoted at runtime, so condition, subtitle,
+publisher, edition, binding, language, publication date and pages are included
+without requiring a settings migration.
+
 When the Vinted source carries photos, up to twelve are copied automatically to
 BIBLIO during the FTP sync. The BIBLIO preflight shows the actual Vinted image
 thumbnails and explicitly states that they will upload automatically. The server

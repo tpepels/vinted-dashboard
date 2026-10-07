@@ -603,12 +603,11 @@ def test_biblio_review_exposes_every_supported_prefilled_book_field():
     assert 'review: "Reviewed"' in APP_JS
 
 
-def test_biblio_upload_profile_is_explicit_and_safe_by_default():
-    assert '["upload_profile", "Upload profile (core or extended)", "core", "text"]' in APP_JS
-    assert "Use upload profile core for the existing 8-column BIBLIO filter" in APP_JS
-    assert 'data.upload_profile === "core"' in APP_JS
-    assert "condition, subtitle, publisher, edition, binding, language, publication date and pages are NOT sent" in APP_JS
-    assert "Extended BIBLIO profile will send" in APP_JS
+def test_biblio_extended_upload_profile_is_automatic():
+    assert '["upload_profile", "Upload profile (core or extended)"' not in APP_JS
+    assert "The extended BIBLIO format is used automatically" in APP_JS
+    assert 'data.upload_profile === "core"' not in APP_JS
+    assert "The extended BIBLIO format will send" in APP_JS
 
 
 

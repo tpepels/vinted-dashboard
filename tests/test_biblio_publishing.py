@@ -6,7 +6,8 @@ from sqlalchemy import select
 from app import db, entry, models, publishing
 from app.connectors import hosted
 from app.constants import Channel, ItemCategory, ListingStatus
-from app.product_models import BackgroundJob
+from app.crypto import decrypt_json
+from app.product_models import BackgroundJob, ConnectorCredential
 from app.workspace_ingest import classify_vinted_category, record_workspace_snapshot
 
 
@@ -1189,7 +1190,7 @@ def test_biblio_candidate_prefills_isbn_from_valid_master_book_barcode():
 
 
 
-def test_biblio_credentials_validate_upload_profile(monkeypatch):
+def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch):
     client, csrf = _registered_client(monkeypatch)
     invalid = client.put(
         "/api/app/connectors/biblio/credentials",
@@ -1209,7 +1210,7 @@ def test_biblio_credentials_validate_upload_profile(monkeypatch):
         json={"values": {
             "username": "seller",
             "password": "secret",
-            "upload_profile": "extended",
+            "upload_profile": "core",
         }},
     )
     assert valid.status_code == 200, valid.text
@@ -1217,6 +1218,14 @@ def test_biblio_credentials_validate_upload_profile(monkeypatch):
     with db.session_scope() as session:
         membership = session.execute(select(models.Membership)).scalar_one()
         workspace_id = membership.workspace_id
+        credential = session.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.workspace_id == workspace_id,
+                ConnectorCredential.channel == Channel.BIBLIO,
+            )
+        ).scalar_one()
+        stored = decrypt_json(credential.encrypted_payload)
+    assert stored["upload_profile"] == "extended"
     assert hosted.biblio_upload_profile(workspace_id) == "extended"
 
     connectors = client.get("/api/app/connectors")

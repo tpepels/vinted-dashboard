@@ -56,14 +56,13 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. Only changed inventory is sent by FTP. Use upload profile core for the existing 8-column BIBLIO filter. Use extended only after BIBLIO has mapped the richer column order in Upload Settings; extended sends subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, ask BIBLIO to configure your account for this filename convention: BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc.",
+    help: "Book connector. Only changed inventory is sent by FTP. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
     fields: [
       ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
       ["password", "FTP password", "", "password"],
       ["directory", "FTP directory", "", "text"],
       ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
-      ["upload_profile", "Upload profile (core or extended)", "core", "text"],
     ],
   },
   ebay: {
@@ -1199,12 +1198,9 @@ function renderBiblioPublish(data) {
   else if (missing.length) warning = "Before publishing: " + missing.join(", ") + ".";
   else if (data.enrichment_warning) warning = "ISBN lookup warning: " + data.enrichment_warning;
   else if (data.photo_warning) warning = "Photo warning: " + data.photo_warning;
-  else if (data.upload_profile === "core") warning = data.already_listed
-    ? "Ready to update. Core FTP profile is active: condition, subtitle, publisher, edition, binding, language, publication date and pages are NOT sent. Switch to extended only after BIBLIO has mapped that format in Upload Settings."
-    : "Ready. Core FTP profile is active: condition, subtitle, publisher, edition, binding, language, publication date and pages are NOT sent. Switch to extended only after BIBLIO has mapped that format in Upload Settings.";
   else warning = data.already_listed
-    ? "Ready to update using the extended BIBLIO profile, including the optional bibliographic fields shown above."
-    : "Ready. Extended BIBLIO profile will send the optional bibliographic fields shown above.";
+    ? "Ready to update using the extended BIBLIO format, including the optional bibliographic fields shown above."
+    : "Ready. The extended BIBLIO format will send the optional bibliographic fields shown above.";
   $("#biblio-publish-warning").textContent = warning;
 
   $("#biblio-open-connections").classList.toggle("hidden", Boolean(data.configured));
