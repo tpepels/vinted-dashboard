@@ -360,12 +360,16 @@ BIBLIO_FTP_USERNAME=
 BIBLIO_FTP_PASSWORD=
 BIBLIO_FTP_DIRECTORY=
 BIBLIO_FTP_ALLOW_PLAIN=false
+BIBLIO_FTP_AUTO_SYNC=false
 \`\`\`
 
-Publishing a book queues its own targeted BIBLIO sync. Later local edits are
-kept as pending changes until **Sync changes** is used in Connections, where the
-dashboard shows the exact changed-record and delete counts first. This keeps
-remote writes deliberate while preserving change-only/idempotent uploads.
+Publishing a book queues its own targeted BIBLIO sync. By default, later local
+edits are kept as pending changes until **Sync changes** is used in Connections,
+where the dashboard shows the exact changed-record and delete counts first.
+Optionally enable **Automatically sync changed BIBLIO listings after Vinted
+browser updates** in Connections (or set `BIBLIO_FTP_AUTO_SYNC=true` for the
+bootstrap workspace). Automatic jobs are deduplicated and the incremental sync
+still exits before FTP when nothing is dirty.
 
 ### eBay personal setup
 
