@@ -1344,8 +1344,9 @@ function biblioActivityDetail(row) {
   if (!row) return "No BIBLIO FTP run has been recorded yet.";
   const parts = [];
   if (row.listing_title) parts.push(row.listing_title);
-  if (row.photos_only) parts.push("Photo retry");
-  else if (row.full_sync) parts.push("Full resync");
+  if (row.photos_only || row.mode === "photos") parts.push("Photo-only sync");
+  else if (row.full_sync || row.mode === "full") parts.push("Full resync");
+  else if (row.mode === "incremental") parts.push("Changed records only");
   if (row.message) parts.push(row.message);
   const inventoryDone = row.inventory_uploaded ?? (row.status === "success" ? row.active_count : null);
   if (row.inventory_total != null || inventoryDone != null) {
