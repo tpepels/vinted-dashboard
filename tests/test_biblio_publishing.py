@@ -1469,6 +1469,7 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
             "username": "seller",
             "password": "secret",
             "upload_profile": "core",
+            "auto_sync": "true",
         }},
     )
     assert valid.status_code == 200, valid.text
@@ -1486,6 +1487,8 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
     assert stored["upload_profile"] == "extended"
     assert stored["host"] == "ftp.biblio.com"
     assert stored["allow_plain_ftp"] == "false"
+    assert stored["auto_sync"] == "true"
+    assert hosted.biblio_auto_sync_enabled(workspace_id) is True
     assert hosted.biblio_upload_profile(workspace_id) == "extended"
 
     connectors = client.get("/api/app/connectors")
@@ -1497,6 +1500,7 @@ def test_biblio_credentials_promote_legacy_core_profile_to_extended(monkeypatch)
     assert biblio["saved_values"]["username"] == "seller"
     assert biblio["saved_values"]["upload_profile"] == "extended"
     assert biblio["saved_values"]["allow_plain_ftp"] == "false"
+    assert biblio["saved_values"]["auto_sync"] == "true"
     assert "password" not in biblio["saved_values"]
 
 
