@@ -4141,6 +4141,10 @@ def _biblio_listing_row(
         item = session.get(models.InventoryItem, listing.inventory_item_id)
         if item is None:
             raise RuntimeError("BIBLIO master inventory item no longer exists")
+        if int(item.quantity or 0) > 0 or str(item.status or "") != ItemStatus.SOLD:
+            raise RuntimeError(
+                "Refusing BIBLIO delete because the master inventory item is not sold out"
+            )
         attrs = dict(item.attributes or {})
         extra = dict(listing.extra or {})
         bibliographic = (
