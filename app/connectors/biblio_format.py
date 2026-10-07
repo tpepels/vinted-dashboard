@@ -23,6 +23,7 @@ _HEADER_ALIASES = {
         "item number",
     },
     "title": {"title"},
+    "subtitle": {"subtitle"},
     "author": {"author"},
     "isbn": {"isbn", "isbn10", "isbn13", "isbn-10", "isbn-13"},
     "price": {"price", "asking price"},
@@ -132,6 +133,7 @@ def parse_biblio_inventory(
                 "sku": sku,
                 "isbn": raw.get(fields.get("isbn", "")),
                 "title": title,
+                "subtitle": raw.get(fields.get("subtitle", "")),
                 "author": raw.get(fields.get("author", "")),
                 "description": raw.get(fields.get("description", "")),
                 "publisher": raw.get(fields.get("publisher", "")),
@@ -146,6 +148,7 @@ def parse_biblio_inventory(
                 "quantity": quantity,
                 "price_cents": _money(raw.get(fields.get("price", ""))),
                 "currency": currency,
+                "_source_fields": sorted(fields.keys()),
             }
         )
     return rows
