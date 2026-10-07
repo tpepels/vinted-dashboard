@@ -267,9 +267,10 @@ replaced inline with a server-validated unique ID. Unlinked Vinted listings show
 can be published.
 
 BIBLIO uploads use the extended column format automatically. Legacy connector
-settings that still say `core` are promoted at runtime, so condition, subtitle,
-publisher, edition, binding, language, publication date and pages are included
-without requiring a settings migration.
+settings that still say `core` are promoted at runtime. The format includes
+condition, subtitle, publisher, edition, binding, language, publication date,
+pages, publication place, first-edition/signed/dust-jacket flags and details,
+illustrator, keywords and up to eight catalog fields when those values exist.
 
 When the Vinted source carries photos, up to twelve are copied automatically to
 BIBLIO during the FTP sync. The BIBLIO preflight shows the actual Vinted image
