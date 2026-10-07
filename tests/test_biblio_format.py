@@ -117,9 +117,12 @@ def test_targeted_success_run_is_not_used_as_legacy_catalogue_baseline():
 def test_parse_biblio_inventory_preserves_optional_bibliographic_fields():
     rows = parse_biblio_inventory(
         "Book ID\tAuthor\tTitle\tSubtitle\tDescription\tPrice\tISBN\tPublisher\tEdition\t"
-        "Binding\tLanguage\tPublication Date\tPublication Year\tPages\tCondition\tStatus\tQuantity\n"
+        "Binding\tLanguage\tPublication Date\tPublication Year\tPages\tCondition\tPublication Place\t"
+        "First Edition\tSigned\tDJ Present\tDJ Condition\tDJ Description\tIllustrator\tKeywords\t"
+        "Catalog 1\tCatalog 8\tStatus\tQuantity\n"
         "ABC-9\tAuthor\tBook\tA subtitle\tDescription\t9.50\t9780140328721\tPuffin\tRevised\t"
-        "Paperback\tEnglish\t1988-01-01\t1988\t176\tVery good\tFor sale\t1\n",
+        "Paperback\tEnglish\t1988-01-01\t1988\t176\tVery good\tLondon\t"
+        "Yes\tNo\tY\tGood\tLight wear\tArtist\tchildren,classic\tKids\tFeatured\tFor sale\t1\n",
         currency="EUR",
     )
     assert len(rows) == 1
@@ -135,6 +138,16 @@ def test_parse_biblio_inventory_preserves_optional_bibliographic_fields():
     assert row["publication_year"] == 1988
     assert row["pages"] == 176
     assert row["condition"] == "Very good"
+    assert row["publication_place"] == "London"
+    assert row["first_edition"] is True
+    assert row["signed"] is False
+    assert row["dust_jacket_present"] is True
+    assert row["dust_jacket_condition"] == "Good"
+    assert row["dust_jacket_description"] == "Light wear"
+    assert row["illustrator"] == "Artist"
+    assert row["keywords"] == "children,classic"
+    assert row["catalog_1"] == "Kids"
+    assert row["catalog_8"] == "Featured"
 
 
 
