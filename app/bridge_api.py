@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app import billing, db, models
+from app import billing, db, jobs, models
 from app.auth import (
     RequestContext,
     extension_context,
@@ -28,6 +28,8 @@ from app.auth import (
     utcnow,
 )
 from app.bridge_package import extension_source_version
+from app.constants import Channel, ListingStatus
+from app.connectors.hosted import biblio_auto_sync_enabled
 from app.product_models import ExtensionCredential, ExtensionPairing
 from app.workspace_ingest import record_workspace_snapshot
 
@@ -266,6 +268,24 @@ def extension_browser_sync(
         extension_version=version,
     )
 
+    biblio_sync_job_id = None
+    if biblio_auto_sync_enabled(context.workspace.id):
+        with db.session_scope() as session:
+            has_active_biblio = session.execute(
+                select(models.ChannelListing.id).where(
+                    models.ChannelListing.workspace_id == context.workspace.id,
+                    models.ChannelListing.channel == Channel.BIBLIO,
+                    models.ChannelListing.status == ListingStatus.ACTIVE,
+                    models.ChannelListing.quantity > 0,
+                ).limit(1)
+            ).scalar_one_or_none() is not None
+        if has_active_biblio:
+            biblio_sync_job_id = jobs.enqueue_unique(
+                "biblio_sync",
+                {},
+                context.workspace.id,
+            )
+
     if context.extension is not None and version:
         with db.session_scope() as session:
             row = session.get(ExtensionCredential, context.extension.id)
@@ -273,4 +293,11 @@ def extension_browser_sync(
                 row.extension_version = version
                 row.last_seen_at = utcnow()
 
-    return {"ok": True, **result}
+    return {
+        "ok": True,
+        **result,
+        "biblio_auto_sync_queued": biblio_sync_job_id is not None,
+        "biblio_auto_sync_job_id": (
+            str(biblio_sync_job_id) if biblio_sync_job_id is not None else None
+        ),
+    }
