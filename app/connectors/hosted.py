@@ -4267,6 +4267,7 @@ def sync_biblio_workspace(
             run_id,
             detail={
                 "stage": "connected",
+                "transport": str(getattr(ftp, "_biblio_transport", "unknown")),
                 "message": (
                     "Connected securely to BIBLIO FTPS"
                     if getattr(ftp, "_biblio_transport", "") == "ftps"
@@ -4633,8 +4634,10 @@ def close_biblio_workspace_listing(
     filename = f"{prefix}-{stamp}-deletes.txt"
     started = datetime.now(timezone.utc)
 
+    transport = "unknown"
     try:
         ftp = _connect_biblio_ftp(values)
+        transport = str(getattr(ftp, "_biblio_transport", "unknown"))
         ftp.storbinary(
             f"STOR {filename}",
             io.BytesIO(_biblio_tsv([row], sold=True, profile=upload_profile)),
@@ -4654,6 +4657,7 @@ def close_biblio_workspace_listing(
                 "deletes_filename": filename,
                 "cross_channel": True,
                 "upload_profile": upload_profile,
+                "transport": transport,
             },
             error=str(exc),
         )
@@ -4669,6 +4673,7 @@ def close_biblio_workspace_listing(
             "deletes_filename": filename,
             "cross_channel": True,
             "upload_profile": upload_profile,
+            "transport": transport,
         },
     )
     return {
@@ -4676,5 +4681,6 @@ def close_biblio_workspace_listing(
         "external_id": str(row.get("source_id") or ""),
         "deletes_filename": filename,
         "upload_profile": upload_profile,
+        "transport": transport,
         "inventory_signature": str(row.get("inventory_signature") or ""),
     }
