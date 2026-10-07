@@ -3251,9 +3251,14 @@ def _biblio_remote_mismatches(
     expected: dict[str, Any],
     remote: dict[str, Any],
 ) -> list[str]:
+    present = set(remote.get("_source_fields") or BIBLIO_VERIFY_FIELDS)
+    comparable = [
+        field for field in BIBLIO_VERIFY_FIELDS
+        if field in present
+    ]
     return [
         field
-        for field in BIBLIO_VERIFY_FIELDS
+        for field in comparable
         if _biblio_compare_value(field, expected.get(field))
         != _biblio_compare_value(field, remote.get(field))
     ]
