@@ -323,8 +323,14 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
         def connect(self, host, timeout=20):
             assert host == "ftp.test"
 
+        def auth(self):
+            return None
+
         def login(self, username, password):
             assert (username, password) == ("seller", "secret")
+
+        def prot_p(self):
+            return None
 
         def set_pasv(self, enabled):
             assert enabled is True
@@ -341,7 +347,7 @@ def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
         def close(self):
             return None
 
-    monkeypatch.setattr(hosted.ftplib, "FTP", FakeFTP)
+    monkeypatch.setattr(hosted.ftplib, "FTP_TLS", FakeFTP)
     result = hosted.close_biblio_workspace_listing(workspace_id, listing_id)
     assert result["remote"] == "delete_uploaded"
     assert len(FakeFTP.uploads) == 1
