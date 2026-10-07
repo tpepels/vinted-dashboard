@@ -1559,6 +1559,8 @@ $("#biblio-publish-submit").onclick = async () => {
     if (!value && required) return;
     if (field.dataset.field === "price_cents") {
       if (value) payload.price_cents = Math.round(Number(value) * 100);
+    } else if (field.dataset.field === "pages") {
+      payload.pages = value === "" ? null : Number(value);
     } else if (field.dataset.type === "boolean") {
       payload[field.dataset.field] = value === "" ? null : value === "true";
     } else {
