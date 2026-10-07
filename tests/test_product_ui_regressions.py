@@ -634,6 +634,8 @@ def test_biblio_connection_is_host_pinned_and_import_is_safe_by_default():
     assert '["host", "FTP host"' not in APP_JS
     assert "FTP is locked to BIBLIO's documented ftp.biblio.com host" in APP_JS
     assert '"allow_plain_ftp"' in APP_JS
+    assert '"auto_sync"' in APP_JS
+    assert "Automatically sync changed BIBLIO listings after Vinted browser updates" in APP_JS
     assert "legacy plain FTP" in APP_JS
     assert "plain FTP requires opt-in" in APP_JS
     assert 'id="verify-biblio"' in html
