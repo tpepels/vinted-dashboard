@@ -1164,6 +1164,22 @@ function renderBiblioPublish(data) {
     ["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false],
     ["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false],
     ["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false],
+    ["publication_place", "Publication place", enrichment.publication_place || "", bibliographicSources.publication_place || null, true, false],
+    ["first_edition", "First edition", enrichment.first_edition ?? "", bibliographicSources.first_edition || null, true, false],
+    ["signed", "Signed", enrichment.signed ?? "", bibliographicSources.signed || null, true, false],
+    ["dust_jacket_present", "Dust jacket present", enrichment.dust_jacket_present ?? "", bibliographicSources.dust_jacket_present || null, true, false],
+    ["dust_jacket_condition", "Dust jacket condition", enrichment.dust_jacket_condition || "", bibliographicSources.dust_jacket_condition || null, true, false],
+    ["dust_jacket_description", "Dust jacket description", enrichment.dust_jacket_description || "", bibliographicSources.dust_jacket_description || null, true, false],
+    ["illustrator", "Illustrator", enrichment.illustrator || "", bibliographicSources.illustrator || null, true, false],
+    ["keywords", "Keywords", enrichment.keywords || "", bibliographicSources.keywords || null, true, false],
+    ["catalog_1", "Catalog 1", enrichment.catalog_1 || "", bibliographicSources.catalog_1 || null, true, false],
+    ["catalog_2", "Catalog 2", enrichment.catalog_2 || "", bibliographicSources.catalog_2 || null, true, false],
+    ["catalog_3", "Catalog 3", enrichment.catalog_3 || "", bibliographicSources.catalog_3 || null, true, false],
+    ["catalog_4", "Catalog 4", enrichment.catalog_4 || "", bibliographicSources.catalog_4 || null, true, false],
+    ["catalog_5", "Catalog 5", enrichment.catalog_5 || "", bibliographicSources.catalog_5 || null, true, false],
+    ["catalog_6", "Catalog 6", enrichment.catalog_6 || "", bibliographicSources.catalog_6 || null, true, false],
+    ["catalog_7", "Catalog 7", enrichment.catalog_7 || "", bibliographicSources.catalog_7 || null, true, false],
+    ["catalog_8", "Catalog 8", enrichment.catalog_8 || "", bibliographicSources.catalog_8 || null, true, false],
     ["price_cents", "Price", fields.price_cents == null ? "" : (Number(fields.price_cents) / 100).toFixed(2), sources.price_cents, true, true],
     ["book_id", data.book_id_locked ? "Book ID (locked after first upload)" : "Book ID", bookIdValue, sources.book_id, bookIdEditable, true],
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
@@ -1173,9 +1189,19 @@ function renderBiblioPublish(data) {
     const missing = required && (value == null || String(value).trim() === "");
     let valueHtml;
     if (editable) {
-      if (key === "description") {
-        valueHtml = '<textarea class="biblio-review-input" data-field="description" data-required="' + (required ? "true" : "false")
-          + '" rows="4" placeholder="Description required by BIBLIO">' + esc(value || "") + '</textarea>';
+      const booleanField = ["first_edition", "signed", "dust_jacket_present"].includes(key);
+      if (booleanField) {
+        const selected = value === true ? "true" : (value === false ? "false" : "");
+        valueHtml = '<select class="biblio-review-input" data-field="' + esc(key)
+          + '" data-type="boolean" data-required="' + (required ? "true" : "false") + '">'
+          + '<option value=""' + (selected === "" ? " selected" : "") + '>Not set</option>'
+          + '<option value="true"' + (selected === "true" ? " selected" : "") + '>Yes</option>'
+          + '<option value="false"' + (selected === "false" ? " selected" : "") + '>No</option>'
+          + '</select>';
+      } else if (key === "description" || key === "dust_jacket_description") {
+        valueHtml = '<textarea class="biblio-review-input" data-field="' + esc(key) + '" data-required="' + (required ? "true" : "false")
+          + '" rows="4" placeholder="' + esc(key === "description" ? "Description required by BIBLIO" : "Dust jacket description (optional)") + '">'
+          + esc(value || "") + '</textarea>';
       } else {
         const type = key === "price_cents" || key === "pages" ? "number" : "text";
         const extra = key === "price_cents"
@@ -1533,6 +1559,8 @@ $("#biblio-publish-submit").onclick = async () => {
     if (!value && required) return;
     if (field.dataset.field === "price_cents") {
       if (value) payload.price_cents = Math.round(Number(value) * 100);
+    } else if (field.dataset.type === "boolean") {
+      payload[field.dataset.field] = value === "" ? null : value === "true";
     } else {
       payload[field.dataset.field] = value;
     }
