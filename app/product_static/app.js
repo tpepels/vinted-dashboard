@@ -56,9 +56,8 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. Only changed inventory is sent by FTP. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
+    help: "Book connector. FTP is locked to BIBLIO's documented ftp.biblio.com host. Only changed inventory is sent. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
     fields: [
-      ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
       ["password", "FTP password", "", "password"],
       ["directory", "FTP directory", "", "text"],
@@ -1305,11 +1304,21 @@ function biblioListingDetails(row) {
   if (details.publisher) parts.push("Publisher: " + details.publisher);
   if (details.edition) parts.push("Edition: " + details.edition);
   if (details.isbn) parts.push("ISBN: " + details.isbn);
-  if (!parts.length) {
-    return '<div class="sub">BIBLIO FTP listing - no remote readback available</div>';
+  let verification = "Submitted locally by FTP; not yet verified from a BIBLIO inventory download.";
+  if (details.remote_verified) {
+    if (details.remote_matches_local === true) {
+      verification = "Verified in BIBLIO inventory" + (details.remote_verified_at ? " · " + when(details.remote_verified_at) : "");
+    } else {
+      const fields = (details.remote_mismatch_fields || []).join(", ");
+      verification = "Verified in BIBLIO, but remote data differs" + (fields ? ": " + fields : "");
+    }
+  } else if (details.remote_missing_at) {
+    verification = "Missing from the last complete BIBLIO active-inventory snapshot.";
   }
-  return '<div class="sub">' + esc(parts.join(" · ")) + '</div>'
-    + '<div class="sub">Submitted locally by FTP; BIBLIO does not provide listing readback to this connector.</div>';
+  const metadata = parts.length
+    ? '<div class="sub">' + esc(parts.join(" · ")) + '</div>'
+    : '<div class="sub">BIBLIO FTP listing</div>';
+  return metadata + '<div class="sub">' + esc(verification) + '</div>';
 }
 
 function biblioActivityStatus(row) {
@@ -1362,6 +1371,19 @@ function renderBiblioActivity(activity, operational) {
   const current = activity?.current || null;
   const status = biblioActivityStatus(current);
   const runs = activity?.runs || [];
+  const health = activity?.health || {};
+  const safety = health.safety || {};
+  const healthHtml = health.active_listings == null
+    ? ""
+    : '<div class="biblio-activity-note"><strong>BIBLIO health:</strong> '
+      + esc(health.active_listings || 0) + ' active · '
+      + esc(health.remote_verified_matching || 0) + ' verified/matching · '
+      + esc(health.remote_verified_mismatching || 0) + ' mismatching · '
+      + esc(health.remote_unverified || 0) + ' unverified · '
+      + esc(health.photo_attention || 0) + ' photo attention · '
+      + esc(health.publish_attention || 0) + ' publish attention'
+      + (safety.ftp_host_locked ? ' · FTP host locked' : '')
+      + '</div>';
   const history = runs.length
     ? runs.map((run) => {
       const runStatus = biblioActivityStatus(run);
@@ -1381,6 +1403,7 @@ function renderBiblioActivity(activity, operational) {
     }).join("")
     : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
   return '<div class="biblio-activity-compact">'
+    + healthHtml
     + '<div class="biblio-activity-current"><span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
     + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
     + '<div class="actions biblio-activity-actions">'
@@ -4029,16 +4052,60 @@ $("#test-biblio").onclick = async () => {
   }
 };
 
-$("#import-biblio").onclick = async () => {
-  const file = $("#biblio-import-file").files[0];
-  if (!file) return flash("Choose a BIBLIO inventory file first.", true);
+function biblioInventoryForm(file, authoritative = false) {
   const form = new FormData();
   form.append("file", file);
-  $("#connector-config-status").textContent = "Importing BIBLIO inventory…";
+  if (authoritative) form.append("authoritative", "true");
+  return form;
+}
+
+function biblioReconciliationText(result) {
+  const parts = [
+    (result.matched_clean || 0) + " matching",
+    (result.mismatched || 0) + " mismatching",
+    (result.remote_only || 0) + " remote-only",
+    (result.missing_local || 0) + " local-only",
+  ];
+  return parts.join(" · ");
+}
+
+$("#verify-biblio").onclick = async () => {
+  const file = $("#biblio-import-file").files[0];
+  if (!file) return flash("Choose a BIBLIO inventory download first.", true);
+  $("#connector-config-status").textContent = "Verifying BIBLIO inventory without changing local stock…";
   try {
-    const result = await api("/api/app/connectors/biblio/import", { method: "POST", body: form });
-    $("#connector-config-status").textContent = "Imported " + result.items + " BIBLIO listings · " + result.active + " active.";
-    flash("BIBLIO inventory imported.");
+    const result = await api("/api/app/connectors/biblio/verify", {
+      method: "POST",
+      body: biblioInventoryForm(file),
+    });
+    $("#connector-config-status").textContent = "Verified " + result.remote_active
+      + " active BIBLIO listings · " + biblioReconciliationText(result) + ".";
+    flash("BIBLIO verification complete; no inventory was changed.");
+    await connections();
+  } catch (error) {
+    $("#connector-config-status").textContent = error.message;
+  }
+};
+
+$("#import-biblio").onclick = async () => {
+  const file = $("#biblio-import-file").files[0];
+  if (!file) return flash("Choose a BIBLIO inventory download first.", true);
+  const authoritative = Boolean($("#biblio-import-authoritative")?.checked);
+  if (authoritative && !window.confirm(
+    "This will treat the file as BIBLIO's COMPLETE active inventory and mark local BIBLIO listings missing from it inactive. Continue?"
+  )) return;
+  $("#connector-config-status").textContent = authoritative
+    ? "Applying complete BIBLIO active-inventory snapshot…"
+    : "Safely merging BIBLIO inventory; omitted local rows will not be deactivated…";
+  try {
+    const result = await api("/api/app/connectors/biblio/import", {
+      method: "POST",
+      body: biblioInventoryForm(file, authoritative),
+    });
+    $("#connector-config-status").textContent = (authoritative ? "Applied complete snapshot. " : "Merged inventory. ")
+      + biblioReconciliationText(result) + ".";
+    flash(authoritative ? "BIBLIO snapshot reconciled." : "BIBLIO inventory merged safely.");
+    await connections();
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
   }
