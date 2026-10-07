@@ -689,3 +689,20 @@ def test_cross_list_remains_one_action_when_connector_count_grows():
     assert 'class="btn cross-list"' in APP_JS
     assert "data-channel=" in APP_JS
     assert "data.destinations" in APP_JS
+
+
+
+def test_diagnostics_controls_and_dev_log_console_are_wired():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="diagnostics-download"' in html
+    assert 'id="diagnostics-live"' in html
+    assert 'id="diagnostics-log-window"' in html
+    assert 'api("/api/app/diagnostics/status")' in APP_JS
+    assert 'api("/api/app/diagnostics/logs?limit=350")' in APP_JS
+    assert 'fetch("/api/app/diagnostics/download"' in APP_JS
+    assert "state.browserLogs" in APP_JS
+    assert 'window.addEventListener("error"' in APP_JS
+    assert 'window.addEventListener("unhandledrejection"' in APP_JS
+    assert "diagnosticsDevConsole" in APP_JS
