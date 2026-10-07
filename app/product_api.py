@@ -1609,7 +1609,7 @@ def cross_list_publish(
                 item_id,
                 source_listing_id=payload.source_listing_id,
             )
-        overrides = payload.model_dump(exclude_none=True)
+        overrides = payload.model_dump(exclude_unset=True)
         overrides.pop("source_listing_id", None)
         if overrides:
             candidate = cross_listing.apply_overrides(candidate, overrides)
