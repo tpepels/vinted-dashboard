@@ -600,11 +600,24 @@ def test_biblio_review_exposes_every_supported_prefilled_book_field():
         '["publish_date", "Publish date", enrichment.publish_date || "", bibliographicSources.publish_date || null, true, false]',
         '["pages", "Pages", enrichment.pages || "", bibliographicSources.pages || null, true, false]',
         '["condition", "Condition", enrichment.condition || "", bibliographicSources.condition || null, true, false]',
+        '["publication_place", "Publication place", enrichment.publication_place || "", bibliographicSources.publication_place || null, true, false]',
+        '["first_edition", "First edition", enrichment.first_edition ?? "", bibliographicSources.first_edition || null, true, false]',
+        '["signed", "Signed", enrichment.signed ?? "", bibliographicSources.signed || null, true, false]',
+        '["dust_jacket_present", "Dust jacket present", enrichment.dust_jacket_present ?? "", bibliographicSources.dust_jacket_present || null, true, false]',
+        '["dust_jacket_condition", "Dust jacket condition", enrichment.dust_jacket_condition || "", bibliographicSources.dust_jacket_condition || null, true, false]',
+        '["dust_jacket_description", "Dust jacket description", enrichment.dust_jacket_description || "", bibliographicSources.dust_jacket_description || null, true, false]',
+        '["illustrator", "Illustrator", enrichment.illustrator || "", bibliographicSources.illustrator || null, true, false]',
+        '["keywords", "Keywords", enrichment.keywords || "", bibliographicSources.keywords || null, true, false]',
+        '["catalog_1", "Catalog 1", enrichment.catalog_1 || "", bibliographicSources.catalog_1 || null, true, false]',
+        '["catalog_8", "Catalog 8", enrichment.catalog_8 || "", bibliographicSources.catalog_8 || null, true, false]',
     ):
         assert row in APP_JS
     assert 'master_barcode: "Master barcode"' in APP_JS
     assert 'vinted_barcode: "Vinted barcode"' in APP_JS
     assert 'review: "Reviewed"' in APP_JS
+    assert 'data-type="boolean"' in APP_JS
+    assert ">Not set</option>" in APP_JS
+    assert 'payload[field.dataset.field] = value === "" ? null : value === "true";' in APP_JS
 
 
 def test_biblio_extended_upload_profile_is_automatic():
