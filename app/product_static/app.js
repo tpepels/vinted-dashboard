@@ -59,11 +59,12 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. FTP is locked to BIBLIO's documented ftp.biblio.com host. Only changed inventory is sent. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
+    help: "Book connector. FTP is locked to BIBLIO's documented ftp.biblio.com host/root. The connector tries verified FTPS first. Because BIBLIO publicly documents standard FTP rather than FTPS, legacy plain FTP is available only with explicit opt-in and is otherwise refused. Only changed inventory is sent. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
     fields: [
       ["username", "FTP username", "", "text"],
       ["password", "FTP password", "", "password"],
       ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
+      ["allow_plain_ftp", "Allow legacy plain FTP if verified FTPS is unavailable (credentials and uploads are unencrypted in transit)", "", "checkbox"],
     ],
   },
   ebay: {
@@ -1388,7 +1389,8 @@ function renderBiblioActivity(activity, operational) {
       + esc(health.remote_verification_stale || 0) + ' stale verification · '
       + esc(health.photo_attention || 0) + ' photo attention · '
       + esc(health.publish_attention || 0) + ' publish attention'
-      + (safety.ftps_required ? ' · verified FTPS/TLS required' : '')
+      + (safety.ftps_preferred ? ' · verified FTPS preferred' : '')
+      + (safety.plain_ftp_requires_opt_in ? ' · plain FTP requires opt-in' : '')
       + (safety.ftp_host_locked ? ' · host/root locked' : '')
       + '</div>';
   const history = runs.length
@@ -3958,6 +3960,11 @@ function openConnectorConfig(channel, connector) {
   const savedValues = connector?.saved_values || {};
   $("#connector-fields").innerHTML = schema.fields.map(([name, label, placeholder, type]) => {
     const value = type === "password" ? "" : (savedValues[name] ?? "");
+    if (type === "checkbox") {
+      const checked = ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+      return '<label class="checkline"><input name="' + esc(name) + '" type="checkbox" value="true"'
+        + (checked ? " checked" : "") + '> ' + esc(label) + '</label>';
+    }
     return '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
       + '" placeholder="' + esc(placeholder) + '" value="' + esc(value) + '"></label>';
   }).join("");
@@ -3984,6 +3991,9 @@ $("#connector-config").onsubmit = async (event) => {
   const values = {};
   new FormData(event.currentTarget).forEach((value, key) => {
     if (String(value).trim()) values[key] = String(value).trim();
+  });
+  (connectorSchemas[channel]?.fields || []).forEach(([name, _label, _placeholder, type]) => {
+    if (type === "checkbox" && !(name in values)) values[name] = "false";
   });
   try {
     const saved = await api("/api/app/connectors/" + channel + "/credentials", {
@@ -4051,10 +4061,10 @@ $("#test-connector").onclick = async () => {
 };
 
 $("#test-biblio").onclick = async () => {
-  $("#connector-config-status").textContent = "Testing secure FTPS…";
+  $("#connector-config-status").textContent = "Testing BIBLIO transfer security…";
   try {
     const result = await api("/api/app/connectors/biblio/test", { method: "POST" });
-    $("#connector-config-status").textContent = result.detail || "BIBLIO secure FTPS connection succeeded.";
+    $("#connector-config-status").textContent = result.detail || "BIBLIO connection succeeded.";
   } catch (error) {
     $("#connector-config-status").textContent = error.message;
   }
