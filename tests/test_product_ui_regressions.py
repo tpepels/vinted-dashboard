@@ -618,6 +618,9 @@ def test_biblio_connection_is_host_pinned_and_import_is_safe_by_default():
     ).read_text(encoding="utf-8")
     assert '["host", "FTP host"' not in APP_JS
     assert "FTP is locked to BIBLIO's documented ftp.biblio.com host" in APP_JS
+    assert '"allow_plain_ftp"' in APP_JS
+    assert "legacy plain FTP" in APP_JS
+    assert "plain FTP requires opt-in" in APP_JS
     assert 'id="verify-biblio"' in html
     assert 'id="biblio-import-authoritative"' in html
     assert '"/api/app/connectors/biblio/verify"' in APP_JS
