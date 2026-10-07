@@ -3631,6 +3631,18 @@ def _biblio_rows(
     return active, deletes
 
 
+def biblio_pending_changes(workspace_id: uuid.UUID) -> dict[str, int]:
+    """Return the exact inventory work an incremental BIBLIO sync would send."""
+    active, deletes = _biblio_rows(
+        workspace_id,
+        profile=biblio_upload_profile(workspace_id),
+    )
+    return {
+        "inventory": sum(1 for row in active if bool(row.get("inventory_dirty"))),
+        "deletes": sum(1 for row in deletes if bool(row.get("inventory_dirty"))),
+    }
+
+
 def _missing_biblio(row: dict[str, Any]) -> list[str]:
     missing = []
     for key, label in (
