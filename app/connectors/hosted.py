@@ -3984,7 +3984,11 @@ def _biblio_upload_stamp() -> str:
     return f"{stamp}-{uuid.uuid4().hex[:10]}"
 
 
-def _connect_biblio_ftp(values: dict[str, str]) -> ftplib.FTP_TLS:
+def _biblio_truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _connect_biblio_ftp(values: dict[str, str]) -> ftplib.FTP:
     values = _harden_biblio_values(values)
     host = values.get("host", BIBLIO_FTP_HOST).strip() or BIBLIO_FTP_HOST
     username = values.get("username", "").strip()
@@ -3992,26 +3996,51 @@ def _connect_biblio_ftp(values: dict[str, str]) -> ftplib.FTP_TLS:
     if not username or not password:
         raise RuntimeError("BIBLIO needs username and password")
 
-    # Do not rely on ftplib's implementation defaults. Require normal public-CA
-    # certificate and hostname verification and refuse obsolete TLS versions.
+    # Prefer explicit-TLS FTPS with normal public-CA and hostname validation.
+    # BIBLIO's public help currently documents standard FTP, not FTPS, so a
+    # legacy plain-FTP fallback is available only after explicit opt-in.
     context = ssl.create_default_context()
     context.check_hostname = True
     context.verify_mode = ssl.CERT_REQUIRED
     if hasattr(ssl, "TLSVersion"):
         context.minimum_version = ssl.TLSVersion.TLSv1_2
 
-    ftp = ftplib.FTP_TLS(context=context)
+    tls_ftp = None
+    try:
+        tls_ftp = ftplib.FTP_TLS(context=context)
+        tls_ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
+        tls_ftp.auth()
+        tls_ftp.login(username, password)
+        tls_ftp.prot_p()
+        tls_ftp.set_pasv(True)
+        setattr(tls_ftp, "_biblio_transport", "ftps")
+        return tls_ftp
+    except Exception as tls_exc:
+        if tls_ftp is not None:
+            try:
+                tls_ftp.close()
+            except Exception:
+                pass
+        if not _biblio_truthy(values.get("allow_plain_ftp")):
+            raise RuntimeError(
+                "BIBLIO did not accept verified FTPS. Plain FTP fallback is disabled "
+                "because FTP credentials and uploads are not encrypted in transit. "
+                "Enable legacy plain FTP explicitly only if your BIBLIO account does "
+                "not support FTPS."
+            ) from tls_exc
+
+    ftp = ftplib.FTP()
     ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
-    ftp.auth()
     ftp.login(username, password)
-    ftp.prot_p()
     ftp.set_pasv(True)
+    setattr(ftp, "_biblio_transport", "plain_ftp")
     return ftp
 
 
 def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
     ftp = _connect_biblio_ftp(values)
+    transport = str(getattr(ftp, "_biblio_transport", "unknown"))
     try:
         pwd = ftp.pwd()
     finally:
@@ -4019,7 +4048,12 @@ def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
             ftp.quit()
         except Exception:
             ftp.close()
-    return {"ok": True, "detail": f"Connected securely with FTPS; directory {pwd}"}
+    detail = (
+        f"Connected securely with FTPS; directory {pwd}"
+        if transport == "ftps"
+        else f"Connected using explicitly enabled legacy plain FTP; directory {pwd}"
+    )
+    return {"ok": True, "detail": detail, "transport": transport}
 
 
 def sync_biblio_workspace(
@@ -4179,7 +4213,11 @@ def sync_biblio_workspace(
             run_id,
             detail={
                 "stage": "connected",
-                "message": "Connected securely to BIBLIO FTPS",
+                "message": (
+                    "Connected securely to BIBLIO FTPS"
+                    if getattr(ftp, "_biblio_transport", "") == "ftps"
+                    else "Connected to BIBLIO using explicitly enabled legacy plain FTP"
+                ),
             },
         )
 
@@ -4387,6 +4425,7 @@ def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
         or "reseller-dashboard",
         "upload_profile": os.getenv("BIBLIO_FTP_UPLOAD_PROFILE", "extended").strip()
         or "extended",
+        "allow_plain_ftp": os.getenv("BIBLIO_FTP_ALLOW_PLAIN", "false").strip() or "false",
     })
 
 
