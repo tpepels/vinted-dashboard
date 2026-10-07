@@ -58,6 +58,15 @@ def test_biblio_connection_requires_explicit_tls_and_private_data_channel(monkey
     calls = []
 
     class FakeTLS:
+        def __init__(self, *args, **kwargs):
+            context = kwargs.get("context")
+            calls.append((
+                "context",
+                bool(context and context.check_hostname),
+                getattr(context, "verify_mode", None),
+                getattr(context, "minimum_version", None),
+            ))
+
         def connect(self, host, timeout=20):
             calls.append(("connect", host, timeout))
 
@@ -86,10 +95,26 @@ def test_biblio_connection_requires_explicit_tls_and_private_data_channel(monkey
     })
 
     assert isinstance(ftp, FakeTLS)
-    assert calls == [
+    assert calls[0][0] == "context"
+    assert calls[0][1] is True
+    assert calls[0][2] == hosted.ssl.CERT_REQUIRED
+    if hasattr(hosted.ssl, "TLSVersion"):
+        assert calls[0][3] >= hosted.ssl.TLSVersion.TLSv1_2
+    assert calls[1:] == [
         ("connect", "ftp.biblio.com", 20),
         ("auth",),
         ("login", "seller", "secret"),
         ("prot_p",),
         ("pasv", True),
     ]
+
+
+
+def test_biblio_directory_is_locked_to_seller_root():
+    assert hosted._safe_biblio_directory("") == ""
+    assert hosted._safe_biblio_directory(".") == ""
+    assert hosted._safe_biblio_directory("./") == ""
+    with pytest.raises(RuntimeError, match="blank or"):
+        hosted._safe_biblio_directory("uploads")
+    with pytest.raises(RuntimeError, match="blank or"):
+        hosted._safe_biblio_directory("../elsewhere")
