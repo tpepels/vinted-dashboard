@@ -290,8 +290,9 @@ without deactivating omitted local listings. Only the explicitly-authoritative
 complete-snapshot option may mark local BIBLIO listings missing from the file
 inactive.
 
-For production safety, BIBLIO FTP credentials are pinned to BIBLIO's documented
-`ftp.biblio.com` host, remote sold/delete uploads are refused while the linked
+For production safety, BIBLIO transfers use mandatory explicit-TLS FTPS and
+credentials are pinned to BIBLIO's documented `ftp.biblio.com` host. Remote
+sold/delete uploads are refused while the linked
 master item still has stock, unchanged inventory and photos remain idempotent,
 and connector health reports verified/mismatching/unverified rows plus photo and
 publication attention states.
