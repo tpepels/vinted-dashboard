@@ -3903,28 +3903,35 @@ def _biblio_upload_stamp() -> str:
     return f"{stamp}-{uuid.uuid4().hex[:10]}"
 
 
-def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
-    values = _workspace_or_env_biblio_values(workspace_id)
-    host = values.get("host", "ftp.biblio.com").strip() or "ftp.biblio.com"
+def _connect_biblio_ftp(values: dict[str, str]) -> ftplib.FTP_TLS:
+    host = values.get("host", BIBLIO_FTP_HOST).strip() or BIBLIO_FTP_HOST
     username = values.get("username", "").strip()
     password = values.get("password", "").strip()
     if not username or not password:
         raise RuntimeError("BIBLIO needs username and password")
-    ftp = ftplib.FTP()
+    ftp = ftplib.FTP_TLS()
+    ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
+    ftp.auth()
+    ftp.login(username, password)
+    ftp.prot_p()
+    ftp.set_pasv(True)
+    directory = values.get("directory", "").strip()
+    if directory and directory not in {".", "./"}:
+        ftp.cwd(directory)
+    return ftp
+
+
+def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    values = _workspace_or_env_biblio_values(workspace_id)
+    ftp = _connect_biblio_ftp(values)
     try:
-        ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
-        ftp.login(username, password)
-        ftp.set_pasv(True)
-        directory = values.get("directory", "").strip()
-        if directory and directory not in {".", "./"}:
-            ftp.cwd(directory)
         pwd = ftp.pwd()
     finally:
         try:
             ftp.quit()
         except Exception:
             ftp.close()
-    return {"ok": True, "detail": f"Connected successfully; directory {pwd}"}
+    return {"ok": True, "detail": f"Connected securely with FTPS; directory {pwd}"}
 
 
 def sync_biblio_workspace(
@@ -4079,18 +4086,12 @@ def sync_biblio_workspace(
                 "message": f"Connecting to {host}",
             },
         )
-        ftp = ftplib.FTP()
-        ftp.connect(host, timeout=_int(values.get("timeout_seconds"), 20) or 20)
-        ftp.login(username, password)
-        ftp.set_pasv(True)
-        directory = values.get("directory", "").strip()
-        if directory and directory not in {".", "./"}:
-            ftp.cwd(directory)
+        ftp = _connect_biblio_ftp(values)
         _update_biblio_run(
             run_id,
             detail={
                 "stage": "connected",
-                "message": "Connected to BIBLIO FTP",
+                "message": "Connected securely to BIBLIO FTPS",
             },
         )
 
@@ -4424,16 +4425,7 @@ def close_biblio_workspace_listing(
     started = datetime.now(timezone.utc)
 
     try:
-        ftp = ftplib.FTP()
-        ftp.connect(
-            values.get("host", "ftp.biblio.com").strip() or "ftp.biblio.com",
-            timeout=_int(values.get("timeout_seconds"), 20) or 20,
-        )
-        ftp.login(values.get("username", ""), values.get("password", ""))
-        ftp.set_pasv(True)
-        directory = values.get("directory", "").strip()
-        if directory and directory not in {".", "./"}:
-            ftp.cwd(directory)
+        ftp = _connect_biblio_ftp(values)
         ftp.storbinary(
             f"STOR {filename}",
             io.BytesIO(_biblio_tsv([row], sold=True, profile=upload_profile)),
