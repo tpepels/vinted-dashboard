@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import time
 import zipfile
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -82,12 +83,12 @@ def setup_diagnostics(service: str) -> Path:
         encoding="utf-8",
     )
     handler.setLevel(logging.INFO)
-    handler.setFormatter(
-        RedactingFormatter(
-            f"%(asctime)sZ %(levelname)s {service} %(name)s %(message)s",
-            datefmt="%Y-%m-%dT%H:%M:%S",
-        )
+    formatter = RedactingFormatter(
+        f"%(asctime)sZ %(levelname)s {service} %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
     )
+    formatter.converter = time.gmtime
+    handler.setFormatter(formatter)
     setattr(handler, "_diagnostics_marker", marker)
 
     targets = [logging.getLogger()]
@@ -136,12 +137,17 @@ def build_bundle(
     *,
     browser_logs: list[dict[str, Any]] | None = None,
     snapshot: dict[str, Any] | None = None,
+    include_server_logs: bool = True,
 ) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         manifest = {
             "generated_at": utcnow().isoformat(),
-            "note": "Secrets are redacted. Logs can still contain user-entered titles/identifiers.",
+            "server_logs_included": bool(include_server_logs),
+            "note": (
+                "Secrets are redacted. Logs can still contain user-entered titles/identifiers. "
+                "Raw process logs are excluded from production bundles because they are not workspace-scoped."
+            ),
         }
         archive.writestr("README.txt", _safe_json(manifest) + "\n")
         archive.writestr("snapshot.json", _safe_json(snapshot or {}) + "\n")
@@ -149,10 +155,11 @@ def build_bundle(
             redact_text(json.dumps(row, sort_keys=True, default=str))
             for row in (browser_logs or [])[-1000:]
         ) + "\n")
-        for _source, path in _iter_log_files():
-            try:
-                body = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            archive.writestr(f"server/{path.name}", redact_text(body))
+        if include_server_logs:
+            for _source, path in _iter_log_files():
+                try:
+                    body = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                archive.writestr(f"server/{path.name}", redact_text(body))
     return buffer.getvalue()
