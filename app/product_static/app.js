@@ -1410,6 +1410,8 @@ function renderBiblioActivity(activity, operational) {
     ? ""
     : '<div class="biblio-activity-note"><strong>BIBLIO health:</strong> '
       + esc(health.active_listings || 0) + ' active · '
+      + esc(health.inventory_changes_pending || 0) + ' changed records pending · '
+      + esc(health.deletes_pending || 0) + ' deletes pending · '
       + esc(health.remote_verified_matching || 0) + ' verified/matching · '
       + esc(health.remote_verified_mismatching || 0) + ' mismatching · '
       + esc(health.remote_verified_uncompared || 0) + ' remote-only · '
