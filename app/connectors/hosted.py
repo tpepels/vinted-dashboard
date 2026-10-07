@@ -107,6 +107,14 @@ def biblio_configured(workspace_id: uuid.UUID) -> bool:
     )
 
 
+def biblio_auto_sync_enabled(workspace_id: uuid.UUID) -> bool:
+    try:
+        values = _workspace_or_env_biblio_values(workspace_id)
+    except RuntimeError:
+        return False
+    return _biblio_truthy(values.get("auto_sync"))
+
+
 def ebay_configured(workspace_id: uuid.UUID) -> bool:
     if has_credentials(workspace_id, Channel.EBAY):
         return True
@@ -4110,6 +4118,197 @@ def test_biblio_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     return {"ok": True, "detail": detail, "transport": transport}
 
 
+def _refresh_biblio_linked_sources(
+    workspace_id: uuid.UUID,
+    *,
+    listing_id: uuid.UUID | None = None,
+) -> int:
+    """Refresh non-reviewed BIBLIO fields from the linked Vinted/master source."""
+    changed_count = 0
+    with db.session_scope() as session:
+        query = (
+            select(models.ChannelListing, models.InventoryItem)
+            .join(
+                models.InventoryItem,
+                models.InventoryItem.id == models.ChannelListing.inventory_item_id,
+            )
+            .where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+            )
+        )
+        if listing_id is not None:
+            query = query.where(models.ChannelListing.id == listing_id)
+        pairs = session.execute(query).all()
+
+        for listing, item in pairs:
+            extra = dict(listing.extra or {})
+            if str(extra.get("source_channel") or "") != Channel.VINTED:
+                continue
+            raw_source_id = str(extra.get("source_listing_id") or "").strip()
+            if not raw_source_id:
+                continue
+            try:
+                source_id = uuid.UUID(raw_source_id)
+            except ValueError:
+                continue
+            source = session.get(models.ChannelListing, source_id)
+            if (
+                source is None
+                or source.workspace_id != workspace_id
+                or source.channel != Channel.VINTED
+            ):
+                continue
+
+            source_extra = dict(source.extra or {})
+            source_meta = (
+                dict(source_extra.get("metadata") or {})
+                if isinstance(source_extra.get("metadata"), dict)
+                else {}
+            )
+            attrs = dict(item.attributes or {})
+            field_sources = (
+                dict(extra.get("field_sources") or {})
+                if isinstance(extra.get("field_sources"), dict)
+                else {}
+            )
+            bibliographic = (
+                dict(extra.get("bibliographic_enrichment") or {})
+                if isinstance(extra.get("bibliographic_enrichment"), dict)
+                else {}
+            )
+            bibliographic_sources = (
+                dict(extra.get("bibliographic_sources") or {})
+                if isinstance(extra.get("bibliographic_sources"), dict)
+                else {}
+            )
+            changed = False
+
+            def update_listing_attr(name: str, value: Any) -> None:
+                nonlocal changed
+                if value in (None, ""):
+                    return
+                if getattr(listing, name) != value:
+                    setattr(listing, name, value)
+                    changed = True
+
+            def update_extra(name: str, value: Any) -> None:
+                nonlocal changed
+                if value in (None, ""):
+                    return
+                if extra.get(name) != value:
+                    extra[name] = value
+                    changed = True
+
+            if field_sources.get("title") == "vinted":
+                update_listing_attr("title", source.title)
+            elif field_sources.get("title") == "master":
+                update_listing_attr("title", attrs.get("listing_title") or item.title)
+
+            if field_sources.get("author") == "vinted":
+                update_extra("author", source_meta.get("author"))
+            elif field_sources.get("author") == "master":
+                update_extra("author", attrs.get("author"))
+
+            if field_sources.get("description") == "vinted":
+                update_extra("description", source_meta.get("description"))
+            elif field_sources.get("description") == "master":
+                update_extra(
+                    "description",
+                    attrs.get("listing_description") or attrs.get("description") or item.notes,
+                )
+
+            if field_sources.get("price_cents") == "vinted":
+                if source.price_cents is not None:
+                    update_listing_attr("price_cents", source.price_cents)
+            elif field_sources.get("price_cents") == "master":
+                default_price = attrs.get("default_price_cents")
+                if default_price is not None:
+                    update_listing_attr("price_cents", int(default_price))
+
+            if field_sources.get("currency") == "vinted" and source.currency:
+                update_listing_attr("currency", source.currency)
+
+            if field_sources.get("isbn") == "vinted":
+                update_extra("isbn", source_meta.get("isbn"))
+            elif field_sources.get("isbn") == "master":
+                update_extra("isbn", attrs.get("isbn"))
+
+            master_bibliographic = {
+                "subtitle": attrs.get("subtitle"),
+                "publisher": attrs.get("publisher"),
+                "edition": attrs.get("edition"),
+                "binding": attrs.get("binding") or attrs.get("physical_format"),
+                "language": attrs.get("language"),
+                "pages": attrs.get("pages") or attrs.get("number_of_pages"),
+                "publish_date": (
+                    attrs.get("publish_date")
+                    or attrs.get("publication_date")
+                    or attrs.get("publication_year")
+                ),
+                "condition": item.condition,
+                "publication_place": attrs.get("publication_place") or attrs.get("place_of_publication"),
+                "first_edition": attrs.get("first_edition"),
+                "signed": attrs.get("signed"),
+                "dust_jacket_present": attrs.get("dust_jacket_present") or attrs.get("dj_present"),
+                "dust_jacket_condition": attrs.get("dust_jacket_condition") or attrs.get("dj_condition"),
+                "dust_jacket_description": attrs.get("dust_jacket_description") or attrs.get("dj_description"),
+                "illustrator": attrs.get("illustrator"),
+                "keywords": attrs.get("keywords"),
+                **{
+                    f"catalog_{index}": attrs.get(f"catalog_{index}")
+                    for index in range(1, 9)
+                },
+            }
+            vinted_bibliographic = {
+                "publisher": source_meta.get("publisher"),
+                "language": source_meta.get("language"),
+                "condition": source_meta.get("condition"),
+            }
+            for key, source_name in bibliographic_sources.items():
+                if source_name == "review" or source_name == "isbn":
+                    continue
+                if source_name == "vinted":
+                    value = vinted_bibliographic.get(key)
+                elif source_name == "master":
+                    value = master_bibliographic.get(key)
+                else:
+                    continue
+                if bibliographic.get(key) != value:
+                    bibliographic[key] = value
+                    changed = True
+
+            current_quantity = int(item.quantity or 0)
+            if listing.quantity != current_quantity:
+                listing.quantity = current_quantity
+                changed = True
+
+            source_images = [
+                str(value).strip()
+                for value in (source_extra.get("image_urls") or [])
+                if str(value or "").strip()
+            ][:BIBLIO_MAX_PHOTOS]
+            if source_images and source_images != list(extra.get("image_urls") or []):
+                extra["image_urls"] = source_images
+                extra["image_source"] = Channel.VINTED
+                extra["photo_sync_state"] = "queued"
+                changed = True
+
+            if changed:
+                extra["bibliographic_enrichment"] = bibliographic
+                extra["bibliographic_sources"] = bibliographic_sources
+                if extra.get("remote_verified") or extra.get("remote_verified_at"):
+                    extra["remote_verified"] = False
+                    extra["remote_matches_local"] = None
+                    extra["remote_mismatch_fields"] = []
+                    extra["remote_verification_stale"] = True
+                    extra["remote_stale_since"] = datetime.now(timezone.utc).isoformat()
+                listing.extra = extra
+                changed_count += 1
+
+    return changed_count
+
+
 def sync_biblio_workspace(
     workspace_id: uuid.UUID,
     *,
@@ -4120,6 +4319,7 @@ def sync_biblio_workspace(
 ) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
     upload_profile = biblio_upload_profile(workspace_id)
+    _refresh_biblio_linked_sources(workspace_id, listing_id=listing_id)
     active, deletes = _biblio_rows(
         workspace_id,
         listing_id=listing_id,
@@ -4481,6 +4681,7 @@ def _workspace_or_env_biblio_values(workspace_id: uuid.UUID) -> dict[str, str]:
         "upload_profile": os.getenv("BIBLIO_FTP_UPLOAD_PROFILE", "extended").strip()
         or "extended",
         "allow_plain_ftp": os.getenv("BIBLIO_FTP_ALLOW_PLAIN", "false").strip() or "false",
+        "auto_sync": os.getenv("BIBLIO_FTP_AUTO_SYNC", "false").strip() or "false",
     })
 
 
