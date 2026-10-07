@@ -1379,6 +1379,7 @@ function renderBiblioActivity(activity, operational) {
       + esc(health.active_listings || 0) + ' active · '
       + esc(health.remote_verified_matching || 0) + ' verified/matching · '
       + esc(health.remote_verified_mismatching || 0) + ' mismatching · '
+      + esc(health.remote_verified_uncompared || 0) + ' remote-only · '
       + esc(health.remote_unverified || 0) + ' unverified · '
       + esc(health.photo_attention || 0) + ' photo attention · '
       + esc(health.publish_attention || 0) + ' publish attention'
@@ -1412,6 +1413,7 @@ function renderBiblioActivity(activity, operational) {
     + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
     + '</div><div class="biblio-activity-history hidden">'
     + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards. For a brand-new listing, the dashboard schedules one delayed photo-only retry because BIBLIO ignores an image if there is no active listing to attach it to.</div>'
+    + '<div class="biblio-activity-note"><strong>Orders:</strong> automatic BIBLIO order handling remains disabled until BIBLIO enables Bulk Order Management for the seller account and supplies its private protocol documentation.</div>'
     + history + "</div></div>";
 }
 
