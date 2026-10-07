@@ -532,8 +532,9 @@ def test_biblio_inventory_and_listing_rows_show_publication_state():
     assert "photo error" in APP_JS
 
     assert "function biblioListingDetails(row)" in APP_JS
-    assert "Submitted locally by FTP" in APP_JS
-    assert "BIBLIO does not provide listing readback" in APP_JS
+    assert "Submitted locally by FTP; not yet verified" in APP_JS
+    assert "Verified in BIBLIO inventory" in APP_JS
+    assert "remote_mismatch_fields" in APP_JS
 
 
 
@@ -608,6 +609,21 @@ def test_biblio_extended_upload_profile_is_automatic():
     assert "The extended BIBLIO format is used automatically" in APP_JS
     assert 'data.upload_profile === "core"' not in APP_JS
     assert "The extended BIBLIO format will send" in APP_JS
+
+
+def test_biblio_connection_is_host_pinned_and_import_is_safe_by_default():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert '["host", "FTP host"' not in APP_JS
+    assert "FTP is locked to BIBLIO's documented ftp.biblio.com host" in APP_JS
+    assert 'id="verify-biblio"' in html
+    assert 'id="biblio-import-authoritative"' in html
+    assert '"/api/app/connectors/biblio/verify"' in APP_JS
+    assert "Verification is read-only" in html
+    assert "complete active-inventory download" in html
+    assert "mark local BIBLIO listings missing from it inactive" in APP_JS
+    assert "BIBLIO health:" in APP_JS
 
 
 
