@@ -2967,6 +2967,10 @@ def biblio_activity(
             row for row in verified
             if dict(row.extra or {}).get("remote_matches_local") is False
         ]
+        verified_uncompared = [
+            row for row in verified
+            if dict(row.extra or {}).get("remote_matches_local") is None
+        ]
         photo_problem = [
             row for row in active_biblio
             if str(dict(row.extra or {}).get("photo_sync_state") or "")
@@ -2987,6 +2991,7 @@ def biblio_activity(
             "remote_verified": len(verified),
             "remote_verified_matching": len(verified_matches),
             "remote_verified_mismatching": len(verified_mismatches),
+            "remote_verified_uncompared": len(verified_uncompared),
             "remote_unverified": max(0, len(active_biblio) - len(verified)),
             "photo_attention": len(photo_problem),
             "publish_attention": len(publish_problem),
