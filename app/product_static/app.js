@@ -56,7 +56,7 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. Inventory changes and Vinted source photos are sent by FTP. Use upload profile core for the existing 8-column BIBLIO filter. Use extended only after BIBLIO has mapped the richer column order in Upload Settings; extended sends subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID automatically.",
+    help: "Book connector. Only changed inventory is sent by FTP. Use upload profile core for the existing 8-column BIBLIO filter. Use extended only after BIBLIO has mapped the richer column order in Upload Settings; extended sends subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, ask BIBLIO to configure your account for this filename convention: BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc.",
     fields: [
       ["host", "FTP host", "ftp.biblio.com", "text"],
       ["username", "FTP username", "", "text"],
@@ -1131,7 +1131,9 @@ function renderBiblioPublish(data) {
     photoPreview.innerHTML = '<div class="biblio-photo-copy"><strong>'
       + photoUrls.length + ' Vinted photo' + (photoUrls.length === 1 ? "" : "s")
       + ' will be uploaded automatically to BIBLIO.</strong>'
-      + '<span>No manual image upload is required.</span></div>'
+      + '<span>' + (photoUrls.length > 1
+        ? 'Multiple photos require BIBLIO to map the BookID.jpg, BookID_1.jpg, BookID_2.jpg… filename convention for your seller account.'
+        : 'No manual image upload is required.') + '</span></div>'
       + '<div class="biblio-photo-strip">'
       + photoUrls.map((url, index) =>
         '<img src="' + esc(url) + '" alt="Vinted photo ' + (index + 1) + '" loading="lazy">'
@@ -1198,8 +1200,8 @@ function renderBiblioPublish(data) {
   else if (data.enrichment_warning) warning = "ISBN lookup warning: " + data.enrichment_warning;
   else if (data.photo_warning) warning = "Photo warning: " + data.photo_warning;
   else if (data.upload_profile === "core") warning = data.already_listed
-    ? "Ready to update. Core FTP profile is active: optional bibliographic fields are retained locally but only the existing 8 BIBLIO columns are sent."
-    : "Ready. Core FTP profile is active: optional bibliographic fields are retained locally but only the existing 8 BIBLIO columns are sent.";
+    ? "Ready to update. Core FTP profile is active: condition, subtitle, publisher, edition, binding, language, publication date and pages are NOT sent. Switch to extended only after BIBLIO has mapped that format in Upload Settings."
+    : "Ready. Core FTP profile is active: condition, subtitle, publisher, edition, binding, language, publication date and pages are NOT sent. Switch to extended only after BIBLIO has mapped that format in Upload Settings.";
   else warning = data.already_listed
     ? "Ready to update using the extended BIBLIO profile, including the optional bibliographic fields shown above."
     : "Ready. Extended BIBLIO profile will send the optional bibliographic fields shown above.";
@@ -1296,6 +1298,22 @@ function marketplaceListingBadge(listing) {
   return '<span class="channel-sync-stack">' + pill
     + '<span class="biblio-sync-mini ' + esc(stateInfo.cls) + '"' + title + '>'
     + esc(stateInfo.label) + "</span></span>";
+}
+
+function biblioListingDetails(row) {
+  if (row.channel !== "biblio") return "";
+  const details = row.biblio_details || {};
+  const parts = [];
+  if (details.author) parts.push("Author: " + details.author);
+  if (details.condition) parts.push("Condition: " + details.condition);
+  if (details.publisher) parts.push("Publisher: " + details.publisher);
+  if (details.edition) parts.push("Edition: " + details.edition);
+  if (details.isbn) parts.push("ISBN: " + details.isbn);
+  if (!parts.length) {
+    return '<div class="sub">BIBLIO FTP listing - no remote readback available</div>';
+  }
+  return '<div class="sub">' + esc(parts.join(" · ")) + '</div>'
+    + '<div class="sub">Submitted locally by FTP; BIBLIO does not provide listing readback to this connector.</div>';
 }
 
 function biblioActivityStatus(row) {
@@ -3142,7 +3160,8 @@ function renderListings() {
         return '<tr class="' + (duplicateCount ? "duplicate-row" : "") + '">'
           + '<td><div class="title">' + title
           + (duplicateCount ? '<span class="duplicate-pill">' + duplicateCount + " copies</span>" : "")
-          + '</div><div class="sub">' + esc(row.external_sku || row.external_id || "") + "</div></td>"
+          + '</div><div class="sub">' + esc(row.external_sku || row.external_id || "") + "</div>"
+          + biblioListingDetails(row) + "</td>"
           + "<td>" + marketplaceListingBadge(row) + "</td>"
           + "<td>" + esc(row.status) + "</td>"
           + (showDate ? (() => {
