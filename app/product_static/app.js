@@ -1307,7 +1307,9 @@ function biblioListingDetails(row) {
   if (details.edition) parts.push("Edition: " + details.edition);
   if (details.isbn) parts.push("ISBN: " + details.isbn);
   let verification = "Submitted locally by FTP; not yet verified from a BIBLIO inventory download.";
-  if (details.remote_verified) {
+  if (details.remote_verification_stale) {
+    verification = "Remote verification is stale because this listing changed locally after the last BIBLIO download.";
+  } else if (details.remote_verified) {
     if (details.remote_matches_local === true) {
       verification = "Verified in BIBLIO inventory" + (details.remote_verified_at ? " · " + when(details.remote_verified_at) : "");
     } else {
@@ -1383,6 +1385,7 @@ function renderBiblioActivity(activity, operational) {
       + esc(health.remote_verified_mismatching || 0) + ' mismatching · '
       + esc(health.remote_verified_uncompared || 0) + ' remote-only · '
       + esc(health.remote_unverified || 0) + ' unverified · '
+      + esc(health.remote_verification_stale || 0) + ' stale verification · '
       + esc(health.photo_attention || 0) + ' photo attention · '
       + esc(health.publish_attention || 0) + ' publish attention'
       + (safety.ftps_required ? ' · verified FTPS/TLS required' : '')
