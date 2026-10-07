@@ -355,17 +355,17 @@ for the migrated personal/bootstrap workspace.
 ### BIBLIO personal setup
 
 \`\`\`env
-BIBLIO_CURRENCY=EUR
 BIBLIO_FTP_HOST=ftp.biblio.com
 BIBLIO_FTP_USERNAME=
 BIBLIO_FTP_PASSWORD=
 BIBLIO_FTP_DIRECTORY=
 BIBLIO_FTP_ALLOW_PLAIN=false
-BIBLIO_FTP_AUTO_SYNC=false
 \`\`\`
 
-Keep the first upload manual and verify it in BIBLIOdirect before enabling
-automatic FTP sync.
+Publishing a book queues its own targeted BIBLIO sync. Later local edits are
+kept as pending changes until **Sync changes** is used in Connections, where the
+dashboard shows the exact changed-record and delete counts first. This keeps
+remote writes deliberate while preserving change-only/idempotent uploads.
 
 ### eBay personal setup
 
