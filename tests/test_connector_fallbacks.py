@@ -16,7 +16,7 @@ def test_biblio_env_credentials_are_bootstrap_only(monkeypatch):
     values = hosted._workspace_or_env_biblio_values(workspace_id)
     assert values["username"] == "seller"
     assert values["password"] == "secret"
-    assert values["host"] == "ftp.example.test"
+    assert values["host"] == "ftp.biblio.com"
 
     monkeypatch.setattr(hosted, "_is_bootstrap_workspace", lambda _workspace_id: False)
     with pytest.raises(RuntimeError, match="this workspace"):
