@@ -254,6 +254,22 @@ class BiblioPublishRequest(BaseModel):
     pages: int | None = Field(default=None, ge=0)
     publish_date: str | None = None
     condition: str | None = None
+    publication_place: str | None = None
+    first_edition: bool | None = None
+    signed: bool | None = None
+    dust_jacket_present: bool | None = None
+    dust_jacket_condition: str | None = None
+    dust_jacket_description: str | None = None
+    illustrator: str | None = None
+    keywords: str | None = None
+    catalog_1: str | None = None
+    catalog_2: str | None = None
+    catalog_3: str | None = None
+    catalog_4: str | None = None
+    catalog_5: str | None = None
+    catalog_6: str | None = None
+    catalog_7: str | None = None
+    catalog_8: str | None = None
     price_cents: int | None = Field(default=None, ge=0)
 
 
