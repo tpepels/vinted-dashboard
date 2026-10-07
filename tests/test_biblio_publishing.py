@@ -6,7 +6,8 @@ from sqlalchemy import select
 from app import db, entry, models, publishing
 from app.connectors import hosted
 from app.constants import Channel, ItemCategory, ListingStatus
-from app.product_models import BackgroundJob
+from app.crypto import decrypt_json
+from app.product_models import BackgroundJob, ConnectorCredential
 from app.workspace_ingest import classify_vinted_category, record_workspace_snapshot
 
 
