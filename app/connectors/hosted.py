@@ -3137,7 +3137,7 @@ def biblio_upload_profile(workspace_id: uuid.UUID) -> str:
 def _biblio_inventory_signature(
     row: dict[str, Any],
     *,
-    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+    profile: str = BIBLIO_UPLOAD_PROFILE_EXTENDED,
 ) -> str:
     profile = _normalize_biblio_upload_profile(profile)
     keys = [
@@ -3164,7 +3164,7 @@ def _biblio_rows(
     workspace_id: uuid.UUID,
     *,
     listing_id: uuid.UUID | None = None,
-    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+    profile: str = BIBLIO_UPLOAD_PROFILE_EXTENDED,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return BIBLIO rows with deterministic, profile-aware dirty state."""
     profile = _normalize_biblio_upload_profile(profile)
@@ -3298,7 +3298,7 @@ def _biblio_tsv(
     rows: list[dict[str, Any]],
     *,
     sold: bool,
-    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+    profile: str = BIBLIO_UPLOAD_PROFILE_EXTENDED,
 ) -> bytes:
     profile = _normalize_biblio_upload_profile(profile)
     output = io.StringIO(newline="")
@@ -4100,7 +4100,7 @@ def _biblio_listing_row(
     workspace_id: uuid.UUID,
     listing_id: uuid.UUID,
     *,
-    profile: str = BIBLIO_UPLOAD_PROFILE_CORE,
+    profile: str = BIBLIO_UPLOAD_PROFILE_EXTENDED,
 ) -> dict[str, Any]:
     with db.session_scope() as session:
         listing = session.get(models.ChannelListing, listing_id)
