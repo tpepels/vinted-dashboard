@@ -1124,7 +1124,7 @@ function renderBiblioPublish(data) {
       + (source.url ? ' · <a href="' + esc(source.url) + '" target="_blank" rel="noreferrer">open Vinted</a>' : "")
     : "No linked Vinted source was found; using the master inventory record.";
 
-  const photoUrls = Array.isArray(source.image_urls) ? source.image_urls.filter(Boolean).slice(0, 5) : [];
+  const photoUrls = Array.isArray(source.image_urls) ? source.image_urls.filter(Boolean).slice(0, 12) : [];
   const photoPreview = $("#biblio-photo-preview");
   if (photoUrls.length) {
     photoPreview.classList.remove("hidden");
