@@ -1146,6 +1146,106 @@ def test_changing_biblio_book_id_requeues_same_photos():
 
 
 
+def test_biblio_book_id_is_locked_after_successful_inventory_upload():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        extra = dict(listing.extra or {})
+        extra["inventory_synced_at"] = "2026-10-07T10:00:00+00:00"
+        extra["inventory_sync_signature"] = "remote-synced"
+        listing.extra = extra
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        assert candidate["book_id_locked"] is True
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {"book_id": "UNSAFE-RENAMED-ID"},
+        )
+        try:
+            publishing.upsert_biblio_listing(
+                session,
+                workspace,
+                item_id,
+                candidate,
+            )
+            assert False, "expected uploaded Book ID lock"
+        except ValueError as exc:
+            assert "cannot be changed after its first successful inventory upload" in str(exc)
+
+
+def test_biblio_update_invalidates_previous_remote_verification_immediately():
+    workspace_id = _workspace()
+    item_id, source_listing_id = _source_book(workspace_id)
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        extra = dict(listing.extra or {})
+        extra["remote_verified"] = True
+        extra["remote_verified_at"] = "2026-10-07T10:00:00+00:00"
+        extra["remote_matches_local"] = True
+        listing.extra = extra
+
+    with db.session_scope() as session:
+        workspace = session.get(models.Workspace, workspace_id)
+        candidate = publishing.build_biblio_candidate(
+            session,
+            workspace_id,
+            item_id,
+            source_listing_id=source_listing_id,
+            enrich_isbn=False,
+        )
+        candidate = publishing.apply_biblio_overrides(
+            candidate,
+            {"title": "Changed after verification"},
+        )
+        listing = publishing.upsert_biblio_listing(
+            session,
+            workspace,
+            item_id,
+            candidate,
+        )
+        assert listing.extra["remote_verified"] is False
+        assert listing.extra["remote_matches_local"] is None
+        assert listing.extra["remote_verification_stale"] is True
+        assert listing.extra["remote_stale_since"]
+
+
 def test_biblio_candidate_prefills_isbn_from_valid_master_book_barcode():
     workspace_id = _workspace()
     with db.session_scope() as session:
