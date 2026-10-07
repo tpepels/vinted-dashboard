@@ -428,6 +428,7 @@ def test_biblio_preflight_shows_automatic_vinted_photo_upload():
     assert '" Vinted photo"' in APP_JS
     assert '" - automatic BIBLIO upload"' in APP_JS
     assert "will be uploaded automatically to BIBLIO" in APP_JS
+    assert "slice(0, 12)" in APP_JS
     assert "No manual image upload is required." in APP_JS
     assert "source.image_urls" in APP_JS
 
