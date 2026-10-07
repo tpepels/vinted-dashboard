@@ -99,6 +99,7 @@ def test_extension_pairing_is_revocable_and_workspace_scoped():
 
 
 def test_vinted_browser_sync_queues_one_deduplicated_biblio_auto_sync(monkeypatch):
+    monkeypatch.setattr("app.auth.rate_limiter.check", lambda *args, **kwargs: None)
     client = TestClient(entry.app)
     csrf = _register(client, "biblio-auto@example.test")
     pairing = client.post(
@@ -182,6 +183,7 @@ def test_vinted_browser_sync_queues_one_deduplicated_biblio_auto_sync(monkeypatc
 
 
 def test_vinted_browser_sync_does_not_queue_biblio_when_auto_sync_disabled(monkeypatch):
+    monkeypatch.setattr("app.auth.rate_limiter.check", lambda *args, **kwargs: None)
     client = TestClient(entry.app)
     csrf = _register(client, "biblio-manual@example.test")
     pairing = client.post(
