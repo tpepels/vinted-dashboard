@@ -525,8 +525,18 @@
           <p class="muted">Download a redacted diagnostics bundle you can inspect or send for support. It includes recent browser events, web/worker logs, background jobs, connector runs and runtime health. User-entered titles and identifiers may still appear.</p>
           <div id="diagnostics-summary" class="diagnostics-summary"></div>
           <div id="diagnostics-live" class="hidden">
-            <div class="diagnostics-live-head"><strong>Development log</strong><span id="diagnostics-live-status" class="muted"></span></div>
-            <pre id="diagnostics-log-window" class="diagnostics-log-window" aria-live="polite"></pre>
+            <div class="diagnostics-live-head">
+              <div class="diagnostics-live-title">
+                <strong>Development log</strong>
+                <div class="diagnostics-level-filters" role="group" aria-label="Log severity filters">
+                  <button class="diagnostics-level-filter error active" data-diagnostics-level="error" type="button" aria-pressed="true">Errors</button>
+                  <button class="diagnostics-level-filter warning" data-diagnostics-level="warning" type="button" aria-pressed="false">Warnings</button>
+                  <button class="diagnostics-level-filter info" data-diagnostics-level="info" type="button" aria-pressed="false">Info</button>
+                </div>
+              </div>
+              <span id="diagnostics-live-status" class="muted"></span>
+            </div>
+            <div id="diagnostics-log-window" class="diagnostics-log-window" role="log" aria-live="polite"></div>
           </div>
         </div>
         <div class="card form"><h2>Delete workspace</h2><p class="muted">This permanently deletes this workspace and its marketplace data. Download an export first.</p><label>Type <code id="delete-workspace-slug"></code> to confirm<input id="delete-workspace-confirm" autocomplete="off"></label><button id="delete-workspace" class="btn danger" type="button">Delete workspace permanently</button></div>
