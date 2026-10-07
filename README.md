@@ -281,11 +281,26 @@ multiple-photo filename convention before secondary images will attach.
 Successful photo sets are fingerprinted so unchanged photos are not re-uploaded
 on every sync; partial failures remain pending for retry.
 
-The BIBLIO connector is primarily an outbound FTP connector. It has no live
-listing/readback API, so Listings shows the locally submitted BIBLIO metadata
-and FTP state rather than pretending those values were confirmed remotely.
-A BIBLIO inventory download can still be imported manually to reconcile the
-dashboard with BIBLIO's processed active inventory.
+The BIBLIO connector is primarily an outbound FTP connector. It has no public
+live listing/readback API. Listings therefore distinguishes locally submitted
+metadata from remote verification. A BIBLIO **Download listings** file can be
+uploaded in read-only verification mode to compare remote active inventory with
+the dashboard without changing stock. A normal import merges present records
+without deactivating omitted local listings. Only the explicitly-authoritative
+complete-snapshot option may mark local BIBLIO listings missing from the file
+inactive.
+
+For production safety, BIBLIO FTP credentials are pinned to BIBLIO's documented
+`ftp.biblio.com` host, remote sold/delete uploads are refused while the linked
+master item still has stock, unchanged inventory and photos remain idempotent,
+and connector health reports verified/mismatching/unverified rows plus photo and
+publication attention states.
+
+BIBLIO also documents a Bulk Order Management interface, but its protocol is
+private and is supplied only after BIBLIO enables it for a seller account.
+Automatic BIBLIO order ingestion/fulfillment therefore remains disabled until
+that account feature is enabled and its protocol documentation is available;
+the connector does not guess undocumented order formats.
 
 Vinted taxonomy is used to set the broad master category automatically when an
 item is first synced or still classified as `general`. This covers books,
