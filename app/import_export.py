@@ -529,8 +529,11 @@ EXPORT_HEADERS = [
     "SKU", "Title", "Category", "Quantity", "Condition", "Cost", "Price",
     "Currency", "Location", "Notes", "Barcode", "Author", "ISBN", "Subtitle",
     "Publisher", "Edition", "Binding", "Language", "Publish Date",
-    "Publication Year", "Pages", "Brand", "Size", "Colour", "Material",
-    "Measurements", "Status",
+    "Publication Year", "Pages", "Publication Place", "First Edition", "Signed",
+    "DJ Present", "DJ Condition", "DJ Description", "Illustrator", "Keywords",
+    "Catalog 1", "Catalog 2", "Catalog 3", "Catalog 4",
+    "Catalog 5", "Catalog 6", "Catalog 7", "Catalog 8",
+    "Brand", "Size", "Colour", "Material", "Measurements", "Status",
 ]
 
 
