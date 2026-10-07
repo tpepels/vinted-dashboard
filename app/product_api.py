@@ -2997,6 +2997,8 @@ def biblio_activity(
             "publish_attention": len(publish_problem),
             "last_remote_verification_at": max(verified_times) if verified_times else None,
             "safety": {
+                "ftps_required": True,
+                "transport": "FTPS explicit TLS",
                 "ftp_host_locked": True,
                 "ftp_host": "ftp.biblio.com",
                 "upload_profile": biblio_upload_profile(context.workspace.id),
