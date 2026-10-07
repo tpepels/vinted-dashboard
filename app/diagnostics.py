@@ -31,7 +31,7 @@ _SECRET_NAME = re.compile(
 )
 _REDACTION_PATTERNS = (
     re.compile(r"(?i)(authorization:\\s*(?:bearer|basic)\\s+)\\S+"),
-    re.compile(r"(?i)(bearer\\s+)[A-Za-z0-9._~+\\-/=]+"),
+    re.compile(r"(?i)(bearer\\s+)[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)(password|passwd|secret|token|api[_-]?key|client[_-]?secret|"
                r"refresh[_-]?token|access[_-]?token)([=:\\s]+)([^\\s,;]+)"),
 )
