@@ -643,6 +643,8 @@ def test_biblio_connection_is_host_pinned_and_import_is_safe_by_default():
     assert "complete active-inventory download" in html
     assert "mark local BIBLIO listings missing from it inactive" in APP_JS
     assert "BIBLIO health:" in APP_JS
+    assert "changed records pending" in APP_JS
+    assert "deletes pending" in APP_JS
 
 
 
