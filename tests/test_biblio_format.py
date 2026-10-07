@@ -204,6 +204,18 @@ def test_biblio_verification_is_read_only_and_records_mismatch():
         assert listing.extra["remote_matches_local"] is False
         assert listing.extra["remote_mismatch_fields"] == ["title"]
 
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, listing_id)
+        listing.title = "Changed again locally"
+
+    active, _deletes = hosted._biblio_rows(workspace_id)
+    hosted._mark_biblio_inventory_sync(workspace_id, active)
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, listing_id)
+        assert listing.extra["remote_verified"] is False
+        assert listing.extra["remote_verification_stale"] is True
+        assert listing.extra["remote_stale_since"]
+
 
 def test_biblio_merge_does_not_deactivate_omitted_local_listing():
     with db.session_scope() as session:
