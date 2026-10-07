@@ -1427,6 +1427,7 @@ function renderBiblioActivity(activity, operational) {
       const files = [run.inventory_filename, run.deletes_filename].filter(Boolean).map(esc).join(" · ");
       const meta = [
         run.upload_profile ? "profile " + esc(run.upload_profile) : "",
+        run.transport ? "transport " + esc(run.transport === "ftps" ? "FTPS/TLS" : run.transport) : "",
         files,
       ].filter(Boolean).join(" · ");
       const errors = (run.photo_errors || []).length
