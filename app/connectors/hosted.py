@@ -3101,30 +3101,91 @@ def import_biblio_workspace(
     rows: list[dict[str, Any]],
     *,
     filename: str = "BIBLIO inventory",
+    authoritative: bool = False,
 ) -> dict[str, Any]:
+    """Merge a BIBLIO inventory download into the workspace safely.
+
+    The default merge is intentionally non-destructive: rows present in the
+    file are upserted, but local BIBLIO rows omitted from the file are not
+    deactivated. Set authoritative only for a complete BIBLIO active-inventory
+    download when missing rows should be treated as remotely absent.
+    """
     if not rows:
         raise ValueError("No BIBLIO inventory rows could be read")
-    active = sum(1 for row in rows if str(row.get("status") or "active").lower() == "active")
+    analysis = analyze_biblio_workspace(workspace_id, rows)
+    synced_at = datetime.now(timezone.utc)
     record_workspace_channel_snapshot(
         workspace_id,
         Channel.BIBLIO,
         rows,
-        synced_at=datetime.now(timezone.utc),
-        full_snapshot=True,
-        note=f"Imported {filename}",
+        synced_at=synced_at,
+        full_snapshot=bool(authoritative),
+        note=(
+            f"Imported complete BIBLIO snapshot {filename}"
+            if authoritative
+            else f"Merged BIBLIO inventory {filename}"
+        ),
     )
-    # An imported BIBLIO file is a snapshot of remote state, not a set of
-    # local edits waiting to be pushed back. Mark those rows as synchronized
-    # so the next incremental sync does not echo the whole imported catalogue.
+    _mark_biblio_remote_verification(
+        workspace_id,
+        rows,
+        analysis,
+        filename=filename,
+        verified_at=synced_at,
+        authoritative=bool(authoritative),
+    )
+
+    imported_ids = {
+        str(row.get("source_id") or row.get("sku") or "").strip()
+        for row in rows
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
     imported_active, imported_deletes = _biblio_rows(
         workspace_id,
         profile=biblio_upload_profile(workspace_id),
     )
-    _mark_biblio_inventory_sync(
+    sync_rows = [*imported_active, *imported_deletes]
+    if not authoritative:
+        sync_rows = [
+            row for row in sync_rows
+            if str(row.get("source_id") or row.get("sku") or "").strip() in imported_ids
+        ]
+    _mark_biblio_inventory_sync(workspace_id, sync_rows)
+    return {
+        "source": Channel.BIBLIO,
+        "items": len(rows),
+        "active": analysis["remote_active"],
+        "authoritative": bool(authoritative),
+        **analysis,
+    }
+
+
+def verify_biblio_workspace(
+    workspace_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+    *,
+    filename: str = "BIBLIO inventory",
+) -> dict[str, Any]:
+    """Compare a BIBLIO download without changing listing/master state."""
+    if not rows:
+        raise ValueError("No BIBLIO inventory rows could be read")
+    analysis = analyze_biblio_workspace(workspace_id, rows)
+    _mark_biblio_remote_verification(
         workspace_id,
-        [*imported_active, *imported_deletes],
+        rows,
+        analysis,
+        filename=filename,
+        verified_at=datetime.now(timezone.utc),
+        authoritative=False,
     )
-    return {"source": Channel.BIBLIO, "items": len(rows), "active": active}
+    return {
+        "source": Channel.BIBLIO,
+        "items": len(rows),
+        "active": analysis["remote_active"],
+        "authoritative": False,
+        "verification_only": True,
+        **analysis,
+    }
 
 
 BIBLIO_UPLOAD_PROFILE_CORE = "core"
@@ -3160,6 +3221,144 @@ def biblio_upload_profile(workspace_id: uuid.UUID) -> str:
     so existing installations send the richer BIBLIO field set after upgrade.
     """
     return BIBLIO_UPLOAD_PROFILE_EXTENDED
+
+
+BIBLIO_VERIFY_FIELDS = (
+    "title", "author", "subtitle", "description", "price_cents", "isbn",
+    "publisher", "edition", "binding", "language", "publish_date", "pages",
+    "condition", "quantity", "status",
+)
+
+
+def _biblio_compare_value(field: str, value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    if field in {"price_cents", "pages", "quantity"}:
+        try:
+            return int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return str(value).strip().casefold()
+    text = re.sub(r"\s+", " ", str(value).strip())
+    if field == "isbn":
+        return re.sub(r"[^0-9Xx]", "", text).upper() or None
+    if field == "status":
+        lowered = text.casefold()
+        return "active" if lowered in {"active", "for sale", "forsale"} else lowered
+    return text.casefold()
+
+
+def _biblio_remote_mismatches(
+    expected: dict[str, Any],
+    remote: dict[str, Any],
+) -> list[str]:
+    return [
+        field
+        for field in BIBLIO_VERIFY_FIELDS
+        if _biblio_compare_value(field, expected.get(field))
+        != _biblio_compare_value(field, remote.get(field))
+    ]
+
+
+def analyze_biblio_workspace(
+    workspace_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    local_active, _local_deletes = _biblio_rows(
+        workspace_id,
+        profile=biblio_upload_profile(workspace_id),
+    )
+    local_by_id = {
+        str(row.get("source_id") or row.get("sku") or "").strip(): row
+        for row in local_active
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
+    remote_active_rows = [
+        row for row in rows
+        if str(row.get("status") or ListingStatus.ACTIVE).lower() == ListingStatus.ACTIVE
+        and int(row.get("quantity") or 0) > 0
+    ]
+    remote_by_id = {
+        str(row.get("source_id") or row.get("sku") or "").strip(): row
+        for row in remote_active_rows
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
+    shared = sorted(set(local_by_id) & set(remote_by_id))
+    mismatches = {
+        external_id: _biblio_remote_mismatches(
+            local_by_id[external_id],
+            remote_by_id[external_id],
+        )
+        for external_id in shared
+    }
+    mismatches = {key: value for key, value in mismatches.items() if value}
+    remote_only = sorted(set(remote_by_id) - set(local_by_id))
+    missing_local = sorted(set(local_by_id) - set(remote_by_id))
+    return {
+        "local_active": len(local_by_id),
+        "remote_active": len(remote_by_id),
+        "matched": len(shared),
+        "matched_clean": len(shared) - len(mismatches),
+        "mismatched": len(mismatches),
+        "remote_only": len(remote_only),
+        "missing_local": len(missing_local),
+        "remote_only_ids": remote_only[:50],
+        "missing_local_ids": missing_local[:50],
+        "mismatch_samples": [
+            {"book_id": external_id, "fields": fields}
+            for external_id, fields in list(mismatches.items())[:50]
+        ],
+    }
+
+
+def _mark_biblio_remote_verification(
+    workspace_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    *,
+    filename: str,
+    verified_at: datetime,
+    authoritative: bool,
+) -> None:
+    remote_by_id = {
+        str(row.get("source_id") or row.get("sku") or "").strip(): row
+        for row in rows
+        if str(row.get("source_id") or row.get("sku") or "").strip()
+    }
+    mismatch_by_id = {
+        str(row.get("book_id") or ""): list(row.get("fields") or [])
+        for row in analysis.get("mismatch_samples") or []
+        if str(row.get("book_id") or "")
+    }
+    with db.session_scope() as session:
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+            )
+        ).scalars().all()
+        for listing in listings:
+            external_id = str(listing.external_id or listing.external_sku or "").strip()
+            extra = dict(listing.extra or {})
+            if external_id in remote_by_id:
+                remote = remote_by_id[external_id]
+                mismatches = mismatch_by_id.get(external_id, [])
+                extra["remote_verified"] = True
+                extra["remote_verified_at"] = verified_at.isoformat()
+                extra["remote_verified_source"] = filename
+                extra["remote_verified_status"] = str(
+                    remote.get("status") or ListingStatus.ACTIVE
+                )
+                extra["remote_matches_local"] = not bool(mismatches)
+                extra["remote_mismatch_fields"] = mismatches
+                extra.pop("remote_missing_at", None)
+            elif authoritative:
+                extra["remote_verified"] = False
+                extra["remote_verified_at"] = verified_at.isoformat()
+                extra["remote_verified_source"] = filename
+                extra["remote_matches_local"] = False
+                extra["remote_mismatch_fields"] = ["missing_from_biblio_active_inventory"]
+                extra["remote_missing_at"] = verified_at.isoformat()
+            listing.extra = extra
 
 
 def _biblio_inventory_signature(
