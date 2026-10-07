@@ -321,3 +321,73 @@ def test_biblio_authoritative_import_deactivates_missing_local_listing():
         assert missing.status == ListingStatus.INACTIVE
         assert missing.extra["remote_verified"] is False
         assert missing.extra["remote_missing_at"]
+
+
+
+def test_biblio_pending_changes_reports_exact_incremental_work():
+    with db.session_scope() as session:
+        workspace = models.Workspace(name="Pending", slug="biblio-pending")
+        session.add(workspace)
+        session.flush()
+        workspace_id = workspace.id
+
+        active_item = models.InventoryItem(
+            workspace_id=workspace.id,
+            sku="ACTIVE-PENDING",
+            title="Active pending",
+            category="book",
+            quantity=1,
+            status="active",
+            currency="EUR",
+            attributes={"author": "Author", "description": "Description"},
+        )
+        sold_item = models.InventoryItem(
+            workspace_id=workspace.id,
+            sku="SOLD-PENDING",
+            title="Sold pending",
+            category="book",
+            quantity=0,
+            status="sold",
+            currency="EUR",
+            attributes={"author": "Author", "description": "Description"},
+        )
+        session.add_all([active_item, sold_item])
+        session.flush()
+
+        session.add(models.ChannelListing(
+            workspace_id=workspace.id,
+            inventory_item_id=active_item.id,
+            channel=Channel.BIBLIO,
+            external_id="ACTIVE-PENDING",
+            external_sku="ACTIVE-PENDING",
+            title="Active pending",
+            price_cents=1000,
+            currency="EUR",
+            status=ListingStatus.ACTIVE,
+            quantity=1,
+            extra={"author": "Author", "description": "Description"},
+        ))
+        session.add(models.ChannelListing(
+            workspace_id=workspace.id,
+            inventory_item_id=sold_item.id,
+            channel=Channel.BIBLIO,
+            external_id="SOLD-PENDING",
+            external_sku="SOLD-PENDING",
+            title="Sold pending",
+            price_cents=1000,
+            currency="EUR",
+            status=ListingStatus.SOLD,
+            quantity=0,
+            extra={"author": "Author", "description": "Description"},
+        ))
+
+    pending = hosted.biblio_pending_changes(workspace_id)
+    assert pending == {"inventory": 1, "deletes": 1}
+
+    active, deletes = hosted._biblio_rows(workspace_id)
+    hosted._mark_biblio_inventory_sync(workspace_id, [*active, *deletes])
+
+    assert hosted.biblio_pending_changes(workspace_id) == {
+        "inventory": 0,
+        "deletes": 0,
+    }
