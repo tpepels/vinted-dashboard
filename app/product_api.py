@@ -53,6 +53,7 @@ from app.constants import (
 from app.connectors.base import Capability, connector_catalog
 from app.connectors.hosted import (
     biblio_configured,
+    biblio_pending_changes,
     biblio_upload_profile,
     exchange_etsy_authorization_code,
     ebay_configured,
@@ -3009,8 +3010,11 @@ def biblio_activity(
             for row in biblio_listings
             if str(dict(row.extra or {}).get("remote_verified_at") or "")
         ]
+        pending_changes = biblio_pending_changes(context.workspace.id)
         health = {
             "active_listings": len(active_biblio),
+            "inventory_changes_pending": int(pending_changes.get("inventory") or 0),
+            "deletes_pending": int(pending_changes.get("deletes") or 0),
             "remote_verified": len(verified),
             "remote_verified_matching": len(verified_matches),
             "remote_verified_mismatching": len(verified_mismatches),
