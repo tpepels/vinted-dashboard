@@ -107,3 +107,27 @@ def test_recent_logs_are_limited_and_redacted(monkeypatch, tmp_path):
     assert len(rows) == 20
     assert all(row["source"] == "web" for row in rows)
     assert all("secret-" not in row["line"] for row in rows)
+
+
+
+def test_production_bundle_excludes_process_wide_server_logs(monkeypatch, tmp_path):
+    monkeypatch.setattr(diagnostics, "DIAGNOSTICS_DIR", tmp_path)
+    monkeypatch.setattr(product_api, "is_production", lambda: True)
+    (tmp_path / "web.log").write_text(
+        "2026-10-07T22:00:00Z INFO web other-workspace-event\n",
+        encoding="utf-8",
+    )
+    client, csrf = _registered_client("diag-prod-download@example.test")
+
+    response = client.post(
+        "/api/app/diagnostics/download",
+        headers={"X-CSRF-Token": csrf},
+        json={"browser_logs": []},
+    )
+    assert response.status_code == 200, response.text
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = set(archive.namelist())
+        assert not any(name.startswith("server/") for name in names)
+        readme = archive.read("README.txt").decode("utf-8")
+    assert '"server_logs_included": false' in readme
