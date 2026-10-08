@@ -1,4 +1,6 @@
 """Connector operation definitions must match implemented paths, not UI optimism."""
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -6,6 +8,7 @@ from app import db, entry, models
 from app.constants import Channel
 from app.connectors.base import Capability, CONNECTORS
 from app.connectors.development import COVERAGE, OPERATIONS, STATES, contract
+from app.connectors.workspace_sync import record_workspace_channel_snapshot
 
 
 def test_contract_is_exhaustive_and_keeps_implementation_separate_from_verification():
@@ -113,3 +116,30 @@ def test_development_endpoint_reports_workspace_only_and_provisional_relations()
     assert other["runtime"]["listing_count"] == 0
     assert other["runtime"]["import_placeholders"] == 0
     assert other["runtime"]["seller_sales"] == 0
+
+
+def test_import_creates_explicitly_provisional_stock_instead_of_silent_verified_copy():
+    _registered("import-relation@example.test")
+    with db.session_scope() as session:
+        workspace = session.execute(select(models.Membership)).scalar_one().workspace_id
+    result = record_workspace_channel_snapshot(
+        workspace,
+        Channel.ETSY,
+        [{"source_id": "ETSY-REMOTE-123", "title": "Independent listing", "quantity": 1,
+          "status": "active", "price_cents": 500, "currency": "EUR"}],
+        synced_at=datetime.now(timezone.utc),
+        full_snapshot=False,
+    )
+    assert result["items"] == 1
+    with db.session_scope() as session:
+        listing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace,
+                models.ChannelListing.channel == Channel.ETSY,
+            )
+        ).scalar_one()
+        item = session.get(models.InventoryItem, listing.inventory_item_id)
+        assert item is not None
+        assert item.attributes["connector_import_placeholder"] is True
+        assert item.attributes["connector_import_channel"] == Channel.ETSY
+        assert item.attributes["connector_import_external_id"] == "ETSY-REMOTE-123"
