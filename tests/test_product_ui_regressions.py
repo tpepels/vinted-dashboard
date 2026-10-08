@@ -850,4 +850,3 @@ def test_woo_stock_sync_is_explicit_and_limited_to_linked_inventory():
     assert "/marketplaces/woocommerce/stock" in APP_JS
     assert "The product ID and SKU" in APP_JS
     assert 'if (!window.confirm("Update the linked WooCommerce simple product to "' in APP_JS
-    assert 'for (const' not in APP_JS[0:0]  # no inert controls used as evidence
