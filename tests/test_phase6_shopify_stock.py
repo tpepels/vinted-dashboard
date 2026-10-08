@@ -227,3 +227,27 @@ def test_shopify_check_resolves_attention_only_after_matching_remote_read(monkey
         op = session.get(MarketplaceOperation, operation_id)
         assert op.status == "succeeded"
         assert op.verification == "remote_verified"
+
+
+def test_shopify_discrepancy_is_visible_without_changing_master_quantity(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    csrf, workspace_id, item_id, listing_id = _setup_item(client)
+    monkeypatch.setattr("app.product_api.read_shopify_workspace_stock", lambda *args, **kwargs: {
+        "external_id": VARIANT, "quantity": 3, "manage_stock": True,
+        "status": ListingStatus.ACTIVE, "stock_status": "instock",
+    })
+    result = client.post(
+        f"/api/app/inventory/{item_id}/marketplaces/shopify/check-stock",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["matches"] is False
+    overview = client.get(f"/api/app/inventory/{item_id}/marketplace-status")
+    assert overview.status_code == 200, overview.text
+    listing = overview.json()["listings"][0]
+    assert listing["verification"] == "stock_mismatch"
+    assert listing["attention"] is True
+    with db.session_scope() as session:
+        assert session.get(models.InventoryItem, item_id).quantity == 1
+        assert session.get(models.ChannelListing, listing_id).quantity == 3
