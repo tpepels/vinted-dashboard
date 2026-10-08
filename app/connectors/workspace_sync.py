@@ -9,10 +9,11 @@ Runtime connector writes are workspace-scoped and failures propagate to the
 caller so job/connector health reflects real persistence failures. Legacy
 SQLite migration is handled separately by :mod:`app.legacy_migration`.
 
-Matching is conservative: live connector snapshots merge physical inventory by
-exact SKU. A listing without a SKU receives a stable synthesized
-`CHANNEL-external_id` SKU. Explicit reconciliation links are preserved across
-later syncs.
+Matching is conservative: remote IDs update their existing marketplace
+listing, but a new remote listing never merges physical stock by SKU or title.
+When a source SKU collides with stock, its provisional record receives a
+distinct synthetic SKU while the original is preserved on the listing.
+Explicit reconciliation links are preserved across later syncs.
 """
 
 from __future__ import annotations
@@ -563,8 +564,8 @@ def record_workspace_channel_orders(
 
     One row represents one marketplace order line so a multi-item order can
     reconcile to multiple physical inventory items. Existing explicit links
-    are preserved. New rows match by exact channel listing identity first,
-    then by exact SKU.
+    are preserved. New rows can link through an exact marketplace listing
+    identity; SKU alone does not establish ownership of a physical copy.
     """
     with db.session_scope() as session:
         workspace = session.get(models.Workspace, workspace_id)
