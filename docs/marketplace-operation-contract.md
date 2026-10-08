@@ -311,7 +311,21 @@ the user must perform a read-only check before a further update. Shopify
 requires `read_products`, `read_inventory` and `write_inventory` permission
 for this operation. No changes to master physical inventory occur.
 
-**Remaining Phase 6 work:** equivalent tested adapters for Wix,
+Wix Catalog V3 linked variants also offer a read-only stock check and a
+manual stock update. The remote reference must identify exactly one product
+and variant with a matching SKU, one quantity-tracked inventory item at one
+location, and preorders disabled. The adapter reads the inventory item's
+revision, PATCHes only that item's quantity with the current revision and a
+manual change reason, then independently reads the same item, revision and
+quantity again. Mismatched identity, ambiguous remote responses and multi-
+location stock require human review. Wix requires Inventory V3 read and
+write permissions. Live account verification is separate.
+
+The item-level UI now uses one **Check stock** action across WooCommerce,
+Shopify and Wix; **Set stock to N** appears after an observed mismatch.
+Other technical details are collapsed rather than competing with core actions.
+
+**Remaining Phase 6 work:**
 general WooCommerce variation configuration, remote price/detail updates
 and deletion/close support.
 Import-only stores remain read-only until supported account permissions and

@@ -889,12 +889,12 @@ function itemMarketplaceStatusLabel(listing) {
       not_verified: "Not yet verified on BIBLIO",
     }[listing.verification] || "Not independently checked";
   }
-  if (listing.channel === "woocommerce" || listing.channel === "shopify") {
+  if (["woocommerce", "shopify", "wix"].includes(listing.channel)) {
     return {
-      stock_checked: "Stock matched the dashboard at the last marketplace check",
-      stock_mismatch: "Marketplace stock differed at the last check",
-      stock_stale: "Stock was checked before local inventory changed; check again",
-      not_checked: "Marketplace stock has not been checked",
+      stock_checked: "Stock matched at the last check",
+      stock_mismatch: "Stock differs - review before updating",
+      stock_stale: "Dashboard stock changed - check again",
+      not_checked: "Stock not yet checked",
     }[listing.verification] || "Marketplace stock has not been checked";
   }
   return "Imported or linked; current remote publication not independently verified";
@@ -945,16 +945,16 @@ function renderItemMarketplacePanel(data) {
       + (listing.can_inspect_photos ? '<button class="btn item-marketplace-photos" type="button" data-book="'
         + esc(listing.external_id) + '">Check / repair photos</button>' : "")
       + (listing.channel === "biblio" ? '<button class="btn item-marketplace-verify" type="button">Compare BIBLIO inventory</button>' : "")
-      + (listing.can_sync_woocommerce_stock
-        ? '<button class="btn item-woo-stock" type="button">Set WooCommerce stock to '
-          + Number(item.quantity || 0) + '…</button>'
-          + '<button class="btn item-woo-check" type="button">Check WooCommerce stock</button>'
-        : "")
-      + (listing.can_sync_shopify_stock
-        ? '<button class="btn item-shopify-stock" type="button">Set Shopify stock to '
-          + Number(item.quantity || 0) + '…</button>'
-          + '<button class="btn item-shopify-check" type="button">Check Shopify stock</button>'
-        : "")
+      + ((listing.can_sync_woocommerce_stock || listing.can_sync_shopify_stock || listing.can_sync_wix_stock)
+        ? '<button class="btn item-stock-check" data-channel="' + esc(listing.channel)
+          + '" type="button">'
+          + (listing.verification === "stock_checked" ? "Check again" : "Check stock")
+          + '</button>'
+          + (listing.verification === "stock_mismatch"
+            ? '<button class="btn primary item-stock-update" data-channel="' + esc(listing.channel)
+              + '" type="button">Set stock to ' + Number(item.quantity || 0) + '…</button>'
+            : '')
+        : '')
       + '</div></div>';
   });
   const operationsMarkup = operations.map(op => {
@@ -975,25 +975,23 @@ function renderItemMarketplacePanel(data) {
     + '</strong> physical units in the dashboard · ' + listings.length + ' marketplace links'
     + '<div class="actions"><button class="btn primary item-marketplace-publish" type="button">Publish to another marketplace</button>'
     + '<button class="btn item-marketplace-edit" type="button">Edit this item</button>'
-    + '<button class="btn item-marketplace-refresh" type="button">Refresh this overview</button></div></div>'
+    + '</div></div>'
     + (rows.length ? '<div class="item-marketplace-list">' + rows.join("") + '</div>'
       : '<p class="muted">No marketplace listings are linked to this item yet. Use Publish to review available channels.</p>')
     + (closing.length ? '<div class="item-marketplace-closure"><strong>Sold-out follow-up</strong>'
       + closing.map(action => '<p>' + esc(action.channel.toUpperCase())
         + ': ' + esc(action.status) + ' (' + esc(action.type) + ')</p>').join("") + '</div>' : '')
     + '<details class="item-marketplace-history"><summary>Recent operations (' + operations.length + ')</summary>'
-    + '<p>These are local attempts and transfer results; sending does not prove a listing is publicly visible.</p>'
+    + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
-    + '<p class="item-marketplace-footnote"><strong>Updates and closing:</strong> Edit local book details before sending BIBLIO changes. '
-    + 'WooCommerce and Shopify support explicit stock-only checks and updates for eligible linked products. Sold-out closures use sale reconciliation; '
-    + 'this panel deliberately does not offer a blind remote delete.</p>';
+    + '<p class="item-marketplace-footnote">Check stock before updating. Supported stores '
+    + 'change marketplace quantities only. Send BIBLIO changes from Connections.</p>';
   const itemId = item.id;
   $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
   $(".item-marketplace-edit").onclick = () => {
     const original = state.inventoryItems.find(row => row.id === itemId);
     if (original) openItemForm(original);
   };
-  $(".item-marketplace-refresh").onclick = () => openItemMarketplaces(itemId);
   $$(".item-marketplace-photos").forEach(button => {
     button.onclick = async () => {
       state.biblioPhotoTarget = button.dataset.book;
@@ -1019,95 +1017,55 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $$(".item-woo-check").forEach(button => {
+  // One workflow for every supported store. Read-only check comes first.
+  $$(".item-stock-check").forEach(button => {
     button.onclick = async () => {
+      const channel = button.dataset.channel;
+      const marketplace = {woocommerce:"WooCommerce", shopify:"Shopify", wix:"Wix"}[channel];
+      if (!marketplace) return;
       button.disabled = true;
       try {
         const result = await api(
           "/api/app/inventory/" + encodeURIComponent(itemId)
-          + "/marketplaces/woocommerce/check-stock",
-          {method: "POST"},
+            + "/marketplaces/" + channel + "/check-stock",
+          {method:"POST"},
         );
         flash(result.matches
-          ? "WooCommerce stock matches the dashboard (" + result.remote_quantity
-            + "). No remote changes were made."
-          : "WooCommerce reports " + result.remote_quantity
-            + " units, while physical stock is " + result.local_quantity
-            + ". Review the difference before updating.");
+          ? marketplace + ": stock matches the dashboard (" + result.local_quantity + ")."
+          : marketplace + ": " + result.remote_quantity + " listed, "
+            + result.local_quantity + " in the dashboard. Check the difference before updating.");
         await openItemMarketplaces(itemId);
       } catch (error) {
-        flash("Could not check WooCommerce stock: " + error.message, true);
+        flash("Could not check " + marketplace + " stock: " + error.message, true);
         button.disabled = false;
       }
     };
   });
-  $$(".item-woo-stock").forEach(button => {
+  $$(".item-stock-update").forEach(button => {
     button.onclick = async () => {
+      const channel = button.dataset.channel;
+      const marketplace = {woocommerce:"WooCommerce", shopify:"Shopify", wix:"Wix"}[channel];
+      if (!marketplace) return;
       const desired = Number(item.quantity || 0);
-      if (!window.confirm("Update the linked WooCommerce product or individually stock-managed variation to "
-        + desired + " available unit(s)? This changes WooCommerce stock only, "
-        + "not the physical stock in this dashboard. The exact remote IDs and SKU "
-        + "will be checked before writing.")) return;
+      if (!window.confirm(
+        "Set " + marketplace + " stock to " + desired + " unit(s)? "
+        + "This changes the marketplace only. The dashboard checks the remote identity "
+        + "and current stock first, then checks the result. If anything differs, "
+        + "the update stops for manual review."
+      )) return;
       button.disabled = true;
       try {
         const result = await api(
           "/api/app/inventory/" + encodeURIComponent(itemId)
-            + "/marketplaces/woocommerce/stock",
-          {method: "POST"},
+            + "/marketplaces/" + channel + "/stock",
+          {method:"POST"},
         );
         flash(result.remote_verified
-          ? "WooCommerce stock updated and independently read back."
-          : "WooCommerce status requires manual verification.");
+          ? marketplace + ": stock verified (" + result.quantity + ")."
+          : marketplace + ": remote result needs checking.");
         await openItemMarketplaces(itemId);
       } catch (error) {
-        flash("Stock was not verified; inspect the WooCommerce listing before another attempt. "
-          + error.message, true);
-        button.disabled = false;
-      }
-    };
-  });
-  $$(".item-shopify-check").forEach(button => {
-    button.onclick = async () => {
-      button.disabled = true;
-      try {
-        const result = await api(
-          "/api/app/inventory/" + encodeURIComponent(itemId)
-          + "/marketplaces/shopify/check-stock",
-          {method: "POST"},
-        );
-        flash(result.matches
-          ? "Shopify stock matches the dashboard (" + result.remote_quantity
-            + "). No remote changes were made."
-          : "Shopify reports " + result.remote_quantity
-            + " units, while physical stock is " + result.local_quantity
-            + ". Review the difference before updating.");
-        await openItemMarketplaces(itemId);
-      } catch (error) {
-        flash("Could not check Shopify stock: " + error.message, true);
-        button.disabled = false;
-      }
-    };
-  });
-  $$(".item-shopify-stock").forEach(button => {
-    button.onclick = async () => {
-      const desired = Number(item.quantity || 0);
-      if (!window.confirm("Update the linked single-location Shopify variant to "
-        + desired + " available unit(s)? This changes Shopify stock only, "
-        + "not the physical stock in this dashboard. The variant ID, SKU, stock location and available quantity "
-        + "will be checked before writing. Shopify changes use compare-and-set to avoid overwriting concurrent changes.")) return;
-      button.disabled = true;
-      try {
-        const result = await api(
-          "/api/app/inventory/" + encodeURIComponent(itemId)
-            + "/marketplaces/shopify/stock",
-          {method: "POST"},
-        );
-        flash(result.remote_verified
-          ? "Shopify stock updated and independently read back."
-          : "Shopify status requires manual verification.");
-        await openItemMarketplaces(itemId);
-      } catch (error) {
-        flash("Stock was not verified; inspect the Shopify listing before another attempt. "
+        flash(marketplace + " stock is not verified. Check it before another update. "
           + error.message, true);
         button.disabled = false;
       }
@@ -1875,21 +1833,21 @@ function renderBiblioActivity(activity, operational) {
   const lastSentAt = last?.completed_at || last?.started_at;
   const verified = count("remote_verified_matching") + count("remote_verified_mismatching");
   const overview = !dataAvailable
-    ? '<div class="biblio-user-warning">BIBLIO listing statistics are temporarily unavailable. The dashboard cannot confirm how many changes are pending.</div>'
+    ? '<p class="biblio-user-warning">BIBLIO counts are temporarily unavailable.</p>'
     : '<div class="biblio-summary">'
-    + '<div class="biblio-summary-stats">'
-    + '<div><strong>' + count("active_listings") + '</strong><span>Books prepared for BIBLIO</span></div>'
-    + '<div><strong>' + waiting + '</strong><span>Changes waiting to be sent</span></div>'
-    + '<div><strong>' + count("photo_attention") + '</strong><span>Books with photo work pending or in error</span></div>'
-    + '</div>'
-    + (count("remote_verified_mismatching") || count("remote_verification_stale")
-      ? '<p class="biblio-user-warning"><strong>Listings to review:</strong> '
-        + count("remote_verified_mismatching") + ' differ from the last BIBLIO comparison; '
-        + count("remote_verification_stale") + ' have changed since they were checked.</p>'
-      : "")
-    + '<p class="biblio-user-note">These are dashboard records, not a confirmed count of books visible on BIBLIO. '
-    + (verified ? verified + ' listings have been compared with a BIBLIO file. ' : 'No BIBLIO inventory comparison has been recorded yet. ')
-    + 'Use <strong>Compare BIBLIO inventory</strong> below to check what BIBLIO reports.</p></div>';
+      + '<p><strong>' + count("active_listings") + '</strong> books prepared'
+      + ' · <strong>' + waiting + '</strong> changes waiting'
+      + (count("photo_attention")
+        ? ' · <strong>' + count("photo_attention") + '</strong> books need photo review'
+        : '') + '</p>'
+      + (count("remote_verified_mismatching") || count("remote_verification_stale")
+        ? '<p class="biblio-user-warning">'
+          + count("remote_verified_mismatching") + ' differ from last comparison; '
+          + count("remote_verification_stale") + ' changed since then.</p>'
+        : '')
+      + '<p class="biblio-user-note">Prepared does not mean published.'
+      + (verified ? ' ' + verified + ' listings checked against a BIBLIO export.' : '')
+      + '</p></div>';
   const latest = '<div class="biblio-latest">'
     + '<span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
     + '<div><strong>' + esc(last ? status.label : "Nothing sent yet") + '</strong>'
@@ -1902,8 +1860,8 @@ function renderBiblioActivity(activity, operational) {
       + '<div class="biblio-task-inner">'
       + '<label class="biblio-field-label" for="biblio-photo-book-select">Choose a BIBLIO book</label>'
       + '<select id="biblio-photo-book-select"><option value="">Loading books when opened…</option></select>'
-      + '<p class="biblio-field-secondary">Or enter a BIBLIO Book ID (for example VINTED-10253402699).</p>'
-      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '">'
+      + '<details class="biblio-photo-manual-id"><summary>Enter a book ID instead</summary>'
+      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '"></details>'
       + '<div class="actions biblio-photo-recovery-controls">'
       + '<button id="biblio-inspect-photos" class="btn" type="button">Check this book’s photos</button>'
       + '<button id="biblio-retry-failed-photos" class="btn" type="button" disabled>Retry failed photo files…</button>'
@@ -2050,10 +2008,10 @@ async function inventory() {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
   });
   bindCrossListButtons();
-  $(".item-marketplaces").forEach(button => {
+  $$(".item-marketplaces").forEach(button => {
     button.onclick = () => openItemMarketplaces(button.dataset.itemId);
   });
-  $(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
+  $$(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
   const selectAll = $("#inventory-select-all");
   if (selectAll) {
     selectAll.onchange = () => {
@@ -4618,13 +4576,12 @@ async function connections() {
           ? '<div class="biblio-primary-task"><div><strong>' + (pending > 0
               ? pending + ' listing change' + (pending === 1 ? '' : 's') + ' waiting to be sent'
               : 'Send new changes when ready') + '</strong>'
-            + '<p>Sends changed books and sold/out-of-stock updates to BIBLIO, plus photos that need uploading. '
+            + '<p>Sends changed listings and photos. ' 
             + 'It does not resend unchanged listings or confirm they are visible to buyers.</p></div>'
             + '<button class="btn primary sync" data-c="biblio" type="button">Send changes to BIBLIO</button></div>'
           : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, you can send changed books and review what was transferred.</p>')
         + renderBiblioActivity(biblioActivity, ready)
-        + '<div class="connector-settings-row">' + configure
-        + '<span>Credentials and upload preferences are separate from book management.</span></div>'
+        + '<div class="connector-settings-row">' + configure + '</div>'
         + '</section>';
     }
     if (channel === "vinted") {
@@ -4649,18 +4606,17 @@ async function connections() {
       ? "Authorization needed" : ready ? "Account set up" : connector.configured
         ? "Needs attention" : "Not connected";
     return '<section class="connector connector--other" data-connector-channel="' + name + '">'
-      + '<div class="connector-header"><div><h2>' + display + '</h2><p>'
-      + esc(connector.description) + '</p></div>'
+      + '<div class="connector-header"><div><h2>' + display + '</h2></div>'
       + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">' + statusText + '</span></div>'
       + '<div class="actions">' + configure
       + (connector.sync_available
         ? '<button class="btn sync" data-c="' + name + '" type="button">Import latest data</button>'
         : '') + '</div>'
-      + (connector.sync_available
-        ? '<p class="connector-workflow-hint">Imports listings and supported orders into the dashboard. It does not publish or edit your listings.</p>'
-        : '<p class="connector-workflow-hint">Connect this marketplace to use the supported import functions.</p>')
-      + (connector.note ? '<p class="connector-workflow-hint">' + esc(connector.note) + '</p>' : "")
       + (lastSeen ? '<p class="connector-last-sync">' + lastSeen.slice(3) + '</p>' : '')
+      + '<details class="connection-technical-help"><summary>About this connection</summary>'
+      + '<p class="connector-workflow-hint">' + esc(connector.description) + '</p>'
+      + (connector.note ? '<p class="connector-workflow-hint">' + esc(connector.note) + '</p>' : "")
+      + '<p class="muted">Import reads marketplace data; it does not edit remote listings.</p></details>'
       + '</section>';
   };
   $("#connector-grid").innerHTML = featured.map(connectorHtml).join("");
@@ -4695,7 +4651,7 @@ async function connections() {
   $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
-  $(".sync").forEach((button) => {
+  $$(".sync").forEach((button) => {
     button.onclick = async () => {
       button.disabled = true;
       const channel = button.dataset.c;

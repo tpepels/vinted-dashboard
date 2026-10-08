@@ -47,7 +47,7 @@ COVERAGE = {
     Channel.SHOPIFY:      "IIIP PMIP PP".replace(" ", ""),
     Channel.BIGCOMMERCE:  "IINN PMIN PP".replace(" ", ""),
     Channel.SQUARESPACE:  "IINN PMIN PP".replace(" ", ""),
-    Channel.WIX:          "IIIN PMIN PP".replace(" ", ""),
+    Channel.WIX:          "IIIP PMIP PP".replace(" ", ""),
     Channel.DEPOP:        "BINN PMIN PP".replace(" ", ""),
 }
 STATE_CODES = {"I": "implemented", "P": "partial", "M": "manual", "B": "blocked", "N": "missing"}
@@ -87,6 +87,8 @@ NOTES = {
     (Channel.WOOCOMMERCE, "stock"): "Manually triggered physical quantity sync with exact SKU/ID checks, parent verification for variations, and WooCommerce GET readback.",
     (Channel.SHOPIFY, "update"): "Explicit stock-only change for one linked, tracked variant at exactly one location; no product-detail updates.",
     (Channel.SHOPIFY, "stock"): "Manual compare-and-set available quantity, idempotent operation key and GraphQL readback; rejects multi-location stock.",
+    (Channel.WIX, "update"): "Explicit Wix Catalog V3 stock-only PATCH for one tracked variant/location; other edits unsupported.",
+    (Channel.WIX, "stock"): "Manual exact product:variant and SKU check, single-location revision PATCH and remote inventory readback.",
     (Channel.DEPOP, "connect"): "Private Depop Selling API requires approved partner access and valid credentials.",
     (Channel.DEPOP, "read_orders"): "Order importer code exists, but requires Depop partner access.",
 }
@@ -122,6 +124,10 @@ def contract() -> dict:
                 evidence = "app.connectors.hosted.update_shopify_workspace_stock"
             elif key == "stock" and channel == Channel.SHOPIFY:
                 evidence = "app.product_api.update_shopify_item_stock; GraphQL read -> CAS -> read"
+            elif key == "update" and channel == Channel.WIX:
+                evidence = "app.connectors.wix_stock.update_wix_workspace_stock"
+            elif key == "stock" and channel == Channel.WIX:
+                evidence = "app.product_api.update_wix_item_stock; variant + inventory read -> PATCH revision -> read"
             elif key == "update" and channel == Channel.WOOCOMMERCE:
                 evidence = "app.connectors.hosted.update_woocommerce_workspace_stock"
             elif key == "stock" and channel == Channel.WOOCOMMERCE:

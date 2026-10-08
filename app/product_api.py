@@ -83,6 +83,7 @@ from app.connectors.hosted import (
     update_shopify_workspace_stock,
     read_shopify_workspace_stock,
 )
+from app.connectors.wix_stock import read_wix_workspace_stock, update_wix_workspace_stock
 from app.connectors.workspace_sync import recompute_inventory_item
 from app import cross_listing
 from app.cross_channel import (
@@ -1600,7 +1601,7 @@ def item_marketplace_status(
             stale = bool(extra.get("remote_verification_stale")) if is_biblio else False
             match = extra.get("remote_matches_local") if is_biblio else None
             photo_state = str(extra.get("photo_sync_state") or "") if is_biblio else ""
-            is_store_stock = listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY}
+            is_store_stock = listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY, Channel.WIX}
             latest_stock_check = extra.get("stock_last_checked_at") or extra.get("stock_synced_at")
             stock_check_quantity = extra.get("stock_last_remote_quantity")
             if stock_check_quantity is None and extra.get("stock_remote_readback_verified"):
@@ -1665,6 +1666,12 @@ def item_marketplace_status(
                     and is_physical(item)
                     and bool(re.fullmatch(r"gid://shopify/ProductVariant/[1-9][0-9]*", str(listing.external_id or "")))
                     and bool(str(listing.external_sku or "").strip())
+                ),
+                "can_sync_wix_stock": (
+                    listing.channel == Channel.WIX
+                    and is_physical(item)
+                    and bool(str(listing.external_sku or "").strip())
+                    and len(str(listing.external_id or "").split(":")) == 2
                 ),
             })
         return {
@@ -1995,6 +2002,190 @@ def verify_shopify_item_stock(
             or listing.workspace_id != context.workspace.id
             or not is_physical(item)
             or listing.channel != Channel.SHOPIFY
+            or listing.inventory_item_id != item_id
+            or listing.external_id != external_id
+            or listing.external_sku != expected_sku
+        ):
+            raise HTTPException(status_code=409, detail="Stock link changed during inspection")
+        desired = int(item.quantity or 0)
+        matches = (
+            remote["manage_stock"] and remote["quantity"] == desired
+            and remote["stock_status"] == ("instock" if desired else "outofstock")
+        )
+        relevant = session.execute(
+            select(MarketplaceOperation).where(
+                MarketplaceOperation.workspace_id == context.workspace.id,
+                MarketplaceOperation.channel_listing_id == listing_id,
+                MarketplaceOperation.operation_type == "update",
+                MarketplaceOperation.status.in_(["attention", "needs_verification"]),
+            ).order_by(MarketplaceOperation.created_at.desc())
+        ).scalars().first()
+        if relevant is not None:
+            # Remote readback establishes what exists, releasing a previous
+            # ambiguous write without ever resending it automatically.
+            relevant.status = "succeeded" if matches else "failed"
+            relevant.verification = "remote_verified" if matches else "remote_mismatch"
+            relevant.last_error = (
+                None if matches else
+                "Remote quantity differs from confirmed physical stock after a read-only check"
+            )
+            relevant.active_key = None
+            relevant.completed_at = utcnow()
+        if matches:
+            listing.quantity = desired
+            listing.status = remote["status"]
+            extra = dict(listing.extra or {})
+            extra["stock_synced_at"] = utcnow().isoformat()
+            extra["stock_synced_quantity"] = desired
+            extra["stock_remote_readback_verified"] = True
+            listing.extra = extra
+        else:
+            extra = dict(listing.extra or {})
+            extra["stock_remote_readback_verified"] = False
+            listing.extra = extra
+        extra = dict(listing.extra or {})
+        extra["stock_last_checked_at"] = utcnow().isoformat()
+        extra["stock_last_remote_quantity"] = remote["quantity"]
+        listing.extra = extra
+        return {
+            "ok": True, "matches": bool(matches),
+            "local_quantity": desired, "remote_quantity": remote["quantity"],
+            "remote_status": remote["status"],
+            "manage_stock": remote["manage_stock"],
+            "note": "Read-only marketplace check; no remote product was changed.",
+        }
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/wix/stock")
+def update_wix_item_stock(
+    item_id: uuid.UUID,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Explicit Wix V3 single-location stock sync using inventory revisions."""
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        if item is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        if not is_physical(item):
+            raise HTTPException(status_code=409, detail="Confirm this physical stock before remote updates")
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.inventory_item_id == item_id,
+                models.ChannelListing.channel == Channel.WIX,
+            )
+        ).scalars().all()
+        if len(listings) != 1:
+            raise HTTPException(status_code=409, detail="Expected exactly one linked Wix variant")
+        listing = listings[0]
+        parts = str(listing.external_id or "").split(":")
+        try:
+            if len(parts) != 2 or any(str(uuid.UUID(value)) != value.lower() for value in parts):
+                raise ValueError("Invalid Wix product:variant ID")
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=409, detail="A Wix product:variant identity is required")
+        if not str(listing.external_sku or "").strip():
+            raise HTTPException(status_code=409, detail="A linked Wix SKU is required")
+        external_id, expected_sku = listing.external_id, listing.external_sku
+        quantity = int(item.quantity or 0)
+        listing_id = listing.id
+
+    try:
+        operation_id = start_inline(
+            context.workspace.id, Channel.WIX, "update", str(listing_id),
+            inventory_item_id=item_id,
+            channel_listing_id=listing_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        result = update_wix_workspace_stock(
+            context.workspace.id,
+            external_id=external_id,
+            expected_sku=expected_sku,
+            quantity=quantity,
+        )
+        with db.session_scope() as session:
+            listing = session.get(models.ChannelListing, listing_id)
+            item = session.get(models.InventoryItem, item_id)
+            if (
+                listing is None or item is None
+                or item.workspace_id != context.workspace.id
+                or listing.workspace_id != context.workspace.id
+                or listing.channel != Channel.WIX
+                or listing.inventory_item_id != item_id
+                or listing.external_id != external_id
+                or listing.external_sku != expected_sku
+                or not is_physical(item)
+                or int(item.quantity or 0) != quantity
+            ):
+                raise RuntimeError(
+                    "Physical inventory changed during the remote update; "
+                    "reconcile Wix stock before the next write"
+                )
+            listing.quantity = quantity
+            listing.status = result["status"]
+            extra = dict(listing.extra or {})
+            extra["stock_synced_at"] = utcnow().isoformat()
+            extra["stock_synced_quantity"] = quantity
+            extra["stock_remote_readback_verified"] = True
+            extra["stock_last_checked_at"] = utcnow().isoformat()
+            extra["stock_last_remote_quantity"] = quantity
+            listing.extra = extra
+        complete_operation(operation_id, result)
+        return {"ok": True, "operation_id": str(operation_id), **result}
+    except Exception as exc:
+        fail_operation(operation_id, str(exc))
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=502,
+            detail="Wix stock update was not confirmed. Inspect the remote product "
+                   "before sending another update.",
+        ) from exc
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/wix/check-stock")
+def verify_wix_item_stock(
+    item_id: uuid.UUID,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Check one Wix variant without changing it; resolve ambiguous writes."""
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        if item is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        if not is_physical(item):
+            raise HTTPException(status_code=409, detail="Stock has not been confirmed")
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.inventory_item_id == item_id,
+                models.ChannelListing.channel == Channel.WIX,
+            )
+        ).scalars().all()
+        if len(listings) != 1:
+            raise HTTPException(status_code=409, detail="Expected exactly one linked Wix variant")
+        listing = listings[0]
+        listing_id = listing.id
+        external_id, expected_sku = listing.external_id, listing.external_sku
+    try:
+        remote = read_wix_workspace_stock(
+            context.workspace.id, external_id=external_id, expected_sku=expected_sku
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not read Wix stock") from exc
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        listing = session.get(models.ChannelListing, listing_id)
+        if (
+            item is None or listing is None
+            or item.workspace_id != context.workspace.id
+            or listing.workspace_id != context.workspace.id
+            or not is_physical(item)
+            or listing.channel != Channel.WIX
             or listing.inventory_item_id != item_id
             or listing.external_id != external_id
             or listing.external_sku != expected_sku

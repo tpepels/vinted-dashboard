@@ -497,12 +497,12 @@
       <section id="connections" class="view">
         <div class="card">
           <div class="card-head inline-head">
-            <div><p class="eyebrow">YOUR SALES CHANNELS</p><h2>Your marketplaces</h2><p class="muted connections-intro-copy">See which services are set up, what needs attention, and what you can do next. Sending data is not the same as a marketplace showing it publicly.</p></div>
-            <button id="connections-refresh" class="btn" type="button">Refresh this page</button>
+            <div><p class="eyebrow">YOUR SALES CHANNELS</p><h2>Your marketplaces</h2><p class="muted connections-intro-copy">Connect accounts and import listings. Manage individual books in Inventory.</p></div>
+            <button id="connections-refresh" class="btn" type="button">Refresh</button>
           </div>
           <div class="connections-shortcuts">
-            <button id="connections-inventory" class="btn primary" type="button">Manage and publish books</button>
-            <button id="connections-reconcile" class="btn" type="button">Match listings to stock</button>
+            <button id="connections-inventory" class="btn primary" type="button">Open Inventory</button>
+            <button id="connections-reconcile" class="btn" type="button">Review stock links</button>
           </div>
           <div id="connector-grid" class="connector-grid"></div>
           <details id="other-marketplaces" class="connections-other-markets">
@@ -513,7 +513,7 @@
         <details id="biblio-compare-panel" class="card connection-task-panel hidden">
           <summary><span><strong>Check what is actually on BIBLIO</strong><small>Compare your dashboard with an inventory file downloaded from BIBLIO</small></span></summary>
           <div class="connection-task-content">
-            <p>Uploads tell us what was sent, not what BIBLIO accepted. Download your inventory from your BIBLIO seller account and choose that file here. Comparing will <strong>not change book details, prices or stock quantities</strong>. It records which BIBLIO listings were checked.</p>
+            <p>Choose an inventory export from BIBLIO to check what it reports. Comparing does not change books, prices or stock.</p>
             <label class="connection-file-label" for="biblio-import-file">Inventory file downloaded from BIBLIO</label>
             <input id="biblio-import-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv">
             <div class="actions"><button id="verify-biblio" class="btn primary" type="button">Compare without changing anything</button></div>
@@ -545,8 +545,8 @@
         <details id="marketplace-operations-panel" class="card connection-task-panel">
           <summary><span><strong>Recent marketplace activity</strong><small>Uploads, imports, problems and actions that still need checking</small></span></summary>
           <div class="connection-task-content">
-            <p class="muted">This is a history of what the dashboard attempted. For BIBLIO, a completed file transfer does not confirm publication on the website.</p>
-            <button class="btn" id="marketplace-operations-refresh" type="button">Refresh activity</button>
+            <p class="muted">A completed BIBLIO transfer does not confirm publication.</p>
+            <button class="btn" id="marketplace-operations-refresh" type="button">Refresh history</button>
             <div id="marketplace-operations-list"><p class="muted">Loading activity…</p></div>
           </div>
         </details>

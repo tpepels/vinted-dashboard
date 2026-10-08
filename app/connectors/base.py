@@ -158,9 +158,10 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         channel=Channel.WIX,
         display_name=CHANNEL_DISPLAY_NAMES[Channel.WIX],
         group="store",
-        description="Wix Stores variants, inventory and orders through the current Wix REST APIs.",
+        description="Wix V3 variants and orders; manual revision-checked stock updates for one tracked location.",
         capabilities=frozenset({
             Capability.CREATE_LISTING,
+            Capability.UPDATE_LISTING,
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
             Capability.FETCH_ORDERS,
