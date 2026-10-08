@@ -2008,10 +2008,10 @@ async function inventory() {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
   });
   bindCrossListButtons();
-  $(".item-marketplaces").forEach(button => {
+  $$(".item-marketplaces").forEach(button => {
     button.onclick = () => openItemMarketplaces(button.dataset.itemId);
   });
-  $(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
+  $$(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
   const selectAll = $("#inventory-select-all");
   if (selectAll) {
     selectAll.onchange = () => {
@@ -4651,7 +4651,7 @@ async function connections() {
   $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
-  $(".sync").forEach((button) => {
+  $$(".sync").forEach((button) => {
     button.onclick = async () => {
       button.disabled = true;
       const channel = button.dataset.c;
