@@ -293,7 +293,19 @@ an ambiguous operation as verified; a mismatch records the discrepancy and
 requires an explicit update action. The action is in **Inventory → Marketplaces**
 and cannot be used on provisional stock, grouped/variable products or variations.
 
-**Remaining Phase 6 work:** equivalent tested adapters for Shopify and Wix,
+Shopify linked variants now also have **Check Shopify stock** (read-only) and
+**Set Shopify stock** (explicit write). The adapter requires a confirmed SKU,
+Shopify ProductVariant GID, tracked inventory, and **exactly one active stock
+location**. It reads `available` for that one location, uses
+`inventorySetQuantities` with `changeFromQuantity` compare-and-set plus
+a per-operation `@idempotent` key, then independently reads the same variant
+and location. Concurrent stock changes, identity drift and multi-location
+inventory are refused. A failed or ambiguous write is not automatically retried;
+the user must perform a read-only check before a further update. Shopify
+requires `read_products`, `read_inventory` and `write_inventory` permission
+for this operation. No changes to master physical inventory occur.
+
+**Remaining Phase 6 work:** equivalent tested adapters for Wix,
 WooCommerce variants, remote price/detail updates and deletion/close support.
 Import-only stores remain read-only until supported account permissions and
 verified write paths are available.
