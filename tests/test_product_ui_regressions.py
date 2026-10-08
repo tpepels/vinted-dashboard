@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 APP_JS = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "app.js").read_text(
@@ -875,4 +876,4 @@ def test_inventory_and_connection_click_collections_are_real_collections():
     for selector in (".item-marketplaces", ".inventory-select", ".sync",
                      ".market-select", ".configure"):
         assert f'$$("{selector}").forEach' in APP_JS
-        assert f'$("{selector}").forEach' not in APP_JS
+        assert not re.search(r'(?<!\\$)' + re.escape(f'$("{selector}").forEach'), APP_JS)
