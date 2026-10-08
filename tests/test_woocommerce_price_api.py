@@ -101,3 +101,22 @@ def test_uncertain_price_write_requires_price_read_not_stock_read(monkeypatch):
     with db.session_scope() as session:
         op=session.execute(select(MarketplaceOperation)).scalar_one()
         assert op.status=="succeeded" and op.verification=="remote_verified"
+
+
+def test_price_check_snapshot_cannot_be_reused_after_link_changes(monkeypatch):
+    client,csrf,wid,item_id,listing_id=setup()
+    headers={"X-CSRF-Token":csrf}
+    monkeypatch.setattr("app.product_api.read_woocommerce_workspace_price",
+                        lambda *a,**kw:{"regular_price_cents":850})
+    assert client.post(
+        f"/api/app/inventory/{item_id}/marketplaces/woocommerce/check-price",
+        headers=headers).status_code==200
+    with db.session_scope() as session:
+        listing=session.get(models.ChannelListing,listing_id)
+        listing.external_id="43"
+    response=client.post(
+        f"/api/app/inventory/{item_id}/marketplaces/woocommerce/price",
+        headers=headers)
+    assert response.status_code==409
+    with db.session_scope() as session:
+        assert not session.execute(select(MarketplaceOperation)).scalars().all()
