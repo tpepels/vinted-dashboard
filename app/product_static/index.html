@@ -524,6 +524,13 @@
           <div class="actions"><button class="btn primary">Save connection</button><button id="test-connector" class="btn hidden" type="button">Test connection</button><button id="remove-connector" class="btn danger hidden" type="button">Remove credentials</button></div>
           <p id="connector-config-status" class="muted"></p>
         </form>
+        <div class="card">
+          <div class="card-head inline-head">
+            <div><h2>Marketplace operations</h2><p class="muted">Actual queued, running and completed actions. Remote upload acceptance is not proof a listing or photo was published.</p></div>
+            <button class="btn" id="marketplace-operations-refresh" type="button">Refresh operations</button>
+          </div>
+          <div id="marketplace-operations-list"><p class="muted">Loading marketplace operation history…</p></div>
+        </div>
         <div class="card"><div class="card-head"><h2>Paired Chrome browsers</h2></div><div id="devices"></div></div>
         <details id="marketplace-development-panel" class="card marketplace-development-panel">
           <summary><strong>Development status</strong> · technical implementation matrix (not marketplace controls)</summary>
