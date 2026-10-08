@@ -710,6 +710,74 @@ def _woo_post(
     return response.json()
 
 
+def update_woocommerce_workspace_stock(
+    workspace_id: uuid.UUID,
+    *,
+    external_id: str,
+    expected_sku: str | None,
+    quantity: int,
+) -> dict[str, Any]:
+    """Explicit stock write to one previously linked WooCommerce simple product.
+
+    Check the exact remote product ID, SKU and type *before* updating stock.
+    Read the product back after PUT. A timeout between PUT and readback is
+    deliberately ambiguous; callers must not automatically issue another
+    remote write in that case.
+    """
+    if not re.fullmatch(r"[1-9][0-9]*", str(external_id or "")):
+        raise ValueError("Only a simple WooCommerce product with a numeric remote ID can be updated")
+    if type(quantity) is not int or quantity < 0:
+        raise ValueError("Physical stock must be a non-negative whole number")
+    values = _credentials(workspace_id, Channel.WOOCOMMERCE)
+    path = f"products/{external_id}"
+    remote = _woo_get(values, path)
+    if not isinstance(remote, dict) or str(remote.get("id") or "") != str(external_id):
+        raise RuntimeError("WooCommerce returned a different product than the linked listing")
+    if str(remote.get("type") or "").lower() != "simple":
+        raise ValueError("Variation/grouped WooCommerce stock updates require a separate adapter")
+    remote_sku = str(remote.get("sku") or "").strip()
+    known_sku = str(expected_sku or "").strip()
+    if known_sku and remote_sku != known_sku:
+        raise ValueError("WooCommerce SKU no longer matches the linked listing; reconcile before changing stock")
+    if bool(remote.get("manage_stock")) and _int(remote.get("stock_quantity")) == quantity:
+        return {
+            "remote_verified": True, "quantity": quantity, "external_id": str(external_id),
+            "status": _woo_status(remote), "already_complete": True,
+        }
+    body = {
+        "manage_stock": True,
+        "stock_quantity": quantity,
+        "stock_status": "instock" if quantity else "outofstock",
+    }
+    response = requests.put(
+        _woocommerce_base(values) + "/wp-json/wc/v3/" + path,
+        headers={**_woocommerce_headers(values), "Content-Type": "application/json"},
+        json=body,
+        timeout=45,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"WooCommerce stock update failed ({response.status_code})")
+    # The response alone is an acknowledgement, not authoritative remote
+    # state; verify by reading exactly the same linked product again.
+    verified = _woo_get(values, path)
+    if not isinstance(verified, dict) or str(verified.get("id") or "") != str(external_id):
+        raise RuntimeError("WooCommerce stock update could not be verified by product ID")
+    if (
+        not bool(verified.get("manage_stock"))
+        or _int(verified.get("stock_quantity")) != quantity
+        or str(verified.get("stock_status") or "").lower()
+           != ("instock" if quantity else "outofstock")
+    ):
+        raise RuntimeError("WooCommerce stock differs after write; inspect the remote listing")
+    return {
+        "remote_verified": True,
+        "quantity": quantity,
+        "external_id": str(external_id),
+        "status": _woo_status(verified),
+        "already_complete": False,
+    }
+
+
 CANDIDATE_DETAIL_FIELDS = (
     ("Author", "author"),
     ("Subtitle", "subtitle"),
