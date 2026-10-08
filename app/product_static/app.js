@@ -4334,6 +4334,9 @@ async function connections() {
         + '<div class="pairing-inline hidden"><p>Enter this code in the Chrome extension within 10 minutes:</p>'
         + '<strong class="pair-code pair-code-inline"></strong></div>'
         + '<p class="connector-workflow-hint">Pairing allows uploads; it does not start one. Open Vinted with the extension active to collect new listings and sales. If Vinted has not updated recently, check the extension.</p>'
+        + '<p class="connector-last-sync">Latest Vinted data received: <strong>'
+        + (connector.last_synced_at ? esc(when(connector.last_synced_at)) : 'not recorded yet')
+        + '</strong></p>'
         + '</section>';
     }
     const statusText = connector.authorization_required
