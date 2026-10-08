@@ -3597,7 +3597,7 @@ def biblio_retry_listing_photos(
                     "listing_id": info["listing_id"],
                     "photos_only": True,
                     "force_photos": not payload.failed_only,
-                    "failed_photos_only": payload.failed_only,
+                    **({"failed_photos_only": True} if payload.failed_only else {}),
                 },
                 channel_listing_id=uuid.UUID(str(info["listing_id"])),
             )
