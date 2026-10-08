@@ -1596,6 +1596,45 @@ function renderBiblioActivity(activity, operational) {
     + history + "</div></div>";
 }
 
+async function inspectInventoryRelationships() {
+  const button = $("#inventory-check-relations");
+  const target = $("#inventory-relation-report");
+  button.disabled = true;
+  target.classList.remove("hidden");
+  target.textContent = "Inspecting relationships…";
+  try {
+    const result = await api("/api/app/inventory/relationship-audit");
+    const conflicts = result.shared_marketplace_skus || [];
+    const orphan = result.unlinked_listings || [];
+    const multiple = result.multi_active_same_market || [];
+    const candidates = result.duplicate_candidates || [];
+    const provisional = result.provisional || [];
+    const issues = [
+      ...conflicts.map(row => 'SKU ' + row.sku + ' occurs across ' + row.item_ids.length + ' master records'),
+      ...multiple.map(row => row.channel + ': ' + row.external_ids.length + ' active listings linked to one item'),
+      ...orphan.map(row => row.channel + ' / ' + row.external_id + ' has no master stock reference'),
+    ];
+    target.innerHTML = '<div class="inventory-relation-counts">'
+      + '<span><strong>' + Number(result.physical || 0) + '</strong> confirmed stock records</span>'
+      + '<span><strong>' + provisional.length + '</strong> provisional imports</span>'
+      + '<span><strong>' + Number(result.legacy_unclassified || 0) + '</strong> legacy unclassified</span>'
+      + '<span><strong>' + candidates.length + '</strong> potential duplicate pairs</span>'
+      + '<span><strong>' + orphan.length + '</strong> unlinked listings</span>'
+      + '</div>'
+      + '<p class="muted">Read-only. Matching SKUs, ISBNs and titles do not prove that listings describe one physical copy.</p>'
+      + (issues.length ? '<ul class="inventory-relation-issues">' + issues.slice(0, 12).map(issue => '<li>' + esc(issue) + '</li>').join("")
+        + (issues.length > 12 ? '<li>…and ' + (issues.length - 12) + ' more</li>' : '') + '</ul>' : '')
+      + (provisional.length || orphan.length || candidates.length || issues.length
+        ? '<button class="btn inventory-open-reconcile" type="button">Review possible matches</button>' : '');
+    const reconcile = $(".inventory-open-reconcile");
+    if (reconcile) reconcile.onclick = () => selectView("reconcile");
+  } catch (error) {
+    target.textContent = "Relationship audit failed: " + error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function inventory() {
   if (state.biblioInventoryTimer) {
     clearTimeout(state.biblioInventoryTimer);
@@ -1622,7 +1661,10 @@ async function inventory() {
         + [item.condition, item.attributes?.author, item.attributes?.brand, item.attributes?.size, item.attributes?.vinted_category]
           .filter(Boolean).map(esc).join(" · ")
         + '</div></td>'
-        + '<td>' + esc(item.sku) + "</td><td>" + esc(item.category)
+        + '<td>' + esc(item.sku)
+        + '<div class="sub">' + esc(item.stock_authority === "physical" ? "Confirmed stock"
+          : item.stock_authority === "provisional" ? "Provisional import" : "Legacy · unclassified") + '</div>'
+        + "</td><td>" + esc(item.category)
         + "</td><td>" + item.quantity + "</td><td>" + esc(item.location || "—")
         + "</td><td>" + money(item.cost_cents, item.currency)
         + (item.attributes?.cost_source
@@ -3980,6 +4022,7 @@ function exportInventory(format) {
   window.location.href = "/api/app/export?" + params.toString();
 }
 
+$("#inventory-check-relations").onclick = inspectInventoryRelationships;
 $("#export-csv").onclick = () => exportInventory("csv");
 $("#export-xlsx").onclick = () => exportInventory("xlsx");
 
