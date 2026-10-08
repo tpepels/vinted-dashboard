@@ -752,3 +752,29 @@ def test_stock_authority_audit_is_accessible_and_user_initiated():
     assert "Provisional import" in APP_JS
     assert "Legacy · unclassified" in APP_JS
     assert "Review possible matches" in APP_JS
+
+
+def test_connections_prioritizes_actions_and_keeps_dev_matrix_collapsed():
+    index = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert index.index('id="connector-grid"') < index.index('id="marketplace-development"')
+    assert '<details id="marketplace-development-panel"' in index
+    assert 'id="other-marketplaces"' in index
+    assert 'id="connections-refresh"' in index
+    assert 'id="connections-inventory"' in index
+    assert 'id="connections-reconcile"' in index
+    assert 'id="connector-other-grid"' in index
+    assert 'featured.map(connectorHtml)' in APP_JS
+    assert 'other.map(connectorHtml)' in APP_JS
+    assert 'api("/api/app/connectors/development").catch(() => null)' in APP_JS
+
+
+def test_connections_uses_multi_element_queries_for_action_handlers():
+    # querySelector returns one HTMLElement, not an array; the previous
+    # implementation raised TypeError before connection cards were rendered.
+    for selector in (".market-select", ".biblio-retry-photos", ".biblio-full-sync"):
+        assert f'$$("{selector}").forEach' in APP_JS
+        assert f' $("{selector}").forEach' not in APP_JS
+    assert 'state.biblioActivityExpanded = opening;' in APP_JS
+    assert 'Go to connection controls' in APP_JS
