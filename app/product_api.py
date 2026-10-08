@@ -33,7 +33,7 @@ from app.marketplace_operations import (
     queue_operation, retry_operation, serialize as serialize_marketplace_operation,
     start_inline, complete_operation, fail_operation,
 )
-from app.product_models import MarketplaceOperation
+from app.product_models import MarketplaceOperation, CrossChannelAction
 
 from app.auth import (
     RequestContext,
@@ -1577,10 +1577,10 @@ def item_marketplace_status(
             ).order_by(MarketplaceOperation.created_at.desc(), MarketplaceOperation.id.desc()).limit(40)
         ).scalars().all()
         actions = session.execute(
-            select(models.CrossChannelAction).where(
-                models.CrossChannelAction.workspace_id == context.workspace.id,
-                models.CrossChannelAction.inventory_item_id == item_id,
-            ).order_by(models.CrossChannelAction.created_at.desc()).limit(30)
+            select(CrossChannelAction).where(
+                CrossChannelAction.workspace_id == context.workspace.id,
+                CrossChannelAction.inventory_item_id == item_id,
+            ).order_by(CrossChannelAction.created_at.desc()).limit(30)
         ).scalars().all()
         related_ops: dict[uuid.UUID, list[MarketplaceOperation]] = {}
         for op in operations:
