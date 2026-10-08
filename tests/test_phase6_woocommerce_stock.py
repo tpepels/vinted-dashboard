@@ -299,3 +299,48 @@ def test_variation_after_write_mismatch_requires_attention(monkeypatch):
             expected_sku="BOOK-77", quantity=0,
         )
     assert [c[0] for c in calls].count("PUT") == 1
+
+
+def test_variation_item_panel_allows_only_explicit_linked_stock_write(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    r = client.post("/api/auth/register", json={
+        "email": "woo-variation-stock@example.test", "password": "a-long-test-password",
+        "workspace_name": "Woo variation",
+    })
+    assert r.status_code == 200, r.text
+    csrf = r.json()["csrf_token"]
+    with db.session_scope() as session:
+        wid = session.execute(select(models.Membership)).scalar_one().workspace_id
+        item = models.InventoryItem(
+            workspace_id=wid, sku="BOOK-77", title="One variation copy",
+            category=ItemCategory.BOOK, status=ItemStatus.ACTIVE,
+            quantity=1, attributes={},
+        )
+        session.add(item)
+        session.flush()
+        record_physical_quantity(session, item, 1)
+        session.add(models.ChannelListing(
+            workspace_id=wid, inventory_item_id=item.id, channel="woocommerce",
+            external_id="22:77", external_sku="BOOK-77", title=item.title,
+            status=ListingStatus.ACTIVE, quantity=3, extra={},
+        ))
+        item_id = item.id
+    overview = client.get(f"/api/app/inventory/{item_id}/marketplace-status")
+    assert overview.status_code == 200, overview.text
+    assert overview.json()["listings"][0]["can_sync_woocommerce_stock"] is True
+    called = []
+    def update(wid, *, external_id, expected_sku, quantity):
+        called.append((external_id, expected_sku, quantity))
+        return {
+            "remote_verified": True, "quantity": quantity,
+            "external_id": external_id, "status": ListingStatus.ACTIVE,
+            "already_complete": False,
+        }
+    monkeypatch.setattr("app.product_api.update_woocommerce_workspace_stock", update)
+    response = client.post(
+        f"/api/app/inventory/{item_id}/marketplaces/woocommerce/stock",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert called == [("22:77", "BOOK-77", 1)]
