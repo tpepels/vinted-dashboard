@@ -9,7 +9,7 @@ const vm = require("node:vm");
 
 const script = fs.readFileSync("app/product_static/app.js", "utf8");
 const start = script.indexOf("function marketplaceRuntimeDetails(");
-const end = script.indexOf("async function connections()", start);
+const end = script.indexOf("function renderMarketplaceOperations(", start);
 assert(start > 0 && end > start, "Marketplace renderer is present");
 const source = script.slice(start, end);
 
