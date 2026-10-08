@@ -43,7 +43,7 @@ COVERAGE = {
     Channel.BIBLIO:       "IPIIPIBPPP",
     Channel.EBAY:         "IINNPINPPP",
     Channel.ETSY:         "IINN PMIN PP".replace(" ", ""),
-    Channel.WOOCOMMERCE:  "IIIN PMIN PP".replace(" ", ""),
+    Channel.WOOCOMMERCE:  "IIIP PMIP PP".replace(" ", ""),
     Channel.SHOPIFY:      "IIIN PMIN PP".replace(" ", ""),
     Channel.BIGCOMMERCE:  "IINN PMIN PP".replace(" ", ""),
     Channel.SQUARESPACE:  "IINN PMIN PP".replace(" ", ""),
@@ -83,6 +83,8 @@ NOTES = {
     (Channel.EBAY, "read_orders"): "No eBay seller-order importer exists yet, despite the earlier coarse capability flag.",
     (Channel.EBAY, "close"): "EndItem is available when a linked item sells elsewhere; not a general edit/publish adapter.",
     (Channel.EBAY, "stock"): "Can end a sold-out item; routine quantity updates are not implemented.",
+    (Channel.WOOCOMMERCE, "update"): "Explicit stock-only PUT for linked simple products; variants and other product edits remain unsupported.",
+    (Channel.WOOCOMMERCE, "stock"): "Manually triggered physical quantity sync with exact SKU/ID preflight and WooCommerce GET readback.",
     (Channel.DEPOP, "connect"): "Private Depop Selling API requires approved partner access and valid credentials.",
     (Channel.DEPOP, "read_orders"): "Order importer code exists, but requires Depop partner access.",
 }
@@ -114,6 +116,10 @@ def contract() -> dict:
                 evidence = SYNC_FUNCTIONS[channel] + " -> record_workspace_channel_orders"
             elif key == "publish":
                 evidence = PUBLISH_FUNCTIONS.get(channel)
+            elif key == "update" and channel == Channel.WOOCOMMERCE:
+                evidence = "app.connectors.hosted.update_woocommerce_workspace_stock"
+            elif key == "stock" and channel == Channel.WOOCOMMERCE:
+                evidence = "app.product_api.update_woocommerce_item_stock; remote GET -> PUT -> GET"
             elif key == "update" and channel == Channel.BIBLIO:
                 evidence = "app.connectors.hosted.sync_biblio_workspace (signature-based incremental FTP)"
             elif key == "close" and channel in {Channel.BIBLIO, Channel.EBAY}:
