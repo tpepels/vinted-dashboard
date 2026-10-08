@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const js = fs.readFileSync("app/product_static/app.js", "utf8");
 const css = fs.readFileSync("app/product_static/styles.css", "utf8");
 const start = js.indexOf("const tableResizeSeen = new WeakSet();");
-const end = js.indexOf("function activateResizableTable(table)", start);
+const end = js.indexOf("function startResponsiveTables()", start);
 assert(start >= 0 && end > start, "Resizable table helpers must exist");
 
 const store = new Map();
@@ -19,14 +19,27 @@ const style = {
     if (key === "width") this.width = "";
   },
 };
-const cells = [0, 1, 2].map(() => ({
-  querySelector() { return null; },
+const headers = ["Item", "SKU", "Status"];
+const cells = headers.map((textContent, i) => ({
+  textContent, colSpan: 1, handle: null, tabIndex: -1,
+  classList: {add() {}},
+  setAttribute() {},
+  querySelector(selector) {
+    return selector === ".table-resize-handle" ? this.handle : null;
+  },
+  appendChild(node) { this.handle = node; },
+  getBoundingClientRect() { return {width: [240, 110, 150][i]}; },
 }));
 const scope = {id: "inventory-table", querySelectorAll: () => [table]};
+const container = {
+  id: "inventory-table", clientWidth: 900,
+  hasAttribute: () => false, setAttribute() {}, tabIndex: -1,
+};
 const table = {
   style,
   tHead: {rows: [{cells}]},
-  closest: selector => selector === "[id]" ? scope : {id: "inventory-table"},
+  classList: {contains: () => false, add() {}},
+  closest: selector => selector === "[id]" ? scope : container,
   querySelector: selector => selector.includes("colgroup") ? group : null,
   insertBefore(node) {
     group = node;
@@ -40,10 +53,20 @@ const ctx = {
     setItem: (key, value) => store.set(key, value),
     removeItem: key => store.delete(key),
   },
+  window: {matchMedia: () => ({matches: false})},
   document: {
+    body: {classList: {add() {}, remove() {}}},
     createElement(tag) {
       if (tag === "colgroup") {
         return {className: "", replaceChildren(...cols) { this.cols = cols; }};
+      }
+      if (tag === "button") {
+        const listeners = {};
+        return {
+          type: "", className: "", style: {}, listeners,
+          setAttribute() {}, removeAttribute() {}, setPointerCapture() {},
+          addEventListener(name, handler) { listeners[name] = handler; },
+        };
       }
       return {style: {}};
     },
@@ -52,9 +75,9 @@ const ctx = {
 vm.createContext(ctx);
 vm.runInContext(js.slice(start, end) + `
   globalThis.exposed = {tableResizeKey, tableStoredWidths,
-    applyTableColumnWidths, resetTableColumnWidths};`, ctx);
+    applyTableColumnWidths, resetTableColumnWidths, activateResizableTable};`, ctx);
 const {tableResizeKey, tableStoredWidths, applyTableColumnWidths,
-  resetTableColumnWidths} = ctx.exposed;
+  resetTableColumnWidths, activateResizableTable} = ctx.exposed;
 
 const key = tableResizeKey(table);
 assert.equal(key, "reseller:table-widths:v1:inventory-table:0");
@@ -79,6 +102,24 @@ assert.equal(group, null);
 assert.equal(style.width, "");
 assert.equal(style.tableLayout, "");
 assert.equal(store.has(key), false);
+
+activateResizableTable(table);
+assert.ok(cells.every(cell => cell.handle), "Every header needs a resize handle");
+const resize = cells[0].handle.listeners;
+assert.ok(resize.pointerdown && resize.pointermove && resize.pointerup && resize.keydown);
+const event = {key:"ArrowRight",shiftKey:false,
+  preventDefault() {}, stopPropagation() {}};
+resize.keydown(event);
+assert.equal(JSON.parse(store.get(key)).widths[0], 252,
+  "Keyboard arrow must adjust and persist only the chosen column");
+resize.pointerdown({button:0,pointerId:7,clientX:100,
+  preventDefault() {}, stopPropagation() {}});
+resize.pointermove({pointerId:7,clientX:133});
+resize.pointerup({pointerId:7});
+assert.equal(JSON.parse(store.get(key)).widths[0], 285,
+  "Dragging must persist the new width");
+resize.dblclick({preventDefault() {},stopPropagation() {}});
+assert.equal(store.has(key), false, "Double-click should reset column widths");
 
 for (const token of ["--state-success", "--state-warning", "--state-danger",
                      "--state-info", "--state-neutral"]) {
