@@ -158,3 +158,24 @@ def test_workspace_isolation_and_bound(monkeypatch):
             BackgroundJob.workspace_id == wid,
             BackgroundJob.job_type == store_stock_audit.JOB_TYPE,
         )).scalars().all()
+
+
+def test_completed_result_becomes_stale_after_local_stock_change(monkeypatch):
+    client, csrf, wid, ids = prepare()
+    monkeypatch.setattr(store_stock_audit, "_read", lambda _wid, target: {
+        "quantity": target["local_quantity"], "manage_stock": True,
+        "stock_status": "instock" if target["local_quantity"] else "outofstock",
+    })
+    job_id = queue(client, csrf)
+    store_stock_audit.run(wid, job_id)
+    first = client.get("/api/app/inventory/store-stock-audit").json()
+    assert first["counts"] == {"matched": 3}
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, ids["woocommerce"][0])
+        record_physical_quantity(session, item, 5)
+    second = client.get("/api/app/inventory/store-stock-audit").json()
+    assert second["counts"]["changed"] == 1
+    assert second["counts"]["matched"] == 2
+    stale = next(row for row in second["results"] if row["channel"] == "woocommerce")
+    assert stale["remote_quantity"] is None
+    assert "changed after" in stale["message"]
