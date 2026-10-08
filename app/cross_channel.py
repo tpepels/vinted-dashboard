@@ -181,17 +181,21 @@ def _action_mode(channel: str) -> tuple[str, str]:
 
 
 def _enqueue_action_job(session: Session, action: CrossChannelAction) -> None:
-    session.add(
-        BackgroundJob(
-            workspace_id=action.workspace_id,
-            job_type="cross_channel_close",
-            payload={"action_id": str(action.id)},
-            status="queued",
-            available_at=utcnow(),
-        )
+    from app.marketplace_operations import queue_operation
+
+    queue_operation(
+        session,
+        action.workspace_id,
+        action.channel,
+        "close",
+        str(action.channel_listing_id),
+        job_type="cross_channel_close",
+        payload={"action_id": str(action.id)},
+        inventory_item_id=action.inventory_item_id,
+        channel_listing_id=action.channel_listing_id,
     )
-    # SessionLocal has autoflush disabled; make every planned action/job pair
-    # immediately visible to subsequent queries in the same transaction.
+    # SessionLocal has autoflush disabled; record and job are in one
+    # transaction, including the sold-stock decision.
     session.flush()
 
 
