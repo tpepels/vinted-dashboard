@@ -367,7 +367,8 @@ def test_dashboard_always_shows_bridge_version_and_versioned_download():
     assert "Bridge v—" in html
     assert '$("#bridge-version-page").textContent = "Bridge v" + (state.me.bridge_version || "unknown");' in APP_JS
     assert "devices.download_url" in APP_JS
-    assert "Download bridge v" in APP_JS
+    assert "Download Chrome extension" in APP_JS
+    assert "Chrome extension version " in APP_JS
 
 
 
@@ -544,7 +545,7 @@ def test_biblio_inventory_and_listing_rows_show_publication_state():
 
 def test_biblio_ui_explains_deferred_photo_retry_and_filename_warning():
     assert "photo retry scheduled" in APP_JS
-    assert "BIBLIO ignores an image if there is no active listing" in APP_JS
+    assert "BIBLIO may not recognize its photos immediately" in APP_JS
     assert "Photo warning:" in APP_JS
     assert "BookID.jpg, BookID_1.jpg, BookID_2.jpg" in APP_JS
     assert "Multiple photos require BIBLIO to map" in APP_JS
@@ -636,7 +637,7 @@ def test_biblio_safe_compare_first_workflow_is_separate_from_credentials():
     assert '"allow_plain_ftp"' in APP_JS
     assert '"auto_sync"' in APP_JS
     assert "Automatically send changed BIBLIO listings after new Vinted updates" in APP_JS
-    assert "Saving these settings does not upload any books" in APP_JS
+    assert "Saving them does not upload any listings" in APP_JS
     assert 'id="biblio-compare-panel"' in html
     assert 'id="verify-biblio"' in html
     assert 'id="biblio-import-authoritative"' in html
