@@ -33,6 +33,7 @@ jobs:
           BACKUP_RESTORE_DRILL_AT: 2026-10-01
       - run: python -m pytest -q
       - run: node --check app/product_static/app.js
+      - run: node scripts/test_connections_ui.js
       - run: node --check app/extension/background.js
       - run: node --check app/extension/vinted_age.js
       - run: node --check app/extension/content.js
