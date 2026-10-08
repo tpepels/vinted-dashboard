@@ -1451,6 +1451,163 @@ query ResellerVariants($cursor: String) {
 """
 
 
+SHOPIFY_STOCK_QUERY = """
+query ResellerStock($variantId: ID!) {
+  productVariant(id: $variantId) {
+    id
+    sku
+    product { status }
+    inventoryItem {
+      id
+      tracked
+      inventoryLevels(first: 2) {
+        nodes {
+          location { id }
+          quantities(names: ["available"]) { name quantity }
+        }
+      }
+    }
+  }
+}
+"""
+
+SHOPIFY_STOCK_SET_MUTATION = """
+mutation ResellerSetStock($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
+  inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
+    inventoryAdjustmentGroup { referenceDocumentUri }
+    userErrors { code field message }
+  }
+}
+"""
+
+
+def read_shopify_workspace_stock(
+    workspace_id: uuid.UUID,
+    *,
+    external_id: str,
+    expected_sku: str | None,
+) -> dict[str, Any]:
+    """Read stock of exactly one Shopify variant in exactly one location.
+
+    Multi-location stock is intentionally unsupported: writing the dashboard's
+    aggregate physical count to a single location would overstate availability.
+    """
+    if not re.fullmatch(r"gid://shopify/ProductVariant/[1-9][0-9]*", str(external_id or "")):
+        raise ValueError("A linked Shopify ProductVariant ID is required")
+    if not str(expected_sku or "").strip():
+        raise ValueError("Shopify stock changes require a confirmed linked SKU")
+    values = _credentials(workspace_id, Channel.SHOPIFY)
+    data = _shopify_graphql(
+        values, SHOPIFY_STOCK_QUERY, variables={"variantId": external_id},
+    )
+    variant = data.get("productVariant")
+    if not isinstance(variant, dict) or variant.get("id") != external_id:
+        raise ValueError("The linked Shopify variant was not found")
+    if str(variant.get("sku") or "").strip() != str(expected_sku).strip():
+        raise ValueError("Shopify SKU differs from the linked listing; reconcile first")
+    inventory = variant.get("inventoryItem") or {}
+    inventory_id = str(inventory.get("id") or "")
+    if not re.fullmatch(r"gid://shopify/InventoryItem/[1-9][0-9]*", inventory_id):
+        raise ValueError("Shopify did not return a valid inventory item ID")
+    if inventory.get("tracked") is not True:
+        raise ValueError("Shopify stock tracking is disabled for this variant")
+    levels = ((inventory.get("inventoryLevels") or {}).get("nodes") or [])
+    if len(levels) != 1:
+        raise ValueError("Only Shopify variants stocked at exactly one location are supported")
+    level = levels[0] or {}
+    location_id = str((level.get("location") or {}).get("id") or "")
+    if not re.fullmatch(r"gid://shopify/Location/[1-9][0-9]*", location_id):
+        raise ValueError("Shopify did not return a valid stock location")
+    quantities = level.get("quantities") or []
+    available = [entry.get("quantity") for entry in quantities
+                 if isinstance(entry, dict) and entry.get("name") == "available"]
+    if len(available) != 1 or type(available[0]) is not int or available[0] < 0:
+        raise ValueError("Shopify available quantity could not be safely determined")
+    quantity = available[0]
+    product_status = str((variant.get("product") or {}).get("status") or "").upper()
+    return {
+        "external_id": external_id,
+        "sku": str(variant.get("sku") or "").strip(),
+        "inventory_item_id": inventory_id,
+        "location_id": location_id,
+        "quantity": quantity,
+        "manage_stock": True,
+        "stock_status": "instock" if quantity else "outofstock",
+        "status": (ListingStatus.ACTIVE
+                   if product_status == "ACTIVE" and quantity > 0
+                   else ListingStatus.INACTIVE),
+    }
+
+
+def update_shopify_workspace_stock(
+    workspace_id: uuid.UUID,
+    *,
+    external_id: str,
+    expected_sku: str | None,
+    quantity: int,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Compare-and-set one Shopify location and verify with a second read.
+
+    A failed or ambiguous mutation must never cause an automatic second write.
+    """
+    if type(quantity) is not int or quantity < 0:
+        raise ValueError("Physical stock must be a non-negative whole number")
+    try:
+        uuid.UUID(str(idempotency_key))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("A unique operation ID is required for the stock update") from exc
+    before = read_shopify_workspace_stock(
+        workspace_id, external_id=external_id, expected_sku=expected_sku,
+    )
+    if before["quantity"] == quantity:
+        return {
+            "remote_verified": True, "quantity": quantity,
+            "external_id": external_id, "status": before["status"],
+            "already_complete": True,
+        }
+    values = _credentials(workspace_id, Channel.SHOPIFY)
+    data = _shopify_graphql(
+        values, SHOPIFY_STOCK_SET_MUTATION,
+        variables={
+            "idempotencyKey": str(idempotency_key),
+            "input": {
+                "name": "available",
+                "reason": "correction",
+                "referenceDocumentUri": f"reseller-dashboard://operation/{idempotency_key}",
+                "quantities": [{
+                    "inventoryItemId": before["inventory_item_id"],
+                    "locationId": before["location_id"],
+                    "quantity": quantity,
+                    "changeFromQuantity": before["quantity"],
+                }],
+            },
+        },
+    )
+    mutation = data.get("inventorySetQuantities")
+    if not isinstance(mutation, dict):
+        raise RuntimeError("Shopify did not acknowledge the stock mutation")
+    errors = mutation.get("userErrors") or []
+    if errors:
+        detail = "; ".join(str(error.get("message") or "stock conflict")
+                           for error in errors if isinstance(error, dict))
+        raise ValueError("Shopify refused the stock update: " + (detail or "stock conflict"))
+    if mutation.get("inventoryAdjustmentGroup") is None:
+        raise RuntimeError("Shopify did not return stock adjustment evidence")
+    after = read_shopify_workspace_stock(
+        workspace_id, external_id=external_id, expected_sku=expected_sku,
+    )
+    if (after["inventory_item_id"] != before["inventory_item_id"]
+            or after["location_id"] != before["location_id"]
+            or after["quantity"] != quantity):
+        raise RuntimeError("Shopify stock did not match on independent readback")
+    return {
+        "remote_verified": True, "quantity": quantity,
+        "external_id": external_id, "status": after["status"],
+        "already_complete": False,
+    }
+
+
 SHOPIFY_ORDERS_QUERY = """
 query ResellerOrders($cursor: String, $query: String!) {
   orders(first: 100, after: $cursor, query: $query, reverse: true) {
