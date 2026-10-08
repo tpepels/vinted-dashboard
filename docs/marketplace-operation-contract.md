@@ -287,8 +287,11 @@ linked WooCommerce numeric product ID and original SKU, then:
 
 A timeout, drift or ambiguous readback is recorded as requiring attention:
 the dashboard will not silently retry the remote write or create another
-product. The action is explicit in **Inventory → Marketplaces** and cannot be
-used on provisional stock, grouped/variable products or variations.
+product. **Check WooCommerce stock** performs a GET-only remote observation
+and compares it against current physical inventory. A matching check resolves
+an ambiguous operation as verified; a mismatch records the discrepancy and
+requires an explicit update action. The action is in **Inventory → Marketplaces**
+and cannot be used on provisional stock, grouped/variable products or variations.
 
 **Remaining Phase 6 work:** equivalent tested adapters for Shopify and Wix,
 WooCommerce variants, remote price/detail updates and deletion/close support.
