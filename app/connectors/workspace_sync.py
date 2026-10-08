@@ -604,14 +604,10 @@ def record_workspace_channel_orders(
                 ).scalar_one_or_none()
                 if listing is not None and listing.inventory_item_id is not None:
                     inventory_item = session.get(models.InventoryItem, listing.inventory_item_id)
+            # A seller SKU may identify an edition/product with multiple
+            # physical copies. It is only reconciliation evidence, not an
+            # authorization to consume a same-SKU InventoryItem.
             sku = normalize_sku(raw.get("sku"))
-            if inventory_item is None and sku:
-                inventory_item = session.execute(
-                    select(models.InventoryItem).where(
-                        models.InventoryItem.workspace_id == workspace.id,
-                        models.InventoryItem.sku == sku,
-                    )
-                ).scalar_one_or_none()
 
             occurred_at = raw.get("occurred_at")
             if isinstance(occurred_at, str):
