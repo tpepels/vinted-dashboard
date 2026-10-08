@@ -819,7 +819,7 @@ def test_item_marketplace_panel_exposes_safe_real_actions():
     assert 'class="btn item-marketplace-retry"' in APP_JS
     assert 'data-book=' in APP_JS
     assert 'state.biblioPhotoTarget = button.dataset.book' in APP_JS
-    assert 'Stock updates change marketplace quantities only' not in APP_JS or 'change marketplace quantities only' in APP_JS
+    assert 'change marketplace quantities only' in APP_JS
 
 
 def test_biblio_selective_photo_repair_keeps_safe_full_resend_choice():
@@ -869,3 +869,10 @@ def test_connections_shows_tasks_and_keeps_verbose_help_collapsed():
     assert 'details class="connection-technical-help"' in APP_JS
     assert 'class="biblio-photo-manual-id"' in APP_JS
     assert "Refresh this overview" not in APP_JS
+
+
+def test_inventory_and_connection_click_collections_are_real_collections():
+    for selector in (".item-marketplaces", ".inventory-select", ".sync",
+                     ".market-select", ".configure"):
+        assert f'$$("{selector}").forEach' in APP_JS
+        assert f'$("{selector}").forEach' not in APP_JS
