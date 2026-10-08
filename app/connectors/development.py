@@ -44,7 +44,7 @@ COVERAGE = {
     Channel.EBAY:         "IINNPINPPP",
     Channel.ETSY:         "IINN PMIN PP".replace(" ", ""),
     Channel.WOOCOMMERCE:  "IIIP PMIP PP".replace(" ", ""),
-    Channel.SHOPIFY:      "IIIN PMIN PP".replace(" ", ""),
+    Channel.SHOPIFY:      "IIIP PMIP PP".replace(" ", ""),
     Channel.BIGCOMMERCE:  "IINN PMIN PP".replace(" ", ""),
     Channel.SQUARESPACE:  "IINN PMIN PP".replace(" ", ""),
     Channel.WIX:          "IIIN PMIN PP".replace(" ", ""),
@@ -85,6 +85,8 @@ NOTES = {
     (Channel.EBAY, "stock"): "Can end a sold-out item; routine quantity updates are not implemented.",
     (Channel.WOOCOMMERCE, "update"): "Explicit stock-only PUT for linked simple products; variants and other product edits remain unsupported.",
     (Channel.WOOCOMMERCE, "stock"): "Manually triggered physical quantity sync with exact SKU/ID preflight and WooCommerce GET readback.",
+    (Channel.SHOPIFY, "update"): "Explicit stock-only change for one linked, tracked variant at exactly one location; no product-detail updates.",
+    (Channel.SHOPIFY, "stock"): "Manual compare-and-set available quantity, idempotent operation key and GraphQL readback; rejects multi-location stock.",
     (Channel.DEPOP, "connect"): "Private Depop Selling API requires approved partner access and valid credentials.",
     (Channel.DEPOP, "read_orders"): "Order importer code exists, but requires Depop partner access.",
 }
@@ -116,6 +118,10 @@ def contract() -> dict:
                 evidence = SYNC_FUNCTIONS[channel] + " -> record_workspace_channel_orders"
             elif key == "publish":
                 evidence = PUBLISH_FUNCTIONS.get(channel)
+            elif key == "update" and channel == Channel.SHOPIFY:
+                evidence = "app.connectors.hosted.update_shopify_workspace_stock"
+            elif key == "stock" and channel == Channel.SHOPIFY:
+                evidence = "app.product_api.update_shopify_item_stock; GraphQL read -> CAS -> read"
             elif key == "update" and channel == Channel.WOOCOMMERCE:
                 evidence = "app.connectors.hosted.update_woocommerce_workspace_stock"
             elif key == "stock" and channel == Channel.WOOCOMMERCE:
