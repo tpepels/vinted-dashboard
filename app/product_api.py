@@ -23,7 +23,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
-from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake
+from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake, store_stock_audit
 from app.stock_relations import record_physical_quantity, confirm_physical_relation, is_physical, is_provisional
 from app.diagnostics import build_bundle, recent_logs, redact_text
 from app.bridge_package import extension_source_version
@@ -2508,6 +2508,31 @@ def link_listing(
             if previous is not None and previous.workspace_id == context.workspace.id:
                 recompute_inventory_item(session, previous)
     return {"ok": True}
+
+
+@router.get("/api/app/inventory/store-stock-audit")
+def get_store_stock_audit(context: RequestContext = Depends(require_context)):
+    """Return last bulk read-only audit; never contacts marketplaces on GET."""
+    return store_stock_audit.latest(context.workspace.id)
+
+
+@router.post("/api/app/inventory/store-stock-audit")
+def start_store_stock_audit(context: RequestContext = Depends(require_write_context)):
+    """Queue one background read-only remote stock scan, never a stock update."""
+    with db.session_scope() as session:
+        count = len(store_stock_audit.candidates(session, context.workspace.id))
+    if count == 0:
+        raise HTTPException(status_code=409, detail="No linked physical stock in supported stores")
+    if count > store_stock_audit.MAX_TARGETS:
+        raise HTTPException(
+            status_code=409,
+            detail="Too many linked store listings for one check (limit 100). No scan was started.",
+        )
+    job_id = jobs.enqueue_unique(
+        store_stock_audit.JOB_TYPE, {"version": 1}, context.workspace.id,
+    )
+    return {"ok": True, "job_id": str(job_id), "eligible": count,
+            "message": "Stock check queued. No marketplace quantities will be changed."}
 
 
 @router.get("/api/app/inventory/relationship-audit")
