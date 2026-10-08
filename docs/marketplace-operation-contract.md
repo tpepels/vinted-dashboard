@@ -200,3 +200,27 @@ operation controls, searchable logs and workflow UX are Phase 3.
 All existing background jobs created before this upgrade remain runnable
 without an operation ID. Existing jobs are not retroactively classified
 as verified. Migration adds an audit table without rewriting inventory.
+
+
+## Phase 3: per-item marketplace operations (implemented)
+
+**Inventory → Marketplaces** now opens a view for one physical stock item.
+The workspace-scoped `GET /api/app/inventory/{item_id}/marketplace-status`
+aggregates its linked listings, local/remote evidence, recent tracked
+operations and sold-out follow-up actions. No network transfer or
+inventory mutation occurs when reviewing this status.
+
+The user can review each channel's listing identity, known local quantity,
+last observed import, BIBLIO seller-download comparison state and recent
+transfer errors. Where supported, actions go to the existing safe
+publishing preflight, BIBLIO single-book photo inspection, BIBLIO file
+comparison or explicit retry of a repeatable failed operation.
+
+The interface deliberately **does not** expose a generic Update/Close
+button unless the corresponding safe marketplace adapter exists. A
+successful FTP send remains unverified until the separate BIBLIO inventory
+download check. Cross-channel close status is visible, while creating
+destructive remote closes remains managed by sales reconciliation.
+
+Operational audit data is limited to the requesting workspace. Legacy
+untracked marketplace activity is described as untracked, not certified.
