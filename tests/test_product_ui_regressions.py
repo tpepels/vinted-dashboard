@@ -820,3 +820,18 @@ def test_item_marketplace_panel_exposes_safe_real_actions():
     assert 'data-book=' in APP_JS
     assert 'state.biblioPhotoTarget = button.dataset.book' in APP_JS
     assert 'this panel deliberately does not offer a blind remote delete' in APP_JS
+
+
+def test_biblio_selective_photo_repair_keeps_safe_full_resend_choice():
+    assert 'id="biblio-retry-failed-photos"' in APP_JS
+    assert 'id="biblio-retry-listing-photos"' in APP_JS
+    assert "Retry failed photo files" in APP_JS
+    assert "Resend all photos for this book" in APP_JS
+    assert "body: JSON.stringify({book_id: selected.book_id, failed_only: true})" in APP_JS
+    assert "unconfirmed_file_transfers" in APP_JS
+    assert "successful_file_transfers" in APP_JS
+    assert "No matching successful FTP receipt" in APP_JS
+    assert "Previously accepted by FTP" in APP_JS
+    assert "photos_skipped" in APP_JS
+    assert "does not prove BIBLIO displays" in APP_JS
+    assert "info.file_progress" in APP_JS
