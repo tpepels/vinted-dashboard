@@ -89,7 +89,7 @@ def test_development_endpoint_reports_workspace_only_and_provisional_relations()
             external_order_id="ORDER-1",
             title="External source",
             status="completed",
-            price_cents=900,
+            total_cents=900,
         ))
 
     anonymous = TestClient(entry.app)
