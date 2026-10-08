@@ -84,6 +84,7 @@ from app.connectors.hosted import (
     read_shopify_workspace_stock,
 )
 from app.connectors.wix_stock import read_wix_workspace_stock, update_wix_workspace_stock
+from app.connectors.woocommerce_price import read_woocommerce_workspace_price, update_woocommerce_workspace_price
 from app.connectors.workspace_sync import recompute_inventory_item
 from app import cross_listing
 from app.cross_channel import (
@@ -1621,6 +1622,10 @@ def item_marketplace_status(
             needs_attention = (
                 any(op.status in {"attention", "failed"} for op in recent)
                 or stock_verification in {"stock_mismatch", "stock_stale"}
+                or (listing.channel == Channel.WOOCOMMERCE and bool(extra.get("price_last_checked_at")) and (
+                    extra.get("price_last_master_cents") != (item.attributes or {}).get("default_price_cents")
+                    or extra.get("price_last_remote_cents") != (item.attributes or {}).get("default_price_cents")
+                ))
                 or (is_biblio and (
                     stale or (verified and match is False)
                     or photo_state == "error" or bool(extra.get("photo_sync_error"))
@@ -1655,6 +1660,31 @@ def item_marketplace_status(
                 "photo_count": len(extra.get("image_urls") or []) if is_biblio else None,
                 "can_inspect_photos": is_biblio and bool(listing.external_id),
                 "can_open_remote": bool(listing.url),
+                "price_verification": (
+                    "not_checked" if not extra.get("price_last_checked_at")
+                    else "price_stale" if (
+                        extra.get("price_last_master_cents") != (item.attributes or {}).get("default_price_cents")
+                        or extra.get("price_last_external_id") != listing.external_id
+                        or extra.get("price_last_sku") != listing.external_sku
+                        or extra.get("price_last_currency") != str(item.currency or "").strip().upper()
+                        or not extra.get("price_remote_readback_verified")
+                        and extra.get("price_last_remote_cents") == (item.attributes or {}).get("default_price_cents")
+                    )
+                    else "price_mismatch" if extra.get("price_last_remote_cents") != (item.attributes or {}).get("default_price_cents")
+                    else "price_checked"
+                ) if listing.channel == Channel.WOOCOMMERCE else None,
+                "remote_price_cents": extra.get("price_last_remote_cents") if listing.channel == Channel.WOOCOMMERCE else None,
+                "price_verified_at": extra.get("price_last_checked_at") if listing.channel == Channel.WOOCOMMERCE else None,
+                "can_sync_woocommerce_price": (
+                    listing.channel == Channel.WOOCOMMERCE
+                    and is_physical(item)
+                    and type((item.attributes or {}).get("default_price_cents")) is int
+                    and 0 < (item.attributes or {}).get("default_price_cents") <= 2000000
+                    and bool(str(item.currency or "").strip())
+                    and (not listing.currency or str(listing.currency).upper() == str(item.currency).upper())
+                    and bool(str(listing.external_sku or "").strip())
+                    and bool(re.fullmatch(r"(?:[1-9][0-9]*:)?[1-9][0-9]*", str(listing.external_id or "")))
+                ),
                 "can_sync_woocommerce_stock": (
                     listing.channel == Channel.WOOCOMMERCE
                     and is_physical(item)
@@ -1676,7 +1706,9 @@ def item_marketplace_status(
             })
         return {
             "item": {"id": str(item.id), "title": item.title, "sku": item.sku,
-                     "quantity": item.quantity, "status": item.status},
+                     "quantity": item.quantity, "status": item.status,
+                     "currency": item.currency,
+                     "default_price_cents": (item.attributes or {}).get("default_price_cents")},
             "listings": rows,
             "operations": [serialize_marketplace_operation(op) for op in operations],
             "closure_actions": [
@@ -1693,6 +1725,178 @@ def item_marketplace_status(
                 "verify": "BIBLIO requires a downloaded seller inventory file or a direct marketplace check to verify publication.",
             },
         }
+
+
+def _woo_price_link(session, workspace_id: uuid.UUID, item_id: uuid.UUID):
+    item = session.get(models.InventoryItem, item_id)
+    if item is None or item.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+    if not is_physical(item):
+        raise HTTPException(status_code=409, detail="Confirm physical stock before changing store prices")
+    amount = (item.attributes or {}).get("default_price_cents")
+    if type(amount) is not int or not 0 < amount <= 2000000:
+        raise HTTPException(status_code=409, detail="Set a valid default asking price before checking WooCommerce")
+    currency = str(item.currency or "").strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", currency):
+        raise HTTPException(status_code=409, detail="Set the item's three-letter currency first")
+    listings = session.execute(select(models.ChannelListing).where(
+        models.ChannelListing.workspace_id == workspace_id,
+        models.ChannelListing.inventory_item_id == item_id,
+        models.ChannelListing.channel == Channel.WOOCOMMERCE,
+    )).scalars().all()
+    if len(listings) != 1:
+        raise HTTPException(status_code=409, detail="Expected one linked WooCommerce listing")
+    listing = listings[0]
+    if (not re.fullmatch(r"(?:[1-9][0-9]*:)?[1-9][0-9]*", str(listing.external_id or ""))
+            or not str(listing.external_sku or "").strip()):
+        raise HTTPException(status_code=409, detail="A WooCommerce product/variation ID and confirmed SKU are required")
+    if listing.currency and str(listing.currency).upper() != currency:
+        raise HTTPException(status_code=409, detail="Linked listing and inventory currencies differ")
+    return item, listing, amount, currency
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/woocommerce/check-price")
+def verify_woocommerce_item_price(
+    item_id: uuid.UUID, context: RequestContext = Depends(require_write_context),
+):
+    """Observe the linked store regular price, without changing it."""
+    with db.session_scope() as session:
+        item, listing, desired, currency = _woo_price_link(
+            session, context.workspace.id, item_id,
+        )
+        listing_id, external_id, sku = listing.id, listing.external_id, listing.external_sku
+    try:
+        remote = read_woocommerce_workspace_price(
+            context.workspace.id, external_id=external_id, expected_sku=sku,
+            expected_currency=currency,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not read WooCommerce regular price") from exc
+    with db.session_scope() as session:
+        _item, current, latest_desired, current_currency = _woo_price_link(
+            session, context.workspace.id, item_id,
+        )
+        if (current.id != listing_id or current.external_id != external_id
+                or current.external_sku != sku or current_currency != currency
+                or latest_desired != desired):
+            raise HTTPException(status_code=409, detail="Item or store link changed during price inspection")
+        observed = remote["regular_price_cents"]
+        matches = observed == desired
+        extra = dict(current.extra or {})
+        now = utcnow().isoformat()
+        extra.update({
+            "price_last_checked_at": now, "price_last_remote_cents": observed,
+            "price_last_master_cents": desired,
+            "price_last_external_id": external_id, "price_last_sku": sku,
+            "price_last_currency": currency,
+            "price_remote_readback_verified": matches,
+        })
+        current.extra = extra
+        # Only price checks can clear a previous ambiguous price write.
+        unresolved = session.execute(select(MarketplaceOperation).where(
+            MarketplaceOperation.workspace_id == context.workspace.id,
+            MarketplaceOperation.channel_listing_id == listing_id,
+            MarketplaceOperation.operation_type == "update",
+            MarketplaceOperation.target_key == f"{listing_id}:price",
+            MarketplaceOperation.status.in_(["attention", "needs_verification"]),
+        ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
+        if unresolved is not None:
+            was_sent = (unresolved.job_payload or {}).get("price_cents")
+            if type(was_sent) is int:
+                confirmed = observed == was_sent
+                unresolved.status = "succeeded" if confirmed else "failed"
+                unresolved.verification = "remote_verified" if confirmed else "remote_mismatch"
+                unresolved.last_error = (
+                    None if confirmed else "WooCommerce regular price differs after uncertain update"
+                )
+                unresolved.active_key = None
+                unresolved.completed_at = utcnow()
+        if matches:
+            current.price_cents = observed
+        return {
+            "ok": True, "matches": matches, "local_price_cents": desired,
+            "remote_price_cents": observed, "currency": currency,
+            "note": "Read-only WooCommerce price check; no remote change.",
+        }
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/woocommerce/price")
+def update_woocommerce_item_price(
+    item_id: uuid.UUID, context: RequestContext = Depends(require_write_context),
+):
+    """Explicit one-field price update after a recent, matching remote snapshot."""
+    with db.session_scope() as session:
+        item, listing, desired, currency = _woo_price_link(
+            session, context.workspace.id, item_id,
+        )
+        extra = dict(listing.extra or {})
+        checked = extra.get("price_last_checked_at")
+        try:
+            checked_at = datetime.fromisoformat(str(checked))
+            recent = checked_at.tzinfo is not None and (
+                timedelta(0) <= utcnow() - checked_at <= timedelta(minutes=5)
+            )
+        except (ValueError, TypeError):
+            recent = False
+        observed = extra.get("price_last_remote_cents")
+        if (not recent or type(observed) is not int
+                or extra.get("price_last_master_cents") != desired
+                or extra.get("price_last_external_id") != listing.external_id
+                or extra.get("price_last_sku") != listing.external_sku
+                or extra.get("price_last_currency") != currency):
+            raise HTTPException(status_code=409, detail="Check the current WooCommerce price before updating")
+        listing_id, external_id, sku = listing.id, listing.external_id, listing.external_sku
+    try:
+        op_id = start_inline(
+            context.workspace.id, Channel.WOOCOMMERCE, "update",
+            f"{listing_id}:price", inventory_item_id=item_id,
+            channel_listing_id=listing_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Preserve the desired price for safe reconciliation if the remote PUT
+    # succeeds but our response/readback becomes uncertain.
+    with db.session_scope() as session:
+        op = session.get(MarketplaceOperation, op_id)
+        op.job_payload = {"scope": "price", "price_cents": desired,
+                          "old_price_cents": observed}
+    try:
+        result = update_woocommerce_workspace_price(
+            context.workspace.id, external_id=external_id,
+            expected_sku=sku, expected_currency=currency,
+            old_price_cents=observed, new_price_cents=desired,
+        )
+        with db.session_scope() as session:
+            _item, current, latest_desired, latest_currency = _woo_price_link(
+                session, context.workspace.id, item_id,
+            )
+            if (current.id != listing_id or current.external_id != external_id
+                    or current.external_sku != sku or latest_currency != currency
+                    or latest_desired != desired):
+                raise RuntimeError("Item or store link changed during WooCommerce price update")
+            current.price_cents = desired
+            extra = dict(current.extra or {})
+            now = utcnow().isoformat()
+            extra.update({
+                "price_last_checked_at": now, "price_last_remote_cents": desired,
+                "price_last_master_cents": desired,
+                "price_last_external_id": external_id, "price_last_sku": sku,
+                "price_last_currency": currency,
+                "price_remote_readback_verified": True,
+            })
+            current.extra = extra
+        complete_operation(op_id, result)
+        return {"ok": True, "operation_id": str(op_id), **result}
+    except Exception as exc:
+        fail_operation(op_id, str(exc))
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=(
+            "WooCommerce price update was not confirmed. Check the remote "
+            "price before attempting another update."
+        )) from exc
 
 
 @router.post("/api/app/inventory/{item_id}/marketplaces/woocommerce/stock")
@@ -1836,6 +2040,7 @@ def verify_woocommerce_item_stock(
                 MarketplaceOperation.workspace_id == context.workspace.id,
                 MarketplaceOperation.channel_listing_id == listing_id,
                 MarketplaceOperation.operation_type == "update",
+                MarketplaceOperation.target_key == str(listing_id),
                 MarketplaceOperation.status.in_(["attention", "needs_verification"]),
             ).order_by(MarketplaceOperation.created_at.desc())
         ).scalars().first()
@@ -2017,6 +2222,7 @@ def verify_shopify_item_stock(
                 MarketplaceOperation.workspace_id == context.workspace.id,
                 MarketplaceOperation.channel_listing_id == listing_id,
                 MarketplaceOperation.operation_type == "update",
+                MarketplaceOperation.target_key == str(listing_id),
                 MarketplaceOperation.status.in_(["attention", "needs_verification"]),
             ).order_by(MarketplaceOperation.created_at.desc())
         ).scalars().first()
@@ -2201,6 +2407,7 @@ def verify_wix_item_stock(
                 MarketplaceOperation.workspace_id == context.workspace.id,
                 MarketplaceOperation.channel_listing_id == listing_id,
                 MarketplaceOperation.operation_type == "update",
+                MarketplaceOperation.target_key == str(listing_id),
                 MarketplaceOperation.status.in_(["attention", "needs_verification"]),
             ).order_by(MarketplaceOperation.created_at.desc())
         ).scalars().first()

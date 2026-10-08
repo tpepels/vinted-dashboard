@@ -820,7 +820,8 @@ def test_item_marketplace_panel_exposes_safe_real_actions():
     assert 'class="btn item-marketplace-retry"' in APP_JS
     assert 'data-book=' in APP_JS
     assert 'state.biblioPhotoTarget = button.dataset.book' in APP_JS
-    assert 'change marketplace quantities only' in APP_JS
+    assert "WooCommerce price updates change regular price only" in APP_JS
+    assert "Stock and price changes are separate, explicit actions" in APP_JS
 
 
 def test_biblio_selective_photo_repair_keeps_safe_full_resend_choice():

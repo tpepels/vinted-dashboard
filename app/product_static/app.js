@@ -1138,11 +1138,38 @@ function renderItemMarketplacePanel(data) {
               + '" type="button">Set stock to ' + Number(item.quantity || 0) + '…</button>'
             : '')
         : '')
+
+      + (listing.can_sync_woocommerce_price
+        ? '<details class="item-price-tools"'
+          + (listing.price_verification === "price_mismatch" ? ' open' : '')
+          + '><summary>Regular price · '
+          + esc(money(item.default_price_cents, item.currency)) + '</summary>'
+          + '<p class="muted">Compare the store price first. Promotions are never changed.</p>'
+          + (listing.price_verification !== "not_checked"
+            ? '<p class="item-price-state">'
+              + (listing.price_verification === "price_checked" ? 'Price matches'
+                : listing.price_verification === "price_mismatch" ? 'Price differs'
+                : 'Previous check is outdated')
+              + (Number.isInteger(listing.remote_price_cents)
+                ? ' · Store ' + esc(money(listing.remote_price_cents, item.currency)) : '')
+              + '</p>' : '')
+          + '<div class="actions"><button class="btn item-price-check" type="button">'
+          + (listing.price_verification === "not_checked" ? 'Check price' : 'Check again')
+          + '</button>'
+          + (listing.price_verification === "price_mismatch"
+              && listing.price_verified_at
+              && Number.isFinite(Date.parse(listing.price_verified_at))
+              && Date.now() - Date.parse(listing.price_verified_at) < 300000
+              && Date.now() >= Date.parse(listing.price_verified_at)
+            ? '<button class="btn primary item-price-update" type="button">Set price to '
+              + esc(money(item.default_price_cents, item.currency)) + '…</button>'
+            : '')
+          + '</div></details>' : '')
       + '</div></div>';
   });
   const operationsMarkup = operations.map(op => {
     const title = {
-      publish:"Publish",update:"Update",photos:"Send photos",
+      publish:"Publish",update:op.target?.endsWith(":price") ? "Price update" : "Stock update",photos:"Send photos",
       close:"Close after sale",sync:"Synchronize",verify:"Verify",
     }[op.type] || op.type;
     return '<div class="item-marketplace-history-row"><div><strong>' + esc(op.channel.toUpperCase())
@@ -1167,8 +1194,8 @@ function renderItemMarketplacePanel(data) {
     + '<details class="item-marketplace-history"><summary>Recent operations (' + operations.length + ')</summary>'
     + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
-    + '<p class="item-marketplace-footnote">Check stock before updating. Supported stores '
-    + 'change marketplace quantities only. Send BIBLIO changes from Connections.</p>';
+    + '<p class="item-marketplace-footnote">Stock and price changes are separate, explicit actions. '
+    + 'WooCommerce price updates change regular price only. Send BIBLIO changes from Connections.</p>';
   const itemId = item.id;
   $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
   $(".item-marketplace-edit").onclick = () => {
@@ -1254,7 +1281,43 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $$(".item-marketplace-retry").forEach(button => {
+
+  $(".item-price-check").forEach(button => {
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const result = await api("/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/woocommerce/check-price", {method:"POST"});
+        flash(result.matches ? "WooCommerce regular price matches."
+          : "WooCommerce regular price differs from the default asking price.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("WooCommerce price check: " + error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $(".item-price-update").forEach(button => {
+    button.onclick = async () => {
+      const price = money(item.default_price_cents, item.currency);
+      if (!window.confirm("Set the WooCommerce regular price to " + price + "? "
+        + "This changes only the linked WooCommerce product or variation's regular price. "
+        + "Existing sale prices and promotions will not be modified.")) return;
+      button.disabled = true;
+      try {
+        const result = await api("/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/woocommerce/price", {method:"POST"});
+        flash(result.remote_verified ? "WooCommerce regular price verified at " + price + "."
+          : "Price update needs remote verification.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("WooCommerce price was not confirmed. Check the store before retrying. "
+          + error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $(".item-marketplace-retry").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Retry this supported operation? Check any uncertain remote result before resending.")) return;
       button.disabled = true;
