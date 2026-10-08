@@ -1140,7 +1140,9 @@ function renderItemMarketplacePanel(data) {
         : '')
 
       + (listing.can_sync_woocommerce_price
-        ? '<details class="item-price-tools"><summary>Regular price · '
+        ? '<details class="item-price-tools"'
+          + (listing.price_verification === "price_mismatch" ? ' open' : '')
+          + '><summary>Regular price · '
           + esc(money(item.default_price_cents, item.currency)) + '</summary>'
           + '<p class="muted">Compare the store price first. Promotions are never changed.</p>'
           + (listing.price_verification !== "not_checked"
