@@ -317,3 +317,37 @@ def test_relationship_audit_is_read_only_workspace_scoped_and_shows_sku_conflict
         assert len(session.execute(select(models.InventoryItem).where(
             models.InventoryItem.workspace_id == workspace,
         )).scalars().all()) == 2
+
+
+def test_manual_listing_move_with_existing_sales_requires_merge(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post("/api/auth/register", json={
+        "email": "phase1-sales-merge@example.test",
+        "password": "a-long-test-password", "workspace_name": "Sale safeguards",
+    })
+    assert registered.status_code == 200, registered.text
+    csrf = registered.json()["csrf_token"]
+    with db.session_scope() as session:
+        workspace = session.execute(select(models.Membership)).scalar_one().workspace_id
+        target = _physical(session, workspace, sku="TARGET-COPY", quantity=1)
+        source = _physical(session, workspace, sku="SOURCE-COPY", quantity=1)
+        listing = _listing(session, workspace, source, "ebay", "E-1")
+        session.add(models.Sale(
+            workspace_id=workspace, inventory_item_id=source.id,
+            channel="ebay", external_order_id="order-with-history",
+            direction="sell", status="cancelled",
+        ))
+        session.flush()
+        target_id, source_id, listing_id = target.id, source.id, listing.id
+
+    result = client.post(
+        f"/api/app/inventory/{target_id}/link",
+        headers={"X-CSRF-Token": csrf},
+        json={"listing_id": str(listing_id)},
+    )
+    assert result.status_code == 409, result.text
+    assert "merge items" in result.json()["detail"]
+    with db.session_scope() as session:
+        assert session.get(models.ChannelListing, listing_id).inventory_item_id == source_id
+        assert len(session.execute(select(models.Sale)).scalars().all()) == 1
