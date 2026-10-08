@@ -92,3 +92,44 @@ For each operation, record:
 Only then can code coverage be upgraded to a verified end-to-end behavior.
 Verification must be evidence-based, and publish/delete tests should only
 affect expressly designated test listings.
+
+
+## Phase 1 implementation: canonical physical stock ownership
+
+- Market snapshots **never** claim an existing master item simply because
+  `sku`, ISBN or title matches. A new remote identity creates a provisional
+  import record with the original SKU preserved in `ChannelListing.external_sku`
+  and `connector_import_sku` provenance. Colliding local SKUs are allocated a
+  distinct synthetic identifier. Subsequent snapshots of that exact remote ID
+  update the same listing and its existing explicit physical link.
+- Direct master creation, barcode intake, quick listing creation and confirmed
+  file imports establish `stock_authority=physical`. Explicit **Link to
+  master** and merge actions also confirm physical ownership. These operations
+  preserve source provenance and set a physical stock baseline.
+- A verified master quantity is a *physical reading*, not the sum or maximum
+  of several marketplace advertisements. Incoming remote quantities and
+  statuses do not overwrite it. Consuming order identities (with their
+  quantities) are counted once against a stable baseline; a later manually
+  entered stock count resets that baseline consistently.
+- A provisional record whose final listing moves to another master is
+  archived with zero stock, not left as an apparent second active copy.
+- Orders resolve by retained explicit link or exact source listing ID first.
+  An SKU by itself is insufficient to consume master stock. Historical
+  exact-title matching in the existing Vinted reconciliation path is still
+  constrained to a single plausible listing and requires separate review if
+  ambiguous.
+- Reconciliation merges preserve the target SKU and cost, carry all linked
+  listings, sales and cross-channel action references, and use the maximum
+  independently reported quantity instead of adding duplicate advertisements.
+- The **Inventory → Check marketplace relationships** audit reports provisional
+  records, legacy unclassified inventory, exact-SKU collisions, active
+  same-market duplicate listing links, missing master references and candidate
+  pairs for explicit review. It is read-only.
+- Existing legacy records are intentionally labelled *legacy unclassified*
+  unless they already have reliable provenance. No automatic migration
+  claims that an unknown legacy item has been physically verified.
+
+**Phase boundary:** Automatic remote quantity updates, robust reservations,
+out-of-order events, multi-line order splits and marketplace-side stock
+verification belong to Phases 2, 5 and 8. Phase 1 does not claim those
+operations have been implemented or live-certified.

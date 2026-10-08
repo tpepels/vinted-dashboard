@@ -92,3 +92,11 @@ table tbody tr{transition:background .12s ease}table tbody tr:hover{background:#
 .market-relations summary{cursor:pointer;font-weight:700}
 .market-relations li{margin:5px 0}
 @media(prefers-color-scheme:dark){.market-status-implemented{color:#9bdfb5}.market-status-partial{color:#f5d090}.market-status-manual{color:#adcff0}.market-status-blocked{color:#f1aaaa}}
+
+/* Phase 1: physical versus provisional stock review */
+.inventory-relation-audit{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:0 0 12px;font-size:10px}
+#inventory-relation-report{flex:1 0 100%;padding:11px;border:1px solid var(--line);border-radius:9px;background:var(--soft)}
+.inventory-relation-counts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:7px}
+.inventory-relation-counts span{padding:5px 7px;border:1px solid var(--line);border-radius:5px}
+.inventory-relation-issues{margin:6px 0 12px;padding-left:20px}
+.inventory-relation-issues li{margin:3px 0}

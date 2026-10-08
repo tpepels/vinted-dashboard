@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import datetime, timezone
 from collections import defaultdict
 from typing import Any
 
@@ -26,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.connectors.workspace_sync import recompute_inventory_item
+from app.stock_relations import is_physical, is_provisional
 from app.workspace_bootstrap import clean_isbn, normalize_sku
 
 
@@ -235,6 +237,10 @@ def _fill_missing(target: models.InventoryItem, source: models.InventoryItem) ->
 
     attrs = dict(target.attributes or {})
     for key, value in dict(source.attributes or {}).items():
+        if key.startswith("connector_import_") or key in {
+            "stock_authority", "stock_base_quantity", "relationship_confirmed_at",
+        }:
+            continue
         if key not in attrs or attrs[key] in (None, ""):
             attrs[key] = value
         elif value not in (None, "") and _norm(attrs[key]) != _norm(value):
@@ -294,18 +300,35 @@ def merge_inventory_items(
             sale.inventory_item_id = target.id
             moved_sales += 1
 
-    session.flush()
+    # An explicit merge confirms these marketplace advertisements share one
+    # physical stock record. Never add their advertised quantities together.
+    attrs = dict(target.attributes or {})
+    previous_baseline = (
+        int(attrs.get("stock_base_quantity") or 0) if is_physical(target)
+        else 0
+    )
+    attrs["stock_authority"] = "physical"
+    attrs["stock_base_quantity"] = max(previous_baseline, fallback_quantity)
+    attrs["relationship_confirmed_at"] = datetime.now(timezone.utc).isoformat()
+    for key in ("connector_import_placeholder", "connector_import_channel",
+                "connector_import_external_id", "connector_import_sku"):
+        attrs.pop(key, None)
+    target.attributes = attrs
 
-    target_listings = session.execute(
-        select(models.ChannelListing).where(
-            models.ChannelListing.workspace_id == workspace_id,
-            models.ChannelListing.inventory_item_id == target.id,
-        )
-    ).scalars().all()
-    if target_listings:
-        recompute_inventory_item(session, target)
-    else:
-        target.quantity = fallback_quantity
+    # Preserve pending action references when their previous master is merged.
+    from app.product_models import CrossChannelAction
+    for source in sources:
+        actions = session.execute(
+            select(CrossChannelAction).where(
+                CrossChannelAction.workspace_id == workspace_id,
+                CrossChannelAction.inventory_item_id == source.id,
+            )
+        ).scalars().all()
+        for action in actions:
+            action.inventory_item_id = target.id
+
+    session.flush()
+    recompute_inventory_item(session, target)
 
     for source in sources:
         session.delete(source)

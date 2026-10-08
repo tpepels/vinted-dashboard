@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from app import db, models
 from app.connectors.workspace_sync import recompute_inventory_item
+from app.stock_relations import create_provisional_item, is_physical
 from app.cross_channel import auto_link_unlinked_sales, reconcile_sale_state
 from app.constants import (
     Channel,
@@ -335,27 +336,17 @@ def _listing_item(
     if listing is not None and listing.inventory_item_id:
         item = session.get(models.InventoryItem, listing.inventory_item_id)
     external_sku = normalize_sku(row.get("sku"))
-    if item is None and external_sku:
-        item = session.execute(
-            select(models.InventoryItem).where(
-                models.InventoryItem.workspace_id == workspace.id,
-                models.InventoryItem.sku == external_sku,
-            )
-        ).scalar_one_or_none()
     if item is None:
-        sku = external_sku or f"VINTED-{external_id}"
-        item = models.InventoryItem(
+        item = create_provisional_item(
+            session,
             workspace_id=workspace.id,
-            sku=sku,
+            channel=Channel.VINTED,
+            external_id=external_id,
+            raw_sku=external_sku,
             title=str(row.get("title") or "Untitled"),
-            category=ItemCategory.GENERAL,
             quantity=1,
-            status=ItemStatus.ACTIVE,
             currency=row.get("currency") or "EUR",
-            attributes={},
         )
-        session.add(item)
-        session.flush()
 
     status = str(row.get("status") or ListingStatus.ACTIVE).lower()
     quantity = 0 if status in {ListingStatus.SOLD, ListingStatus.ENDED, ListingStatus.INACTIVE} else 1
@@ -508,8 +499,9 @@ def _listing_item(
             )
         )
 
-    item.title = listing.title
-    item.currency = listing.currency or item.currency
+    if not is_physical(item):
+        item.title = listing.title
+        item.currency = listing.currency or item.currency
     recompute_inventory_item(session, item)
     return listing
 

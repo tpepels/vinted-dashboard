@@ -739,3 +739,16 @@ def test_marketplace_contract_matrix_is_rendered_and_not_confused_with_verificat
     assert "Vinted and staged BIBLIO photo counts differ" in APP_JS
     assert "A successful job does not establish that a marketplace published the result" in APP_JS
     assert "Provisional stock references:" in APP_JS
+
+
+def test_stock_authority_audit_is_accessible_and_user_initiated():
+    index = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="inventory-check-relations"' in index
+    assert 'id="inventory-relation-report"' in index
+    assert 'api("/api/app/inventory/relationship-audit")' in APP_JS
+    assert "function inspectInventoryRelationships()" in APP_JS
+    assert "Provisional import" in APP_JS
+    assert "Legacy · unclassified" in APP_JS
+    assert "Review possible matches" in APP_JS

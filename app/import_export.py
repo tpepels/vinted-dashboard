@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
+from app.stock_relations import record_physical_quantity, is_physical
 from app.constants import ItemCategory, ItemStatus, KNOWN_ITEM_CATEGORIES
 from app.workspace_bootstrap import clean_isbn, normalize_sku
 
@@ -489,6 +490,8 @@ def apply_inventory_import(
         if item is None:
             item = models.InventoryItem(workspace_id=workspace_id, **payload)
             session.add(item)
+            session.flush()
+            record_physical_quantity(session, item, int(payload["quantity"]))
             existing[sku] = item
             created += 1
             continue
@@ -504,8 +507,13 @@ def apply_inventory_import(
         item.currency = payload["currency"]
         item.location = payload["location"]
         item.notes = payload["notes"]
-        item.attributes = payload["attributes"]
-        item.status = ItemStatus.ACTIVE if item.quantity > 0 else ItemStatus.ARCHIVED
+        # A confirmed physical-stock file can amend fields, but should not
+        # discard connector/source provenance from a previously linked item.
+        item.attributes = {**dict(item.attributes or {}), **payload["attributes"]}
+        record_physical_quantity(
+            session, item, int(payload["quantity"]),
+            confirmed=not is_physical(item),
+        )
         after = (
             item.title, item.category, item.quantity, item.condition, item.cost_cents,
             item.currency, item.location, item.notes, dict(item.attributes or {})
@@ -519,8 +527,7 @@ def apply_inventory_import(
     if full_snapshot:
         for sku, item in existing.items():
             if sku not in incoming and item.status == ItemStatus.ACTIVE:
-                item.status = ItemStatus.ARCHIVED
-                item.quantity = 0
+                record_physical_quantity(session, item, 0, confirmed=False)
                 archived += 1
 
     session.flush()

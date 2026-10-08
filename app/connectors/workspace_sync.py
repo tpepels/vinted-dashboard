@@ -9,10 +9,11 @@ Runtime connector writes are workspace-scoped and failures propagate to the
 caller so job/connector health reflects real persistence failures. Legacy
 SQLite migration is handled separately by :mod:`app.legacy_migration`.
 
-Matching is conservative: live connector snapshots merge physical inventory by
-exact SKU. A listing without a SKU receives a stable synthesized
-`CHANNEL-external_id` SKU. Explicit reconciliation links are preserved across
-later syncs.
+Matching is conservative: remote IDs update their existing marketplace
+listing, but a new remote listing never merges physical stock by SKU or title.
+When a source SKU collides with stock, its provisional record receives a
+distinct synthetic SKU while the original is preserved on the listing.
+Explicit reconciliation links are preserved across later syncs.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from sqlalchemy.orm import Session
 from app import db, models
 from app.constants import Channel, ItemCategory, ItemStatus, ListingStatus, SyncRunStatus
 from app.stock_policy import sale_counts_as_sold
+from app.stock_relations import (
+    create_provisional_item, is_physical, is_provisional, consuming_quantity,
+)
 from app.workspace_bootstrap import (
     clean_isbn,
     get_or_create_channel_account,
@@ -91,30 +95,16 @@ def _apply_item(
     if listing is not None and listing.inventory_item_id is not None:
         inventory_item = session.get(models.InventoryItem, listing.inventory_item_id)
     if inventory_item is None:
-        inventory_item = session.execute(
-            select(models.InventoryItem).where(
-                models.InventoryItem.workspace_id == workspace.id,
-                models.InventoryItem.sku == sku,
-            )
-        ).scalar_one_or_none()
-    if inventory_item is None:
-        inventory_item = models.InventoryItem(
+        inventory_item = create_provisional_item(
+            session,
             workspace_id=workspace.id,
-            sku=sku,
+            channel=channel,
+            external_id=external_id,
+            raw_sku=item.get("sku"),
             title=title,
-            category=ItemCategory.GENERAL,
             quantity=0,
-            status=ItemStatus.ARCHIVED,
-            # A market snapshot with no matching SKU is not proof of a new
-            # physical copy. Keep that provenance visible until reconciled.
-            attributes={
-                "connector_import_placeholder": True,
-                "connector_import_channel": channel,
-                "connector_import_external_id": external_id,
-            },
+            currency=item.get("currency"),
         )
-        session.add(inventory_item)
-        session.flush()
 
     if listing is None:
         listing = models.ChannelListing(
@@ -362,6 +352,19 @@ def recompute_inventory_item(session: Session, item: models.InventoryItem) -> No
         .all()
     )
     if not listings:
+        # A placeholder whose final remote listing was explicitly moved to
+        # verified physical stock must never masquerade as another live copy.
+        if is_provisional(item):
+            item.quantity = 0
+            item.status = ItemStatus.ARCHIVED
+        return
+
+    if is_physical(item):
+        # Remote quantities are advertisements/observations, not stock counts.
+        # Count each stable Sale identity once, including multi-unit orders.
+        baseline = int((item.attributes or {}).get("stock_base_quantity", item.quantity) or 0)
+        item.quantity = max(0, baseline - consuming_quantity(session, item))
+        item.status = ItemStatus.ACTIVE if item.quantity > 0 else ItemStatus.SOLD
         return
 
     consuming_sales = session.execute(
@@ -561,8 +564,8 @@ def record_workspace_channel_orders(
 
     One row represents one marketplace order line so a multi-item order can
     reconcile to multiple physical inventory items. Existing explicit links
-    are preserved. New rows match by exact channel listing identity first,
-    then by exact SKU.
+    are preserved. New rows can link through an exact marketplace listing
+    identity; SKU alone does not establish ownership of a physical copy.
     """
     with db.session_scope() as session:
         workspace = session.get(models.Workspace, workspace_id)
@@ -602,14 +605,10 @@ def record_workspace_channel_orders(
                 ).scalar_one_or_none()
                 if listing is not None and listing.inventory_item_id is not None:
                     inventory_item = session.get(models.InventoryItem, listing.inventory_item_id)
+            # A seller SKU may identify an edition/product with multiple
+            # physical copies. It is only reconciliation evidence, not an
+            # authorization to consume a same-SKU InventoryItem.
             sku = normalize_sku(raw.get("sku"))
-            if inventory_item is None and sku:
-                inventory_item = session.execute(
-                    select(models.InventoryItem).where(
-                        models.InventoryItem.workspace_id == workspace.id,
-                        models.InventoryItem.sku == sku,
-                    )
-                ).scalar_one_or_none()
 
             occurred_at = raw.get("occurred_at")
             if isinstance(occurred_at, str):

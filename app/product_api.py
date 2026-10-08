@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake
+from app.stock_relations import record_physical_quantity, confirm_physical_relation, is_physical, is_provisional
 from app.diagnostics import build_bundle, recent_logs, redact_text
 from app.bridge_package import extension_source_version
 from app.connectors.biblio_format import parse_biblio_inventory
@@ -445,6 +446,8 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
         "title": item.title,
         "category": item.category,
         "quantity": item.quantity,
+        "stock_authority": ("physical" if is_physical(item) else "provisional" if is_provisional(item) else "legacy"),
+        "relation_confirmed_at": attributes.get("relationship_confirmed_at"),
         "condition": item.condition,
         "cost_cents": item.cost_cents,
         "default_price_cents": default_price,
@@ -1230,6 +1233,7 @@ def stock_intake_create_items(
                 )
                 session.add(item)
                 session.flush()
+                record_physical_quantity(session, item, 1)
                 created.append(_serialize_item(item, []))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1272,6 +1276,7 @@ def create_inventory_item(
         )
         session.add(item)
         session.flush()
+        record_physical_quantity(session, item, payload.quantity)
         result = _serialize_item(item, [])
     return {"ok": True, "item": result}
 
@@ -1343,10 +1348,19 @@ def update_inventory_item(
         values = payload.model_dump(exclude_unset=True)
         if "quantity" in values and values["quantity"] is not None and values["quantity"] < 0:
             raise HTTPException(status_code=400, detail="Quantity cannot be negative")
+        if "attributes" in values and values["attributes"] is not None:
+            # Internal stock relation provenance is not client-editable.
+            protected = {"stock_authority", "stock_base_quantity", "relationship_confirmed_at",
+                         "connector_import_placeholder", "connector_import_channel",
+                         "connector_import_external_id", "connector_import_sku"}
+            values["attributes"] = {
+                **{k: v for k, v in dict(item.attributes or {}).items() if k in protected},
+                **{k: v for k, v in dict(values["attributes"]).items() if k not in protected},
+            }
         for key, value in values.items():
             setattr(item, key, value)
-        if "quantity" in values and "status" not in values:
-            item.status = ItemStatus.ACTIVE if int(item.quantity or 0) > 0 else ItemStatus.ARCHIVED
+        if "quantity" in values and values["quantity"] is not None:
+            record_physical_quantity(session, item, int(item.quantity or 0))
         session.flush()
         listings = session.execute(
             select(models.ChannelListing).where(
@@ -1744,7 +1758,25 @@ def link_listing(
         ):
             raise HTTPException(status_code=404, detail="Item or listing not found")
         previous_item_id = listing.inventory_item_id
+        if previous_item_id and previous_item_id != item.id:
+            associated_sales = session.execute(
+                select(models.Sale.id).where(
+                    models.Sale.workspace_id == context.workspace.id,
+                    models.Sale.inventory_item_id == previous_item_id,
+                ).limit(1)
+            ).first()
+            if associated_sales:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This listing's previous stock record has linked sales. "
+                           "Use Reconcile → merge items so sales and listings move together.",
+                )
+        confirm_physical_relation(session, item)
         listing.inventory_item_id = item.id
+        extra = dict(listing.extra or {})
+        extra["master_link_confirmed_at"] = utcnow().isoformat()
+        extra["master_link_source"] = "user"
+        listing.extra = extra
         session.flush()
         recompute_inventory_item(session, item)
         if previous_item_id and previous_item_id != item.id:
@@ -1752,6 +1784,80 @@ def link_listing(
             if previous is not None and previous.workspace_id == context.workspace.id:
                 recompute_inventory_item(session, previous)
     return {"ok": True}
+
+
+@router.get("/api/app/inventory/relationship-audit")
+def inventory_relationship_audit(context: RequestContext = Depends(require_context)):
+    """Read-only, workspace-scoped inventory relationship warnings.
+
+    Exact-SKU matches and same-title/ISBN suggestions are *not* merges.
+    Only the user's explicit reconciliation may assert physical identity.
+    """
+    with db.session_scope() as session:
+        items = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == context.workspace.id,
+            )
+        ).scalars().all()
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+            )
+        ).scalars().all()
+        by_id = {item.id: item for item in items}
+        provisional = [
+            {
+                "item_id": str(item.id), "sku": item.sku, "title": item.title,
+                "channel": (item.attributes or {}).get("connector_import_channel"),
+            } for item in items if is_provisional(item)
+        ]
+        orphan = [
+            {"listing_id": str(row.id), "channel": row.channel, "external_id": row.external_id}
+            for row in listings if row.inventory_item_id not in by_id
+        ]
+        sku_refs: dict[str, set[uuid.UUID]] = {}
+        for row in listings:
+            sku = str(row.external_sku or "").strip().upper()
+            if sku and row.inventory_item_id in by_id:
+                sku_refs.setdefault(sku, set()).add(row.inventory_item_id)
+        shared_skus = [
+            {"sku": sku, "item_ids": sorted(str(value) for value in item_ids)}
+            for sku, item_ids in sku_refs.items() if len(item_ids) > 1
+        ]
+        shared_skus.sort(key=lambda row: row["sku"])
+        per_market: dict[tuple[uuid.UUID, str], list[str]] = {}
+        for row in listings:
+            if row.inventory_item_id in by_id and row.status == ListingStatus.ACTIVE:
+                per_market.setdefault((row.inventory_item_id, row.channel), []).append(row.external_id)
+        multi_active = [
+            {
+                "item_id": str(item_id),
+                "channel": channel,
+                "external_ids": sorted(external_ids),
+            }
+            for (item_id, channel), external_ids in per_market.items()
+            if len(external_ids) > 1
+        ]
+        suggestions = reconciliation_suggestions(session, context.workspace.id)
+    return {
+        "stock_items": len(items),
+        "physical": sum(is_physical(item) for item in items),
+        "provisional": provisional,
+        "legacy_unclassified": sum(not is_physical(item) and not is_provisional(item) for item in items),
+        "unlinked_listings": orphan,
+        "shared_marketplace_skus": shared_skus,
+        "multi_active_same_market": multi_active,
+        "duplicate_candidates": [
+            {
+                "confidence": row["confidence"],
+                "reasons": row["reasons"],
+                "item_a_id": row["item_a"]["id"],
+                "item_b_id": row["item_b"]["id"],
+            }
+            for row in suggestions
+        ],
+        "policy": "Suggestions and shared SKUs never merge stock automatically.",
+    }
 
 
 @router.get("/api/app/reconciliation")

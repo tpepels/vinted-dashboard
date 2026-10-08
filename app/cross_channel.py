@@ -21,6 +21,7 @@ from app import db, models
 from app.constants import Channel, ItemStatus, ListingStatus
 from app.product_models import BackgroundJob, CrossChannelAction
 from app.stock_policy import sale_counts_as_sold
+from app.stock_relations import is_physical
 from app.connectors.workspace_sync import (
     item_has_remaining_stock_on_sale_channel,
     recompute_inventory_item,
@@ -314,8 +315,15 @@ def plan_sale_reconciliation(
     if item is None:
         return []
 
-    if item_has_remaining_stock_on_sale_channel(session, item, sale):
+    if is_physical(item):
         recompute_inventory_item(session, item)
+        still_available = item.quantity > 0
+    else:
+        still_available = item_has_remaining_stock_on_sale_channel(session, item, sale)
+        if still_available:
+            recompute_inventory_item(session, item)
+
+    if still_available:
         pending = session.execute(
             select(CrossChannelAction).where(
                 CrossChannelAction.trigger_sale_id == sale.id,
