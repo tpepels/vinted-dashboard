@@ -110,7 +110,7 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         channel=Channel.WOOCOMMERCE,
         display_name=CHANNEL_DISPLAY_NAMES[Channel.WOOCOMMERCE],
         group="store",
-        description="WooCommerce products and orders through REST API v3; explicit, readback-verified stock edits for linked simple products only.",
+        description="WooCommerce products and orders through REST API v3; explicit, readback-verified stock edits for linked simple products and independently managed variations.",
         capabilities=frozenset({
             Capability.CREATE_LISTING,
             Capability.UPDATE_LISTING,
