@@ -1167,7 +1167,7 @@ function renderItemMarketplacePanel(data) {
   });
   const operationsMarkup = operations.map(op => {
     const title = {
-      publish:"Publish",update:"Update",photos:"Send photos",
+      publish:"Publish",update:op.target?.endsWith(":price") ? "Price update" : "Stock update",photos:"Send photos",
       close:"Close after sale",sync:"Synchronize",verify:"Verify",
     }[op.type] || op.type;
     return '<div class="item-marketplace-history-row"><div><strong>' + esc(op.channel.toUpperCase())
