@@ -118,7 +118,7 @@ table tbody tr{transition:background .12s ease}table tbody tr:hover{background:#
 /* Human-centered Connections: everyday work first, advanced recovery on request. */
 #connections>.card,#connections>.connection-task-panel,#connections>#connector-config{margin-bottom:16px}
 #connections .connections-intro-copy{font-size:13px;line-height:1.6;max-width:720px;margin:9px 0 0}
-#connections #connector-grid{grid-template-columns:repeat(2,minmax(0,1fr));padding:18px;align-items:start;gap:14px}
+#connections #connector-grid{grid-template-columns:minmax(0,1fr);padding:18px;align-items:start;gap:14px}
 #connections #connector-other-grid{padding:14px 0;grid-template-columns:repeat(2,minmax(0,1fr))}
 #connections .connector{min-width:0;padding:20px;border-radius:13px;border-color:var(--line);background:#fff}
 #connections .connector--biblio{grid-column:1/-1}
