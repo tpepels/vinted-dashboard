@@ -835,3 +835,10 @@ def test_biblio_selective_photo_repair_keeps_safe_full_resend_choice():
     assert "photos_skipped" in APP_JS
     assert "does not prove BIBLIO displays" in APP_JS
     assert "info.file_progress" in APP_JS
+
+
+def test_cross_channel_refunds_warn_about_already_closed_marketplace_listings():
+    assert "if (row.needs_reopen)" in APP_JS
+    assert "Stock available: reopen this listing on the marketplace" in APP_JS
+    assert "Manual reopening required: stock is available again." in APP_JS
+    assert "needs_reopen" in APP_JS

@@ -175,7 +175,7 @@ def _public_result(result: dict[str, Any] | None) -> dict[str, Any]:
         "inventory_total", "deletes", "deletes_uploaded", "photos_uploaded",
         "photos_total", "photos_skipped", "photo_count", "photo_retry_scheduled",
         "remote", "external_id", "listing_id", "url", "already_complete",
-        "message",
+        "message", "skipped",
     }
     for key, value in (result or {}).items():
         if key in allowed and isinstance(value, (str, int, float, bool, type(None))):
@@ -189,7 +189,12 @@ def complete_operation(operation_id: uuid.UUID, result: dict[str, Any] | None = 
         if op is None or op.status in TERMINAL:
             return
         safe = _public_result(result)
-        if op.channel == "biblio" and op.operation_type in {"sync", "publish", "update", "photos"}:
+        if op.operation_type == "close" and (result or {}).get("skipped"):
+            # A late stock restoration can cancel the work after the worker
+            # began. Do not label an intentionally skipped close "sent".
+            op.status = "cancelled"
+            op.verification = "not_checked"
+        elif op.channel == "biblio" and op.operation_type in {"sync", "publish", "update", "photos"}:
             pending_photos = int((result or {}).get("photos_total") or 0) - int(
                 (result or {}).get("photos_uploaded") or 0
             )

@@ -828,6 +828,11 @@ function crossChannelActionControls(row) {
   const open = row.listing?.url
     ? '<a class="btn" target="_blank" rel="noreferrer" href="' + esc(row.listing.url) + '">Open listing</a>'
     : "";
+  if (row.needs_reopen) {
+    // Stock was restored after the listing was closed. Never claim that
+    // reopening happened automatically: it requires an explicit remote check.
+    return open + '<span class="error">Stock available: reopen this listing on the marketplace and verify its status.</span>';
+  }
   if (row.status === "attention") {
     return open + '<button class="btn stock-ack" data-id="' + esc(row.id) + '">Mark handled</button>';
   }
@@ -3286,7 +3291,9 @@ function renderReconciliation(data, crossData) {
         + '</div><div class="sub">' + esc(row.item?.sku || "") + '</div></td>'
         + '<td>' + esc(row.sale?.channel || "") + '<div class="sub">' + esc(row.sale?.external_order_id || "") + '</div></td>'
         + '<td><span class="pill ' + esc(row.channel) + '">' + esc(row.channel) + '</span><div class="sub">' + esc(row.listing?.title || "") + '</div></td>'
-        + '<td>' + esc(row.status) + (row.last_error ? '<div class="sub error">' + esc(row.last_error) + '</div>' : "") + '</td>'
+        + '<td>' + esc(row.status)
+        + (row.needs_reopen ? '<div class="sub error">Manual reopening required: stock is available again.</div>' : "")
+        + (row.last_error ? '<div class="sub error">' + esc(row.last_error) + '</div>' : "") + '</td>'
         + '<td>' + esc(row.attempts) + '</td><td class="row-actions">' + crossChannelActionControls(row) + '</td></tr>'
       ).join("")
       + "</tbody></table>"
