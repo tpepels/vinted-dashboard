@@ -63,7 +63,7 @@ def test_unsafe_remote_data_refuses_write(monkeypatch,record,message):
 
 def test_currency_and_remote_price_drift_refuse_write(monkeypatch):
     writes=setup(monkeypatch,sample(),currency="USD")
-    with pytest.raises(ValueError,match="currencies differ"):
+    with pytest.raises(ValueError,match="currency differ"):
         change()
     assert not writes
     writes=setup(monkeypatch,sample(price="9.00"))
