@@ -241,3 +241,31 @@ all-photos recovery commands remain explicit and guarded.
 the private Bulk Order Management integration and seller authorization.
 FTP inventory/photograph delivery cannot establish remote publication or
 order state. These are not advertised as completed capabilities.
+
+
+## Phase 5: multi-sale stock and destructive closure safety
+
+When an authoritative physical item has several seller-side orders, the
+quantity baseline accounts for every consuming sale once (including
+multi-unit orders), while the same remote listing may only have one
+actionable close at a time.
+
+**Refund/cancellation safety:** all queued closure actions for the physical
+item are re-evaluated, not just those created by the order being cancelled.
+When stock becomes available, queued closes are cancelled along with their
+unstarted background jobs and operation records. A remote close worker
+recomputes physical quantity and checks for a consuming sale immediately
+before making the network call. Retrying a failed close is rejected when
+stock is again available.
+
+A close already sent to a marketplace cannot be automatically undone.
+When stock later becomes available, the completed action records
+`needs_reopen` and is shown as a manual reconciliation discrepancy in
+**Reconcile → Cross-channel actions**, and in that item's marketplace view.
+An in-flight close is rechecked when it finishes; if a refund occurred
+during the call, it is likewise flagged for manual reopening.
+
+**Not yet implemented:** automatic per-channel stock adjustments/reservations
+on APIs without existing write adapters, automatic remote reopening and
+marketplace event ordering guarantees. These remain guarded/manual until
+supported, and no BIBLIO FTP acknowledgement is called publication proof.
