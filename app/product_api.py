@@ -27,6 +27,7 @@ from app import billing, db, jobs, listing_assistant, models, publishing, stock_
 from app.diagnostics import build_bundle, recent_logs, redact_text
 from app.bridge_package import extension_source_version
 from app.connectors.biblio_format import parse_biblio_inventory
+from app.connectors.development import contract as marketplace_contract
 from app.auth import (
     RequestContext,
     clear_session_cookies,
@@ -2748,6 +2749,78 @@ def export_inventory(
         media_type=media,
         headers={"Content-Disposition": f'attachment; filename="inventory{suffix}.{kind}"'},
     )
+
+
+@router.get("/api/app/connectors/development")
+def connector_development_status(context: RequestContext = Depends(require_context)):
+    """Reviewable code capabilities alongside live, workspace-scoped evidence.
+
+    Authentication/configuration, test coverage, FTP transport completion,
+    and remotely verified marketplace state are deliberately distinct.
+    """
+    definition = marketplace_contract()
+    connections = {row["channel"]: row for row in connectors(context)["connectors"]}
+    with db.session_scope() as session:
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id
+            )
+        ).scalars().all()
+        items = {
+            row.id: row
+            for row in session.execute(
+                select(models.InventoryItem).where(
+                    models.InventoryItem.workspace_id == context.workspace.id
+                )
+            ).scalars().all()
+        }
+        sales = session.execute(
+            select(models.Sale).where(
+                models.Sale.workspace_id == context.workspace.id,
+                models.Sale.direction == "sell",
+            )
+        ).scalars().all()
+        runs = session.execute(
+            select(models.ConnectorSyncRun).where(
+                models.ConnectorSyncRun.workspace_id == context.workspace.id
+            ).order_by(models.ConnectorSyncRun.started_at.desc())
+        ).scalars().all()
+
+    recent_runs = {}
+    for run in runs:
+        recent_runs.setdefault(run.channel, run)
+    for row in definition["channels"]:
+        channel = row["channel"]
+        connection = connections.get(channel, {})
+        channel_listings = [listing for listing in listings if listing.channel == channel]
+        channel_sales = [sale for sale in sales if sale.channel == channel]
+        recent = recent_runs.get(channel)
+        row["runtime"] = {
+            "configured": bool(connection.get("configured")),
+            "credential_ready": bool(connection.get("operational")),
+            "connection_status": connection.get("status", "unknown"),
+            "last_successful_sync_at": connection.get("last_synced_at"),
+            "last_run": (
+                {
+                    "type": recent.run_type,
+                    "status": recent.status,
+                    "started_at": recent.started_at.isoformat() if recent.started_at else None,
+                    "completed_at": recent.completed_at.isoformat() if recent.completed_at else None,
+                } if recent else None
+            ),
+            "listing_count": len(channel_listings),
+            "master_references": sum(listing.inventory_item_id in items for listing in channel_listings),
+            "unlinked_listings": sum(listing.inventory_item_id not in items for listing in channel_listings),
+            "import_placeholders": sum(
+                bool(dict(items[listing.inventory_item_id].attributes or {}).get("connector_import_placeholder"))
+                for listing in channel_listings
+                if listing.inventory_item_id in items
+            ),
+            "seller_sales": len(channel_sales),
+            "sales_unlinked_to_master": sum(sale.inventory_item_id not in items for sale in channel_sales),
+            "remote_verified": False,
+        }
+    return definition
 
 
 @router.get("/api/app/connectors")
