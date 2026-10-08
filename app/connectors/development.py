@@ -40,8 +40,8 @@ OPERATIONS = (
 # successful FTP upload is not proof BIBLIO made a photo visible.
 COVERAGE = {
     Channel.VINTED:       "IIMM PMIPPP".replace(" ", ""),
-    Channel.BIBLIO:       "IPII PIBM PP".replace(" ", ""),
-    Channel.EBAY:         "IINN PNI PPP".replace(" ", ""),
+    Channel.BIBLIO:       "IPIIPIBPPP",
+    Channel.EBAY:         "IINNPINPPP",
     Channel.ETSY:         "IINN PMIN PP".replace(" ", ""),
     Channel.WOOCOMMERCE:  "IIIN PMIN PP".replace(" ", ""),
     Channel.SHOPIFY:      "IIIN PMIN PP".replace(" ", ""),
