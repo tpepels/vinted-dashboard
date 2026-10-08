@@ -133,3 +133,70 @@ affect expressly designated test listings.
 out-of-order events, multi-line order splits and marketplace-side stock
 verification belong to Phases 2, 5 and 8. Phase 1 does not claim those
 operations have been implemented or live-certified.
+
+
+## Phase 2: unified marketplace operation engine (implemented)
+
+### Persisted operation lifecycle
+
+`MarketplaceOperation` holds one workspace-scoped request and its background
+job, with one active key per `workspace + channel + type + target`. It
+records status, attempt count, safe output summary, timestamps and explicit
+remote verification state. A job and its operation are inserted in the **same
+database transaction**, preventing a queued job with no tracked operation.
+
+```
+queued -> running -> succeeded             (read-only marketplace snapshot)
+                  -> needs_verification    (remote create/upload/close accepted)
+                  -> failed                (retrievable task failed)
+                  -> attention             (remote write outcome uncertain)
+```
+
+BIBLIO inventory FTP transfers, updates, photo uploads and delete uploads are
+**not** marked remotely verified. The target marketplace must process them.
+Successful storefront creates similarly await independent readback.
+`succeeded` on an import operation means the remote read and local
+snapshot completed, not that every listed product is for sale.
+
+### Supported adapters and safeguards
+
+- **Sync/import**: eBay, Etsy, WooCommerce, Shopify, BigCommerce,
+  Squarespace, Wix and Depop reuse their existing supported server workers.
+- **BIBLIO**: incremental/full inventory sync, queued listing publishes,
+  photo-only upload and targeted retries are all tracked as operations.
+  A scheduled delayed photo pickup can be promoted to immediate user retry;
+  no second FTP job is created for the same target.
+- **Other publishers**: WooCommerce, Shopify and Wix retain synchronous
+  preflight/preview/remote create behavior but first reserve a durable
+  publish operation. An ambiguous result blocks another create until the
+  operator verifies remote state. This protects against duplicate listings.
+- **Sold-out closing**: supported eBay and BIBLIO close workers are tracked;
+  a failed audited remote close does not auto-retry, because the previous
+  request may already have reached the marketplace. Existing manual and
+  legacy untracked actions remain supported.
+- **Retries**: available only for failed sync, photo and verification
+  operations. A retry reuses the same audit record, queues a new
+  `BackgroundJob`, and leaves all historical attempt counts intact.
+- **Isolation**: operation IDs, listing targets, workspace IDs and retries
+  are checked server-side. Payloads deliberately exclude connector secrets.
+
+The dashboard exposes operation history under
+**Connections → Marketplace operations**, and an API:
+
+- `GET /api/app/marketplace-operations?channel=biblio&limit=60`
+- `GET /api/app/marketplace-operations/{operation_id}`
+- `POST /api/app/marketplace-operations/{operation_id}/retry`
+
+### Deliberate limitations
+
+This engine does **not** invent missing remote publish/edit/close
+capabilities. There is not yet a generic remote readback verifier for BIBLIO
+FTP photographs or deletion records, and there is no legitimate way to
+recover automatically from a storefront create where the marketplace may
+have succeeded but the local process lost its acknowledgement. Such
+operations require explicit remote reconciliation. Detailed per-item
+operation controls, searchable logs and workflow UX are Phase 3.
+
+All existing background jobs created before this upgrade remain runnable
+without an operation ID. Existing jobs are not retroactively classified
+as verified. Migration adds an audit table without rewriting inventory.
