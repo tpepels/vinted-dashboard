@@ -714,3 +714,14 @@ def test_diagnostics_controls_and_dev_log_console_are_wired():
     assert "function diagnosticsSeverity" in APP_JS
     assert "function renderDiagnosticsRows" in APP_JS
     assert 'diagnostics-log-' in APP_JS
+
+
+def test_biblio_photo_recovery_ui_has_scoped_actions_and_feedback():
+    assert 'id="biblio-photo-book-id"' in APP_JS
+    assert 'id="biblio-inspect-photos"' in APP_JS
+    assert 'id="biblio-retry-listing-photos"' in APP_JS
+    assert "/api/app/connectors/biblio/photo-status?book_id=" in APP_JS
+    assert 'api("/api/app/connectors/biblio/retry-listing-photos"' in APP_JS
+    assert "biblioPhotoInspectionHtml" in APP_JS
+    assert "last_ftp_photo_count" in APP_JS
+    assert "Vinted and staged BIBLIO photo counts differ" in APP_JS
