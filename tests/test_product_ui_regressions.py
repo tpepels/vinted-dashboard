@@ -726,3 +726,16 @@ def test_biblio_photo_recovery_ui_has_scoped_actions_and_feedback():
     assert "biblioPhotoInspectionHtml" in APP_JS
     assert "last_ftp_photo_count" in APP_JS
     assert "Vinted and staged BIBLIO photo counts differ" in APP_JS
+
+
+def test_marketplace_contract_matrix_is_rendered_and_not_confused_with_verification():
+    assert 'id="marketplace-development"' in (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'api("/api/app/connectors/development")' in APP_JS
+    assert 'function renderMarketplaceDevelopment(definitions)' in APP_JS
+    assert "marketplaceSelected" in APP_JS
+    assert "marketplaceRuntimeDetails" in APP_JS
+    assert "Vinted and staged BIBLIO photo counts differ" in APP_JS
+    assert "A successful job does not establish that a marketplace published the result" in APP_JS
+    assert "Provisional stock references:" in APP_JS

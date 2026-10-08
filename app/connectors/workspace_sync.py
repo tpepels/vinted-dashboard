@@ -105,7 +105,13 @@ def _apply_item(
             category=ItemCategory.GENERAL,
             quantity=0,
             status=ItemStatus.ARCHIVED,
-            attributes={},
+            # A market snapshot with no matching SKU is not proof of a new
+            # physical copy. Keep that provenance visible until reconciled.
+            attributes={
+                "connector_import_placeholder": True,
+                "connector_import_channel": channel,
+                "connector_import_external_id": external_id,
+            },
         )
         session.add(inventory_item)
         session.flush()
