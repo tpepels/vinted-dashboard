@@ -1622,6 +1622,10 @@ def item_marketplace_status(
             needs_attention = (
                 any(op.status in {"attention", "failed"} for op in recent)
                 or stock_verification in {"stock_mismatch", "stock_stale"}
+                or (listing.channel == Channel.WOOCOMMERCE and bool(extra.get("price_last_checked_at")) and (
+                    extra.get("price_last_master_cents") != (item.attributes or {}).get("default_price_cents")
+                    or extra.get("price_last_remote_cents") != (item.attributes or {}).get("default_price_cents")
+                ))
                 or (is_biblio and (
                     stale or (verified and match is False)
                     or photo_state == "error" or bool(extra.get("photo_sync_error"))
@@ -1675,7 +1679,7 @@ def item_marketplace_status(
                     listing.channel == Channel.WOOCOMMERCE
                     and is_physical(item)
                     and type((item.attributes or {}).get("default_price_cents")) is int
-                    and 0 <= (item.attributes or {}).get("default_price_cents") <= 2000000
+                    and 0 < (item.attributes or {}).get("default_price_cents") <= 2000000
                     and bool(str(item.currency or "").strip())
                     and (not listing.currency or str(listing.currency).upper() == str(item.currency).upper())
                     and bool(str(listing.external_sku or "").strip())
