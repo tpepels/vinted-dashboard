@@ -272,10 +272,22 @@ input,select,textarea{max-width:100%}
 .stock-row-state.pending,.market-status-manual{
   color:var(--state-info);background:var(--state-info-bg);border-color:var(--state-info-line)
 }
-.market-status-blocked,.signal.low_interest_stale,
-.item-marketplace-closure,.biblio-photo-alert{
+.market-status-blocked,.signal.low_interest_stale{
   color:var(--state-danger);background:var(--state-danger-bg);border-color:var(--state-danger-line)
 }
+.item-marketplace-closure,.biblio-photo-alert{
+  color:var(--state-warning);background:var(--state-warning-bg);border-color:var(--state-warning-line)
+}
+.item-marketplace-state.verified{
+  color:var(--state-success);background:var(--state-success-bg);border-color:var(--state-success-line)
+}
+.operation-status{display:inline-flex;align-items:center;padding:3px 7px;
+  border:1px solid var(--state-neutral-line);border-radius:6px;font-size:11px;
+  font-weight:700;color:var(--state-neutral);background:var(--state-neutral-bg)}
+.operation-status-success{color:var(--state-success);background:var(--state-success-bg);border-color:var(--state-success-line)}
+.operation-status-warning{color:var(--state-warning);background:var(--state-warning-bg);border-color:var(--state-warning-line)}
+.operation-status-danger{color:var(--state-danger);background:var(--state-danger-bg);border-color:var(--state-danger-line)}
+.operation-status-info{color:var(--state-info);background:var(--state-info-bg);border-color:var(--state-info-line)}
 .market-status-missing{color:var(--state-neutral);background:var(--state-neutral-bg);border-color:var(--state-neutral-line)}
 .signal.momentum,.signal.steady{color:var(--state-neutral);background:var(--state-neutral-bg);border-color:var(--state-neutral-line)}
 .signal.momentum{color:var(--state-success);background:var(--state-success-bg);border-color:var(--state-success-line)}
