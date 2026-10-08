@@ -68,19 +68,25 @@ def _sync_biblio(payload: dict, workspace_id: uuid.UUID | None) -> dict:
         for raw_id in result.get("deferred_photo_retry_listing_ids") or []:
             from app import db
             from app.marketplace_operations import queue_operation
-            with db.session_scope() as session:
-                queue_operation(
-                    session, resolved_workspace, "biblio", "photos", str(raw_id),
-                    job_type="biblio_sync",
-                    payload={
-                        "listing_id": str(raw_id),
-                        "photos_only": True,
-                        "force_photos": False,
-                        "automatic_photo_retry": True,
-                    },
-                    channel_listing_id=uuid.UUID(str(raw_id)),
-                    delay_seconds=delay_seconds,
-                )
+            try:
+                with db.session_scope() as session:
+                    queue_operation(
+                        session, resolved_workspace, "biblio", "photos", str(raw_id),
+                        job_type="biblio_sync",
+                        payload={
+                            "listing_id": str(raw_id),
+                            "photos_only": True,
+                            "force_photos": False,
+                            "automatic_photo_retry": True,
+                        },
+                        channel_listing_id=uuid.UUID(str(raw_id)),
+                        delay_seconds=delay_seconds,
+                    )
+            except ValueError:
+                # A manual photo job may already be queued or executing.
+                # Follow-up scheduling cannot turn a successful FTP send into
+                # another expensive/duplicate inventory upload.
+                logger.info("BIBLIO photo follow-up already active for %s", raw_id)
 
     return result
 
