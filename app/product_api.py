@@ -1772,6 +1772,80 @@ def link_listing(
     return {"ok": True}
 
 
+@router.get("/api/app/inventory/relationship-audit")
+def inventory_relationship_audit(context: RequestContext = Depends(require_context)):
+    """Read-only, workspace-scoped inventory relationship warnings.
+
+    Exact-SKU matches and same-title/ISBN suggestions are *not* merges.
+    Only the user's explicit reconciliation may assert physical identity.
+    """
+    with db.session_scope() as session:
+        items = session.execute(
+            select(models.InventoryItem).where(
+                models.InventoryItem.workspace_id == context.workspace.id,
+            )
+        ).scalars().all()
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+            )
+        ).scalars().all()
+        by_id = {item.id: item for item in items}
+        provisional = [
+            {
+                "item_id": str(item.id), "sku": item.sku, "title": item.title,
+                "channel": (item.attributes or {}).get("connector_import_channel"),
+            } for item in items if is_provisional(item)
+        ]
+        orphan = [
+            {"listing_id": str(row.id), "channel": row.channel, "external_id": row.external_id}
+            for row in listings if row.inventory_item_id not in by_id
+        ]
+        sku_refs: dict[str, set[uuid.UUID]] = {}
+        for row in listings:
+            sku = str(row.external_sku or "").strip().upper()
+            if sku and row.inventory_item_id in by_id:
+                sku_refs.setdefault(sku, set()).add(row.inventory_item_id)
+        shared_skus = [
+            {"sku": sku, "item_ids": sorted(str(value) for value in item_ids)}
+            for sku, item_ids in sku_refs.items() if len(item_ids) > 1
+        ]
+        shared_skus.sort(key=lambda row: row["sku"])
+        per_market: dict[tuple[uuid.UUID, str], list[str]] = {}
+        for row in listings:
+            if row.inventory_item_id in by_id and row.status == ListingStatus.ACTIVE:
+                per_market.setdefault((row.inventory_item_id, row.channel), []).append(row.external_id)
+        multi_active = [
+            {
+                "item_id": str(item_id),
+                "channel": channel,
+                "external_ids": sorted(external_ids),
+            }
+            for (item_id, channel), external_ids in per_market.items()
+            if len(external_ids) > 1
+        ]
+        suggestions = reconciliation_suggestions(session, context.workspace.id)
+    return {
+        "stock_items": len(items),
+        "physical": sum(is_physical(item) for item in items),
+        "provisional": provisional,
+        "legacy_unclassified": sum(not is_physical(item) and not is_provisional(item) for item in items),
+        "unlinked_listings": orphan,
+        "shared_marketplace_skus": shared_skus,
+        "multi_active_same_market": multi_active,
+        "duplicate_candidates": [
+            {
+                "confidence": row["confidence"],
+                "reasons": row["reasons"],
+                "item_a_id": row["item_a"]["id"],
+                "item_b_id": row["item_b"]["id"],
+            }
+            for row in suggestions
+        ],
+        "policy": "Suggestions and shared SKUs never merge stock automatically.",
+    }
+
+
 @router.get("/api/app/reconciliation")
 def reconciliation(context: RequestContext = Depends(require_context)):
     with db.session_scope() as session:
