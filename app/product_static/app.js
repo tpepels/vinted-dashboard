@@ -1833,21 +1833,21 @@ function renderBiblioActivity(activity, operational) {
   const lastSentAt = last?.completed_at || last?.started_at;
   const verified = count("remote_verified_matching") + count("remote_verified_mismatching");
   const overview = !dataAvailable
-    ? '<div class="biblio-user-warning">BIBLIO listing statistics are temporarily unavailable. The dashboard cannot confirm how many changes are pending.</div>'
+    ? '<p class="biblio-user-warning">BIBLIO counts are temporarily unavailable.</p>'
     : '<div class="biblio-summary">'
-    + '<div class="biblio-summary-stats">'
-    + '<div><strong>' + count("active_listings") + '</strong><span>Books prepared for BIBLIO</span></div>'
-    + '<div><strong>' + waiting + '</strong><span>Changes waiting to be sent</span></div>'
-    + '<div><strong>' + count("photo_attention") + '</strong><span>Books with photo work pending or in error</span></div>'
-    + '</div>'
-    + (count("remote_verified_mismatching") || count("remote_verification_stale")
-      ? '<p class="biblio-user-warning"><strong>Listings to review:</strong> '
-        + count("remote_verified_mismatching") + ' differ from the last BIBLIO comparison; '
-        + count("remote_verification_stale") + ' have changed since they were checked.</p>'
-      : "")
-    + '<p class="biblio-user-note">These are dashboard records, not a confirmed count of books visible on BIBLIO. '
-    + (verified ? verified + ' listings have been compared with a BIBLIO file. ' : 'No BIBLIO inventory comparison has been recorded yet. ')
-    + 'Use <strong>Compare BIBLIO inventory</strong> below to check what BIBLIO reports.</p></div>';
+      + '<p><strong>' + count("active_listings") + '</strong> books prepared'
+      + ' · <strong>' + waiting + '</strong> changes waiting'
+      + (count("photo_attention")
+        ? ' · <strong>' + count("photo_attention") + '</strong> books need photo review'
+        : '') + '</p>'
+      + (count("remote_verified_mismatching") || count("remote_verification_stale")
+        ? '<p class="biblio-user-warning">'
+          + count("remote_verified_mismatching") + ' differ from last comparison; '
+          + count("remote_verification_stale") + ' changed since then.</p>'
+        : '')
+      + '<p class="biblio-user-note">Prepared does not mean published.'
+      + (verified ? ' ' + verified + ' listings checked against a BIBLIO export.' : '')
+      + '</p></div>';
   const latest = '<div class="biblio-latest">'
     + '<span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
     + '<div><strong>' + esc(last ? status.label : "Nothing sent yet") + '</strong>'
