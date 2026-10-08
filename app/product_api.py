@@ -33,7 +33,7 @@ from app.marketplace_operations import (
     queue_operation, retry_operation, serialize as serialize_marketplace_operation,
     start_inline, complete_operation, fail_operation,
 )
-from app.product_models import MarketplaceOperation, CrossChannelAction
+from app.product_models import MarketplaceOperation, CrossChannelAction, CrossChannelAction
 
 from app.auth import (
     RequestContext,
