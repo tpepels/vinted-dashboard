@@ -195,3 +195,29 @@ table tbody tr{transition:background .12s ease}table tbody tr:hover{background:#
 #connections .pairing-inline p{font-size:12px;margin:6px 0 8px}
 @media(max-width:950px){#connections #connector-grid,#connections #connector-other-grid{grid-template-columns:1fr}#connections .connector--biblio{grid-column:auto}}
 @media(max-width:680px){#connections .connector-header{flex-direction:column;gap:9px}#connections .biblio-primary-task,#connections .biblio-recovery-row{flex-direction:column;align-items:stretch}#connections .biblio-summary-stats{grid-template-columns:1fr}#connections .biblio-next-actions{align-items:stretch;flex-direction:column}#connections .biblio-next-actions .btn{width:100%}#connections .biblio-photo-recovery-controls .btn{width:100%;flex:1 1 100%}#connections .connector-settings-row .btn{width:100%}}
+
+/* Phase 3: per-item marketplace workspace */
+#item-marketplaces-panel{scroll-margin-top:15px}
+#item-marketplaces-panel>.card-head{margin:-18px -18px 15px}
+.item-marketplace-summary{background:var(--soft);border-radius:10px;padding:14px 16px;margin-bottom:14px;font-size:12px}
+.item-marketplace-summary>strong{font-size:22px;font-variant-numeric:tabular-nums}
+.item-marketplace-summary .actions{flex-wrap:wrap}
+.item-marketplace-list{display:grid;gap:10px}
+.item-marketplace-row{display:flex;gap:15px;justify-content:space-between;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:15px}
+.item-marketplace-main{flex:1 1 auto;min-width:0}
+.item-marketplace-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.item-marketplace-head strong{font-size:14px}
+.item-marketplace-state{font-size:10px;border:1px solid var(--line);border-radius:999px;padding:4px 8px}
+.item-marketplace-state.attention{background:#fff6e7;color:#815921;border-color:#e4c998}
+.item-marketplace-row p{font-size:12px;line-height:1.5;margin:7px 0 0;overflow-wrap:anywhere}
+.item-marketplace-actions{display:flex;flex:0 0 190px;flex-direction:column;gap:7px}
+.item-marketplace-actions .btn{font-size:11px;white-space:normal;text-align:center}
+.item-marketplace-history{border-top:1px solid var(--line);margin:18px 0;padding:12px 0 0}
+.item-marketplace-history>summary{font-weight:700;font-size:13px;cursor:pointer}
+.item-marketplace-history>p,.item-marketplace-footnote{font-size:12px;color:var(--muted);line-height:1.6}
+.item-marketplace-history-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding:10px 0}
+.item-marketplace-history-row strong{display:block;font-size:12px}
+.item-marketplace-history-row span{display:block;font-size:11px;color:var(--muted);line-height:1.5}
+.item-marketplace-closure{padding:14px;border-radius:9px;border:1px solid #e4c998;background:#fffaf1;margin-top:12px;font-size:12px}
+.item-marketplace-closure p{margin:5px 0}
+@media(max-width:720px){.item-marketplace-row{flex-direction:column}.item-marketplace-actions{width:100%;flex:0 0 auto;flex-direction:row;flex-wrap:wrap}.item-marketplace-actions .btn{flex:1 1 140px}.item-marketplace-history-row{align-items:flex-start;flex-direction:column}}
