@@ -1660,6 +1660,9 @@ def item_marketplace_status(
                     "not_checked" if not extra.get("price_last_checked_at")
                     else "price_stale" if (
                         extra.get("price_last_master_cents") != (item.attributes or {}).get("default_price_cents")
+                        or extra.get("price_last_external_id") != listing.external_id
+                        or extra.get("price_last_sku") != listing.external_sku
+                        or extra.get("price_last_currency") != str(item.currency or "").strip().upper()
                         or not extra.get("price_remote_readback_verified")
                         and extra.get("price_last_remote_cents") == (item.attributes or {}).get("default_price_cents")
                     )
@@ -1782,6 +1785,8 @@ def verify_woocommerce_item_price(
         extra.update({
             "price_last_checked_at": now, "price_last_remote_cents": observed,
             "price_last_master_cents": desired,
+            "price_last_external_id": external_id, "price_last_sku": sku,
+            "price_last_currency": currency,
             "price_remote_readback_verified": matches,
         })
         current.extra = extra
@@ -1833,7 +1838,10 @@ def update_woocommerce_item_price(
             recent = False
         observed = extra.get("price_last_remote_cents")
         if (not recent or type(observed) is not int
-                or extra.get("price_last_master_cents") != desired):
+                or extra.get("price_last_master_cents") != desired
+                or extra.get("price_last_external_id") != listing.external_id
+                or extra.get("price_last_sku") != listing.external_sku
+                or extra.get("price_last_currency") != currency):
             raise HTTPException(status_code=409, detail="Check the current WooCommerce price before updating")
         listing_id, external_id, sku = listing.id, listing.external_id, listing.external_sku
     try:
@@ -1870,6 +1878,8 @@ def update_woocommerce_item_price(
             extra.update({
                 "price_last_checked_at": now, "price_last_remote_cents": desired,
                 "price_last_master_cents": desired,
+                "price_last_external_id": external_id, "price_last_sku": sku,
+                "price_last_currency": currency,
                 "price_remote_readback_verified": True,
             })
             current.extra = extra
