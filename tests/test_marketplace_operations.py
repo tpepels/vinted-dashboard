@@ -82,6 +82,22 @@ def test_biblio_upload_transport_needs_manual_remote_verification():
         assert not result["can_retry"]
 
 
+def test_incomplete_biblio_photo_batch_requires_attention():
+    ws = workspace()
+    operation_id, job_id, _ = queue(ws, channel="biblio", operation_type="photos", target="book-1")
+    assert begin_operation(operation_id, job_id)
+    complete_operation(operation_id, {
+        "photos_total": 5, "photos_uploaded": 4,
+        "photo_errors": ["one photo was unavailable"],
+    })
+    with db.session_scope() as session:
+        record = session.get(MarketplaceOperation, operation_id)
+        assert record.status == "attention"
+        assert record.verification == "manual_required"
+        assert record.result["photos_missing_or_failed"] == 1
+        assert "missing or failed photo" in record.last_error
+
+
 def test_retries_are_bounded_to_safe_operations_and_do_not_clone_history():
     ws = workspace()
     op_id, job_id, _ = queue(ws)
