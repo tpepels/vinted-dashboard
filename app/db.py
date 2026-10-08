@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, TypeDecorator, create_engine
+from sqlalchemy import JSON, DateTime, TypeDecorator, create_engine, event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -70,20 +70,39 @@ def default_database_url() -> str:
 
 def _engine_kwargs(url: str) -> dict:
     if url.startswith("sqlite"):
-        # SQLite connections are not thread-safe by default; FastAPI/uvicorn
-        # may use a session across threads within one logical request.
-        kwargs = {"connect_args": {"check_same_thread": False}}
+        # A browser and the background worker can write concurrently.
+        # Default SQLite timeout (5s) is too short during imports/syncs.
+        kwargs = {
+            "connect_args": {"check_same_thread": False, "timeout": 30},
+            "hide_parameters": True,
+        }
         # A bare sqlite:// URL is an in-memory database. StaticPool makes all
         # request/test threads share the same connection instead of each
         # seeing an empty private database.
         if url in {"sqlite://", "sqlite:///:memory:"}:
             kwargs["poolclass"] = StaticPool
         return kwargs
-    return {"pool_pre_ping": True}
+    # Never include credentials or session token hashes in SQL exception logs.
+    return {"pool_pre_ping": True, "hide_parameters": True}
 
 
 def _create_engine(url: str) -> Engine:
-    return create_engine(url, **_engine_kwargs(url))
+    result = create_engine(url, **_engine_kwargs(url))
+    if url.startswith("sqlite") and url not in {"sqlite://", "sqlite:///:memory:"}:
+        @event.listens_for(result, "connect")
+        def _configure_file_sqlite(dbapi_connection, _connection_record):
+            # WAL allows reads during worker writes. It is persistent in the
+            # database file, so avoid resetting it on each pooled connection.
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA busy_timeout=30000")
+                mode = cursor.execute("PRAGMA journal_mode").fetchone()[0]
+                if str(mode).lower() != "wal":
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+            finally:
+                cursor.close()
+    return result
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", default_database_url())

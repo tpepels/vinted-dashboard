@@ -31,6 +31,9 @@ CSRF_COOKIE = "reseller_csrf"
 SESSION_DAYS = int(os.getenv("AUTH_SESSION_DAYS", "30"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes", "on"}
 PBKDF2_ITERATIONS = int(os.getenv("PASSWORD_HASH_ITERATIONS", "310000"))
+# Activity timestamps are advisory; updating them on every GET needlessly
+# serializes the web process and background worker on SQLite.
+ACTIVITY_TOUCH_INTERVAL = timedelta(minutes=2)
 
 
 @dataclass
@@ -178,8 +181,12 @@ def require_context(request: Request) -> RequestContext:
         membership, workspace = _workspace_for_user(
             session, user, request.headers.get("x-workspace-id")
         )
-        auth_session.last_seen_at = now
-        session.flush()
+        if (
+            auth_session.last_seen_at is None
+            or now - auth_session.last_seen_at >= ACTIVITY_TOUCH_INTERVAL
+        ):
+            auth_session.last_seen_at = now
+            session.flush()
         session.expunge(user)
         session.expunge(membership)
         session.expunge(workspace)
@@ -250,8 +257,13 @@ def extension_context(request: Request) -> RequestContext:
         ).scalar_one_or_none()
         if membership is None:
             raise HTTPException(status_code=403, detail="Extension workspace access denied")
-        credential.last_seen_at = utcnow()
-        session.flush()
+        now = utcnow()
+        if (
+            credential.last_seen_at is None
+            or now - credential.last_seen_at >= ACTIVITY_TOUCH_INTERVAL
+        ):
+            credential.last_seen_at = now
+            session.flush()
         session.expunge(user)
         session.expunge(workspace)
         session.expunge(membership)
