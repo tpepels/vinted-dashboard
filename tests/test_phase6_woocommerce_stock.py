@@ -18,6 +18,7 @@ def _woo_mock(monkeypatch, remote, result, *, status=200):
         "store_url": "https://shop.example", "consumer_key": "key", "consumer_secret": "secret",
     })
     monkeypatch.setattr(hosted, "_woo_get", lambda *args, **kwargs: next(states))
+    monkeypatch.setattr(hosted, "_woocommerce_base", lambda values: "https://shop.example")
     writes = []
     def put(url, *, headers, json, timeout):
         writes.append((url, json))
