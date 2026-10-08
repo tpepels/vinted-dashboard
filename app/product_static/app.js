@@ -1630,6 +1630,9 @@ function biblioActivityDetail(row) {
   if (row.photos_total != null) {
     parts.push("photos sent " + Number(row.photos_uploaded || 0) + "/" + Number(row.photos_total || 0));
   }
+  if (Number(row.photos_skipped || 0) > 0) {
+    parts.push(Number(row.photos_skipped) + " previously accepted photos skipped");
+  }
   if (Number(row.photo_retry_scheduled || 0) > 0) {
     parts.push(Number(row.photo_retry_scheduled) + " automatic photo follow-up");
   }
@@ -1663,6 +1666,15 @@ function biblioPhotoInspectionHtml() {
     + '<p class="muted">Dashboard transfer status: ' + esc(info.photo_state || "not sent")
     + (info.last_ftp_photo_at ? ' · last FTP ' + esc(when(info.last_ftp_photo_at)) : '') + '</p>'
     + (info.photo_error ? '<p class="error">' + esc(info.photo_error) + '</p>' : '')
+    + ((info.file_progress || []).length
+      ? '<details class="biblio-photo-files"><summary>File transfer evidence (' + Number(info.successful_file_transfers || 0)
+        + ' previously accepted by FTP; ' + Number(info.unconfirmed_file_transfers || 0)
+        + ' without a recorded receipt)</summary>'
+        + (info.file_progress || []).map(file =>
+          '<div class="' + (file.sent_to_ftp ? 'muted' : 'error') + '">' + esc(file.filename)
+          + ' · ' + (file.sent_to_ftp ? 'Previously accepted by FTP' : 'No matching successful FTP receipt')
+          + '</div>').join("") + '</details>'
+      : '')
     + job
     + '<p class="muted">These counts describe the dashboard and its file transfers, not pictures visible to buyers. Check the book on BIBLIO to confirm the result.</p>'
     + '</div>';
@@ -1698,6 +1710,8 @@ function resetBiblioPhotoInspection(value) {
     state.biblioPhotoError = "";
     const retry = $("#biblio-retry-listing-photos");
     if (retry) retry.disabled = true;
+    const selective = $("#biblio-retry-failed-photos");
+    if (selective) selective.disabled = true;
     const report = $("#biblio-photo-inspection");
     if (report) report.innerHTML = biblioPhotoInspectionHtml();
   }
@@ -1724,6 +1738,11 @@ async function inspectBiblioPhotoTarget() {
   const retry = $("#biblio-retry-listing-photos");
   if (retry) retry.disabled = !state.biblioPhotoInspection?.active
     || !(state.biblioPhotoInspection.biblio_source_photos || state.biblioPhotoInspection.vinted_source_photos);
+  const selective = $("#biblio-retry-failed-photos");
+  if (selective) selective.disabled = !state.biblioPhotoInspection?.active
+    || !state.biblioPhotoInspection?.photo_error
+    || !(state.biblioPhotoInspection?.successful_file_transfers > 0)
+    || !(state.biblioPhotoInspection?.unconfirmed_file_transfers > 0);
 }
 
 function renderBiblioActivity(activity, operational) {
@@ -1768,8 +1787,10 @@ function renderBiblioActivity(activity, operational) {
       + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '">'
       + '<div class="actions biblio-photo-recovery-controls">'
       + '<button id="biblio-inspect-photos" class="btn" type="button">Check this book’s photos</button>'
-      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend this book’s photos…</button>'
-      + '</div><div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
+      + '<button id="biblio-retry-failed-photos" class="btn" type="button" disabled>Retry failed photo files…</button>'
+      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend all photos for this book…</button>'
+      + '</div><p class="biblio-user-note">Retry failed files only when some individual transfers succeeded and others failed. To repair photos missing from BIBLIO even though FTP accepted them, resend the whole book’s photos.</p>'
+      + '<div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
       + '</div></details>'
     : '';
   const fileHistory = runs.map((run) => {
@@ -4641,6 +4662,35 @@ async function connections() {
         state.biblioPhotoError = error.message;
         $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
         flash(error.message, true);
+      }
+    };
+  }
+
+  const failedPhotosButton = $("#biblio-retry-failed-photos");
+  if (failedPhotosButton) {
+    const info = state.biblioPhotoInspection;
+    failedPhotosButton.disabled = !info?.active || !info?.photo_error
+      || !(info.successful_file_transfers > 0)
+      || !(info.unconfirmed_file_transfers > 0);
+    failedPhotosButton.onclick = async () => {
+      const selected = state.biblioPhotoInspection;
+      if (!selected || $("#biblio-photo-book-id").value.trim() !== selected.book_id) return;
+      if (!window.confirm("Retry only the " + selected.unconfirmed_file_transfers
+        + " photo file(s) without a matching successful FTP receipt? Previously accepted files will be skipped. This does not prove BIBLIO displays any photo.")) return;
+      failedPhotosButton.disabled = true;
+      try {
+        const result = await api("/api/app/connectors/biblio/retry-listing-photos", {
+          method: "POST",
+          body: JSON.stringify({book_id: selected.book_id, failed_only: true}),
+        });
+        flash("Unconfirmed photo files queued for " + result.book_id + ". Other previously transferred files will be skipped.");
+        await inspectBiblioPhotoTarget();
+        await connections();
+      } catch (error) {
+        state.biblioPhotoError = error.message;
+        $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
+        flash(error.message, true);
+        failedPhotosButton.disabled = false;
       }
     };
   }

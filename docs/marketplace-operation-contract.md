@@ -200,3 +200,44 @@ operation controls, searchable logs and workflow UX are Phase 3.
 All existing background jobs created before this upgrade remain runnable
 without an operation ID. Existing jobs are not retroactively classified
 as verified. Migration adds an audit table without rewriting inventory.
+
+
+## Phase 4: BIBLIO selective photo recovery and verified inventory boundary
+
+The BIBLIO uploader now maintains **per-file FTP transfer receipts** on each
+BIBLIO listing: a SHA-256 digest of the original image URL and its exact BIBLIO
+filename (including its Book ID and image index). These receipts are evidence
+of a successful `STOR` response **only**. They are not proof that BIBLIO's
+image processing or public site has displayed the photo.
+
+**Photo repair choices** under Connections → BIBLIO → Fix photos for one book:
+
+- **Check this book's photos** displays source counts, the last transfer
+  summary, each filename and whether that precise filename/source pair has a
+  successful FTP receipt.
+- **Retry failed photo files** is offered when the latest photo state includes
+  an error, some files have receipts, and others have no receipts. It resends
+  only unconfirmed files, preserving their original indices and filenames.
+  This is a transport-recovery operation, not a remote publication verifier.
+- **Resend all photos for this book** deliberately ignores existing file
+  receipts. Use it if the BIBLIO website shows missing photos even though all
+  transfers succeeded or if there are no reliable individual receipts.
+- **New books** still receive a delayed complete photo follow-up if images
+  were first transferred before BIBLIO had indexed the listing. That first
+  transfer intentionally does not create skippable per-file receipts, so a
+  delayed retry cannot incorrectly omit photos that BIBLIO never attached.
+
+The targeted retry endpoint accepts `failed_only: true` when available.
+It returns HTTP 409 if an incomplete batch cannot be identified safely.
+The default `failed_only: false` preserves the existing all-photos retry.
+A scheduled retry for the same listing may be promoted to an immediate user
+request without queuing duplicate FTP jobs.
+
+Upload logs and operation records include `photos_skipped` when receipts
+allowed files to be omitted. The existing full BIBLIO catalogue and
+all-photos recovery commands remain explicit and guarded.
+
+**Still blocked externally:** automatic BIBLIO order retrieval depends on
+the private Bulk Order Management integration and seller authorization.
+FTP inventory/photograph delivery cannot establish remote publication or
+order state. These are not advertised as completed capabilities.

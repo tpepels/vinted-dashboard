@@ -723,3 +723,103 @@ def test_biblio_optional_metadata_only_changes_extended_signature():
     ) != hosted._biblio_inventory_signature(
         changed, profile="extended"
     )
+
+
+def test_failed_only_biblio_retry_skips_recorded_files_and_keeps_original_filename_indices(monkeypatch):
+    listing_id = str(uuid.uuid4())
+    urls = [f"https://images1.vinted.net/t/{index}.jpg" for index in range(3)]
+    book_id = "BK-SELECTIVE"
+    active = [{
+        "source_id": book_id, "sku": book_id, "title": "Already listed book",
+        "author": "Author", "description": "Description", "price_cents": 600,
+        "currency": "EUR", "quantity": 1, "status": "active",
+        "listing_id": listing_id, "image_urls": urls,
+        "photo_sync_signature": None, "photo_file_receipts": {},
+        "inventory_synced_at": "2026-10-01T10:00:00+00:00",
+        "inventory_signature": "stable", "inventory_sync_signature": "stable",
+        "inventory_dirty": False,
+    }]
+    monkeypatch.setattr(hosted, "_workspace_or_env_biblio_values",
+                        lambda _ws: {"host":"ftp.biblio.com", "username":"seller",
+                                     "password":"secret", "filename_prefix":"test"})
+    monkeypatch.setattr(hosted, "_biblio_rows",
+                        lambda _ws, listing_id=None, profile="core": (active, []))
+    monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg")
+    records = []
+    def remember(_ws, target_listing_id, receipts):
+        assert target_listing_id == listing_id
+        active[0]["photo_file_receipts"].update(receipts)
+    monkeypatch.setattr(hosted, "_remember_biblio_photo_file_receipts", remember)
+    monkeypatch.setattr(hosted, "_mark_biblio_photo_sync",
+                        lambda _ws, synced: records.extend(synced))
+    _stub_progress(monkeypatch)
+
+    commands = []
+    class FTP:
+        fail = True
+        def storbinary(self, command, data):
+            commands.append(command)
+            data.read()
+            if self.fail and command.endswith("BK-SELECTIVE_1.jpg"):
+                raise RuntimeError("temporary failure")
+        def quit(self): pass
+        def close(self): pass
+    ftp = FTP()
+    monkeypatch.setattr(hosted, "_connect_biblio_ftp", lambda _values: ftp)
+
+    initial = hosted.sync_biblio_workspace(uuid.uuid4(), photos_only=True, force_photos=True)
+    assert initial["photos_uploaded"] == 2
+    assert len(initial["photo_errors"]) == 1
+    assert len(active[0]["photo_file_receipts"]) == 2
+    assert records == []
+    assert commands == ["STOR BK-SELECTIVE.jpg", "STOR BK-SELECTIVE_1.jpg", "STOR BK-SELECTIVE_2.jpg"]
+
+    commands.clear()
+    ftp.fail = False
+    selective = hosted.sync_biblio_workspace(uuid.uuid4(), photos_only=True,
+                                             failed_photos_only=True)
+    assert selective["photos_uploaded"] == 1
+    assert selective["photos_total"] == 1
+    assert selective["photos_skipped"] == 2
+    assert selective["photo_errors"] == []
+    # Keep the original remote filename slot, never compact index 1 to 0.
+    assert commands == ["STOR BK-SELECTIVE_1.jpg"]
+    assert len(active[0]["photo_file_receipts"]) == 3
+    assert records[-1][0] == listing_id
+    assert records[-1][2] == 3
+    assert hosted.biblio_photo_file_signature(book_id, 0, urls[0]) != hosted.biblio_photo_file_signature(book_id, 1, urls[0])
+    assert hosted.biblio_photo_file_signature("A", 0, urls[0]) != hosted.biblio_photo_file_signature("B", 0, urls[0])
+
+
+def test_biblio_first_upload_does_not_cache_files_until_listing_has_had_time_to_exist(monkeypatch):
+    book_id = "BK-NEW"
+    listing_id = str(uuid.uuid4())
+    active = [{
+        "sku":book_id, "source_id":book_id, "title":"Fresh listing",
+        "author":"Writer", "description":"Description", "price_cents":1000,
+        "currency":"EUR", "quantity":1, "status":"active",
+        "listing_id":listing_id, "image_urls":["https://images1.vinted.net/t/cover.jpg"],
+        "photo_sync_signature":None, "photo_file_receipts":{},
+        "inventory_synced_at":None,
+        "inventory_signature":"new", "inventory_sync_signature":None,
+        "inventory_dirty":True,
+    }]
+    monkeypatch.setattr(hosted, "_workspace_or_env_biblio_values",
+                        lambda _ws: {"host":"ftp.biblio.com","username":"u",
+                                     "password":"p","filename_prefix":"test"})
+    monkeypatch.setattr(hosted, "_biblio_rows",
+                        lambda _ws, listing_id=None, profile="core": (active, []))
+    monkeypatch.setattr(hosted, "_download_biblio_jpeg", lambda url: b"jpeg")
+    receipts = []
+    monkeypatch.setattr(hosted, "_remember_biblio_photo_file_receipts",
+                        lambda *args: receipts.append(args))
+    monkeypatch.setattr(hosted, "_mark_biblio_photo_sync", lambda *args: None)
+    _stub_progress(monkeypatch)
+    class FTP:
+        def storbinary(self, command, data): data.read()
+        def quit(self): pass
+        def close(self): pass
+    monkeypatch.setattr(hosted, "_connect_biblio_ftp", lambda _: FTP())
+    result = hosted.sync_biblio_workspace(uuid.uuid4())
+    assert result["deferred_photo_retry_listing_ids"] == [listing_id]
+    assert receipts == []

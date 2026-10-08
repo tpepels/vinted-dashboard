@@ -107,7 +107,7 @@ def queue_operation(
             and operation_type == "photos"
             and existing.status == "queued"
             and stored.get("automatic_photo_retry")
-            and requested.get("force_photos")
+            and (requested.get("force_photos") or requested.get("failed_photos_only"))
             and existing.job_type == job_type
         ):
             # A user retry must not be blocked for ~26 hours by the
@@ -173,7 +173,7 @@ def _public_result(result: dict[str, Any] | None) -> dict[str, Any]:
     allowed = {
         "items", "active", "orders", "linked", "inventory_uploaded",
         "inventory_total", "deletes", "deletes_uploaded", "photos_uploaded",
-        "photos_total", "photo_count", "photo_retry_scheduled",
+        "photos_total", "photos_skipped", "photo_count", "photo_retry_scheduled",
         "remote", "external_id", "listing_id", "url", "already_complete",
         "message",
     }

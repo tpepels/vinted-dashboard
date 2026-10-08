@@ -3607,6 +3607,7 @@ def _biblio_rows(
                     if str(value or "").strip()
                 ][:BIBLIO_MAX_PHOTOS],
                 "photo_sync_signature": extra.get("photo_sync_signature"),
+                "photo_file_receipts": dict(extra.get("photo_file_receipts") or {}),
                 "photo_sync_state": extra.get("photo_sync_state"),
                 "inventory_sync_signature": extra.get("inventory_sync_signature"),
                 "inventory_synced_at": extra.get("inventory_synced_at"),
@@ -3759,6 +3760,40 @@ def _biblio_photo_signature(
     # image URLs still need to be uploaded again under the new filenames.
     payload = "\n".join([f"book:{str(book_id or '').strip()}", *clean])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def biblio_photo_file_signature(book_id: str, index: int, url: str) -> str:
+    """Evidence for one filename/source pair accepted by the FTP server.
+
+    This is NOT evidence that BIBLIO has attached or displayed the image.
+    Including filename prevents reuse after photo reordering or Book ID edits.
+    """
+    filename = _biblio_photo_filename(book_id, index)
+    return hashlib.sha256(
+        f"{filename}\\n{str(url or '').strip()}".encode("utf-8")
+    ).hexdigest()
+
+
+def _remember_biblio_photo_file_receipts(
+    workspace_id: uuid.UUID,
+    listing_id: str,
+    receipts: dict[str, str],
+) -> None:
+    if not receipts:
+        return
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, uuid.UUID(str(listing_id)))
+        if listing is None or listing.workspace_id != workspace_id or listing.channel != Channel.BIBLIO:
+            # Concurrent deletion, or an isolated uploader test: do not turn
+            # an accepted remote FTP file into a false transfer failure.
+            return
+        extra = dict(listing.extra or {})
+        previous = dict(extra.get("photo_file_receipts") or {})
+        previous.update(receipts)
+        # A book has at most 12 photos; keep the cache bounded to filenames
+        # from the current batch. Older receipts are harmless but not useful.
+        extra["photo_file_receipts"] = dict(list(previous.items())[-24:])
+        listing.extra = extra
 
 
 def _biblio_photo_filename(book_id: str, index: int) -> str:
@@ -4328,6 +4363,7 @@ def sync_biblio_workspace(
     full_sync: bool = False,
     force_photos: bool = False,
     photos_only: bool = False,
+    failed_photos_only: bool = False,
 ) -> dict[str, Any]:
     values = _workspace_or_env_biblio_values(workspace_id)
     upload_profile = biblio_upload_profile(workspace_id)
@@ -4351,6 +4387,32 @@ def sync_biblio_workspace(
         active,
         force=bool(force_photos or full_sync),
     )
+    photo_skipped = 0
+    if failed_photos_only:
+        # Only skip files whose filename and exact source URL were previously
+        # accepted by FTP. Unknown transfers remain eligible for recovery.
+        selected: list[dict[str, Any]] = []
+        for row in photo_rows:
+            book_id = str(row.get("sku") or row.get("source_id") or "").strip()
+            receipts = dict(row.get("photo_file_receipts") or {})
+            attempts = []
+            skipped = 0
+            for index, url in enumerate(row.get("image_urls") or []):
+                filename = _biblio_photo_filename(book_id, index)
+                signature = biblio_photo_file_signature(book_id, index, url)
+                if receipts.get(filename) == signature:
+                    skipped += 1
+                else:
+                    attempts.append((index, url))
+            photo_skipped += skipped
+            if attempts:
+                selected.append({**row, "photo_attempts": attempts, "photo_skipped": skipped})
+        photo_rows = selected
+    else:
+        photo_rows = [
+            {**row, "photo_attempts": list(enumerate(row.get("image_urls") or [])), "photo_skipped": 0}
+            for row in photo_rows
+        ]
     first_upload_photo_ids = {
         str(row.get("listing_id") or "")
         for row in photo_rows
@@ -4410,7 +4472,7 @@ def sync_biblio_workspace(
     ).strip("-")
     inventory_filename = f"{prefix}-{stamp}.txt" if inventory_rows else None
     deletes_filename = f"{prefix}-{stamp}-deletes.txt" if delete_rows else None
-    photo_total = sum(len(row.get("image_urls") or []) for row in photo_rows)
+    photo_total = sum(len(row.get("photo_attempts") or []) for row in photo_rows)
     mode = (
         "listing"
         if listing_id is not None
@@ -4431,6 +4493,7 @@ def sync_biblio_workspace(
             "deletes_total": len(delete_rows),
             "photos_total": photo_total,
             "photos_uploaded": 0,
+            "photos_skipped": photo_skipped,
             "photos_pending_listings": len(photo_rows),
             "photo_errors": [],
             "photo_retry_scheduled": 0,
@@ -4525,13 +4588,15 @@ def sync_biblio_workspace(
             listing_key = str(row.get("listing_id") or "")
             book_id = str(row.get("sku") or row.get("source_id") or "").strip()
             row_errors: list[str] = []
-            for index, url in enumerate(row.get("image_urls") or []):
+            file_receipts: dict[str, str] = {}
+            for index, url in row.get("photo_attempts") or []:
                 filename = ""
                 result_state = "ftp_uploaded"
                 try:
                     filename = _biblio_photo_filename(book_id, index)
                     jpeg = _download_biblio_jpeg(url)
                     ftp.storbinary(f"STOR {filename}", io.BytesIO(jpeg))
+                    file_receipts[filename] = biblio_photo_file_signature(book_id, index, url)
                     uploaded += 1
                     photos_uploaded += 1
                 except Exception as exc:
@@ -4555,6 +4620,11 @@ def sync_biblio_workspace(
                         "message": f"Uploaded {photos_uploaded}/{photo_total} photo(s)",
                     },
                 )
+            # On an initial listing upload the marketplace may ignore a
+            # file until it has created the book. Do not use those transfers
+            # as a reason to skip files in the scheduled second pass.
+            if listing_key and listing_key not in first_upload_photo_ids and file_receipts:
+                _remember_biblio_photo_file_receipts(workspace_id, listing_key, file_receipts)
             if row_errors:
                 if not photos_only and listing_key:
                     deferred_photo_retry_listing_ids.append(listing_key)
@@ -4567,7 +4637,7 @@ def sync_biblio_workspace(
                     photo_state=photo_state,
                     photo_error="; ".join(row_errors)[:2000],
                 )
-            elif uploaded == len(row.get("image_urls") or []) and uploaded > 0:
+            elif uploaded + int(row.get("photo_skipped") or 0) == len(row.get("image_urls") or []) and (uploaded > 0 or row.get("photo_skipped")):
                 if listing_key in first_upload_photo_ids:
                     # BIBLIO ignores a photo if there is no active listing to
                     # attach it to. A newly-uploaded record may still be
@@ -4583,7 +4653,7 @@ def sync_biblio_workspace(
                     )
                 else:
                     photo_synced.append(
-                        (listing_key, str(row["photo_signature"]), uploaded)
+                        (listing_key, str(row["photo_signature"]), len(row.get("image_urls") or []))
                     )
                     _set_biblio_listing_states(
                         workspace_id,
@@ -4619,6 +4689,7 @@ def sync_biblio_workspace(
                 "deletes_filename": deletes_filename,
                 "photos_total": photo_total,
                 "photos_uploaded": photos_uploaded,
+                "photos_skipped": photo_skipped,
                 "photo_errors": photo_errors[:20],
                 "photo_results": photo_results,
                 "message": "BIBLIO FTP sync failed",
@@ -4642,6 +4713,7 @@ def sync_biblio_workspace(
             "deletes_uploaded": len(delete_rows),
             "photos_total": photo_total,
             "photos_uploaded": photos_uploaded,
+            "photos_skipped": photo_skipped,
             "photos_pending_listings": len(photo_rows),
             "photo_errors": photo_errors[:20],
             "photo_results": photo_results,
@@ -4661,6 +4733,7 @@ def sync_biblio_workspace(
         "deletes_filename": deletes_filename,
         "photos_total": photo_total,
         "photos_uploaded": photos_uploaded,
+        "photos_skipped": photo_skipped,
         "photo_errors": photo_errors,
         "deferred_photo_retry_listing_ids": list(dict.fromkeys(deferred_photo_retry_listing_ids)),
         "upload_profile": upload_profile,

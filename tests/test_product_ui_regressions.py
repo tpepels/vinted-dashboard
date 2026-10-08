@@ -517,7 +517,7 @@ def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert "function renderBiblioActivity(activity, operational)" in APP_JS
     assert "Send changes to BIBLIO" in APP_JS
     assert "Fix photos for one book" in APP_JS
-    assert "Resend this book’s photos" in APP_JS
+    assert "Resend all photos for this book" in APP_JS
     assert "Advanced recovery" in APP_JS
     assert "Resend all photos" in APP_JS
     assert "Resend all listings" in APP_JS
@@ -783,7 +783,7 @@ def test_biblio_photo_repair_has_title_picker_and_confirmation():
     assert 'api("/api/app/listings?channel=biblio")' in APP_JS
     assert "Choose a book by title" in APP_JS
     assert "The book details will not be resent" in APP_JS
-    assert "Resend this book’s photos" in APP_JS
+    assert "Resend all photos for this book" in APP_JS
     assert "loadBiblioPhotoChoices()" in APP_JS
 
 
@@ -820,3 +820,18 @@ def test_item_marketplace_panel_exposes_safe_real_actions():
     assert 'data-book=' in APP_JS
     assert 'state.biblioPhotoTarget = button.dataset.book' in APP_JS
     assert 'this panel deliberately does not offer a blind remote delete' in APP_JS
+
+
+def test_biblio_selective_photo_repair_keeps_safe_full_resend_choice():
+    assert 'id="biblio-retry-failed-photos"' in APP_JS
+    assert 'id="biblio-retry-listing-photos"' in APP_JS
+    assert "Retry failed photo files" in APP_JS
+    assert "Resend all photos for this book" in APP_JS
+    assert "body: JSON.stringify({book_id: selected.book_id, failed_only: true})" in APP_JS
+    assert "unconfirmed_file_transfers" in APP_JS
+    assert "successful_file_transfers" in APP_JS
+    assert "No matching successful FTP receipt" in APP_JS
+    assert "Previously accepted by FTP" in APP_JS
+    assert "photos_skipped" in APP_JS
+    assert "does not prove BIBLIO displays" in APP_JS
+    assert "info.file_progress" in APP_JS

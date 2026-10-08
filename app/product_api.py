@@ -63,6 +63,7 @@ from app.connectors.base import Capability, connector_catalog
 from app.connectors.hosted import (
     biblio_configured,
     biblio_pending_changes,
+    biblio_photo_file_signature,
     biblio_upload_profile,
     exchange_etsy_authorization_code,
     ebay_configured,
@@ -3267,6 +3268,7 @@ def _serialize_biblio_activity_run(run: models.ConnectorSyncRun) -> dict[str, An
         "deletes_uploaded": detail.get("deletes_uploaded"),
         "photos_total": detail.get("photos_total"),
         "photos_uploaded": detail.get("photos_uploaded"),
+        "photos_skipped": detail.get("photos_skipped"),
         "photos_pending_listings": detail.get("photos_pending_listings"),
         "photo_retry_scheduled": detail.get("photo_retry_scheduled"),
         "photo_errors": list(detail.get("photo_errors") or []),
@@ -3506,6 +3508,16 @@ def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any
             len([url for url in (row.extra or {}).get("image_urls") or [] if url])
             for row in source
         ]
+        receipts = dict(extra.get("photo_file_receipts") or {})
+        file_progress = []
+        for index, url in enumerate(urls):
+            filename = book_id + (f"_{index}" if index else "") + ".jpg"
+            known = receipts.get(filename) == biblio_photo_file_signature(book_id, index, url)
+            file_progress.append({
+                "filename": filename,
+                "sent_to_ftp": bool(known),
+            })
+        successful_transfers = sum(row["sent_to_ftp"] for row in file_progress)
         jobs_found = session.execute(
             select(BackgroundJob).where(
                 BackgroundJob.workspace_id == workspace_id,
@@ -3527,6 +3539,9 @@ def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any
                 book_id + (f"_{index}" if index else "") + ".jpg"
                 for index in range(len(urls))
             ],
+            "file_progress": file_progress,
+            "successful_file_transfers": successful_transfers,
+            "unconfirmed_file_transfers": len(urls) - successful_transfers,
             "last_ftp_photo_count": extra.get("photo_count"),
             "last_ftp_photo_at": extra.get("photo_synced_at"),
             "photo_state": extra.get("photo_sync_state"),
@@ -3549,6 +3564,7 @@ def biblio_photo_status(book_id: str, context: RequestContext = Depends(require_
 
 class BiblioTargetedPhotoRetry(BaseModel):
     book_id: str = Field(min_length=1, max_length=200)
+    failed_only: bool = False
 
 
 @router.post("/api/app/connectors/biblio/retry-listing-photos")
@@ -3563,6 +3579,15 @@ def biblio_retry_listing_photos(
         raise HTTPException(status_code=409, detail="Listing is not active with stock available")
     if not info["biblio_source_photos"] and not info["vinted_source_photos"]:
         raise HTTPException(status_code=409, detail="No source photographs available; refresh Vinted first")
+    if payload.failed_only and (
+        not info["photo_error"]
+        or not info["successful_file_transfers"]
+        or not info["unconfirmed_file_transfers"]
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="No verifiable partial photo transfer. Use Resend all photos for this book to check unconfirmed publication.",
+        )
     try:
         with db.session_scope() as session:
             operation, created = queue_operation(
@@ -3571,7 +3596,8 @@ def biblio_retry_listing_photos(
                 payload={
                     "listing_id": info["listing_id"],
                     "photos_only": True,
-                    "force_photos": True,
+                    "force_photos": not payload.failed_only,
+                    **({"failed_photos_only": True} if payload.failed_only else {}),
                 },
                 channel_listing_id=uuid.UUID(str(info["listing_id"])),
             )

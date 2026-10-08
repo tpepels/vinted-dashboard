@@ -82,6 +82,7 @@ def test_worker_biblio_handler_preserves_target_and_photo_modes(monkeypatch):
         "full_sync": False,
         "force_photos": True,
         "photos_only": True,
+        "failed_photos_only": False,
     }
 
 
