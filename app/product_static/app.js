@@ -889,12 +889,12 @@ function itemMarketplaceStatusLabel(listing) {
       not_verified: "Not yet verified on BIBLIO",
     }[listing.verification] || "Not independently checked";
   }
-  if (listing.channel === "woocommerce" || listing.channel === "shopify") {
+  if (["woocommerce", "shopify", "wix"].includes(listing.channel)) {
     return {
-      stock_checked: "Stock matched the dashboard at the last marketplace check",
-      stock_mismatch: "Marketplace stock differed at the last check",
-      stock_stale: "Stock was checked before local inventory changed; check again",
-      not_checked: "Marketplace stock has not been checked",
+      stock_checked: "Stock matched at the last check",
+      stock_mismatch: "Stock differs - review before updating",
+      stock_stale: "Dashboard stock changed - check again",
+      not_checked: "Stock not yet checked",
     }[listing.verification] || "Marketplace stock has not been checked";
   }
   return "Imported or linked; current remote publication not independently verified";
@@ -945,16 +945,16 @@ function renderItemMarketplacePanel(data) {
       + (listing.can_inspect_photos ? '<button class="btn item-marketplace-photos" type="button" data-book="'
         + esc(listing.external_id) + '">Check / repair photos</button>' : "")
       + (listing.channel === "biblio" ? '<button class="btn item-marketplace-verify" type="button">Compare BIBLIO inventory</button>' : "")
-      + (listing.can_sync_woocommerce_stock
-        ? '<button class="btn item-woo-stock" type="button">Set WooCommerce stock to '
-          + Number(item.quantity || 0) + '…</button>'
-          + '<button class="btn item-woo-check" type="button">Check WooCommerce stock</button>'
-        : "")
-      + (listing.can_sync_shopify_stock
-        ? '<button class="btn item-shopify-stock" type="button">Set Shopify stock to '
-          + Number(item.quantity || 0) + '…</button>'
-          + '<button class="btn item-shopify-check" type="button">Check Shopify stock</button>'
-        : "")
+      + ((listing.can_sync_woocommerce_stock || listing.can_sync_shopify_stock || listing.can_sync_wix_stock)
+        ? '<button class="btn item-stock-check" data-channel="' + esc(listing.channel)
+          + '" type="button">'
+          + (listing.verification === "stock_checked" ? "Check again" : "Check stock")
+          + '</button>'
+          + (listing.verification === "stock_mismatch"
+            ? '<button class="btn primary item-stock-update" data-channel="' + esc(listing.channel)
+              + '" type="button">Set stock to ' + Number(item.quantity || 0) + '…</button>'
+            : '')
+        : '')
       + '</div></div>';
   });
   const operationsMarkup = operations.map(op => {
@@ -984,9 +984,8 @@ function renderItemMarketplacePanel(data) {
     + '<details class="item-marketplace-history"><summary>Recent operations (' + operations.length + ')</summary>'
     + '<p>These are local attempts and transfer results; sending does not prove a listing is publicly visible.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
-    + '<p class="item-marketplace-footnote"><strong>Updates and closing:</strong> Edit local book details before sending BIBLIO changes. '
-    + 'WooCommerce and Shopify support explicit stock-only checks and updates for eligible linked products. Sold-out closures use sale reconciliation; '
-    + 'this panel deliberately does not offer a blind remote delete.</p>';
+    + '<p class="item-marketplace-footnote">Check stock before changing it. Updates to supported stores '
+    + 'change marketplace quantities only. BIBLIO listing changes are sent from Connections.</p>';
   const itemId = item.id;
   $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
   $(".item-marketplace-edit").onclick = () => {
@@ -1019,95 +1018,55 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $$(".item-woo-check").forEach(button => {
+  // One workflow for every supported store. Read-only check comes first.
+  $$(".item-stock-check").forEach(button => {
     button.onclick = async () => {
+      const channel = button.dataset.channel;
+      const marketplace = {woocommerce:"WooCommerce", shopify:"Shopify", wix:"Wix"}[channel];
+      if (!marketplace) return;
       button.disabled = true;
       try {
         const result = await api(
           "/api/app/inventory/" + encodeURIComponent(itemId)
-          + "/marketplaces/woocommerce/check-stock",
-          {method: "POST"},
+            + "/marketplaces/" + channel + "/check-stock",
+          {method:"POST"},
         );
         flash(result.matches
-          ? "WooCommerce stock matches the dashboard (" + result.remote_quantity
-            + "). No remote changes were made."
-          : "WooCommerce reports " + result.remote_quantity
-            + " units, while physical stock is " + result.local_quantity
-            + ". Review the difference before updating.");
+          ? marketplace + ": stock matches the dashboard (" + result.local_quantity + ")."
+          : marketplace + ": " + result.remote_quantity + " listed, "
+            + result.local_quantity + " in the dashboard. Check the difference before updating.");
         await openItemMarketplaces(itemId);
       } catch (error) {
-        flash("Could not check WooCommerce stock: " + error.message, true);
+        flash("Could not check " + marketplace + " stock: " + error.message, true);
         button.disabled = false;
       }
     };
   });
-  $$(".item-woo-stock").forEach(button => {
+  $$(".item-stock-update").forEach(button => {
     button.onclick = async () => {
+      const channel = button.dataset.channel;
+      const marketplace = {woocommerce:"WooCommerce", shopify:"Shopify", wix:"Wix"}[channel];
+      if (!marketplace) return;
       const desired = Number(item.quantity || 0);
-      if (!window.confirm("Update the linked WooCommerce product or individually stock-managed variation to "
-        + desired + " available unit(s)? This changes WooCommerce stock only, "
-        + "not the physical stock in this dashboard. The exact remote IDs and SKU "
-        + "will be checked before writing.")) return;
+      if (!window.confirm(
+        "Set " + marketplace + " stock to " + desired + " unit(s)? "
+        + "This changes the marketplace only. The dashboard checks the remote identity "
+        + "and current stock first, then checks the result. If anything differs, "
+        + "the update stops for manual review."
+      )) return;
       button.disabled = true;
       try {
         const result = await api(
           "/api/app/inventory/" + encodeURIComponent(itemId)
-            + "/marketplaces/woocommerce/stock",
-          {method: "POST"},
+            + "/marketplaces/" + channel + "/stock",
+          {method:"POST"},
         );
         flash(result.remote_verified
-          ? "WooCommerce stock updated and independently read back."
-          : "WooCommerce status requires manual verification.");
+          ? marketplace + ": stock verified (" + result.quantity + ")."
+          : marketplace + ": remote result needs checking.");
         await openItemMarketplaces(itemId);
       } catch (error) {
-        flash("Stock was not verified; inspect the WooCommerce listing before another attempt. "
-          + error.message, true);
-        button.disabled = false;
-      }
-    };
-  });
-  $$(".item-shopify-check").forEach(button => {
-    button.onclick = async () => {
-      button.disabled = true;
-      try {
-        const result = await api(
-          "/api/app/inventory/" + encodeURIComponent(itemId)
-          + "/marketplaces/shopify/check-stock",
-          {method: "POST"},
-        );
-        flash(result.matches
-          ? "Shopify stock matches the dashboard (" + result.remote_quantity
-            + "). No remote changes were made."
-          : "Shopify reports " + result.remote_quantity
-            + " units, while physical stock is " + result.local_quantity
-            + ". Review the difference before updating.");
-        await openItemMarketplaces(itemId);
-      } catch (error) {
-        flash("Could not check Shopify stock: " + error.message, true);
-        button.disabled = false;
-      }
-    };
-  });
-  $$(".item-shopify-stock").forEach(button => {
-    button.onclick = async () => {
-      const desired = Number(item.quantity || 0);
-      if (!window.confirm("Update the linked single-location Shopify variant to "
-        + desired + " available unit(s)? This changes Shopify stock only, "
-        + "not the physical stock in this dashboard. The variant ID, SKU, stock location and available quantity "
-        + "will be checked before writing. Shopify changes use compare-and-set to avoid overwriting concurrent changes.")) return;
-      button.disabled = true;
-      try {
-        const result = await api(
-          "/api/app/inventory/" + encodeURIComponent(itemId)
-            + "/marketplaces/shopify/stock",
-          {method: "POST"},
-        );
-        flash(result.remote_verified
-          ? "Shopify stock updated and independently read back."
-          : "Shopify status requires manual verification.");
-        await openItemMarketplaces(itemId);
-      } catch (error) {
-        flash("Stock was not verified; inspect the Shopify listing before another attempt. "
+        flash(marketplace + " stock is not verified. Check it before another update. "
           + error.message, true);
         button.disabled = false;
       }
