@@ -12,9 +12,12 @@ const elements = {
   "#store-stock-audit-progress": {textContent:""},
   "#store-stock-audit-start": {disabled:false},
 };
+const reviewButtons = [{dataset:{item:"abc"},onclick:null}];
+let openedItem = null;
 const ctx = {
   $: selector => elements[selector],
-  $$: () => [],
+  $: selector => selector === ".store-stock-audit-open" ? reviewButtons : [],
+  openItemMarketplaces: id => { openedItem = id; },
   esc: value => String(value ?? "").replace(/[&<>"']/g, char =>
     ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[char])),
   when: value => value || "—",
@@ -46,6 +49,9 @@ assert.match(html,/Review item/);
 assert.match(html,/1 matching listing/);
 assert.doesNotMatch(html,/<script>/,"Marketplace text must be escaped");
 assert.match(html,/&lt;script&gt;/);
+assert.equal(typeof reviewButtons[0].onclick, "function");
+reviewButtons[0].onclick();
+assert.equal(openedItem, "abc", "Review should open the affected item's marketplace controls");
 ctx.renderStoreStockAudit({job:null,eligible:0,limit:100,counts:{},results:[]});
 assert.equal(elements["#store-stock-audit-start"].disabled,true);
 assert.match(elements["#store-stock-audit-results"].innerHTML,/No store stock check/);
