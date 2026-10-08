@@ -1233,6 +1233,7 @@ def stock_intake_create_items(
                 )
                 session.add(item)
                 session.flush()
+                record_physical_quantity(session, item, 1)
                 created.append(_serialize_item(item, []))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
