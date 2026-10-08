@@ -9,7 +9,7 @@ import re
 import uuid
 from typing import Any
 
-import requests
+from curl_cffi import requests
 
 from app.constants import Channel, ListingStatus
 from app.connectors import hosted
