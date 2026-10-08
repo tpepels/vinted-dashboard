@@ -4196,9 +4196,16 @@ function renderMarketplaceOperations(data) {
     return;
   }
   const statuses = {
-    queued: "Queued", running: "Running",
-    succeeded: "Completed", needs_verification: "Transfer accepted · verification needed",
-    failed: "Failed", attention: "Review remote outcome", cancelled: "Cancelled",
+    queued: "Waiting to start", running: "In progress",
+    succeeded: "Finished", needs_verification: "Sent; check the marketplace",
+    failed: "Did not finish", attention: "Needs your attention", cancelled: "Cancelled",
+  };
+  const verificationLabels = {
+    manual_required: "Check the result on the marketplace",
+    snapshot_imported: "Information imported into the dashboard",
+    no_remote_changes: "No new changes sent",
+    not_checked: "Not independently checked",
+    remote_verified: "Checked against the marketplace",
   };
   root.innerHTML = '<div class="table-wrap"><table><thead><tr>'
     + '<th>Marketplace / action</th><th>Target</th><th>Status</th><th>Created</th><th>Next step</th>'
@@ -4208,21 +4215,28 @@ function renderMarketplaceOperations(data) {
       const result = Object.entries(op.result || {}).slice(0, 6)
         .map(([key, value]) => esc(key.replaceAll("_", " ") + ": " + String(value))).join(" · ");
       const next = op.can_retry
-        ? '<button class="btn marketplace-operation-retry" type="button" data-id="' + esc(op.id) + '">Retry safely</button>'
-        : requiresCheck ? '<span class="muted">Check in marketplace before further action</span>'
+        ? '<button class="btn marketplace-operation-retry" type="button" data-id="' + esc(op.id) + '">'
+          + (op.type === "photos" ? "Try sending photos again…" : "Try again…") + '</button>'
+        : requiresCheck ? '<span class="muted">Check the result on the marketplace first</span>'
         : "";
-      return '<tr><td><strong>' + esc(op.channel.toUpperCase()) + ' · ' + esc(op.type)
-        + '</strong><div class="sub">' + esc(op.verification) + '</div></td>'
-        + '<td>' + esc(op.target || "all") + '</td>'
+      const actionLabel = {sync:"Update dashboard", publish:"Add listing",
+        update:"Update listing", photos:"Send photos", close:"Close sold listing",
+        verify:"Check listing"}[op.type] || op.type;
+      const targetLabel = op.target === "all" ? "All relevant listings"
+        : /^[0-9a-f-]{36}$/i.test(op.target || "") ? "One listing"
+        : op.target || "Single listing";
+      return '<tr><td><strong>' + esc(op.channel.toUpperCase()) + ' · ' + esc(actionLabel)
+        + '</strong><div class="sub">' + esc(verificationLabels[op.verification] || op.verification) + '</div></td>'
+        + '<td>' + esc(targetLabel) + '</td>'
         + '<td><strong>' + esc(statuses[op.status] || op.status) + '</strong>'
         + (op.error ? '<div class="error">' + esc(op.error) + '</div>' : "")
-        + (result ? '<div class="sub">' + result + '</div>' : "")
+        + (result ? '<details class="operation-technical"><summary>Transfer details</summary><p>' + result + '</p></details>' : "")
         + '</td><td>' + esc(when(op.created_at)) + '</td><td>' + next + '</td></tr>';
     }).join("")
     + '</tbody></table></div>';
   $$(".marketplace-operation-retry").forEach(button => {
     button.onclick = async () => {
-      if (!window.confirm("Retry this failed operation? Only supported idempotent operations can be retried.")) return;
+      if (!window.confirm("Try this operation again? The dashboard only allows automatic retries when repeating it is considered safe. If a marketplace may have accepted an earlier upload, check it first.")) return;
       button.disabled = true;
       try {
         await api("/api/app/marketplace-operations/" + button.dataset.id + "/retry", {method:"POST"});
