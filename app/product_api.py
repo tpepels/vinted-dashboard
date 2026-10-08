@@ -1758,6 +1758,19 @@ def link_listing(
         ):
             raise HTTPException(status_code=404, detail="Item or listing not found")
         previous_item_id = listing.inventory_item_id
+        if previous_item_id and previous_item_id != item.id:
+            associated_sales = session.execute(
+                select(models.Sale.id).where(
+                    models.Sale.workspace_id == context.workspace.id,
+                    models.Sale.inventory_item_id == previous_item_id,
+                ).limit(1)
+            ).first()
+            if associated_sales:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This listing's previous stock record has linked sales. "
+                           "Use Reconcile → merge items so sales and listings move together.",
+                )
         confirm_physical_relation(session, item)
         listing.inventory_item_id = item.id
         extra = dict(listing.extra or {})
