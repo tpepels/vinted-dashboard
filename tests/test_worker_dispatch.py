@@ -17,6 +17,7 @@ def test_worker_dispatch_table_has_one_handler_per_supported_job():
         "wix_sync",
         "depop_sync",
         "cross_channel_close",
+        "store_stock_audit",
         "noop",
     }
 
