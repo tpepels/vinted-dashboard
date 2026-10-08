@@ -1432,23 +1432,23 @@ function biblioListingDetails(row) {
 }
 
 function biblioActivityStatus(row) {
-  if (!row) return { label: "No activity yet", cls: "idle" };
-  if (row.status === "queued") return { label: "Queued", cls: "queued" };
+  if (!row) return { label: "Nothing sent yet", cls: "idle" };
+  if (row.status === "queued") return { label: "Waiting to send", cls: "queued" };
   if (row.status === "running") {
     const stages = {
-      preparing: "Preparing",
-      connecting: "Connecting to FTP",
-      connected: "Connected",
-      inventory_uploaded: "Inventory uploaded",
-      deletes_uploaded: "Deletes uploaded",
-      photos_uploading: "Uploading photos",
+      preparing: "Preparing files",
+      connecting: "Connecting to BIBLIO",
+      connected: "Sending files",
+      inventory_uploaded: "Book details sent",
+      deletes_uploaded: "Sold-out updates sent",
+      photos_uploading: "Sending photos",
     };
-    return { label: stages[row.stage] || "Running", cls: "running" };
+    return { label: stages[row.stage] || "Sending to BIBLIO", cls: "running" };
   }
-  if (row.status === "error") return { label: "Failed", cls: "error" };
+  if (row.status === "error") return { label: "Could not send files", cls: "error" };
   if (row.status === "success") {
     return {
-      label: (row.photo_errors || []).length ? "FTP uploaded with photo warnings" : "FTP uploaded",
+      label: (row.photo_errors || []).length ? "Some photos could not be sent" : "Files sent to BIBLIO",
       cls: (row.photo_errors || []).length ? "warn" : "success",
     };
   }
@@ -1456,25 +1456,25 @@ function biblioActivityStatus(row) {
 }
 
 function biblioActivityDetail(row) {
-  if (!row) return "No BIBLIO FTP run has been recorded yet.";
+  if (!row) return "No BIBLIO transfer has been recorded yet.";
   const parts = [];
   if (row.listing_title) parts.push(row.listing_title);
-  if (row.photos_only || row.mode === "photos") parts.push("Photo-only sync");
-  else if (row.full_sync || row.mode === "full") parts.push("Full resync");
-  else if (row.mode === "incremental") parts.push("Changed records only");
+  if (row.photos_only || row.mode === "photos") parts.push("Photos only");
+  else if (row.full_sync || row.mode === "full") parts.push("Entire catalogue");
+  else if (row.mode === "incremental") parts.push("Only changed records");
   if (row.message) parts.push(row.message);
   const inventoryDone = row.inventory_uploaded ?? (row.status === "success" ? row.active_count : null);
   if (row.inventory_total != null || inventoryDone != null) {
-    parts.push("inventory " + Number(inventoryDone || 0) + "/" + Number(row.inventory_total ?? row.active_count ?? 0));
+    parts.push("book records sent " + Number(inventoryDone || 0) + "/" + Number(row.inventory_total ?? row.active_count ?? 0));
   }
   if (row.photos_total != null) {
-    parts.push("photos " + Number(row.photos_uploaded || 0) + "/" + Number(row.photos_total || 0));
+    parts.push("photos sent " + Number(row.photos_uploaded || 0) + "/" + Number(row.photos_total || 0));
   }
   if (Number(row.photo_retry_scheduled || 0) > 0) {
-    parts.push(Number(row.photo_retry_scheduled) + " delayed photo retry scheduled");
+    parts.push(Number(row.photo_retry_scheduled) + " automatic photo follow-up");
   }
   if (row.error) parts.push(row.error);
-  return parts.join(" · ") || "BIBLIO FTP activity recorded.";
+  return parts.join(" · ") || "BIBLIO transfer recorded.";
 }
 
 function biblioPhotoInspectionHtml() {
@@ -1568,6 +1568,7 @@ async function inspectBiblioPhotoTarget() {
 
 function renderBiblioActivity(activity, operational) {
   const health = activity?.health || {};
+  const dataAvailable = health.active_listings != null;
   const count = (key) => Number(health[key] || 0);
   const waiting = count("inventory_changes_pending") + count("deletes_pending");
   const last = activity?.current || null;
@@ -1575,7 +1576,9 @@ function renderBiblioActivity(activity, operational) {
   const runs = activity?.runs || [];
   const lastSentAt = last?.completed_at || last?.started_at;
   const verified = count("remote_verified_matching") + count("remote_verified_mismatching");
-  const overview = '<div class="biblio-summary">'
+  const overview = !dataAvailable
+    ? '<div class="biblio-user-warning">BIBLIO listing statistics are temporarily unavailable. The dashboard cannot confirm how many changes are pending.</div>'
+    : '<div class="biblio-summary">'
     + '<div class="biblio-summary-stats">'
     + '<div><strong>' + count("active_listings") + '</strong><span>Books prepared for BIBLIO</span></div>'
     + '<div><strong>' + waiting + '</strong><span>Changes waiting to be sent</span></div>'
