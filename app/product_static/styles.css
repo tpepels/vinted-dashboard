@@ -221,3 +221,152 @@ table tbody tr{transition:background .12s ease}table tbody tr:hover{background:#
 .item-marketplace-closure{padding:14px;border-radius:9px;border:1px solid #e4c998;background:#fffaf1;margin-top:12px;font-size:12px}
 .item-marketplace-closure p{margin:5px 0}
 @media(max-width:720px){.item-marketplace-row{flex-direction:column}.item-marketplace-actions{width:100%;flex:0 0 auto;flex-direction:row;flex-wrap:wrap}.item-marketplace-actions .btn{flex:1 1 140px}.item-marketplace-history-row{align-items:flex-start;flex-direction:column}}
+
+
+/* UI system: teal = action/navigation; green = confirmed; amber = review;
+   red = failure/destructive; blue = processing; grey = neutral.
+   The same status must use the same color across views and marketplaces. */
+:root{
+  --state-success:#206445;--state-success-bg:#e8f5ed;--state-success-line:#bedfca;
+  --state-warning:#86590f;--state-warning-bg:#fff5dc;--state-warning-line:#e9d39e;
+  --state-danger:#992f2b;--state-danger-bg:#fcecea;--state-danger-line:#e9c2bc;
+  --state-info:#345d8d;--state-info-bg:#edf3fc;--state-info-line:#cad9ee;
+  --state-neutral:#53625d;--state-neutral-bg:#f2f5f3;--state-neutral-line:#dbe3df;
+}
+:where(.view,.card,.two,.form-grid,.table-wrap,.market-matrix-scroll,.toolbar){min-width:0}
+.shell{grid-template-columns:220px minmax(0,1fr)}
+main{width:100%;max-width:100%;min-width:0}
+input,select,textarea{max-width:100%}
+.form-grid>*{min-width:0}
+:where(.actions,.toolbar,.connector-header,.item-marketplace-head){min-width:0;flex-wrap:wrap}
+:where(.actions,.toolbar)>.btn{max-width:100%}
+.btn:focus-visible,.nav:focus-visible,summary:focus-visible,
+  .table-resize-handle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.danger{color:var(--state-danger);border-color:var(--state-danger-line);background:var(--state-danger-bg)}
+.btn.danger:hover{background:#f9dfdb}
+.flash{background:var(--state-info-bg);color:var(--state-info);border:1px solid var(--state-info-line)}
+.flash.error{background:var(--state-danger-bg);border-color:var(--state-danger-line);color:var(--state-danger)}
+.error{color:var(--state-danger)}
+/* Status colors represent the outcome, not a platform identity. */
+.pill,.pill.vinted,.pill.biblio,.pill.ebay,
+.work-kind,.cross-list-group-head span{background:var(--state-neutral-bg);color:var(--state-neutral)}
+.source-dot,.biblio-activity-dot{background:var(--state-neutral-line)}
+.source-dot.ok,.biblio-activity-dot.success{background:var(--state-success)}
+.source-dot.warn,.biblio-activity-dot.queued,.biblio-activity-dot.warn{background:var(--state-warning)}
+.source-dot.error,.biblio-activity-dot.error{background:var(--state-danger)}
+.biblio-activity-dot.running{background:var(--state-info)}
+.work-row::before{background:var(--state-neutral-line)}
+.work-stock_action::before,.work-connector_error::before{background:var(--state-danger)}
+.work-reconcile::before,.work-open_sales::before{background:var(--state-warning)}
+.work-purchase_cost::before{background:var(--state-info)}
+.work-listing::before{background:var(--accent)}
+#connections .connection-state.ready,
+.stock-row-state.ready,.market-status-implemented{
+  color:var(--state-success);background:var(--state-success-bg);border-color:var(--state-success-line)
+}
+#connections .connection-state.not-ready,.stock-row-state.review,
+.market-status-partial,.signal.high_interest_stale,
+.item-marketplace-state.attention{
+  color:var(--state-warning);background:var(--state-warning-bg);border-color:var(--state-warning-line)
+}
+.stock-row-state.pending,.market-status-manual{
+  color:var(--state-info);background:var(--state-info-bg);border-color:var(--state-info-line)
+}
+.market-status-blocked,.signal.low_interest_stale,
+.item-marketplace-closure,.biblio-photo-alert{
+  color:var(--state-danger);background:var(--state-danger-bg);border-color:var(--state-danger-line)
+}
+.market-status-missing{color:var(--state-neutral);background:var(--state-neutral-bg);border-color:var(--state-neutral-line)}
+.signal.momentum,.signal.steady{color:var(--state-neutral);background:var(--state-neutral-bg);border-color:var(--state-neutral-line)}
+.signal.momentum{color:var(--state-success);background:var(--state-success-bg);border-color:var(--state-success-line)}
+#connections .biblio-user-warning{color:var(--state-warning);background:var(--state-warning-bg);border-left-color:var(--state-warning)}
+.biblio-sync-mini.queued,.biblio-sync-mini.warn{color:var(--state-warning)}
+.biblio-sync-mini.running{color:var(--state-info)}
+.biblio-sync-mini.success,.gain{color:var(--state-success)}
+.biblio-sync-mini.error{color:var(--state-danger)}
+.stock-copy-note,.cross-list-review,.cross-list-destination.needs_fields,
+.cross-list-destination.review,.cross-list-destination.connect{
+  color:var(--state-warning);background:var(--state-warning-bg);border-color:var(--state-warning-line)
+}
+.cross-list-destination.ready,.biblio-photo-preview{border-color:var(--state-success-line);background:var(--state-success-bg)}
+.biblio-activity-errors{color:var(--state-danger);background:var(--state-danger-bg)}
+/* Tables are scrollable regions, not page-width constraints. */
+.table-wrap,.market-matrix-scroll{
+  max-width:100%;min-width:0;overflow-x:auto;overflow-y:auto;
+  scrollbar-gutter:stable;overscroll-behavior-x:contain;
+}
+.table-wrap{border-radius:11px}
+.table-wrap table{width:100%;min-width:720px;border-collapse:separate;border-spacing:0}
+.table-wrap th,.table-wrap td{line-height:1.45;vertical-align:middle}
+.table-wrap th{background:var(--state-neutral-bg);color:var(--state-neutral);
+  font-size:11px;letter-spacing:.02em;text-transform:none;
+  white-space:normal;overflow-wrap:anywhere;position:relative}
+.table-wrap td{font-size:12px;overflow-wrap:anywhere;max-width:320px}
+.table-wrap tbody tr:hover{background:#f5faf8}
+.table-wrap tbody tr:focus-within{background:var(--soft)}
+.table-wrap thead th[data-sort-direction]{color:var(--accent-strong);background:var(--soft)}
+.table-wrap :is(th,td)[data-sort-value]{font-variant-numeric:tabular-nums}
+.table-wrap tbody tr:last-child td{border-bottom:0}
+.market-matrix-scroll .market-matrix{min-width:680px}
+.market-matrix-scroll .market-matrix th{white-space:normal;overflow-wrap:anywhere}
+/* Column handles are shown on fine-pointer desktops only. */
+.table-wrap table.table-resizable{border-collapse:separate;border-spacing:0}
+.table-resize-handle{
+  position:absolute;right:-6px;top:0;bottom:0;z-index:5;width:12px;
+  border:0;border-radius:0;background:transparent;cursor:col-resize;padding:0;
+  touch-action:none;transform:none!important;box-shadow:none!important
+}
+.table-resize-handle::after{
+  content:"";position:absolute;right:5px;top:25%;height:50%;
+  border-right:2px solid transparent
+}
+.table-resize-handle:hover::after,.table-resize-handle:focus-visible::after,
+.is-resizing-columns .table-resize-handle::after{border-right-color:var(--accent)}
+body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;user-select:none!important}
+.table-wrap thead th.table-sortable{cursor:pointer}
+.table-wrap thead th.table-sortable:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+@media(hover:none),(pointer:coarse),(max-width:900px){
+  .table-resize-handle{display:none}
+  .table-wrap,.market-matrix-scroll{scrollbar-width:thin}
+}
+@media(max-width:1200px){
+  .shell{grid-template-columns:190px minmax(0,1fr)}
+  main{padding:24px 20px 48px}
+  .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .shell aside{width:100%;max-width:100%;overflow:hidden}
+  .shell nav{min-width:0;overflow-x:auto;gap:12px}
+  .shell .nav-group{flex:0 0 auto}
+  main{padding:18px 14px 40px}
+  .two,.analytics-grid,.today-layout{grid-template-columns:minmax(0,1fr)}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .table-wrap table{min-width:680px}
+}
+@media(max-width:600px){
+  header{align-items:flex-start}
+  header h1{font-size:25px}
+  .metrics{gap:8px}
+  .metric{padding:12px;min-height:80px}
+  .metric strong{font-size:22px}
+  .form-grid,.quick-photo-grid,.stock-defaults{grid-template-columns:minmax(0,1fr)}
+  .standard-toolbar>*,.listing-toolbar>*{min-width:0}
+  .standard-toolbar .search,.listing-toolbar .search{flex-basis:100%;min-width:0}
+  .table-wrap table{min-width:640px}
+  .table-wrap th,.table-wrap td{padding:9px}
+  #connections .connector{padding:14px}
+  #connections .connection-task-panel{padding:0 12px}
+  .item-marketplace-actions{width:100%;flex-basis:auto}
+  .item-marketplace-actions .btn{min-width:0;flex:1 1 140px}
+}
+@media(max-width:380px){
+  main{padding-inline:10px}
+  .metrics{grid-template-columns:minmax(0,1fr)}
+  .standard-toolbar>*{flex:1 1 100%}
+  .table-wrap table{min-width:600px}
+}
+@media(prefers-reduced-motion:reduce){
+  .btn,.nav,.card,table tbody tr{transition:none!important}
+  .btn:hover,.nav:hover{transform:none}
+}
