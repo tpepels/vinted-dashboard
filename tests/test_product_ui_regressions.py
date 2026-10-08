@@ -517,7 +517,7 @@ def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert "function renderBiblioActivity(activity, operational)" in APP_JS
     assert "Send changes to BIBLIO" in APP_JS
     assert "Fix photos for one book" in APP_JS
-    assert "Resend this book’s photos" in APP_JS
+    assert "Resend all photos for this book" in APP_JS
     assert "Advanced recovery" in APP_JS
     assert "Resend all photos" in APP_JS
     assert "Resend all listings" in APP_JS
@@ -783,7 +783,7 @@ def test_biblio_photo_repair_has_title_picker_and_confirmation():
     assert 'api("/api/app/listings?channel=biblio")' in APP_JS
     assert "Choose a book by title" in APP_JS
     assert "The book details will not be resent" in APP_JS
-    assert "Resend this book’s photos" in APP_JS
+    assert "Resend all photos for this book" in APP_JS
     assert "loadBiblioPhotoChoices()" in APP_JS
 
 
