@@ -755,6 +755,7 @@ def read_woocommerce_workspace_stock(
     expected_sku: str | None,
 ) -> dict[str, Any]:
     """Read a verified WooCommerce simple product or parent:variation pair."""
+    _woocommerce_stock_path(external_id)
     values = _credentials(workspace_id, Channel.WOOCOMMERCE)
     _, remote, parent_status, variation = _woocommerce_stock_record(
         values, external_id, expected_sku,
