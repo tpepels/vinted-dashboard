@@ -4085,8 +4085,13 @@ async function connections() {
     inspectPhotosButton.onclick = () => inspectBiblioPhotoTarget();
     const field = $("#biblio-photo-book-id");
     field.oninput = () => {
-      if (field.value.trim() !== state.biblioPhotoTarget) {
+      const value = field.value.trim();
+      state.biblioPhotoTarget = value;
+      if (value !== state.biblioPhotoInspection?.book_id) {
+        state.biblioPhotoInspection = null;
+        state.biblioPhotoError = "";
         $("#biblio-retry-listing-photos").disabled = true;
+        $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
       }
     };
     field.onkeydown = (event) => {
@@ -4144,6 +4149,7 @@ async function connections() {
 
   const currentStatus = String(biblioActivity?.current?.status || "");
   if (["queued", "running"].includes(currentStatus) && state.view === "connections") {
+    if (state.biblioPhotoInspection) inspectBiblioPhotoTarget();
     state.biblioActivityTimer = setTimeout(() => {
       if (state.view === "connections") connections();
     }, 2500);
