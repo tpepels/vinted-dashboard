@@ -1578,7 +1578,7 @@ function renderBiblioActivity(activity, operational) {
     + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
     + '<div class="actions biblio-activity-actions">'
     + '<button class="btn biblio-activity-toggle" type="button">View activity</button>'
-    + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry photos</button>' : "")
+    + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry all photos</button>' : "")
     + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
     + '</div>'
     + (operational ? '<div class="biblio-photo-recovery"><strong>Photo recovery for one book</strong>'
@@ -4053,6 +4053,7 @@ async function connections() {
   });
   $(".biblio-retry-photos").forEach((button) => {
     button.onclick = async () => {
+      if (!window.confirm("Retry all photos will resend every active BIBLIO listing's images. Use the single-book photo recovery tool below when only one book is affected. Continue?")) return;
       button.disabled = true;
       try {
         await api("/api/app/connectors/biblio/retry-photos", { method: "POST" });
