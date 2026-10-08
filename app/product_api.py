@@ -1546,6 +1546,108 @@ def _cross_list_destination_status(
     }
 
 
+@router.get("/api/app/inventory/{item_id}/marketplace-status")
+def item_marketplace_status(
+    item_id: uuid.UUID,
+    context: RequestContext = Depends(require_context),
+):
+    """Item-specific channel relationships, proofs and operation history.
+
+    Never guess that a remote marketplace accepted a write from a successful
+    transport job. No network calls or stock changes happen on this GET.
+    """
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        if item is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.inventory_item_id == item_id,
+            ).order_by(models.ChannelListing.channel, models.ChannelListing.external_id)
+        ).scalars().all()
+        listing_ids = [row.id for row in listings]
+        operation_filter = MarketplaceOperation.inventory_item_id == item_id
+        if listing_ids:
+            operation_filter = operation_filter | MarketplaceOperation.channel_listing_id.in_(listing_ids)
+        operations = session.execute(
+            select(MarketplaceOperation).where(
+                MarketplaceOperation.workspace_id == context.workspace.id,
+                operation_filter,
+            ).order_by(MarketplaceOperation.created_at.desc(), MarketplaceOperation.id.desc()).limit(40)
+        ).scalars().all()
+        actions = session.execute(
+            select(models.CrossChannelAction).where(
+                models.CrossChannelAction.workspace_id == context.workspace.id,
+                models.CrossChannelAction.inventory_item_id == item_id,
+            ).order_by(models.CrossChannelAction.created_at.desc()).limit(30)
+        ).scalars().all()
+        related_ops: dict[uuid.UUID, list[MarketplaceOperation]] = {}
+        for op in operations:
+            if op.channel_listing_id:
+                related_ops.setdefault(op.channel_listing_id, []).append(op)
+        rows = []
+        for listing in listings:
+            extra = dict(listing.extra or {})
+            recent = related_ops.get(listing.id, [])
+            is_biblio = listing.channel == Channel.BIBLIO
+            verified = bool(extra.get("remote_verified")) if is_biblio else False
+            stale = bool(extra.get("remote_verification_stale")) if is_biblio else False
+            match = extra.get("remote_matches_local") if is_biblio else None
+            photo_state = str(extra.get("photo_sync_state") or "") if is_biblio else ""
+            needs_attention = (
+                any(op.status in {"attention", "failed"} for op in recent)
+                or (is_biblio and (
+                    stale or (verified and match is False)
+                    or photo_state == "error" or bool(extra.get("photo_sync_error"))
+                    or str(extra.get("publish_state") or "") == "error"
+                ))
+            )
+            rows.append({
+                "listing_id": str(listing.id),
+                "channel": listing.channel,
+                "external_id": listing.external_id,
+                "external_sku": listing.external_sku,
+                "title": listing.title,
+                "status": listing.status,
+                "quantity": listing.quantity,
+                "url": listing.url,
+                "last_seen_at": listing.last_seen_at.isoformat() if listing.last_seen_at else None,
+                "link_source": extra.get("master_link_source"),
+                "last_operation": serialize_marketplace_operation(recent[0]) if recent else None,
+                "attention": needs_attention,
+                "verification": (
+                    "stale" if stale else
+                    "matches" if verified and match is True else
+                    "differs" if verified and match is False else
+                    "compared" if verified else "not_verified"
+                ) if is_biblio else "not_checked",
+                "verified_at": extra.get("remote_verified_at") if is_biblio else None,
+                "photo_state": photo_state if is_biblio else None,
+                "photo_error": redact_text(str(extra.get("photo_sync_error") or ""))[:500] if is_biblio else None,
+                "photo_count": len(extra.get("image_urls") or []) if is_biblio else None,
+                "can_inspect_photos": is_biblio and bool(listing.external_id),
+                "can_open_remote": bool(listing.url),
+            })
+        return {
+            "item": {"id": str(item.id), "title": item.title, "sku": item.sku,
+                     "quantity": item.quantity, "status": item.status},
+            "listings": rows,
+            "operations": [serialize_marketplace_operation(op) for op in operations],
+            "closure_actions": [
+                {"id": str(action.id), "channel": action.channel, "status": action.status,
+                 "type": action.action_type, "listing_id": str(action.channel_listing_id)}
+                for action in actions
+            ],
+            "notes": {
+                "publish": "Use Publish to other marketplaces to review required fields and supported destinations.",
+                "update": "Edit the physical item first. BIBLIO supports sending changed records; other channels need a supported edit adapter.",
+                "close": "Closing another marketplace listing must follow stock/sale reconciliation. A manual remote close is not inferred from this page.",
+                "verify": "BIBLIO requires a downloaded seller inventory file or a direct marketplace check to verify publication.",
+            },
+        }
+
+
 @router.get("/api/app/inventory/{item_id}/cross-list")
 def cross_list_preview(
     item_id: uuid.UUID,
