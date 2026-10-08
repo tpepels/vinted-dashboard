@@ -969,7 +969,7 @@ function renderItemMarketplacePanel(data) {
     if (original) openItemForm(original);
   };
   $(".item-marketplace-refresh").onclick = () => openItemMarketplaces(itemId);
-  $(".item-marketplace-photos").forEach(button => {
+  $$(".item-marketplace-photos").forEach(button => {
     button.onclick = async () => {
       state.biblioPhotoTarget = button.dataset.book;
       state.biblioPhotoExpanded = true;
@@ -984,7 +984,7 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-marketplace-verify").forEach(button => {
+  $$(".item-marketplace-verify").forEach(button => {
     button.onclick = async () => {
       await selectView("connections");
       const target = $("#biblio-compare-panel");
@@ -994,7 +994,7 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-marketplace-retry").forEach(button => {
+  $$(".item-marketplace-retry").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Retry this supported operation? Check any uncertain remote result before resending.")) return;
       button.disabled = true;
