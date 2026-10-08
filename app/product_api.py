@@ -79,6 +79,7 @@ from app.connectors.hosted import (
     test_wix_workspace,
     test_woocommerce_workspace,
     update_woocommerce_workspace_stock,
+    read_woocommerce_workspace_stock,
 )
 from app.connectors.workspace_sync import recompute_inventory_item
 from app import cross_listing
@@ -1736,6 +1737,84 @@ def update_woocommerce_item_stock(
             detail="WooCommerce stock update was not confirmed. Inspect the remote product "
                    "before sending another update.",
         ) from exc
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/woocommerce/check-stock")
+def verify_woocommerce_item_stock(
+    item_id: uuid.UUID,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Remote GET-only observation; resolve ambiguous update attempts safely."""
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        if item is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        if not is_physical(item):
+            raise HTTPException(status_code=409, detail="Stock has not been confirmed")
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.inventory_item_id == item_id,
+                models.ChannelListing.channel == Channel.WOOCOMMERCE,
+            )
+        ).scalars().all()
+        if len(listings) != 1:
+            raise HTTPException(status_code=409, detail="Expected one linked WooCommerce listing")
+        listing = listings[0]
+        listing_id = listing.id
+        external_id, expected_sku = listing.external_id, listing.external_sku
+    try:
+        remote = read_woocommerce_workspace_stock(
+            context.workspace.id, external_id=external_id, expected_sku=expected_sku
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not read WooCommerce stock") from exc
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        listing = session.get(models.ChannelListing, listing_id)
+        if item is None or listing is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=409, detail="Stock link changed during inspection")
+        desired = int(item.quantity or 0)
+        matches = (
+            remote["manage_stock"] and remote["quantity"] == desired
+            and remote["stock_status"] == ("instock" if desired else "outofstock")
+        )
+        relevant = session.execute(
+            select(MarketplaceOperation).where(
+                MarketplaceOperation.workspace_id == context.workspace.id,
+                MarketplaceOperation.channel_listing_id == listing_id,
+                MarketplaceOperation.operation_type == "update",
+                MarketplaceOperation.status.in_(["attention", "needs_verification"]),
+            ).order_by(MarketplaceOperation.created_at.desc())
+        ).scalars().first()
+        if relevant is not None:
+            # Remote readback establishes what exists, releasing a previous
+            # ambiguous write without ever resending it automatically.
+            relevant.status = "succeeded" if matches else "failed"
+            relevant.verification = "remote_verified" if matches else "remote_mismatch"
+            relevant.last_error = (
+                None if matches else
+                "Remote quantity differs from confirmed physical stock after a read-only check"
+            )
+            relevant.active_key = None
+            relevant.completed_at = utcnow()
+        if matches:
+            listing.quantity = desired
+            listing.status = remote["status"]
+            extra = dict(listing.extra or {})
+            extra["stock_synced_at"] = utcnow().isoformat()
+            extra["stock_synced_quantity"] = desired
+            extra["stock_remote_readback_verified"] = True
+            listing.extra = extra
+        return {
+            "ok": True, "matches": bool(matches),
+            "local_quantity": desired, "remote_quantity": remote["quantity"],
+            "remote_status": remote["status"],
+            "manage_stock": remote["manage_stock"],
+            "note": "Read-only marketplace check; no remote product was changed.",
+        }
 
 
 @router.get("/api/app/inventory/{item_id}/cross-list")
