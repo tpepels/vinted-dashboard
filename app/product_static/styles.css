@@ -384,3 +384,37 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   .btn,.nav,.card,table tbody tr{transition:none!important}
   .btn:hover,.nav:hover{transform:none}
 }
+
+/* Read-only stock audit: discrepancies first; technical history stays collapsed. */
+.store-stock-audit{margin:12px 0 18px;min-width:0}
+.store-stock-audit>summary{display:flex;gap:12px;justify-content:space-between;
+  align-items:center;flex-wrap:wrap;padding:14px 18px;cursor:pointer}
+.store-stock-audit>summary strong{font-size:14px}
+.store-stock-audit>summary span{font-size:12px}
+.store-stock-audit-body{padding:0 18px 18px}
+.store-stock-audit-body>.muted{margin:0 0 12px;font-size:12px}
+.store-stock-audit-body>.actions{align-items:center;flex-wrap:wrap}
+.store-stock-audit-summary{font-size:12px;margin:18px 0 10px;color:var(--state-neutral)}
+.store-stock-audit-summary strong{color:var(--state-warning)}
+.store-stock-audit-issues{display:grid;gap:7px}
+.store-stock-audit-row{display:flex;gap:16px;align-items:center;justify-content:space-between;
+  min-width:0;padding:12px 14px;border:1px solid var(--state-warning-line);
+  border-radius:9px;background:var(--state-warning-bg)}
+.store-stock-audit-copy{display:grid;min-width:0;gap:3px}
+.store-stock-audit-copy strong{overflow-wrap:anywhere}
+.store-stock-audit-copy span,.store-stock-audit-copy small{font-size:12px;overflow-wrap:anywhere}
+.store-stock-audit-copy small{color:var(--state-neutral)}
+.store-stock-audit-mismatch,.store-stock-audit-skipped,
+.store-stock-audit-changed{color:var(--state-warning);font-weight:700}
+.store-stock-audit-error{color:var(--state-danger);font-weight:700}
+.store-stock-audit-row:has(.store-stock-audit-error){
+  background:var(--state-danger-bg);border-color:var(--state-danger-line)}
+.store-stock-audit-row .btn{flex:0 0 auto}
+.store-stock-audit-matches{margin-top:13px;border-top:1px solid var(--line);padding-top:12px}
+.store-stock-audit-matches summary{font-weight:700;cursor:pointer;color:var(--state-success)}
+.store-stock-audit-matches p{font-size:12px;overflow-wrap:anywhere}
+@media(max-width:600px){
+  .store-stock-audit>summary{align-items:flex-start;flex-direction:column;gap:3px}
+  .store-stock-audit-row{align-items:stretch;flex-direction:column}
+  .store-stock-audit-row .btn{align-self:flex-start}
+}

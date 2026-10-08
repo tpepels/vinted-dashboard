@@ -43,6 +43,7 @@ const state = {
   biblioPhotoError: "",
   biblioActivityTimer: null,
   biblioInventoryTimer: null,
+  storeStockAuditTimer: null,
   biblioListingsTimer: null,
   crossList: null,
   connectors: [],
@@ -700,6 +701,10 @@ $$(".nav").forEach((button) => {
 });
 
 async function selectView(view) {
+  if (view !== "inventory" && state.storeStockAuditTimer) {
+    clearTimeout(state.storeStockAuditTimer);
+    state.storeStockAuditTimer = null;
+  }
   if (view !== "inventory" && state.barcodeStream) stopBarcodeCamera();
   if (view !== "settings" && state.diagnosticsTimer) {
     clearInterval(state.diagnosticsTimer);
@@ -2129,6 +2134,112 @@ async function inspectInventoryRelationships() {
   }
 }
 
+function renderStoreStockAudit(data) {
+  const root = $("#store-stock-audit-results");
+  const progress = $("#store-stock-audit-progress");
+  const button = $("#store-stock-audit-start");
+  const job = data.job;
+  const results = Array.isArray(data.results) ? data.results : [];
+  const counts = data.counts || {};
+  const checked = results.length;
+  const running = job && ["queued", "running"].includes(job.status);
+  button.disabled = Boolean(running) || Number(data.eligible || 0) === 0
+    || Number(data.eligible || 0) > Number(data.limit || 100);
+  progress.textContent = !job
+    ? Number(data.eligible || 0) + " eligible store listing(s)"
+    : running
+      ? "Checking " + checked + " of " + Number(data.eligible || 0) + "…"
+      : job.status === "error"
+        ? "Check stopped. Review completed results and retry."
+        : "Last check completed " + when(job.completed_at);
+  const issues = results.filter(row => row.state !== "matched");
+  const matches = results.filter(row => row.state === "matched");
+  const heading = '<p class="store-stock-audit-summary"><strong>'
+    + Number(counts.mismatch || 0) + ' different</strong> · '
+    + Number(counts.error || 0) + ' could not be checked · '
+    + Number(counts.matched || 0) + ' matched'
+    + ((counts.skipped || 0) + (counts.changed || 0)
+      ? ' · ' + Number((counts.skipped || 0) + (counts.changed || 0)) + ' needs review'
+      : "") + '</p>';
+  const labels = {
+    mismatch: "Stock differs", error: "Check failed",
+    changed: "Changed during check", skipped: "Needs linking review",
+    matched: "Matches",
+  };
+  const issueRows = issues.map(row => {
+    const known = Number.isInteger(row.remote_quantity);
+    const quantities = known
+      ? "Store " + row.remote_quantity + " · Dashboard " + row.local_quantity
+      : "Dashboard " + row.local_quantity;
+    return '<div class="store-stock-audit-row"><div class="store-stock-audit-copy">'
+      + '<strong>' + esc(row.title) + '</strong><span>'
+      + esc(row.channel.toUpperCase()) + ' · ' + esc(quantities)
+      + '</span><span class="store-stock-audit-' + esc(row.state) + '">'
+      + esc(labels[row.state] || "Review") + '</span>'
+      + (row.message ? '<small>' + esc(row.message) + '</small>' : "")
+      + '</div><button class="btn store-stock-audit-open" type="button" data-item="'
+      + esc(row.item_id) + '">Review item</button></div>';
+  }).join("");
+  root.innerHTML = !job
+    ? '<p class="muted">No store stock check has been run yet.</p>'
+    : heading
+      + (issues.length
+        ? '<div class="store-stock-audit-issues">' + issueRows + '</div>'
+        : (running ? '<p class="muted">No discrepancies found so far.</p>'
+          : '<p class="muted">No discrepancies recorded in this check.</p>'))
+      + (matches.length
+        ? '<details class="store-stock-audit-matches"><summary>'
+          + matches.length + ' matching listing(s)</summary><p class="muted">'
+          + matches.map(row => esc(row.title) + ' (' + esc(row.channel) + ')').join(" · ")
+          + '</p></details>'
+        : "");
+  $$(".store-stock-audit-open").forEach(button => {
+    button.onclick = () => openItemMarketplaces(button.dataset.item);
+  });
+}
+
+async function loadStoreStockAudit() {
+  if (state.storeStockAuditTimer) {
+    clearTimeout(state.storeStockAuditTimer);
+    state.storeStockAuditTimer = null;
+  }
+  const panel = $("#store-stock-audit-panel");
+  if (!panel?.open || state.view !== "inventory") return;
+  try {
+    const data = await api("/api/app/inventory/store-stock-audit");
+    if (!panel.open || state.view !== "inventory") return;
+    renderStoreStockAudit(data);
+    if (data.job && ["queued", "running"].includes(data.job.status)) {
+      state.storeStockAuditTimer = setTimeout(loadStoreStockAudit, 2500);
+    }
+  } catch (error) {
+    $("#store-stock-audit-progress").textContent = "Unable to load results";
+    $("#store-stock-audit-results").textContent = error.message;
+  }
+}
+
+$("#store-stock-audit-panel").addEventListener("toggle", () => {
+  if ($("#store-stock-audit-panel").open) {
+    loadStoreStockAudit();
+  } else if (state.storeStockAuditTimer) {
+    clearTimeout(state.storeStockAuditTimer);
+    state.storeStockAuditTimer = null;
+  }
+});
+$("#store-stock-audit-start").onclick = async () => {
+  const button = $("#store-stock-audit-start");
+  button.disabled = true;
+  try {
+    const queued = await api("/api/app/inventory/store-stock-audit", {method:"POST"});
+    flash("Checking " + Number(queued.eligible || 0)
+      + " linked listings. Store quantities will not be changed.");
+    await loadStoreStockAudit();
+  } catch (error) {
+    flash(error.message, true);
+    button.disabled = false;
+  }
+};
+
 async function inventory() {
   if (state.biblioInventoryTimer) {
     clearTimeout(state.biblioInventoryTimer);
@@ -2198,6 +2309,7 @@ async function inventory() {
     };
   }
   updateInventorySelection();
+  if ($("#store-stock-audit-panel").open && !state.storeStockAuditTimer) loadStoreStockAudit();
   const biblioPending = state.inventoryItems.some((item) =>
     (item.listings || []).some((listing) =>
       listing.channel === "biblio"

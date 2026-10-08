@@ -114,6 +114,17 @@
           <span class="muted">Review provisional stock, same-SKU candidates, and listings requiring reconciliation. Nothing is merged automatically.</span>
           <div id="inventory-relation-report" class="hidden" role="status"></div>
         </div>
+        <details id="store-stock-audit-panel" class="card store-stock-audit">
+          <summary><strong>Store stock check</strong><span class="muted">WooCommerce, Shopify and Wix · read-only</span></summary>
+          <div class="store-stock-audit-body">
+            <p class="muted">Compare confirmed physical stock with each linked store. This check cannot change a marketplace listing or your stock.</p>
+            <div class="actions">
+              <button id="store-stock-audit-start" class="btn primary" type="button">Check linked store stock</button>
+              <span id="store-stock-audit-progress" class="muted" role="status" aria-live="polite"></span>
+            </div>
+            <div id="store-stock-audit-results" role="region" aria-label="Store stock check results"></div>
+          </div>
+        </details>
         <div id="stock-intake-panel" class="card form stock-intake hidden">
           <div class="card-head inline-head">
             <div><p class="eyebrow">ADD STOCK</p><h2>How is this stock available?</h2></div>

@@ -150,6 +150,15 @@ def _cross_channel_close(payload: dict, workspace_id: uuid.UUID | None) -> dict:
     return execute_action(uuid.UUID(str(action_id)))
 
 
+def _store_stock_audit(payload: dict, workspace_id: uuid.UUID | None) -> dict:
+    from app.store_stock_audit import run
+    resolved_workspace = _require_workspace("store_stock_audit", workspace_id)
+    job_id = str(payload.get("job_id") or "")
+    if not job_id:
+        raise RuntimeError("Stock audit job ID missing")
+    return run(resolved_workspace, job_id)
+
+
 def _noop(_payload: dict, _workspace_id: uuid.UUID | None) -> None:
     return
 
@@ -165,6 +174,7 @@ _JOB_HANDLERS = {
     "wix_sync": _sync_wix,
     "depop_sync": _sync_depop,
     "cross_channel_close": _cross_channel_close,
+    "store_stock_audit": _store_stock_audit,
     "noop": _noop,
 }
 
@@ -181,7 +191,11 @@ def handle(job: dict) -> dict | None:
         else None
     )
     _check_workspace_write_access(workspace_id, job_type)
-    return handler(job.get("payload") or {}, workspace_id)
+    payload = job.get("payload") or {}
+    if job_type == "store_stock_audit":
+        # The durable job ID ties every per-listing result to this exact run.
+        payload = {**payload, "job_id": job["id"]}
+    return handler(payload, workspace_id)
 
 
 def run_forever() -> None:
