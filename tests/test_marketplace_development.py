@@ -37,7 +37,8 @@ def test_marketplace_claims_reflect_code_boundaries():
     assert by_channel[Channel.BIBLIO]["read_orders"]["status"] == "blocked"
     assert by_channel[Channel.DEPOP]["connect"]["status"] == "blocked"
     assert by_channel[Channel.WOOCOMMERCE]["publish"]["status"] == "implemented"
-    assert by_channel[Channel.WOOCOMMERCE]["update"]["status"] == "missing"
+    assert by_channel[Channel.WOOCOMMERCE]["update"]["status"] == "partial"
+    assert by_channel[Channel.WOOCOMMERCE]["stock"]["status"] == "partial"
     assert by_channel[Channel.VINTED]["close"]["status"] == "manual"
 
 

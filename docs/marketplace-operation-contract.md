@@ -269,3 +269,31 @@ during the call, it is likewise flagged for manual reopening.
 on APIs without existing write adapters, automatic remote reopening and
 marketplace event ordering guarantees. These remain guarded/manual until
 supported, and no BIBLIO FTP acknowledgement is called publication proof.
+
+
+## Phase 6: hosted-store update adapter, first supported slice
+
+WooCommerce simple products now offer a **manual, item-level stock sync**.
+The dashboard takes quantity only from confirmed physical stock, resolves one
+linked WooCommerce numeric product ID and original SKU, then:
+
+1. GET the product and reject remote ID/SKU drift or unsupported product types.
+2. If it already has the desired quantity under stock management, return a
+   verified no-op without issuing another write.
+3. PUT only `manage_stock`, `stock_quantity` and `stock_status`.
+4. GET the same product again and require matching managed quantity/status.
+5. Only then update local channel-listing state and mark the marketplace
+   operation `remote_verified`. The physical baseline never changes.
+
+A timeout, drift or ambiguous readback is recorded as requiring attention:
+the dashboard will not silently retry the remote write or create another
+product. **Check WooCommerce stock** performs a GET-only remote observation
+and compares it against current physical inventory. A matching check resolves
+an ambiguous operation as verified; a mismatch records the discrepancy and
+requires an explicit update action. The action is in **Inventory → Marketplaces**
+and cannot be used on provisional stock, grouped/variable products or variations.
+
+**Remaining Phase 6 work:** equivalent tested adapters for Shopify and Wix,
+WooCommerce variants, remote price/detail updates and deletion/close support.
+Import-only stores remain read-only until supported account permissions and
+verified write paths are available.

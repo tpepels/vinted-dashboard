@@ -935,6 +935,11 @@ function renderItemMarketplacePanel(data) {
       + (listing.can_inspect_photos ? '<button class="btn item-marketplace-photos" type="button" data-book="'
         + esc(listing.external_id) + '">Check / repair photos</button>' : "")
       + (listing.channel === "biblio" ? '<button class="btn item-marketplace-verify" type="button">Compare BIBLIO inventory</button>' : "")
+      + (listing.can_sync_woocommerce_stock
+        ? '<button class="btn item-woo-stock" type="button">Set WooCommerce stock to '
+          + Number(item.quantity || 0) + '…</button>'
+          + '<button class="btn item-woo-check" type="button">Check WooCommerce stock</button>'
+        : "")
       + '</div></div>';
   });
   const operationsMarkup = operations.map(op => {
@@ -974,7 +979,7 @@ function renderItemMarketplacePanel(data) {
     if (original) openItemForm(original);
   };
   $(".item-marketplace-refresh").onclick = () => openItemMarketplaces(itemId);
-  $(".item-marketplace-photos").forEach(button => {
+  $$(".item-marketplace-photos").forEach(button => {
     button.onclick = async () => {
       state.biblioPhotoTarget = button.dataset.book;
       state.biblioPhotoExpanded = true;
@@ -989,7 +994,7 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-marketplace-verify").forEach(button => {
+  $$(".item-marketplace-verify").forEach(button => {
     button.onclick = async () => {
       await selectView("connections");
       const target = $("#biblio-compare-panel");
@@ -999,7 +1004,54 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-marketplace-retry").forEach(button => {
+  $$(".item-woo-check").forEach(button => {
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const result = await api(
+          "/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/woocommerce/check-stock",
+          {method: "POST"},
+        );
+        flash(result.matches
+          ? "WooCommerce stock matches the dashboard (" + result.remote_quantity
+            + "). No remote changes were made."
+          : "WooCommerce reports " + result.remote_quantity
+            + " units, while physical stock is " + result.local_quantity
+            + ". Review the difference before updating.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("Could not check WooCommerce stock: " + error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $$(".item-woo-stock").forEach(button => {
+    button.onclick = async () => {
+      const desired = Number(item.quantity || 0);
+      if (!window.confirm("Update the linked WooCommerce simple product to "
+        + desired + " available unit(s)? This changes WooCommerce stock only, "
+        + "not the physical stock in this dashboard. The product ID and SKU "
+        + "will be checked before writing.")) return;
+      button.disabled = true;
+      try {
+        const result = await api(
+          "/api/app/inventory/" + encodeURIComponent(itemId)
+            + "/marketplaces/woocommerce/stock",
+          {method: "POST"},
+        );
+        flash(result.remote_verified
+          ? "WooCommerce stock updated and independently read back."
+          : "WooCommerce status requires manual verification.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("Stock was not verified; inspect the WooCommerce listing before another attempt. "
+          + error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $$(".item-marketplace-retry").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Retry this supported operation? Check any uncertain remote result before resending.")) return;
       button.disabled = true;
