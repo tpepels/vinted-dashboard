@@ -171,7 +171,7 @@ def _public_result(result: dict[str, Any] | None) -> dict[str, Any]:
     safe = {}
     allowed = {
         "items", "active", "orders", "linked", "inventory_uploaded",
-        "inventory_total", "deletes_uploaded", "photos_uploaded",
+        "inventory_total", "deletes", "deletes_uploaded", "photos_uploaded",
         "photos_total", "photo_count", "photo_retry_scheduled",
         "remote", "external_id", "listing_id", "url", "already_complete",
         "message",
@@ -187,16 +187,34 @@ def complete_operation(operation_id: uuid.UUID, result: dict[str, Any] | None = 
         op = session.get(MarketplaceOperation, operation_id)
         if op is None or op.status in TERMINAL:
             return
-        if op.operation_type in {"publish", "update", "photos", "close"} or (
-            op.channel == "biblio" and op.operation_type == "sync"
-        ):
+        safe = _public_result(result)
+        if op.channel == "biblio" and op.operation_type in {"sync", "publish", "update", "photos"}:
+            pending_photos = int((result or {}).get("photos_total") or 0) - int(
+                (result or {}).get("photos_uploaded") or 0
+            )
+            if (result or {}).get("photo_errors") or pending_photos > 0:
+                op.status = "attention"
+                op.verification = "manual_required"
+                op.last_error = "BIBLIO reported missing or failed photo transfers; inspect per-file FTP results"
+                safe["photos_missing_or_failed"] = max(0, pending_photos)
+            elif op.operation_type == "sync" and not any(
+                int((result or {}).get(key) or 0) for key in (
+                    "active", "deletes", "photos_uploaded"
+                )
+            ):
+                op.status = "succeeded"
+                op.verification = "no_remote_changes"
+            else:
+                op.status = "needs_verification"
+                op.verification = "manual_required"
+        elif op.operation_type in {"publish", "update", "photos", "close"}:
             # FTP/API acceptance alone cannot prove remote publication.
             op.status = "needs_verification"
             op.verification = "manual_required"
         else:
             op.status = "succeeded"
             op.verification = "snapshot_imported" if op.operation_type == "sync" else "not_checked"
-        op.result = _public_result(result)
+        op.result = safe
         op.active_key = None
         op.completed_at = utcnow()
         op.last_error = None
