@@ -1720,6 +1720,10 @@ def update_woocommerce_item_stock(
                 listing is None or item is None
                 or item.workspace_id != context.workspace.id
                 or listing.workspace_id != context.workspace.id
+                or listing.channel != Channel.WOOCOMMERCE
+                or listing.inventory_item_id != item_id
+                or listing.external_id != external_id
+                or listing.external_sku != expected_sku
                 or not is_physical(item)
                 or int(item.quantity or 0) != quantity
             ):
@@ -1782,7 +1786,16 @@ def verify_woocommerce_item_stock(
     with db.session_scope() as session:
         item = session.get(models.InventoryItem, item_id)
         listing = session.get(models.ChannelListing, listing_id)
-        if item is None or listing is None or item.workspace_id != context.workspace.id:
+        if (
+            item is None or listing is None
+            or item.workspace_id != context.workspace.id
+            or listing.workspace_id != context.workspace.id
+            or not is_physical(item)
+            or listing.channel != Channel.WOOCOMMERCE
+            or listing.inventory_item_id != item_id
+            or listing.external_id != external_id
+            or listing.external_sku != expected_sku
+        ):
             raise HTTPException(status_code=409, detail="Stock link changed during inspection")
         desired = int(item.quantity or 0)
         matches = (
@@ -1816,6 +1829,14 @@ def verify_woocommerce_item_stock(
             extra["stock_synced_quantity"] = desired
             extra["stock_remote_readback_verified"] = True
             listing.extra = extra
+        else:
+            extra = dict(listing.extra or {})
+            extra["stock_remote_readback_verified"] = False
+            listing.extra = extra
+        extra = dict(listing.extra or {})
+        extra["stock_last_checked_at"] = utcnow().isoformat()
+        extra["stock_last_remote_quantity"] = remote["quantity"]
+        listing.extra = extra
         return {
             "ok": True, "matches": bool(matches),
             "local_quantity": desired, "remote_quantity": remote["quantity"],
@@ -1878,6 +1899,10 @@ def update_shopify_item_stock(
                 listing is None or item is None
                 or item.workspace_id != context.workspace.id
                 or listing.workspace_id != context.workspace.id
+                or listing.channel != Channel.SHOPIFY
+                or listing.inventory_item_id != item_id
+                or listing.external_id != external_id
+                or listing.external_sku != expected_sku
                 or not is_physical(item)
                 or int(item.quantity or 0) != quantity
             ):
@@ -1940,7 +1965,16 @@ def verify_shopify_item_stock(
     with db.session_scope() as session:
         item = session.get(models.InventoryItem, item_id)
         listing = session.get(models.ChannelListing, listing_id)
-        if item is None or listing is None or item.workspace_id != context.workspace.id:
+        if (
+            item is None or listing is None
+            or item.workspace_id != context.workspace.id
+            or listing.workspace_id != context.workspace.id
+            or not is_physical(item)
+            or listing.channel != Channel.SHOPIFY
+            or listing.inventory_item_id != item_id
+            or listing.external_id != external_id
+            or listing.external_sku != expected_sku
+        ):
             raise HTTPException(status_code=409, detail="Stock link changed during inspection")
         desired = int(item.quantity or 0)
         matches = (
@@ -1974,6 +2008,14 @@ def verify_shopify_item_stock(
             extra["stock_synced_quantity"] = desired
             extra["stock_remote_readback_verified"] = True
             listing.extra = extra
+        else:
+            extra = dict(listing.extra or {})
+            extra["stock_remote_readback_verified"] = False
+            listing.extra = extra
+        extra = dict(listing.extra or {})
+        extra["stock_last_checked_at"] = utcnow().isoformat()
+        extra["stock_last_remote_quantity"] = remote["quantity"]
+        listing.extra = extra
         return {
             "ok": True, "matches": bool(matches),
             "local_quantity": desired, "remote_quantity": remote["quantity"],
