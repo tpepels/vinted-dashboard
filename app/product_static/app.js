@@ -2193,7 +2193,7 @@ function renderStoreStockAudit(data) {
           + matches.map(row => esc(row.title) + ' (' + esc(row.channel) + ')').join(" · ")
           + '</p></details>'
         : "");
-  $(".store-stock-audit-open").forEach(button => {
+  $$(".store-stock-audit-open").forEach(button => {
     button.onclick = () => openItemMarketplaces(button.dataset.item);
   });
 }
