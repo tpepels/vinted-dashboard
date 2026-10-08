@@ -1607,12 +1607,12 @@ def item_marketplace_status(
                 stock_check_quantity = extra.get("stock_synced_quantity")
             stock_verification = "not_checked"
             if is_store_stock and latest_stock_check:
-                if stock_check_quantity is not None and int(stock_check_quantity) != int(item.quantity or 0):
+                if type(stock_check_quantity) is int and stock_check_quantity != int(item.quantity or 0):
                     stock_verification = "stock_mismatch"
                 elif (
                     extra.get("stock_remote_readback_verified")
-                    and stock_check_quantity is not None
-                    and int(stock_check_quantity) == int(item.quantity or 0)
+                    and type(stock_check_quantity) is int
+                    and stock_check_quantity == int(item.quantity or 0)
                 ):
                     stock_verification = "stock_checked"
                 else:
