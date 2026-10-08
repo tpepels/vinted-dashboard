@@ -1640,12 +1640,26 @@ def cross_list_publish(
         overrides.pop("source_listing_id", None)
         if overrides:
             candidate = cross_listing.apply_overrides(candidate, overrides)
-        return cross_listing.publish(
-            context.workspace.id,
-            item_id,
-            channel,
-            candidate,
+        if candidate.get("missing"):
+            raise ValueError("Listing is missing: " + ", ".join(map(str, candidate["missing"])))
+        with db.session_scope() as session:
+            if cross_listing.existing_channel_listing(session, context.workspace.id, item_id, channel):
+                raise ValueError("This physical item already has a listing on this marketplace.")
+        operation_id = start_inline(
+            context.workspace.id, channel, "publish", str(item_id),
+            inventory_item_id=item_id,
         )
+        try:
+            result = cross_listing.publish(
+                context.workspace.id, item_id, channel, candidate,
+            )
+        except Exception as exc:
+            # The remote call may have succeeded before a response or local
+            # linkage failed. Block blind duplicate creation on retry.
+            fail_operation(operation_id, str(exc))
+            raise
+        complete_operation(operation_id, result)
+        return {**result, "operation_id": str(operation_id)}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
