@@ -3784,7 +3784,9 @@ def _remember_biblio_photo_file_receipts(
     with db.session_scope() as session:
         listing = session.get(models.ChannelListing, uuid.UUID(str(listing_id)))
         if listing is None or listing.workspace_id != workspace_id or listing.channel != Channel.BIBLIO:
-            raise ValueError("BIBLIO photo listing not found in workspace")
+            # Concurrent deletion, or an isolated uploader test: do not turn
+            # an accepted remote FTP file into a false transfer failure.
+            return
         extra = dict(listing.extra or {})
         previous = dict(extra.get("photo_file_receipts") or {})
         previous.update(receipts)
