@@ -488,11 +488,20 @@
 
       <section id="connections" class="view">
         <div class="card">
-          <div class="card-head"><h2>Marketplace development</h2></div>
-          <p class="muted">Implementation coverage, account readiness and observed data are separate. A completed FTP transfer or API import is not proof a listing or photo is published.</p>
-          <div id="marketplace-development">Loading marketplace operations…</div>
+          <div class="card-head inline-head">
+            <div><h2>Manage marketplaces</h2><p class="muted">Connect accounts, retrieve listings and orders, and manage BIBLIO uploads. Marketplace publishing and stock linking start from Inventory.</p></div>
+            <button id="connections-refresh" class="btn" type="button">Refresh status</button>
+          </div>
+          <div class="connections-shortcuts">
+            <button id="connections-inventory" class="btn primary" type="button">Publish from Inventory</button>
+            <button id="connections-reconcile" class="btn" type="button">Review stock relationships</button>
+          </div>
+          <div id="connector-grid" class="connector-grid"></div>
+          <details id="other-marketplaces" class="connections-other-markets">
+            <summary>Other marketplaces (<span id="other-marketplaces-count">0</span>) · connect another service</summary>
+            <div id="connector-other-grid" class="connector-grid"></div>
+          </details>
         </div>
-        <div class="card"><div class="card-head"><h2>Connections</h2></div><div id="connector-grid" class="connector-grid"></div></div>
         <form id="connector-config" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">CONNECTION</p><h2 id="connector-config-title"></h2></div><button type="button" id="close-connector-config" class="btn">Close</button></div>
           <p id="connector-config-help" class="muted"></p>
@@ -516,6 +525,11 @@
           <p id="connector-config-status" class="muted"></p>
         </form>
         <div class="card"><div class="card-head"><h2>Paired Chrome browsers</h2></div><div id="devices"></div></div>
+        <details id="marketplace-development-panel" class="card marketplace-development-panel">
+          <summary><strong>Development status</strong> · technical implementation matrix (not marketplace controls)</summary>
+          <p class="muted">This tracks which operations have code. It is not a remote-account control panel. Successful API or FTP transfer does not prove that a listing or image is published.</p>
+          <div id="marketplace-development">Loading technical operation status…</div>
+        </details>
       </section>
 
       <section id="settings" class="view">

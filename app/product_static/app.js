@@ -31,6 +31,7 @@ const state = {
   stockAudioContext: null,
   biblioPublish: null,
   biblioActivity: null,
+  biblioActivityExpanded: false,
   biblioPhotoTarget: "",
   biblioPhotoInspection: null,
   biblioPhotoError: "",
@@ -1579,7 +1580,7 @@ function renderBiblioActivity(activity, operational) {
     + '<div class="biblio-activity-current"><span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
     + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
     + '<div class="actions biblio-activity-actions">'
-    + '<button class="btn biblio-activity-toggle" type="button">View activity</button>'
+    + '<button class="btn biblio-activity-toggle" type="button">' + (state.biblioActivityExpanded ? 'Hide activity' : 'View activity') + '</button>'
     + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry all photos</button>' : "")
     + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
     + '</div>'
@@ -1590,7 +1591,7 @@ function renderBiblioActivity(activity, operational) {
       + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Retry this book</button>'
       + '</div><div id="biblio-photo-inspection">' + biblioPhotoInspectionHtml() + '</div></div>'
       : "")
-    + '<div class="biblio-activity-history hidden">'
+    + '<div class="biblio-activity-history' + (state.biblioActivityExpanded ? '' : ' hidden') + '">'
     + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards. For a brand-new listing, the dashboard schedules one delayed photo-only retry because BIBLIO ignores an image if there is no active listing to attach it to.</div>'
     + '<div class="biblio-activity-note"><strong>Orders:</strong> automatic BIBLIO order handling remains disabled until BIBLIO enables Bulk Order Management for the seller account and supplies its private protocol documentation.</div>'
     + history + "</div></div>";
@@ -4047,7 +4048,8 @@ function marketplaceRuntimeDetails(market, definitions) {
       + esc(value.status.replaceAll("_", " ")) + '</span></td>'
       + '<td>' + esc(operation.acceptance) + info + evidence + '</td></tr>';
   }).join("");
-  return '<h3>' + esc(market.display_name) + ' · detailed operation audit</h3>'
+  return '<div class="market-development-detail-heading"><h3>' + esc(market.display_name) + ' · technical implementation</h3>'
+    + '<button class="btn marketplace-open-connection" data-c="' + esc(market.channel) + '" type="button">Go to connection controls</button></div>'
     + '<div class="market-runtime">'
     + '<span><strong>Account:</strong> ' + esc(statusText) + '</span>'
     + '<span><strong>Last successful sync:</strong> ' + esc(runtime.last_successful_sync_at ? when(runtime.last_successful_sync_at) : "none") + '</span>'
@@ -4107,12 +4109,20 @@ function renderMarketplaceDevelopment(definitions) {
   function showSelected() {
     const selected = markets.find(row => row.channel === state.marketplaceSelected);
     $("#marketplace-detail").innerHTML = marketplaceRuntimeDetails(selected, definitions);
-    $(".market-select").forEach(button => {
+    const jump = $(".marketplace-open-connection");
+    if (jump) jump.onclick = () => {
+      const target = document.querySelector('[data-connector-channel="' + selected.channel + '"]');
+      if (!target) return;
+      if ($("#connector-other-grid").contains(target)) $("#other-marketplaces").open = true;
+      target.scrollIntoView({behavior: "smooth", block: "center"});
+      target.classList.add("connector-focused");
+    };
+    $$(".market-select").forEach(button => {
       button.classList.toggle("active", button.dataset.marketChannel === state.marketplaceSelected);
       button.setAttribute("aria-pressed", String(button.dataset.marketChannel === state.marketplaceSelected));
     });
   }
-  $(".market-select").forEach(button => {
+  $$(".market-select").forEach(button => {
     button.onclick = () => {
       state.marketplaceSelected = button.dataset.marketChannel;
       showSelected();
@@ -4129,14 +4139,21 @@ async function connections() {
   const [data, devices, biblioActivity, development] = await Promise.all([
     api("/api/app/connectors"),
     api("/api/app/extension/devices"),
-    api("/api/app/connectors/biblio/activity"),
-    api("/api/app/connectors/development"),
+    api("/api/app/connectors/biblio/activity").catch(() => null),
+    api("/api/app/connectors/development").catch(() => null),
   ]);
-  state.marketplaceDevelopment = development;
-  renderMarketplaceDevelopment(development);
   state.connectors = data.connectors || [];
   state.biblioActivity = biblioActivity;
-  $("#connector-grid").innerHTML = data.connectors.map((connector) => {
+  state.marketplaceDevelopment = development;
+  renderMarketplaceDevelopment(development);
+  const featured = state.connectors.filter(connector =>
+    connector.configured || connector.channel === "vinted" || connector.channel === "biblio"
+  ).sort((a, b) => {
+    const priority = {vinted: 0, biblio: 1};
+    return (priority[a.channel] ?? 5) - (priority[b.channel] ?? 5);
+  });
+  const other = state.connectors.filter(connector => !featured.includes(connector));
+  const connectorHtml = (connector) => {
     const connected = connector.status === "connected";
     const statusClass = connected ? "status-ok" : (connector.configured ? "status-warn" : "");
     const statusText = connector.authorization_required
@@ -4144,7 +4161,7 @@ async function connections() {
       : (connected
         ? "Connected"
         : (connector.configured ? "Configured - not synced yet" : "Not configured"));
-    return '<div class="connector"><h2>' + esc(connector.display_name) + "</h2><p>"
+    return '<div class="connector" data-connector-channel="' + esc(connector.channel) + '"><h2>' + esc(connector.display_name) + "</h2><p>"
       + esc(connector.description) + '</p><div class="meta ' + statusClass + '">'
       + statusText
       + (connector.last_synced_at ? " · " + esc(when(connector.last_synced_at)) : "")
@@ -4166,9 +4183,16 @@ async function connections() {
         : "")
       + "</div>"
       + (connector.note ? '<div class="connector-note">' + esc(connector.note) + "</div>" : "")
+      + (connector.channel === "vinted" ? '<p class="connector-workflow-hint">Listing updates arrive through the Chrome Bridge while signed in to Vinted. Pairing does not start a server-side sync.</p>' : "")
+      + (connector.channel === "biblio" ? '<p class="connector-workflow-hint">Sync changes sends modified records by FTP. For a new book, use Inventory → Publish to BIBLIO; successful transfer is not remote publication confirmation.</p>' : "")
+      + (connector.channel !== "vinted" && connector.channel !== "biblio" && connector.sync_available ? '<p class="connector-workflow-hint">Queue sync imports available listings and orders; it does not publish or update items.</p>' : "")
       + (connector.channel === "biblio" ? renderBiblioActivity(biblioActivity, connector.operational) : "")
       + "</div>";
-  }).join("");
+  };
+  $("#connector-grid").innerHTML = featured.map(connectorHtml).join("");
+  $("#connector-other-grid").innerHTML = other.map(connectorHtml).join("");
+  $("#other-marketplaces-count").textContent = String(other.length);
+  $("#other-marketplaces").classList.toggle("hidden", other.length === 0);
 
   document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
   $$(".configure").forEach((button) => {
@@ -4190,11 +4214,12 @@ async function connections() {
       const history = button.closest(".biblio-activity-compact")?.querySelector(".biblio-activity-history");
       if (!history) return;
       const opening = history.classList.contains("hidden");
+      state.biblioActivityExpanded = opening;
       history.classList.toggle("hidden", !opening);
       button.textContent = opening ? "Hide activity" : "View activity";
     };
   });
-  $(".biblio-retry-photos").forEach((button) => {
+  $$(".biblio-retry-photos").forEach((button) => {
     button.onclick = async () => {
       if (!window.confirm("Retry all photos will resend every active BIBLIO listing's images. Use the single-book photo recovery tool below when only one book is affected. Continue?")) return;
       button.disabled = true;
@@ -4208,7 +4233,7 @@ async function connections() {
       }
     };
   });
-  $(".biblio-full-sync").forEach((button) => {
+  $$(".biblio-full-sync").forEach((button) => {
     button.onclick = async () => {
       if (!window.confirm("Full resync will deliberately resend every active BIBLIO listing and its photos. Continue?")) return;
       button.disabled = true;
@@ -4313,6 +4338,21 @@ function renderEtsyOAuthTools(connector) {
     ? "Reauthorize with Etsy"
     : "Authorize with Etsy";
 }
+
+$("#connections-refresh").onclick = async () => {
+  const button = $("#connections-refresh");
+  button.disabled = true;
+  try {
+    await connections();
+    flash("Marketplace status refreshed.");
+  } catch (error) {
+    flash(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+};
+$("#connections-inventory").onclick = () => selectView("inventory");
+$("#connections-reconcile").onclick = () => selectView("reconcile");
 
 function openConnectorConfig(channel, connector) {
   const schema = connectorSchemas[channel];
