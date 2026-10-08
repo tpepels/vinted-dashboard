@@ -489,12 +489,12 @@
       <section id="connections" class="view">
         <div class="card">
           <div class="card-head inline-head">
-            <div><h2>Manage marketplaces</h2><p class="muted">Connect accounts, retrieve listings and orders, and manage BIBLIO uploads. Marketplace publishing and stock linking start from Inventory.</p></div>
-            <button id="connections-refresh" class="btn" type="button">Refresh status</button>
+            <div><p class="eyebrow">YOUR SALES CHANNELS</p><h2>Your marketplaces</h2><p class="muted connections-intro-copy">See which services are set up, what needs attention, and what you can do next. Sending data is not the same as a marketplace showing it publicly.</p></div>
+            <button id="connections-refresh" class="btn" type="button">Refresh this page</button>
           </div>
           <div class="connections-shortcuts">
-            <button id="connections-inventory" class="btn primary" type="button">Publish from Inventory</button>
-            <button id="connections-reconcile" class="btn" type="button">Review stock relationships</button>
+            <button id="connections-inventory" class="btn primary" type="button">Manage and publish books</button>
+            <button id="connections-reconcile" class="btn" type="button">Match listings to stock</button>
           </div>
           <div id="connector-grid" class="connector-grid"></div>
           <details id="other-marketplaces" class="connections-other-markets">
@@ -502,6 +502,22 @@
             <div id="connector-other-grid" class="connector-grid"></div>
           </details>
         </div>
+        <details id="biblio-compare-panel" class="card connection-task-panel hidden">
+          <summary><span><strong>Check what is actually on BIBLIO</strong><small>Compare your dashboard with an inventory file downloaded from BIBLIO</small></span></summary>
+          <div class="connection-task-content">
+            <p>Uploads tell us what was sent, not what BIBLIO accepted. Download your inventory from your BIBLIO seller account and choose that file here. Comparing will <strong>not change book details, prices or stock quantities</strong>. It records which BIBLIO listings were checked.</p>
+            <label class="connection-file-label" for="biblio-import-file">Inventory file downloaded from BIBLIO</label>
+            <input id="biblio-import-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv">
+            <div class="actions"><button id="verify-biblio" class="btn primary" type="button">Compare without changing anything</button></div>
+            <div id="biblio-compare-result" class="connection-task-result" role="status" aria-live="polite">Choose a file, then compare it with the dashboard.</div>
+            <details id="biblio-import-advanced" class="connection-danger-zone">
+              <summary>Advanced: update the dashboard from this file</summary>
+              <p>This imports listing information from the selected BIBLIO file into your dashboard. It does not publish anything to BIBLIO. Review the comparison first.</p>
+              <label class="checkline"><input id="biblio-import-authoritative" type="checkbox"> <span><strong>This file contains every active BIBLIO listing.</strong> Treat missing listings as inactive in the dashboard. Only tick this for a complete BIBLIO export.</span></label>
+              <button id="import-biblio" class="btn danger" type="button" disabled>Apply file to dashboard…</button>
+            </details>
+          </div>
+        </details>
         <form id="connector-config" class="card form hidden">
           <div class="card-head inline-head"><div><p class="eyebrow">CONNECTION</p><h2 id="connector-config-title"></h2></div><button type="button" id="close-connector-config" class="btn">Close</button></div>
           <p id="connector-config-help" class="muted"></p>
@@ -511,29 +527,27 @@
             <div class="actions"><button id="authorize-etsy" class="btn primary hidden" type="button">Authorize with Etsy</button></div>
           </div>
           <div id="biblio-tools" class="hidden">
-            <div class="actions"><button id="test-biblio" class="btn" type="button">Test secure FTPS</button></div>
-            <p class="muted">Use a BIBLIO <strong>Download listings</strong> file to verify what BIBLIO currently has. Verification is read-only.</p>
-            <label>BIBLIO inventory download<input id="biblio-import-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv"></label>
-            <div class="actions">
-              <button id="verify-biblio" class="btn primary" type="button">Verify against dashboard</button>
-              <button id="import-biblio" class="btn" type="button">Merge downloaded inventory</button>
-            </div>
-            <label class="checkline"><input id="biblio-import-authoritative" type="checkbox"> This is a complete active-inventory download; mark local BIBLIO rows missing from it inactive.</label>
-            <p class="muted">Leave this unchecked unless the file is the complete active-inventory download generated by BIBLIO.</p>
+            <p class="muted">These are the credentials your dashboard uses to send listing files to BIBLIO. Changing them does not send or edit books.</p>
+            <button id="test-biblio" class="btn" type="button">Check BIBLIO connection</button>
+            <details class="connection-technical-help"><summary>About FTP and secure connections</summary><p>The dashboard prefers encrypted FTPS. BIBLIO documents standard FTP; unencrypted FTP needs your explicit permission in the settings above. An FTP connection test does not mean a book is publicly listed.</p></details>
           </div>
           <div class="actions"><button class="btn primary">Save connection</button><button id="test-connector" class="btn hidden" type="button">Test connection</button><button id="remove-connector" class="btn danger hidden" type="button">Remove credentials</button></div>
           <p id="connector-config-status" class="muted"></p>
         </form>
-        <div class="card">
-          <div class="card-head inline-head">
-            <div><h2>Marketplace operations</h2><p class="muted">Actual queued, running and completed actions. Remote upload acceptance is not proof a listing or photo was published.</p></div>
-            <button class="btn" id="marketplace-operations-refresh" type="button">Refresh operations</button>
+        <details id="marketplace-operations-panel" class="card connection-task-panel">
+          <summary><span><strong>Recent marketplace activity</strong><small>Uploads, imports, problems and actions that still need checking</small></span></summary>
+          <div class="connection-task-content">
+            <p class="muted">This is a history of what the dashboard attempted. For BIBLIO, a completed file transfer does not confirm publication on the website.</p>
+            <button class="btn" id="marketplace-operations-refresh" type="button">Refresh activity</button>
+            <div id="marketplace-operations-list"><p class="muted">Loading activity…</p></div>
           </div>
-          <div id="marketplace-operations-list"><p class="muted">Loading marketplace operation history…</p></div>
-        </div>
-        <div class="card"><div class="card-head"><h2>Paired Chrome browsers</h2></div><div id="devices"></div></div>
+        </details>
+        <details id="paired-browsers-panel" class="card connection-task-panel">
+          <summary><span><strong>Connected Chrome browsers</strong><small>Devices that can send Vinted updates to your dashboard</small></span></summary>
+          <div id="devices" class="connection-task-content"></div>
+        </details>
         <details id="marketplace-development-panel" class="card marketplace-development-panel">
-          <summary><strong>Development status</strong> · technical implementation matrix (not marketplace controls)</summary>
+          <summary><strong>Developer information</strong> · implementation details, not required for daily use</summary>
           <p class="muted">This tracks which operations have code. It is not a remote-account control panel. Successful API or FTP transfer does not prove that a listing or image is published.</p>
           <div id="marketplace-development">Loading technical operation status…</div>
         </details>

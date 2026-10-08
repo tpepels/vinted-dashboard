@@ -32,6 +32,11 @@ const state = {
   biblioPublish: null,
   biblioActivity: null,
   biblioActivityExpanded: false,
+  biblioPhotoExpanded: false,
+  biblioRecoveryExpanded: false,
+  biblioBookChoices: null,
+  biblioCompareCheckedFile: null,
+  biblioCompareResult: null,
   biblioPhotoTarget: "",
   biblioPhotoInspection: null,
   biblioPhotoError: "",
@@ -70,13 +75,13 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. FTP is locked to BIBLIO's documented ftp.biblio.com host/root. The connector tries verified FTPS first. Because BIBLIO publicly documents standard FTP rather than FTPS, legacy plain FTP is available only with explicit opt-in and is otherwise refused. Only changed inventory is sent. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
+    help: "Enter the FTP credentials provided for your BIBLIO seller account. These settings let the dashboard send book information and photos. Saving them does not upload any listings. Technical connection and photo-format details are available below.",
     fields: [
-      ["username", "FTP username", "", "text"],
-      ["password", "FTP password", "", "password"],
-      ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
-      ["allow_plain_ftp", "Allow legacy plain FTP if verified FTPS is unavailable (credentials and uploads are unencrypted in transit)", "", "checkbox"],
-      ["auto_sync", "Automatically sync changed BIBLIO listings after Vinted browser updates", "", "checkbox"],
+      ["username", "BIBLIO FTP username", "", "text"],
+      ["password", "BIBLIO FTP password", "", "password"],
+      ["filename_prefix", "File name prefix (optional)", "reseller-dashboard", "text"],
+      ["allow_plain_ftp", "Allow unencrypted FTP only if BIBLIO does not support encrypted FTPS (less secure)", "", "checkbox"],
+      ["auto_sync", "Automatically send changed BIBLIO listings after new Vinted updates", "", "checkbox"],
     ],
   },
   ebay: {
@@ -1427,23 +1432,23 @@ function biblioListingDetails(row) {
 }
 
 function biblioActivityStatus(row) {
-  if (!row) return { label: "No activity yet", cls: "idle" };
-  if (row.status === "queued") return { label: "Queued", cls: "queued" };
+  if (!row) return { label: "Nothing sent yet", cls: "idle" };
+  if (row.status === "queued") return { label: "Waiting to send", cls: "queued" };
   if (row.status === "running") {
     const stages = {
-      preparing: "Preparing",
-      connecting: "Connecting to FTP",
-      connected: "Connected",
-      inventory_uploaded: "Inventory uploaded",
-      deletes_uploaded: "Deletes uploaded",
-      photos_uploading: "Uploading photos",
+      preparing: "Preparing files",
+      connecting: "Connecting to BIBLIO",
+      connected: "Sending files",
+      inventory_uploaded: "Book details sent",
+      deletes_uploaded: "Sold-out updates sent",
+      photos_uploading: "Sending photos",
     };
-    return { label: stages[row.stage] || "Running", cls: "running" };
+    return { label: stages[row.stage] || "Sending to BIBLIO", cls: "running" };
   }
-  if (row.status === "error") return { label: "Failed", cls: "error" };
+  if (row.status === "error") return { label: "Could not send files", cls: "error" };
   if (row.status === "success") {
     return {
-      label: (row.photo_errors || []).length ? "FTP uploaded with photo warnings" : "FTP uploaded",
+      label: (row.photo_errors || []).length ? "Some photos could not be sent" : "Files sent to BIBLIO",
       cls: (row.photo_errors || []).length ? "warn" : "success",
     };
   }
@@ -1451,35 +1456,35 @@ function biblioActivityStatus(row) {
 }
 
 function biblioActivityDetail(row) {
-  if (!row) return "No BIBLIO FTP run has been recorded yet.";
+  if (!row) return "No BIBLIO transfer has been recorded yet.";
   const parts = [];
   if (row.listing_title) parts.push(row.listing_title);
-  if (row.photos_only || row.mode === "photos") parts.push("Photo-only sync");
-  else if (row.full_sync || row.mode === "full") parts.push("Full resync");
-  else if (row.mode === "incremental") parts.push("Changed records only");
+  if (row.photos_only || row.mode === "photos") parts.push("Photos only");
+  else if (row.full_sync || row.mode === "full") parts.push("Entire catalogue");
+  else if (row.mode === "incremental") parts.push("Only changed records");
   if (row.message) parts.push(row.message);
   const inventoryDone = row.inventory_uploaded ?? (row.status === "success" ? row.active_count : null);
   if (row.inventory_total != null || inventoryDone != null) {
-    parts.push("inventory " + Number(inventoryDone || 0) + "/" + Number(row.inventory_total ?? row.active_count ?? 0));
+    parts.push("book records sent " + Number(inventoryDone || 0) + "/" + Number(row.inventory_total ?? row.active_count ?? 0));
   }
   if (row.photos_total != null) {
-    parts.push("photos " + Number(row.photos_uploaded || 0) + "/" + Number(row.photos_total || 0));
+    parts.push("photos sent " + Number(row.photos_uploaded || 0) + "/" + Number(row.photos_total || 0));
   }
   if (Number(row.photo_retry_scheduled || 0) > 0) {
-    parts.push(Number(row.photo_retry_scheduled) + " delayed photo retry scheduled");
+    parts.push(Number(row.photo_retry_scheduled) + " automatic photo follow-up");
   }
   if (row.error) parts.push(row.error);
-  return parts.join(" · ") || "BIBLIO FTP activity recorded.";
+  return parts.join(" · ") || "BIBLIO transfer recorded.";
 }
 
 function biblioPhotoInspectionHtml() {
   const info = state.biblioPhotoInspection;
   if (state.biblioPhotoError) return '<p class="error">' + esc(state.biblioPhotoError) + '</p>';
-  if (!info) return '<p class="muted">Enter the exact BIBLIO Book ID to inspect its local photo sources and FTP history.</p>';
+  if (!info) return '<p class="muted">Choose a book, or enter its BIBLIO Book ID, to see what photos the dashboard has and what was last sent.</p>';
   const known = Number(info.biblio_source_photos || 0);
   const vinted = info.vinted_source_photos;
   const difference = vinted != null && Number(vinted) !== known
-    ? '<p class="biblio-photo-alert">Vinted and staged BIBLIO photo counts differ. A targeted retry first refreshes the source data.</p>'
+    ? '<p class="biblio-photo-alert">Vinted and staged BIBLIO photo counts differ. Resending this book will refresh the source first.</p>'
     : "";
   const job = info.job
     ? '<p class="muted">Most recent targeted job: ' + esc(info.job.status)
@@ -1489,18 +1494,53 @@ function biblioPhotoInspectionHtml() {
   return '<div class="biblio-photo-inspection-details">'
     + '<strong>' + esc(info.title || info.book_id) + '</strong>'
     + '<div class="diagnostics-pills">'
-    + '<span>Staged for BIBLIO <strong>' + known + '</strong></span>'
-    + '<span>Vinted source <strong>' + esc(vinted == null ? "unknown" : vinted) + '</strong></span>'
-    + '<span>Last FTP batch <strong>' + esc(info.last_ftp_photo_count ?? "unrecorded") + '</strong></span>'
+    + '<span>Saved in dashboard <strong>' + known + '</strong></span>'
+    + '<span>Available on Vinted <strong>' + esc(vinted == null ? "unknown" : vinted) + '</strong></span>'
+    + '<span>Last sent count <strong>' + esc(info.last_ftp_photo_count ?? "unrecorded") + '</strong></span>'
     + '</div>'
     + difference
-    + '<p class="muted">Expected FTP names: ' + esc((info.filenames || []).join(", ") || "none") + '</p>'
-    + '<p class="muted">Photo state: ' + esc(info.photo_state || "not synced")
+    + '<details class="biblio-photo-files"><summary>Technical file names</summary><p>' + esc((info.filenames || []).join(", ") || "None") + '</p></details>'
+    + '<p class="muted">Dashboard transfer status: ' + esc(info.photo_state || "not sent")
     + (info.last_ftp_photo_at ? ' · last FTP ' + esc(when(info.last_ftp_photo_at)) : '') + '</p>'
     + (info.photo_error ? '<p class="error">' + esc(info.photo_error) + '</p>' : '')
     + job
-    + '<p class="muted">FTP uploads cannot prove that BIBLIO has processed or published all images. Compare with BIBLIO’s image history.</p>'
+    + '<p class="muted">These counts describe the dashboard and its file transfers, not pictures visible to buyers. Check the book on BIBLIO to confirm the result.</p>'
     + '</div>';
+}
+
+async function loadBiblioPhotoChoices() {
+  const select = $("#biblio-photo-book-select");
+  if (!select) return;
+  if (state.biblioBookChoices === null) {
+    select.innerHTML = '<option value="">Loading your BIBLIO books…</option>';
+    try {
+      const response = await api("/api/app/listings?channel=biblio");
+      state.biblioBookChoices = (response.listings || [])
+        .filter(book => book.status === "active" && Number(book.quantity || 0) > 0)
+        .sort((a,b) => String(a.title || "").localeCompare(String(b.title || "")));
+    } catch (error) {
+      select.innerHTML = '<option value="">Could not load books. Enter a Book ID below.</option>';
+      return;
+    }
+  }
+  select.innerHTML = '<option value="">Choose a book by title…</option>'
+    + state.biblioBookChoices.map(book =>
+      '<option value="' + esc(book.external_id) + '"'
+      + (state.biblioPhotoTarget === book.external_id ? ' selected' : '') + '>'
+      + esc(book.title || "Untitled") + ' (' + esc(book.external_id) + ')</option>'
+    ).join("");
+}
+
+function resetBiblioPhotoInspection(value) {
+  state.biblioPhotoTarget = value;
+  if (value !== state.biblioPhotoInspection?.book_id) {
+    state.biblioPhotoInspection = null;
+    state.biblioPhotoError = "";
+    const retry = $("#biblio-retry-listing-photos");
+    if (retry) retry.disabled = true;
+    const report = $("#biblio-photo-inspection");
+    if (report) report.innerHTML = biblioPhotoInspectionHtml();
+  }
 }
 
 async function inspectBiblioPhotoTarget() {
@@ -1527,74 +1567,91 @@ async function inspectBiblioPhotoTarget() {
 }
 
 function renderBiblioActivity(activity, operational) {
-  const current = activity?.current || null;
-  const status = biblioActivityStatus(current);
-  const runs = activity?.runs || [];
   const health = activity?.health || {};
-  const safety = health.safety || {};
-  const healthHtml = health.active_listings == null
-    ? ""
-    : '<div class="biblio-activity-note"><strong>BIBLIO health:</strong> '
-      + esc(health.active_listings || 0) + ' active · '
-      + esc(health.inventory_changes_pending || 0) + ' changed records pending · '
-      + esc(health.deletes_pending || 0) + ' deletes pending · '
-      + esc(health.remote_verified_matching || 0) + ' verified/matching · '
-      + esc(health.remote_verified_mismatching || 0) + ' mismatching · '
-      + esc(health.remote_verified_uncompared || 0) + ' remote-only · '
-      + esc(health.remote_unverified || 0) + ' unverified · '
-      + esc(health.remote_verification_stale || 0) + ' stale verification · '
-      + esc(health.photo_attention || 0) + ' photo attention · '
-      + esc(health.publish_attention || 0) + ' publish attention'
-      + (safety.ftps_preferred ? ' · verified FTPS preferred' : '')
-      + (safety.plain_ftp_requires_opt_in ? ' · plain FTP requires opt-in' : '')
-      + (safety.ftp_host_locked ? ' · host/root locked' : '')
-      + '</div>';
-  const history = runs.length
-    ? runs.map((run) => {
-      const runStatus = biblioActivityStatus(run);
-      const files = [run.inventory_filename, run.deletes_filename].filter(Boolean).map(esc).join(" · ");
-      const meta = [
-        run.upload_profile ? "profile " + esc(run.upload_profile) : "",
-        run.transport ? "transport " + esc(run.transport === "ftps" ? "FTPS/TLS" : run.transport) : "",
-        files,
-      ].filter(Boolean).join(" · ");
-      const errors = (run.photo_errors || []).length
-        ? '<div class="biblio-activity-errors">' + run.photo_errors.map((value) => esc(value)).join("<br>") + "</div>"
-        : "";
-      const photoResults = (run.photo_results || []).length
-        ? '<details class="biblio-photo-files"><summary>FTP photo files (' + run.photo_results.length + ' recorded)</summary>'
-          + run.photo_results.map((photo) =>
-            '<div class="' + (photo.status === "error" ? "error" : "muted") + '">'
-            + esc(photo.filename) + ' · ' + esc(photo.status === "error" ? "FAILED" : "FTP sent") + '</div>'
-          ).join("") + '</details>'
-        : "";
-      return '<div class="biblio-activity-run">'
-        + '<div><strong>' + esc(runStatus.label) + '</strong><span>' + esc(when(run.started_at)) + "</span></div>"
-        + '<p>' + esc(biblioActivityDetail(run)) + "</p>"
-        + (meta ? '<small>' + meta + "</small>" : "")
-        + errors + photoResults + "</div>";
-    }).join("")
-    : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
-  return '<div class="biblio-activity-compact">'
-    + healthHtml
-    + '<div class="biblio-activity-current"><span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
-    + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
-    + '<div class="actions biblio-activity-actions">'
-    + '<button class="btn biblio-activity-toggle" type="button">' + (state.biblioActivityExpanded ? 'Hide activity' : 'View activity') + '</button>'
-    + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry all photos</button>' : "")
-    + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
+  const dataAvailable = health.active_listings != null;
+  const count = (key) => Number(health[key] || 0);
+  const waiting = count("inventory_changes_pending") + count("deletes_pending");
+  const last = activity?.current || null;
+  const status = biblioActivityStatus(last);
+  const runs = activity?.runs || [];
+  const lastSentAt = last?.completed_at || last?.started_at;
+  const verified = count("remote_verified_matching") + count("remote_verified_mismatching");
+  const overview = !dataAvailable
+    ? '<div class="biblio-user-warning">BIBLIO listing statistics are temporarily unavailable. The dashboard cannot confirm how many changes are pending.</div>'
+    : '<div class="biblio-summary">'
+    + '<div class="biblio-summary-stats">'
+    + '<div><strong>' + count("active_listings") + '</strong><span>Books prepared for BIBLIO</span></div>'
+    + '<div><strong>' + waiting + '</strong><span>Changes waiting to be sent</span></div>'
+    + '<div><strong>' + count("photo_attention") + '</strong><span>Books with photo work pending or in error</span></div>'
     + '</div>'
-    + (operational ? '<div class="biblio-photo-recovery"><strong>Photo recovery for one book</strong>'
-      + '<div class="biblio-photo-recovery-controls">'
-      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="e.g. VINTED-10253402699" value="' + esc(state.biblioPhotoTarget) + '">'
-      + '<button id="biblio-inspect-photos" class="btn" type="button">Inspect photos</button>'
-      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Retry this book</button>'
-      + '</div><div id="biblio-photo-inspection">' + biblioPhotoInspectionHtml() + '</div></div>'
+    + (count("remote_verified_mismatching") || count("remote_verification_stale")
+      ? '<p class="biblio-user-warning"><strong>Listings to review:</strong> '
+        + count("remote_verified_mismatching") + ' differ from the last BIBLIO comparison; '
+        + count("remote_verification_stale") + ' have changed since they were checked.</p>'
       : "")
-    + '<div class="biblio-activity-history' + (state.biblioActivityExpanded ? '' : ' hidden') + '">'
-    + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards. For a brand-new listing, the dashboard schedules one delayed photo-only retry because BIBLIO ignores an image if there is no active listing to attach it to.</div>'
-    + '<div class="biblio-activity-note"><strong>Orders:</strong> automatic BIBLIO order handling remains disabled until BIBLIO enables Bulk Order Management for the seller account and supplies its private protocol documentation.</div>'
-    + history + "</div></div>";
+    + '<p class="biblio-user-note">These are dashboard records, not a confirmed count of books visible on BIBLIO. '
+    + (verified ? verified + ' listings have been compared with a BIBLIO file. ' : 'No BIBLIO inventory comparison has been recorded yet. ')
+    + 'Use <strong>Compare BIBLIO inventory</strong> below to check what BIBLIO reports.</p></div>';
+  const latest = '<div class="biblio-latest">'
+    + '<span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
+    + '<div><strong>' + esc(last ? status.label : "Nothing sent yet") + '</strong>'
+    + '<p>' + (last ? esc(biblioActivityDetail(last)) : "Send changed books when you are ready.")
+    + (lastSentAt ? ' · ' + esc(when(lastSentAt)) : '') + '</p></div></div>';
+  const photoHelp = operational
+    ? '<details class="biblio-task-panel biblio-photos-panel"'
+      + (state.biblioPhotoExpanded ? ' open' : '') + '>'
+      + '<summary><span><strong>Fix photos for one book</strong><small>Check the pictures available locally, then resend that book’s photos if needed</small></span></summary>'
+      + '<div class="biblio-task-inner">'
+      + '<label class="biblio-field-label" for="biblio-photo-book-select">Choose a BIBLIO book</label>'
+      + '<select id="biblio-photo-book-select"><option value="">Loading books when opened…</option></select>'
+      + '<p class="biblio-field-secondary">Or enter a BIBLIO Book ID (for example VINTED-10253402699).</p>'
+      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '">'
+      + '<div class="actions biblio-photo-recovery-controls">'
+      + '<button id="biblio-inspect-photos" class="btn" type="button">Check this book’s photos</button>'
+      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend this book’s photos…</button>'
+      + '</div><div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
+      + '</div></details>'
+    : '';
+  const fileHistory = runs.map((run) => {
+    const state = biblioActivityStatus(run);
+    const photos = (run.photo_results || []).length
+      ? '<details class="biblio-photo-files"><summary>See individual photo transfer results (' + run.photo_results.length + ')</summary>'
+        + run.photo_results.map(photo => '<div class="' + (photo.status === "error" ? "error" : "muted") + '">'
+          + esc(photo.filename) + ' · ' + esc(photo.status === "error" ? "Transfer failed" : "Sent to BIBLIO") + '</div>').join("") + '</details>'
+      : "";
+    return '<article class="biblio-activity-run"><div><strong>' + esc(state.label) + '</strong><time>' + esc(when(run.started_at)) + '</time></div>'
+      + '<p>' + esc(biblioActivityDetail(run)) + '</p>'
+      + ((run.photo_errors || []).length ? '<p class="error">' + esc(run.photo_errors.join(" · ")) + '</p>' : '')
+      + photos + '</article>';
+  }).join("");
+  const history = '<details class="biblio-task-panel biblio-history-panel"'
+    + (state.biblioActivityExpanded ? ' open' : '') + '><summary>'
+    + '<span><strong>What has the dashboard sent?</strong><small>Recent transfers and individual photo results</small></span>'
+    + '</summary><div class="biblio-task-inner">'
+    + '<p>“Sent” means that BIBLIO received the files. BIBLIO may need additional time to process and display the books and photos.</p>'
+    + '<p>For a newly added book, BIBLIO may not recognize its photos immediately. The dashboard automatically attempts one later photo follow-up when needed; you normally do not need to resend all photos.</p>'
+    + '<div class="biblio-activity-history">' + (fileHistory || '<p>No transfers have been recorded yet.</p>') + '</div>'
+    + '</div></details>';
+  const advanced = operational
+    ? '<details class="biblio-task-panel biblio-recovery-panel"'
+      + (state.biblioRecoveryExpanded ? ' open' : '') + '><summary>'
+      + '<span><strong>Advanced recovery</strong><small>Resend everything only when normal uploads have not worked</small></span></summary>'
+      + '<div class="biblio-task-inner">'
+      + '<div class="biblio-recovery-row"><div><strong>Resend all photos</strong><p>Reuploads pictures for every active BIBLIO book. Use the one-book tool above for a single missing image.</p></div>'
+      + '<button class="btn biblio-retry-photos" type="button">Resend all photos…</button></div>'
+      + '<div class="biblio-recovery-row"><div><strong>Resend the entire catalogue</strong><p>Reuploads every active listing, updates and photos, even if nothing has changed. Usually unnecessary.</p></div>'
+      + '<button class="btn biblio-full-sync" type="button">Resend all listings…</button></div>'
+      + '<p class="biblio-user-note">This does not confirm publication. BIBLIO orders are not imported automatically because the separate Bulk Order Management interface is not connected.</p>'
+      + '</div></details>'
+    : '';
+  return '<div class="biblio-human-workflow">'
+    + overview + latest
+    + '<div class="biblio-next-actions">'
+    + '<button class="btn biblio-open-compare" type="button">Compare BIBLIO inventory</button>'
+    + '<span>Download a listing file from your BIBLIO seller account; checking it here does not alter your books.</span>'
+    + '</div>'
+    + photoHelp + history + advanced
+    + '</div>';
 }
 
 async function inspectInventoryRelationships() {
@@ -4140,9 +4197,16 @@ function renderMarketplaceOperations(data) {
     return;
   }
   const statuses = {
-    queued: "Queued", running: "Running",
-    succeeded: "Completed", needs_verification: "Transfer accepted · verification needed",
-    failed: "Failed", attention: "Review remote outcome", cancelled: "Cancelled",
+    queued: "Waiting to start", running: "In progress",
+    succeeded: "Finished", needs_verification: "Sent; check the marketplace",
+    failed: "Did not finish", attention: "Needs your attention", cancelled: "Cancelled",
+  };
+  const verificationLabels = {
+    manual_required: "Check the result on the marketplace",
+    snapshot_imported: "Information imported into the dashboard",
+    no_remote_changes: "No new changes sent",
+    not_checked: "Not independently checked",
+    remote_verified: "Checked against the marketplace",
   };
   root.innerHTML = '<div class="table-wrap"><table><thead><tr>'
     + '<th>Marketplace / action</th><th>Target</th><th>Status</th><th>Created</th><th>Next step</th>'
@@ -4152,21 +4216,29 @@ function renderMarketplaceOperations(data) {
       const result = Object.entries(op.result || {}).slice(0, 6)
         .map(([key, value]) => esc(key.replaceAll("_", " ") + ": " + String(value))).join(" · ");
       const next = op.can_retry
-        ? '<button class="btn marketplace-operation-retry" type="button" data-id="' + esc(op.id) + '">Retry safely</button>'
-        : requiresCheck ? '<span class="muted">Check in marketplace before further action</span>'
+        ? '<button class="btn marketplace-operation-retry" type="button" data-id="' + esc(op.id) + '">'
+          + (op.type === "photos" ? "Try sending photos again…" : "Try again…") + '</button>'
+        : requiresCheck ? '<span class="muted">Check the result on the marketplace first</span>'
         : "";
-      return '<tr><td><strong>' + esc(op.channel.toUpperCase()) + ' · ' + esc(op.type)
-        + '</strong><div class="sub">' + esc(op.verification) + '</div></td>'
-        + '<td>' + esc(op.target || "all") + '</td>'
+      const actionLabel = op.type === "sync"
+        ? (op.channel === "biblio" ? "Send listing changes" : "Import marketplace data")
+        : ({publish:"Add listing", update:"Update listing", photos:"Send photos",
+          close:"Close sold listing", verify:"Check listing"}[op.type] || op.type);
+      const targetLabel = op.target === "all" ? "All relevant listings"
+        : /^[0-9a-f-]{36}$/i.test(op.target || "") ? "One listing"
+        : op.target || "Single listing";
+      return '<tr><td><strong>' + esc(op.channel.toUpperCase()) + ' · ' + esc(actionLabel)
+        + '</strong><div class="sub">' + esc(verificationLabels[op.verification] || op.verification) + '</div></td>'
+        + '<td>' + esc(targetLabel) + '</td>'
         + '<td><strong>' + esc(statuses[op.status] || op.status) + '</strong>'
         + (op.error ? '<div class="error">' + esc(op.error) + '</div>' : "")
-        + (result ? '<div class="sub">' + result + '</div>' : "")
+        + (result ? '<details class="operation-technical"><summary>Transfer details</summary><p>' + result + '</p></details>' : "")
         + '</td><td>' + esc(when(op.created_at)) + '</td><td>' + next + '</td></tr>';
     }).join("")
     + '</tbody></table></div>';
   $$(".marketplace-operation-retry").forEach(button => {
     button.onclick = async () => {
-      if (!window.confirm("Retry this failed operation? Only supported idempotent operations can be retried.")) return;
+      if (!window.confirm("Try this operation again? The dashboard only allows automatic retries when repeating it is considered safe. If a marketplace may have accepted an earlier upload, check it first.")) return;
       button.disabled = true;
       try {
         await api("/api/app/marketplace-operations/" + button.dataset.id + "/retry", {method:"POST"});
@@ -4221,78 +4293,130 @@ async function connections() {
   });
   const other = state.connectors.filter(connector => !featured.includes(connector));
   const connectorHtml = (connector) => {
-    const connected = connector.status === "connected";
-    const statusClass = connected ? "status-ok" : (connector.configured ? "status-warn" : "");
+    const channel = connector.channel;
+    const ready = Boolean(connector.operational);
+    const display = esc(connector.display_name);
+    const name = esc(channel);
+    const lastSeen = connector.last_synced_at ? " · last import " + esc(when(connector.last_synced_at)) : "";
+    const configure = connectorSchemas[channel]
+      ? '<button class="btn configure" data-c="' + name + '" type="button">'
+        + (connector.configured ? 'Connection settings' : 'Set up connection') + '</button>' : '';
+    if (channel === "biblio") {
+      const health = biblioActivity?.health || {};
+      const pending = Number(health.inventory_changes_pending || 0)
+        + Number(health.deletes_pending || 0);
+      return '<section class="connector connector--biblio" data-connector-channel="biblio" aria-label="BIBLIO">'
+        + '<div class="connector-header"><div><h2>BIBLIO</h2><p>Send and maintain book listings in your BIBLIO seller account.</p></div>'
+        + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">'
+        + (ready ? 'Account set up' : 'Setup required') + '</span></div>'
+        + (ready
+          ? '<div class="biblio-primary-task"><div><strong>' + (pending > 0
+              ? pending + ' listing change' + (pending === 1 ? '' : 's') + ' waiting to be sent'
+              : 'Send new changes when ready') + '</strong>'
+            + '<p>Sends changed books and sold/out-of-stock updates to BIBLIO, plus photos that need uploading. '
+            + 'It does not resend unchanged listings or confirm they are visible to buyers.</p></div>'
+            + '<button class="btn primary sync" data-c="biblio" type="button">Send changes to BIBLIO</button></div>'
+          : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, you can send changed books and review what was transferred.</p>')
+        + renderBiblioActivity(biblioActivity, ready)
+        + '<div class="connector-settings-row">' + configure
+        + '<span>Credentials and upload preferences are separate from book management.</span></div>'
+        + '</section>';
+    }
+    if (channel === "vinted") {
+      const paired = (devices.devices || []).filter(device => !device.revoked).length;
+      return '<section class="connector connector--vinted" data-connector-channel="vinted" aria-label="Vinted">'
+        + '<div class="connector-header"><div><h2>Vinted</h2><p>Your Vinted data comes from the Chrome browser extension while you are signed in to Vinted.</p></div>'
+        + '<span class="connection-state ' + (paired ? 'ready' : 'not-ready') + '">'
+        + (paired ? paired + ' browser' + (paired === 1 ? '' : 's') + ' paired' : 'Browser not paired') + '</span></div>'
+        + '<div class="actions"><button class="btn pair" type="button">' + (paired ? 'Pair another browser' : 'Pair a Chrome browser') + '</button>'
+        + '<a class="btn" href="' + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
+        + '">Download Chrome extension</a></div>'
+        + '<p class="connector-version">Chrome extension version ' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</p>'
+        + '<div class="pairing-inline hidden"><p>Enter this code in the Chrome extension within 10 minutes:</p>'
+        + '<strong class="pair-code pair-code-inline"></strong></div>'
+        + '<p class="connector-workflow-hint">Pairing allows uploads; it does not start one. Open Vinted with the extension active to collect new listings and sales. If Vinted has not updated recently, check the extension.</p>'
+        + '<p class="connector-last-sync">Latest Vinted data received: <strong>'
+        + (connector.last_synced_at ? esc(when(connector.last_synced_at)) : 'not recorded yet')
+        + '</strong></p>'
+        + '</section>';
+    }
     const statusText = connector.authorization_required
-      ? "Authorization required"
-      : (connected
-        ? "Connected"
-        : (connector.configured ? "Configured - not synced yet" : "Not configured"));
-    return '<div class="connector" data-connector-channel="' + esc(connector.channel) + '"><h2>' + esc(connector.display_name) + "</h2><p>"
-      + esc(connector.description) + '</p><div class="meta ' + statusClass + '">'
-      + statusText
-      + (connector.last_synced_at ? " · " + esc(when(connector.last_synced_at)) : "")
-      + '</div><div class="actions">'
-      + (connector.channel === "vinted"
-        ? '<button class="btn primary pair">Pair Chrome</button><a class="btn" href="'
-          + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
-          + '">Download bridge v' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</a>'
-          + '<div class="pairing-inline hidden"><span class="eyebrow">PAIR CODE</span>'
-          + '<strong class="pair-code pair-code-inline"></strong>'
-          + '<small>Enter this in Chrome Bridge. Expires in 10 minutes.</small></div>'
-        : "")
-      + (connectorSchemas[connector.channel]
-        ? '<button class="btn configure" data-c="' + esc(connector.channel) + '">Configure</button>'
-        : "")
+      ? "Authorization needed" : ready ? "Account set up" : connector.configured
+        ? "Needs attention" : "Not connected";
+    return '<section class="connector connector--other" data-connector-channel="' + name + '">'
+      + '<div class="connector-header"><div><h2>' + display + '</h2><p>'
+      + esc(connector.description) + '</p></div>'
+      + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">' + statusText + '</span></div>'
+      + '<div class="actions">' + configure
       + (connector.sync_available
-        ? '<button class="btn sync" data-c="' + esc(connector.channel) + '">'
-          + (connector.channel === "biblio" ? "Sync changes" : "Queue sync") + "</button>"
-        : "")
-      + "</div>"
-      + (connector.note ? '<div class="connector-note">' + esc(connector.note) + "</div>" : "")
-      + (connector.channel === "vinted" ? '<p class="connector-workflow-hint">Listing updates arrive through the Chrome Bridge while signed in to Vinted. Pairing does not start a server-side sync.</p>' : "")
-      + (connector.channel === "biblio" ? '<p class="connector-workflow-hint">Sync changes sends modified records by FTP. For a new book, use Inventory → Publish to BIBLIO; successful transfer is not remote publication confirmation.</p>' : "")
-      + (connector.channel !== "vinted" && connector.channel !== "biblio" && connector.sync_available ? '<p class="connector-workflow-hint">Queue sync imports available listings and orders; it does not publish or update items.</p>' : "")
-      + (connector.channel === "biblio" ? renderBiblioActivity(biblioActivity, connector.operational) : "")
-      + "</div>";
+        ? '<button class="btn sync" data-c="' + name + '" type="button">Import latest data</button>'
+        : '') + '</div>'
+      + (connector.sync_available
+        ? '<p class="connector-workflow-hint">Imports listings and supported orders into the dashboard. It does not publish or edit your listings.</p>'
+        : '<p class="connector-workflow-hint">Connect this marketplace to use the supported import functions.</p>')
+      + (connector.note ? '<p class="connector-workflow-hint">' + esc(connector.note) + '</p>' : "")
+      + (lastSeen ? '<p class="connector-last-sync">' + lastSeen.slice(3) + '</p>' : '')
+      + '</section>';
   };
   $("#connector-grid").innerHTML = featured.map(connectorHtml).join("");
   $("#connector-other-grid").innerHTML = other.map(connectorHtml).join("");
   $("#other-marketplaces-count").textContent = String(other.length);
   $("#other-marketplaces").classList.toggle("hidden", other.length === 0);
+  $("#biblio-compare-panel").classList.toggle("hidden",
+    !state.connectors.some(connector => connector.channel === "biblio" && connector.operational)
+  );
+  const openCompare = $(".biblio-open-compare");
+  if (openCompare) openCompare.onclick = () => {
+    const panel = $("#biblio-compare-panel");
+    panel.open = true;
+    panel.scrollIntoView({behavior:"smooth", block:"start"});
+  };
+  const trackedPanels = [
+    [".biblio-photos-panel", "biblioPhotoExpanded"],
+    [".biblio-history-panel", "biblioActivityExpanded"],
+    [".biblio-recovery-panel", "biblioRecoveryExpanded"],
+  ];
+  trackedPanels.forEach(([selector, key]) => {
+    const panel = $(selector);
+    if (!panel) return;
+    panel.addEventListener("toggle", () => {
+      state[key] = panel.open;
+      if (key === "biblioPhotoExpanded" && panel.open) loadBiblioPhotoChoices();
+    });
+  });
+  if (state.biblioPhotoExpanded) loadBiblioPhotoChoices();
 
   document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
   $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
-  $$(".sync").forEach((button) => {
+  $(".sync").forEach((button) => {
     button.onclick = async () => {
+      button.disabled = true;
+      const channel = button.dataset.c;
       try {
-        await api("/api/app/connectors/" + button.dataset.c + "/sync", { method: "POST" });
-        flash(button.dataset.c === "biblio" ? "BIBLIO change sync queued." : "Sync queued.");
-        if (button.dataset.c === "biblio") await connections();
+        const result = await api("/api/app/connectors/" + channel + "/sync", { method: "POST" });
+        flash(channel === "biblio"
+          ? (result.already_queued
+              ? "Your BIBLIO upload is already in the queue. No second upload was started."
+              : "Changes queued for BIBLIO. You can follow the transfer below.")
+          : (result.already_queued ? "This import is already queued." : "Import queued."));
+        await connections();
       } catch (error) {
-        flash(error.message, true);
+        flash("Could not start the " + (channel === "biblio" ? "BIBLIO upload" : "import")
+          + ": " + error.message, true);
+      } finally {
+        button.disabled = false;
       }
-    };
-  });
-  $$(".biblio-activity-toggle").forEach((button) => {
-    button.onclick = () => {
-      const history = button.closest(".biblio-activity-compact")?.querySelector(".biblio-activity-history");
-      if (!history) return;
-      const opening = history.classList.contains("hidden");
-      state.biblioActivityExpanded = opening;
-      history.classList.toggle("hidden", !opening);
-      button.textContent = opening ? "Hide activity" : "View activity";
     };
   });
   $$(".biblio-retry-photos").forEach((button) => {
     button.onclick = async () => {
-      if (!window.confirm("Retry all photos will resend every active BIBLIO listing's images. Use the single-book photo recovery tool below when only one book is affected. Continue?")) return;
+      if (!window.confirm("This resends the pictures for EVERY active BIBLIO listing. It is much larger than repairing one book and cannot confirm BIBLIO has displayed them. Do you want to resend all photos?")) return;
       button.disabled = true;
       try {
         await api("/api/app/connectors/biblio/retry-photos", { method: "POST" });
-        flash("BIBLIO photo retry queued without resending inventory.");
+        flash("All BIBLIO photos queued for re-upload. Unchanged listing details will not be resent.");
         await connections();
       } catch (error) {
         flash(error.message, true);
@@ -4302,11 +4426,11 @@ async function connections() {
   });
   $$(".biblio-full-sync").forEach((button) => {
     button.onclick = async () => {
-      if (!window.confirm("Full resync will deliberately resend every active BIBLIO listing and its photos. Continue?")) return;
+      if (!window.confirm("This resends ALL active BIBLIO listings and photos, including unchanged ones. It may take longer and is usually unnecessary. Do you want to continue?")) return;
       button.disabled = true;
       try {
         await api("/api/app/connectors/biblio/full-sync", { method: "POST" });
-        flash("Full BIBLIO resync queued.");
+        flash("Complete BIBLIO catalogue re-upload queued.");
         await connections();
       } catch (error) {
         flash(error.message, true);
@@ -4319,15 +4443,11 @@ async function connections() {
   if (inspectPhotosButton) {
     inspectPhotosButton.onclick = () => inspectBiblioPhotoTarget();
     const field = $("#biblio-photo-book-id");
-    field.oninput = () => {
-      const value = field.value.trim();
-      state.biblioPhotoTarget = value;
-      if (value !== state.biblioPhotoInspection?.book_id) {
-        state.biblioPhotoInspection = null;
-        state.biblioPhotoError = "";
-        $("#biblio-retry-listing-photos").disabled = true;
-        $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
-      }
+    field.oninput = () => resetBiblioPhotoInspection(field.value.trim());
+    const chooser = $("#biblio-photo-book-select");
+    if (chooser) chooser.onchange = () => {
+      field.value = chooser.value;
+      resetBiblioPhotoInspection(chooser.value);
     };
     field.onkeydown = (event) => {
       if (event.key === "Enter") {
@@ -4343,13 +4463,15 @@ async function connections() {
     retryPhotosButton.onclick = async () => {
       const info = state.biblioPhotoInspection;
       if (!info || $("#biblio-photo-book-id").value.trim() !== info.book_id) return;
+      if (!window.confirm("Resend the photos for " + info.title
+        + " (" + info.book_id + ")? The book details will not be reuploaded, and you will still need to check the photos on BIBLIO.")) return;
       retryPhotosButton.disabled = true;
       try {
         const result = await api("/api/app/connectors/biblio/retry-listing-photos", {
           method: "POST",
           body: JSON.stringify({ book_id: info.book_id }),
         });
-        flash("Photo-only retry queued for " + result.book_id + ". No inventory records will be resent.");
+        flash("Photos for " + result.book_id + " queued for re-upload. The book details will not be resent.");
         await inspectBiblioPhotoTarget();
         await connections();
       } catch (error) {
@@ -4548,54 +4670,102 @@ function biblioInventoryForm(file, authoritative = false) {
 }
 
 function biblioReconciliationText(result) {
-  const parts = [
-    (result.matched_clean || 0) + " matching",
-    (result.mismatched || 0) + " mismatching",
-    (result.remote_only || 0) + " remote-only",
-    (result.missing_local || 0) + " local-only",
-  ];
-  return parts.join(" · ");
+  return (Number(result.matched_clean || 0)) + " the same in both"
+    + " · " + Number(result.mismatched || 0) + " with different details"
+    + " · " + Number(result.remote_only || 0) + " on BIBLIO only"
+    + " · " + Number(result.missing_local || 0) + " in dashboard only";
 }
+
+function biblioComparisonHtml(result) {
+  const different = (result.mismatch_samples || []).slice(0, 12)
+    .map(row => '<li>' + esc(row.book_id) + ': ' + esc((row.fields || []).join(", ")) + '</li>')
+    .join("");
+  const warnings = Number(result.mismatched || 0) + Number(result.remote_only || 0)
+    + Number(result.missing_local || 0);
+  return '<div class="biblio-comparison-results">'
+    + '<strong>Comparison finished · ' + Number(result.remote_active || 0)
+    + ' active books in the BIBLIO file</strong>'
+    + '<p>' + esc(biblioReconciliationText(result)) + '</p>'
+    + (warnings
+      ? '<p>These are differences to review, not automatic errors or proof a photo is missing.</p>'
+      : '<p>Book identifiers and compared details match. Photos still need checking on BIBLIO.</p>')
+    + (different ? '<details><summary>See books with different details</summary><ul>' + different + '</ul></details>' : "")
+    + (result.remote_only_ids?.length
+      ? '<details><summary>Books only in the BIBLIO file</summary><p>'
+        + esc(result.remote_only_ids.join(", ")) + '</p></details>' : '')
+    + (result.missing_local_ids?.length
+      ? '<details><summary>Books only in the dashboard</summary><p>'
+        + esc(result.missing_local_ids.join(", ")) + '</p></details>' : '')
+    + '<p class="muted">No book descriptions, prices or stock quantities were changed by this comparison.</p>'
+    + '</div>';
+}
+
+const biblioImportInput = $("#biblio-import-file");
+if (biblioImportInput) biblioImportInput.onchange = () => {
+  state.biblioCompareCheckedFile = null;
+  state.biblioCompareResult = null;
+  $("#import-biblio").disabled = true;
+  $("#biblio-compare-result").textContent = "File selected. Compare it first to see what differs.";
+};
 
 $("#verify-biblio").onclick = async () => {
   const file = $("#biblio-import-file").files[0];
-  if (!file) return flash("Choose a BIBLIO inventory download first.", true);
-  $("#connector-config-status").textContent = "Verifying BIBLIO inventory without changing local stock…";
+  if (!file) return flash("Choose an inventory file downloaded from BIBLIO first.", true);
+  const button = $("#verify-biblio");
+  const message = $("#biblio-compare-result");
+  button.disabled = true;
+  $("#import-biblio").disabled = true;
+  state.biblioCompareCheckedFile = null;
+  state.biblioCompareResult = null;
+  message.textContent = "Comparing the BIBLIO file with your dashboard…";
   try {
     const result = await api("/api/app/connectors/biblio/verify", {
       method: "POST",
       body: biblioInventoryForm(file),
     });
-    $("#connector-config-status").textContent = "Verified " + result.remote_active
-      + " active BIBLIO listings · " + biblioReconciliationText(result) + ".";
-    flash("BIBLIO verification complete; no inventory was changed.");
+    state.biblioCompareCheckedFile = file;
+    state.biblioCompareResult = result;
+    $("#import-biblio").disabled = false;
+    message.innerHTML = biblioComparisonHtml(result);
     await connections();
   } catch (error) {
-    $("#connector-config-status").textContent = error.message;
+    message.textContent = "Comparison failed: " + error.message;
+    flash(error.message, true);
+  } finally {
+    button.disabled = false;
   }
 };
 
 $("#import-biblio").onclick = async () => {
   const file = $("#biblio-import-file").files[0];
-  if (!file) return flash("Choose a BIBLIO inventory download first.", true);
+  if (!file || state.biblioCompareCheckedFile !== file) {
+    return flash("Compare the selected BIBLIO file before applying it.", true);
+  }
   const authoritative = Boolean($("#biblio-import-authoritative")?.checked);
-  if (authoritative && !window.confirm(
-    "This will treat the file as BIBLIO's COMPLETE active inventory and mark local BIBLIO listings missing from it inactive. Continue?"
-  )) return;
-  $("#connector-config-status").textContent = authoritative
-    ? "Applying complete BIBLIO active-inventory snapshot…"
-    : "Safely merging BIBLIO inventory; omitted local rows will not be deactivated…";
+  const message = authoritative
+    ? "This changes dashboard listing records using the BIBLIO file. Because you selected COMPLETE inventory, books missing from that file will also be marked inactive locally. This does NOT edit BIBLIO. Continue?"
+    : "This imports BIBLIO listing information into your dashboard. Books missing from the file remain unchanged. This does NOT edit BIBLIO. Continue?";
+  if (!window.confirm(message)) return;
+  const button = $("#import-biblio");
+  const resultBox = $("#biblio-compare-result");
+  button.disabled = true;
+  resultBox.textContent = "Updating dashboard listing records from the selected BIBLIO file…";
   try {
     const result = await api("/api/app/connectors/biblio/import", {
       method: "POST",
       body: biblioInventoryForm(file, authoritative),
     });
-    $("#connector-config-status").textContent = (authoritative ? "Applied complete snapshot. " : "Merged inventory. ")
-      + biblioReconciliationText(result) + ".";
-    flash(authoritative ? "BIBLIO snapshot reconciled." : "BIBLIO inventory merged safely.");
+    resultBox.innerHTML = '<strong>BIBLIO file applied to the dashboard.</strong>'
+      + '<p>' + esc(biblioReconciliationText(result)) + '</p>'
+      + '<p>This changed local BIBLIO listing records, not your live BIBLIO account.</p>';
+    state.biblioCompareCheckedFile = null;
+    state.biblioCompareResult = null;
+    flash("Dashboard listing records updated. No files were sent to BIBLIO.");
     await connections();
   } catch (error) {
-    $("#connector-config-status").textContent = error.message;
+    resultBox.textContent = "Could not apply file: " + error.message;
+    button.disabled = false;
+    flash(error.message, true);
   }
 };
 
