@@ -4367,24 +4367,33 @@ async function connections() {
   $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
-  $$(".sync").forEach((button) => {
+  $(".sync").forEach((button) => {
     button.onclick = async () => {
+      button.disabled = true;
+      const channel = button.dataset.c;
       try {
-        await api("/api/app/connectors/" + button.dataset.c + "/sync", { method: "POST" });
-        flash(button.dataset.c === "biblio" ? "BIBLIO change sync queued." : "Sync queued.");
-        if (button.dataset.c === "biblio") await connections();
+        const result = await api("/api/app/connectors/" + channel + "/sync", { method: "POST" });
+        flash(channel === "biblio"
+          ? (result.already_queued
+              ? "Your BIBLIO upload is already in the queue. No second upload was started."
+              : "Changes queued for BIBLIO. You can follow the transfer below.")
+          : (result.already_queued ? "This import is already queued." : "Import queued."));
+        await connections();
       } catch (error) {
-        flash(error.message, true);
+        flash("Could not start the " + (channel === "biblio" ? "BIBLIO upload" : "import")
+          + ": " + error.message, true);
+      } finally {
+        button.disabled = false;
       }
     };
   });
   $$(".biblio-retry-photos").forEach((button) => {
     button.onclick = async () => {
-      if (!window.confirm("Retry all photos will resend every active BIBLIO listing's images. Use the single-book photo recovery tool below when only one book is affected. Continue?")) return;
+      if (!window.confirm("This resends the pictures for EVERY active BIBLIO listing. It is much larger than repairing one book and cannot confirm BIBLIO has displayed them. Do you want to resend all photos?")) return;
       button.disabled = true;
       try {
         await api("/api/app/connectors/biblio/retry-photos", { method: "POST" });
-        flash("BIBLIO photo retry queued without resending inventory.");
+        flash("All BIBLIO photos queued for re-upload. Unchanged listing details will not be resent.");
         await connections();
       } catch (error) {
         flash(error.message, true);
@@ -4394,11 +4403,11 @@ async function connections() {
   });
   $$(".biblio-full-sync").forEach((button) => {
     button.onclick = async () => {
-      if (!window.confirm("Full resync will deliberately resend every active BIBLIO listing and its photos. Continue?")) return;
+      if (!window.confirm("This resends ALL active BIBLIO listings and photos, including unchanged ones. It may take longer and is usually unnecessary. Do you want to continue?")) return;
       button.disabled = true;
       try {
         await api("/api/app/connectors/biblio/full-sync", { method: "POST" });
-        flash("Full BIBLIO resync queued.");
+        flash("Complete BIBLIO catalogue re-upload queued.");
         await connections();
       } catch (error) {
         flash(error.message, true);
@@ -4411,15 +4420,11 @@ async function connections() {
   if (inspectPhotosButton) {
     inspectPhotosButton.onclick = () => inspectBiblioPhotoTarget();
     const field = $("#biblio-photo-book-id");
-    field.oninput = () => {
-      const value = field.value.trim();
-      state.biblioPhotoTarget = value;
-      if (value !== state.biblioPhotoInspection?.book_id) {
-        state.biblioPhotoInspection = null;
-        state.biblioPhotoError = "";
-        $("#biblio-retry-listing-photos").disabled = true;
-        $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
-      }
+    field.oninput = () => resetBiblioPhotoInspection(field.value.trim());
+    const chooser = $("#biblio-photo-book-select");
+    if (chooser) chooser.onchange = () => {
+      field.value = chooser.value;
+      resetBiblioPhotoInspection(chooser.value);
     };
     field.onkeydown = (event) => {
       if (event.key === "Enter") {
@@ -4435,13 +4440,15 @@ async function connections() {
     retryPhotosButton.onclick = async () => {
       const info = state.biblioPhotoInspection;
       if (!info || $("#biblio-photo-book-id").value.trim() !== info.book_id) return;
+      if (!window.confirm("Resend the photos for " + info.title
+        + " (" + info.book_id + ")? The book details will not be reuploaded, and you will still need to check the photos on BIBLIO.")) return;
       retryPhotosButton.disabled = true;
       try {
         const result = await api("/api/app/connectors/biblio/retry-listing-photos", {
           method: "POST",
           body: JSON.stringify({ book_id: info.book_id }),
         });
-        flash("Photo-only retry queued for " + result.book_id + ". No inventory records will be resent.");
+        flash("Photos for " + result.book_id + " queued for re-upload. The book details will not be resent.");
         await inspectBiblioPhotoTarget();
         await connections();
       } catch (error) {
