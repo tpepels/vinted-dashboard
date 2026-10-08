@@ -326,6 +326,182 @@ document.addEventListener("click", (event) => {
   sortTableByHeader(header);
 });
 
+// Tables retain natural column sizes until a user resizes them. Resized widths
+// are scoped to the view/table and ignored if the header structure changes.
+const tableResizeSeen = new WeakSet();
+const tableResizeWidths = new WeakMap();
+const TABLE_MIN_COLUMN_WIDTH = 72;
+const TABLE_MAX_COLUMN_WIDTH = 640;
+
+function tableResizeKey(table) {
+  const host = table.closest(".table-wrap");
+  const scope = table.closest("[id]");
+  if (!host || !scope) return null;
+  const index = Array.from(scope.querySelectorAll("table")).indexOf(table);
+  if (index < 0) return null;
+  return "reseller:table-widths:v1:" + scope.id + ":" + index;
+}
+
+function tableStoredWidths(key, labels) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    return saved && Array.isArray(saved.widths)
+      && Array.isArray(saved.labels) && saved.labels.join("|") === labels.join("|")
+      && saved.widths.length === labels.length
+      && saved.widths.every(value => Number.isInteger(value)
+        && value >= TABLE_MIN_COLUMN_WIDTH && value <= TABLE_MAX_COLUMN_WIDTH)
+      ? saved.widths : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function applyTableColumnWidths(table, widths) {
+  if (!widths?.length) return;
+  let group = table.querySelector(":scope > colgroup.table-resize-columns");
+  if (!group) {
+    group = document.createElement("colgroup");
+    group.className = "table-resize-columns";
+    table.insertBefore(group, table.firstChild);
+  }
+  group.replaceChildren(...widths.map(width => {
+    const col = document.createElement("col");
+    col.style.width = width + "px";
+    return col;
+  }));
+  table.style.tableLayout = "fixed";
+  table.style.width = "max(100%, " + widths.reduce((sum, width) => sum + width, 0) + "px)";
+  tableResizeWidths.set(table, widths.slice());
+  Array.from(table.tHead?.rows[0]?.cells || []).forEach((cell, i) => {
+    const handle = cell.querySelector(".table-resize-handle");
+    if (handle) handle.setAttribute("aria-valuenow", String(widths[i]));
+  });
+}
+
+function resetTableColumnWidths(table, key) {
+  table.querySelector(":scope > colgroup.table-resize-columns")?.remove();
+  table.style.removeProperty("table-layout");
+  table.style.removeProperty("width");
+  tableResizeWidths.delete(table);
+  try { localStorage.removeItem(key); } catch (_) { /* storage disabled */ }
+  Array.from(table.tHead?.rows[0]?.cells || []).forEach(cell => {
+    cell.querySelector(".table-resize-handle")?.removeAttribute("aria-valuenow");
+  });
+}
+
+function activateResizableTable(table) {
+  if (tableResizeSeen.has(table)) return;
+  const row = table.tHead?.rows?.[0];
+  const key = tableResizeKey(table);
+  if (!row || !key || row.cells.length < 3 || row.cells.length > 25
+      || Array.from(row.cells).some(cell => cell.colSpan !== 1)
+      || table.classList.contains("stock-scan-table")) return;
+  tableResizeSeen.add(table);
+  const headers = Array.from(row.cells);
+  const labels = headers.map(cell => cell.textContent.replace(/\\s+/g, " ").trim());
+  table.classList.add("table-resizable");
+  const container = table.closest(".table-wrap");
+  if (container && !container.hasAttribute("tabindex")) {
+    container.tabIndex = 0;
+    container.setAttribute("aria-label", "Scrollable data table");
+  }
+  const saved = tableStoredWidths(key, labels);
+  if (saved) applyTableColumnWidths(table, saved);
+
+  headers.forEach((header, column) => {
+    if (labels[column] && !header.querySelector("a,button,input,select")) {
+      header.classList.add("table-sortable");
+      header.tabIndex = 0;
+      header.setAttribute("aria-keyshortcuts", "Enter Space");
+    }
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "table-resize-handle";
+    handle.tabIndex = 0;
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-orientation", "vertical");
+    handle.setAttribute("aria-label", "Resize " + (labels[column] || "column " + (column + 1)));
+    handle.setAttribute("aria-valuemin", String(TABLE_MIN_COLUMN_WIDTH));
+    handle.setAttribute("aria-valuemax", String(TABLE_MAX_COLUMN_WIDTH));
+    handle.title = "Drag or use arrow keys to resize; double-click to reset";
+    header.appendChild(handle);
+    let drag = null;
+
+    function currentWidths() {
+      return tableResizeWidths.get(table)?.slice()
+        || headers.map(cell => Math.min(TABLE_MAX_COLUMN_WIDTH,
+          Math.max(TABLE_MIN_COLUMN_WIDTH, Math.round(cell.getBoundingClientRect().width))));
+    }
+    function changeWidth(widths, width) {
+      widths[column] = Math.max(TABLE_MIN_COLUMN_WIDTH,
+        Math.min(TABLE_MAX_COLUMN_WIDTH, Math.round(width)));
+      applyTableColumnWidths(table, widths);
+    }
+    function saveWidths() {
+      try {
+        const widths = tableResizeWidths.get(table);
+        if (widths) localStorage.setItem(key, JSON.stringify({labels, widths}));
+      } catch (_) { /* storage disabled */ }
+    }
+    handle.addEventListener("pointerdown", event => {
+      if (event.button !== 0 || window.matchMedia("(max-width: 900px), (pointer: coarse)").matches) return;
+      event.stopPropagation();
+      event.preventDefault();
+      const widths = currentWidths();
+      drag = {startX: event.clientX, startWidth: widths[column], widths,
+        pointerId: event.pointerId};
+      handle.setPointerCapture(event.pointerId);
+      document.body.classList.add("is-resizing-columns");
+    });
+    handle.addEventListener("pointermove", event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      changeWidth(drag.widths, drag.startWidth + event.clientX - drag.startX);
+    });
+    function finish(event) {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      drag = null;
+      document.body.classList.remove("is-resizing-columns");
+      saveWidths();
+    }
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+    handle.addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const widths = currentWidths();
+      changeWidth(widths, widths[column] + direction * (event.shiftKey ? 40 : 12));
+      saveWidths();
+    });
+    handle.addEventListener("dblclick", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      resetTableColumnWidths(table, key);
+    });
+  });
+}
+
+function startResponsiveTables() {
+  const root = document.querySelector("main");
+  if (!root) return;
+  const scan = () => root.querySelectorAll(".table-wrap table")
+    .forEach(activateResizableTable);
+  scan();
+  const observer = new MutationObserver(records => {
+    if (records.some(record => record.addedNodes.length)) scan();
+  });
+  observer.observe(root, {childList: true, subtree: true});
+}
+
+document.addEventListener("keydown", event => {
+  if (event.target.tagName !== "TH" || !event.target.classList.contains("table-sortable")
+      || !["Enter", " "].includes(event.key)) return;
+  event.preventDefault();
+  sortTableByHeader(event.target);
+});
+startResponsiveTables();
+
 function redactClientText(value) {
   return String(value ?? "")
     .replace(/(authorization:\s*(?:bearer|basic)\s+)\S+/gi, "$1[REDACTED]")
