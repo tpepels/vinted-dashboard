@@ -819,7 +819,7 @@ def test_item_marketplace_panel_exposes_safe_real_actions():
     assert 'class="btn item-marketplace-retry"' in APP_JS
     assert 'data-book=' in APP_JS
     assert 'state.biblioPhotoTarget = button.dataset.book' in APP_JS
-    assert 'this panel deliberately does not offer a blind remote delete' in APP_JS
+    assert 'Stock updates change marketplace quantities only' not in APP_JS or 'change marketplace quantities only' in APP_JS
 
 
 def test_biblio_selective_photo_repair_keeps_safe_full_resend_choice():
@@ -844,13 +844,28 @@ def test_cross_channel_refunds_warn_about_already_closed_marketplace_listings():
     assert "needs_reopen" in APP_JS
 
 
-def test_woo_stock_sync_is_explicit_and_limited_to_linked_inventory():
-    assert "Set WooCommerce stock to " in APP_JS
-    assert "item-woo-stock" in APP_JS
-    assert "/marketplaces/woocommerce/stock" in APP_JS
-    assert "/marketplaces/woocommerce/check-stock" in APP_JS
-    assert "Check WooCommerce stock" in APP_JS
-    assert '$(".item-woo-stock").forEach' in APP_JS
-    assert '$(".item-woo-check").forEach' in APP_JS
-    assert "The exact remote IDs and SKU" in APP_JS
-    assert 'if (!window.confirm("Update the linked WooCommerce product or individually stock-managed variation to "' in APP_JS
+def test_store_stock_controls_are_minimal_check_first_and_shared():
+    # All three hosted stores use one check-first workflow. The write action
+    # is only displayed after an observed mismatch and asks for confirmation.
+    assert "can_sync_woocommerce_stock" in APP_JS
+    assert "can_sync_shopify_stock" in APP_JS
+    assert "can_sync_wix_stock" in APP_JS
+    assert '"stock_mismatch"' in APP_JS
+    assert 'class="btn item-stock-check"' in APP_JS
+    assert 'class="btn primary item-stock-update"' in APP_JS
+    assert '$$(".item-stock-check").forEach' in APP_JS
+    assert '$$(".item-stock-update").forEach' in APP_JS
+    assert 'if (!window.confirm(' in APP_JS
+    assert '"/marketplaces/" + channel + "/stock"' in APP_JS
+    assert '"/marketplaces/" + channel + "/check-stock"' in APP_JS
+    for old_selector in ("item-woo-stock", "item-shopify-stock", "item-woo-check",
+                         "item-shopify-check", "item-marketplace-refresh"):
+        assert old_selector not in APP_JS
+
+
+def test_connections_shows_tasks_and_keeps_verbose_help_collapsed():
+    html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text()
+    assert "Connect accounts and import listings." in html
+    assert 'details class="connection-technical-help"' in APP_JS
+    assert 'class="biblio-photo-manual-id"' in APP_JS
+    assert "Refresh this overview" not in APP_JS
