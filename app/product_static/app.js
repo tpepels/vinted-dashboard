@@ -4581,8 +4581,7 @@ async function connections() {
             + '<button class="btn primary sync" data-c="biblio" type="button">Send changes to BIBLIO</button></div>'
           : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, you can send changed books and review what was transferred.</p>')
         + renderBiblioActivity(biblioActivity, ready)
-        + '<div class="connector-settings-row">' + configure
-        + '<span>Credentials and upload preferences are separate from book management.</span></div>'
+        + '<div class="connector-settings-row">' + configure + '</div>'
         + '</section>';
     }
     if (channel === "vinted") {
@@ -4607,18 +4606,17 @@ async function connections() {
       ? "Authorization needed" : ready ? "Account set up" : connector.configured
         ? "Needs attention" : "Not connected";
     return '<section class="connector connector--other" data-connector-channel="' + name + '">'
-      + '<div class="connector-header"><div><h2>' + display + '</h2><p>'
-      + esc(connector.description) + '</p></div>'
+      + '<div class="connector-header"><div><h2>' + display + '</h2></div>'
       + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">' + statusText + '</span></div>'
       + '<div class="actions">' + configure
       + (connector.sync_available
         ? '<button class="btn sync" data-c="' + name + '" type="button">Import latest data</button>'
         : '') + '</div>'
-      + (connector.sync_available
-        ? '<p class="connector-workflow-hint">Imports listings and supported orders into the dashboard. It does not publish or edit your listings.</p>'
-        : '<p class="connector-workflow-hint">Connect this marketplace to use the supported import functions.</p>')
-      + (connector.note ? '<p class="connector-workflow-hint">' + esc(connector.note) + '</p>' : "")
       + (lastSeen ? '<p class="connector-last-sync">' + lastSeen.slice(3) + '</p>' : '')
+      + '<details class="connection-technical-help"><summary>About this connection</summary>'
+      + '<p class="connector-workflow-hint">' + esc(connector.description) + '</p>'
+      + (connector.note ? '<p class="connector-workflow-hint">' + esc(connector.note) + '</p>' : "")
+      + '<p class="muted">Import reads marketplace data; it does not edit remote listings.</p></details>'
       + '</section>';
   };
   $("#connector-grid").innerHTML = featured.map(connectorHtml).join("");
