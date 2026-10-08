@@ -798,5 +798,5 @@ def test_connections_hides_advanced_tools_and_separates_comparison_from_settings
     assert "biblio-history-panel" in APP_JS
     assert "biblio-recovery-panel" in APP_JS
     assert 'panel.addEventListener("toggle"' in APP_JS
-    assert "data-connector-channel=\\\"biblio\\\"" in APP_JS
+    assert 'data-connector-channel="biblio"' in APP_JS
     assert html.index('id="biblio-compare-panel"') < html.index('id="connector-config"')
