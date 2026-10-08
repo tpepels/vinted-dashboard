@@ -522,7 +522,7 @@ def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert "Advanced recovery" in APP_JS
     assert "Resend all photos" in APP_JS
     assert "Resend all listings" in APP_JS
-    assert "These are dashboard records, not a confirmed count" in APP_JS
+    assert "Prepared does not mean published" in APP_JS
     assert '"/api/app/connectors/biblio/retry-photos"' in APP_JS
     assert '"/api/app/connectors/biblio/full-sync"' in APP_JS
     assert "photos sent " in APP_JS
