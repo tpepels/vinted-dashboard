@@ -176,6 +176,7 @@ def _public_result(result: dict[str, Any] | None) -> dict[str, Any]:
         "photos_total", "photos_skipped", "photo_count", "photo_retry_scheduled",
         "remote", "external_id", "listing_id", "url", "already_complete",
         "message", "skipped", "remote_verified", "quantity", "status",
+        "price_cents", "currency",
     }
     for key, value in (result or {}).items():
         if key in allowed and isinstance(value, (str, int, float, bool, type(None))):
