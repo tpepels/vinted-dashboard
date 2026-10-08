@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app import db, models
 from app.constants import Channel, ItemStatus, ListingStatus
-from app.product_models import BackgroundJob, CrossChannelAction
+from app.product_models import BackgroundJob, CrossChannelAction, MarketplaceOperation
 from app.stock_policy import sale_counts_as_sold
 from app.stock_relations import is_physical
 from app.connectors.workspace_sync import (
@@ -306,6 +306,61 @@ def unlinked_sale_reconciliation(
     }
 
 
+def _cancel_stale_closures(session: Session, item: models.InventoryItem) -> None:
+    """Restore stock safely across ALL sales of this physical item.
+
+    A cancelled or refunded order can restore available stock while a
+    different order's closure is still queued. Never look only at the sale
+    which changed state: the physical item is the shared source of truth.
+    Completed remote closes cannot be undone locally; surface a manual
+    reopening discrepancy instead of pretending they were reverted.
+    """
+    if not is_physical(item) or int(item.quantity or 0) <= 0:
+        return
+    actions = session.execute(
+        select(CrossChannelAction).where(
+            CrossChannelAction.workspace_id == item.workspace_id,
+            CrossChannelAction.inventory_item_id == item.id,
+        )
+    ).scalars().all()
+    for action in actions:
+        if action.status in {"queued", "attention", "error"}:
+            action.status = "cancelled"
+            action.completed_at = utcnow()
+            action.last_error = None
+            # Cancelling at the operation layer releases the unique active
+            # key and prevents workers from invoking a stale destructive job.
+            operations = session.execute(
+                select(MarketplaceOperation).where(
+                    MarketplaceOperation.workspace_id == item.workspace_id,
+                    MarketplaceOperation.channel_listing_id == action.channel_listing_id,
+                    MarketplaceOperation.operation_type == "close",
+                    MarketplaceOperation.status == "queued",
+                )
+            ).scalars().all()
+            for op in operations:
+                if str((op.job_payload or {}).get("action_id") or "") != str(action.id):
+                    continue
+                op.status = "cancelled"
+                op.active_key = None
+                op.completed_at = utcnow()
+                job = session.get(BackgroundJob, op.job_id) if op.job_id else None
+                if job and job.status == "queued":
+                    job.status = "cancelled"
+                    job.completed_at = utcnow()
+        elif action.status in {"success", "acknowledged"}:
+            detail = dict(action.detail or {})
+            detail["needs_reopen"] = True
+            detail["reopen_reason"] = "Physical stock became available after this listing was closed"
+            action.detail = detail
+        elif action.status == "running":
+            # The remote call may be in flight; the worker must recheck stock
+            # and, if already sent, flag manual reopening on completion.
+            detail = dict(action.detail or {})
+            detail["cancel_requested_due_to_stock"] = True
+            action.detail = detail
+
+
 def plan_sale_reconciliation(
     session: Session,
     sale: models.Sale,
@@ -328,16 +383,19 @@ def plan_sale_reconciliation(
             recompute_inventory_item(session, item)
 
     if still_available:
-        pending = session.execute(
-            select(CrossChannelAction).where(
-                CrossChannelAction.trigger_sale_id == sale.id,
-                CrossChannelAction.status.in_(["queued", "running", "attention", "error"]),
-            )
-        ).scalars().all()
-        for action in pending:
-            action.status = "cancelled"
-            action.completed_at = utcnow()
-            action.last_error = None
+        if is_physical(item):
+            _cancel_stale_closures(session, item)
+        else:
+            pending = session.execute(
+                select(CrossChannelAction).where(
+                    CrossChannelAction.trigger_sale_id == sale.id,
+                    CrossChannelAction.status.in_(["queued", "running", "attention", "error"]),
+                )
+            ).scalars().all()
+            for action in pending:
+                action.status = "cancelled"
+                action.completed_at = utcnow()
+                action.last_error = None
         return []
 
     item.quantity = 0
@@ -362,6 +420,19 @@ def plan_sale_reconciliation(
             )
         ).scalar_one_or_none()
         if existing is not None:
+            continue
+        # One remote listing can have several completed or pending orders.
+        # Only one close per listing may be actionable at any moment.
+        already_handled = session.execute(
+            select(CrossChannelAction).where(
+                CrossChannelAction.workspace_id == sale.workspace_id,
+                CrossChannelAction.inventory_item_id == item.id,
+                CrossChannelAction.channel_listing_id == listing.id,
+                CrossChannelAction.action_type == ACTION_TYPE,
+                CrossChannelAction.status.in_(["queued", "running", "attention", "error", "success", "acknowledged"]),
+            )
+        ).scalars().first()
+        if already_handled is not None:
             continue
         mode, status = _action_mode(listing.channel)
         action = CrossChannelAction(
@@ -422,9 +493,8 @@ def reconcile_sale_state(
 
     item = resolve_sale_item(session, sale, external_item_id=external_item_id)
     if item is not None:
-        from app.connectors.workspace_sync import recompute_inventory_item
-
         recompute_inventory_item(session, item)
+        _cancel_stale_closures(session, item)
     return []
 
 
