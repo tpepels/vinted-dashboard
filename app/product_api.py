@@ -1600,8 +1600,26 @@ def item_marketplace_status(
             stale = bool(extra.get("remote_verification_stale")) if is_biblio else False
             match = extra.get("remote_matches_local") if is_biblio else None
             photo_state = str(extra.get("photo_sync_state") or "") if is_biblio else ""
+            is_store_stock = listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY}
+            latest_stock_check = extra.get("stock_last_checked_at") or extra.get("stock_synced_at")
+            stock_check_quantity = extra.get("stock_last_remote_quantity")
+            if stock_check_quantity is None and extra.get("stock_remote_readback_verified"):
+                stock_check_quantity = extra.get("stock_synced_quantity")
+            stock_verification = "not_checked"
+            if is_store_stock and latest_stock_check:
+                if stock_check_quantity is not None and int(stock_check_quantity) != int(item.quantity or 0):
+                    stock_verification = "stock_mismatch"
+                elif (
+                    extra.get("stock_remote_readback_verified")
+                    and stock_check_quantity is not None
+                    and int(stock_check_quantity) == int(item.quantity or 0)
+                ):
+                    stock_verification = "stock_checked"
+                else:
+                    stock_verification = "stock_stale"
             needs_attention = (
                 any(op.status in {"attention", "failed"} for op in recent)
+                or stock_verification in {"stock_mismatch", "stock_stale"}
                 or (is_biblio and (
                     stale or (verified and match is False)
                     or photo_state == "error" or bool(extra.get("photo_sync_error"))
@@ -1626,8 +1644,11 @@ def item_marketplace_status(
                     "matches" if verified and match is True else
                     "differs" if verified and match is False else
                     "compared" if verified else "not_verified"
-                ) if is_biblio else "not_checked",
-                "verified_at": extra.get("remote_verified_at") if is_biblio else None,
+                ) if is_biblio else stock_verification,
+                "verified_at": (
+                    extra.get("remote_verified_at") if is_biblio
+                    else latest_stock_check if is_store_stock else None
+                ),
                 "photo_state": photo_state if is_biblio else None,
                 "photo_error": redact_text(str(extra.get("photo_sync_error") or ""))[:500] if is_biblio else None,
                 "photo_count": len(extra.get("image_urls") or []) if is_biblio else None,
@@ -1737,6 +1758,8 @@ def update_woocommerce_item_stock(
             extra["stock_synced_at"] = utcnow().isoformat()
             extra["stock_synced_quantity"] = quantity
             extra["stock_remote_readback_verified"] = True
+            extra["stock_last_checked_at"] = utcnow().isoformat()
+            extra["stock_last_remote_quantity"] = quantity
             listing.extra = extra
         complete_operation(operation_id, result)
         return {"ok": True, "operation_id": str(operation_id), **result}
@@ -1916,6 +1939,8 @@ def update_shopify_item_stock(
             extra["stock_synced_at"] = utcnow().isoformat()
             extra["stock_synced_quantity"] = quantity
             extra["stock_remote_readback_verified"] = True
+            extra["stock_last_checked_at"] = utcnow().isoformat()
+            extra["stock_last_remote_quantity"] = quantity
             listing.extra = extra
         complete_operation(operation_id, result)
         return {"ok": True, "operation_id": str(operation_id), **result}
