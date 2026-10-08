@@ -114,3 +114,84 @@ table tbody tr{transition:background .12s ease}table tbody tr:hover{background:#
 .market-development-detail-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px}
 .market-development-detail-heading h3{margin:0}
 @media(max-width:700px){.connections-shortcuts>.btn{flex:1 1 160px}.market-development-detail-heading>.btn{width:100%}}
+
+/* Human-centered Connections: everyday work first, advanced recovery on request. */
+#connections>.card,#connections>.connection-task-panel,#connections>#connector-config{margin-bottom:16px}
+#connections .connections-intro-copy{font-size:13px;line-height:1.6;max-width:720px;margin:9px 0 0}
+#connections #connector-grid{grid-template-columns:repeat(2,minmax(0,1fr));padding:18px;align-items:start;gap:14px}
+#connections #connector-other-grid{padding:14px 0;grid-template-columns:repeat(2,minmax(0,1fr))}
+#connections .connector{min-width:0;padding:20px;border-radius:13px;border-color:var(--line);background:#fff}
+#connections .connector--biblio{grid-column:1/-1}
+#connections .connector-header{display:flex;align-items:flex-start;justify-content:space-between;gap:15px}
+#connections .connector-header h2{font-size:19px;margin:0 0 4px;letter-spacing:-.01em}
+#connections .connector-header p{margin:0;min-height:0;font-size:13px;line-height:1.5;max-width:650px}
+#connections .connector-workflow-hint,#connections .connector-last-sync{font-size:12px;line-height:1.55;min-height:0;margin:14px 0 0}
+#connections .connector-settings-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);padding-top:14px;margin-top:18px}
+#connections .connector-settings-row span{font-size:12px;color:var(--muted)}
+#connections .connection-state{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:11px;font-weight:750}
+#connections .connection-state.ready{background:#edf6ef;color:#265d45;border-color:#c7dfce}
+#connections .connection-state.not-ready{background:#faf4e8;color:#775e22;border-color:#e8d8ae}
+#connections .biblio-setup-help{margin:17px 0 8px;font-size:13px;min-height:0}
+#connections .biblio-primary-task{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:19px 0 12px;padding:16px 18px;border-radius:12px;background:var(--soft)}
+#connections .biblio-primary-task strong{display:block;font-size:14px}
+#connections .biblio-primary-task p{font-size:12px;line-height:1.55;min-height:0;margin:5px 0 0;max-width:630px}
+#connections .biblio-primary-task .btn{flex:0 0 auto;max-width:100%}
+#connections .biblio-summary-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+#connections .biblio-summary-stats>div{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;gap:4px}
+#connections .biblio-summary-stats strong{font-size:23px;font-variant-numeric:tabular-nums;line-height:1.2;letter-spacing:-.025em}
+#connections .biblio-summary-stats span{font-size:12px;color:var(--muted);line-height:1.45}
+#connections .biblio-user-note,#connections .biblio-user-warning{margin:11px 0 0!important;min-height:0;font-size:12px;line-height:1.6}
+#connections .biblio-user-warning{border-left:3px solid #b78624;padding:9px 12px;background:#fff9e9}
+#connections .biblio-latest{display:flex;align-items:flex-start;gap:10px;margin:17px 0;border-top:1px solid var(--line);padding:14px 0 0}
+#connections .biblio-latest strong{font-size:13px}
+#connections .biblio-latest p{margin:4px 0 0;min-height:0;font-size:12px;line-height:1.5}
+#connections .biblio-next-actions{display:flex;align-items:center;gap:12px;margin:13px 0 16px;flex-wrap:wrap}
+#connections .biblio-next-actions span{font-size:12px;color:var(--muted);line-height:1.5}
+#connections .biblio-task-panel{border-top:1px solid var(--line)}
+#connections .biblio-task-panel>summary,#connections .connection-task-panel>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 0;cursor:pointer}
+#connections .biblio-task-panel>summary::-webkit-details-marker,#connections .connection-task-panel>summary::-webkit-details-marker{display:none}
+#connections .biblio-task-panel>summary::after,#connections .connection-task-panel>summary::after{content:"+";font-size:23px;font-weight:400;line-height:1;color:var(--muted);flex:0 0 auto}
+#connections .biblio-task-panel[open]>summary::after,#connections .connection-task-panel[open]>summary::after{content:"−"}
+#connections .biblio-task-panel>summary strong,#connections .connection-task-panel>summary strong{display:block;font-size:13px}
+#connections .biblio-task-panel>summary small,#connections .connection-task-panel>summary small{display:block;margin-top:3px;font-size:12px;color:var(--muted);line-height:1.55;font-weight:400}
+#connections .biblio-task-inner{padding:0 2px 16px}
+#connections .biblio-task-inner p{min-height:0;margin:7px 0 12px;font-size:12px;line-height:1.55}
+#connections .biblio-field-label{display:block;font-size:12px;font-weight:750;margin:8px 0 6px}
+#connections .biblio-field-secondary{margin:12px 0 6px!important;color:var(--muted)}
+#connections #biblio-photo-book-select,#connections #biblio-photo-book-id{width:100%;max-width:540px;display:block}
+#connections .biblio-photo-recovery-controls{margin:12px 0;justify-content:flex-start}
+#connections .biblio-photo-inspection-details{padding:12px;background:#f8fbfa;border:1px solid var(--line);border-radius:9px;max-width:760px}
+#connections .biblio-photo-inspection-details>strong{font-size:13px}
+#connections .biblio-photo-inspection-details p{font-size:12px}
+#connections .biblio-recovery-row{display:flex;align-items:center;justify-content:space-between;gap:15px;border:1px solid var(--line);border-radius:9px;padding:12px;margin:8px 0}
+#connections .biblio-recovery-row strong{font-size:13px}
+#connections .biblio-recovery-row p{margin:4px 0 0;font-size:12px}
+#connections .biblio-history-panel .biblio-activity-history{max-height:340px;overflow:auto}
+#connections .biblio-activity-run{padding:12px}
+#connections .biblio-activity-run strong{font-size:12px}
+#connections .biblio-activity-run p,#connections .biblio-activity-run time{font-size:11px}
+#connections .connection-task-panel{padding:0 18px}
+#connections .connection-task-panel>summary{padding:17px 0}
+#connections .connection-task-panel>summary strong{font-size:15px}
+#connections .connection-task-content{padding:0 0 20px;font-size:13px;line-height:1.6;max-width:100%}
+#connections .connection-task-content p{font-size:13px;line-height:1.6}
+#connections .connection-file-label{display:block;font-size:12px;font-weight:750;margin:12px 0 6px}
+#connections #biblio-import-file{width:min(100%,540px)}
+#connections .connection-task-result{padding:12px 14px;margin:13px 0;background:#f7faf9;border:1px solid var(--line);border-radius:10px;line-height:1.6}
+#connections .biblio-comparison-results p{margin:8px 0;line-height:1.5}
+#connections .biblio-comparison-results details{padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}
+#connections .biblio-comparison-results summary{cursor:pointer;font-weight:650}
+#connections .connection-danger-zone{border-top:1px solid var(--line);padding-top:13px;margin-top:15px}
+#connections .connection-danger-zone>summary{cursor:pointer;font-size:13px;font-weight:750}
+#connections .connection-danger-zone .checkline{display:flex;align-items:start;gap:9px}
+#connections .connection-danger-zone .checkline input{margin-top:3px}
+#connections .connection-danger-zone .checkline span{font-size:12px;font-weight:400;line-height:1.5}
+#connections .connection-technical-help{margin:13px 0;font-size:12px}
+#connections .connection-technical-help summary{cursor:pointer;font-weight:700}
+#connections .connection-technical-help p{font-size:12px;line-height:1.55}
+#connections .marketplace-development-panel>summary{font-size:12px}
+#connections .pairing-inline{display:block;margin-top:10px}
+#connections .pairing-inline.hidden{display:none}
+#connections .pairing-inline p{font-size:12px;margin:6px 0 8px}
+@media(max-width:950px){#connections #connector-grid,#connections #connector-other-grid{grid-template-columns:1fr}#connections .connector--biblio{grid-column:auto}}
+@media(max-width:680px){#connections .connector-header{flex-direction:column;gap:9px}#connections .biblio-primary-task,#connections .biblio-recovery-row{flex-direction:column;align-items:stretch}#connections .biblio-summary-stats{grid-template-columns:1fr}#connections .biblio-next-actions{align-items:stretch;flex-direction:column}#connections .biblio-next-actions .btn{width:100%}#connections .biblio-photo-recovery-controls .btn{width:100%;flex:1 1 100%}#connections .connector-settings-row .btn{width:100%}}
