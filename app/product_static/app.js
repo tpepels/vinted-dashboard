@@ -937,7 +937,9 @@ function renderItemMarketplacePanel(data) {
       + (listing.channel === "biblio" ? '<button class="btn item-marketplace-verify" type="button">Compare BIBLIO inventory</button>' : "")
       + (listing.can_sync_woocommerce_stock
         ? '<button class="btn item-woo-stock" type="button">Set WooCommerce stock to '
-          + Number(item.quantity || 0) + '…</button>' : "")
+          + Number(item.quantity || 0) + '…</button>'
+          + '<button class="btn item-woo-check" type="button">Check WooCommerce stock</button>'
+        : "")
       + '</div></div>';
   });
   const operationsMarkup = operations.map(op => {
@@ -1002,7 +1004,29 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-woo-stock").forEach(button => {
+  $$(".item-woo-check").forEach(button => {
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const result = await api(
+          "/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/woocommerce/check-stock",
+          {method: "POST"},
+        );
+        flash(result.matches
+          ? "WooCommerce stock matches the dashboard (" + result.remote_quantity
+            + "). No remote changes were made."
+          : "WooCommerce reports " + result.remote_quantity
+            + " units, while physical stock is " + result.local_quantity
+            + ". Review the difference before updating.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("Could not check WooCommerce stock: " + error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $$(".item-woo-stock").forEach(button => {
     button.onclick = async () => {
       const desired = Number(item.quantity || 0);
       if (!window.confirm("Update the linked WooCommerce simple product to "
