@@ -1558,11 +1558,18 @@ function renderBiblioActivity(activity, operational) {
       const errors = (run.photo_errors || []).length
         ? '<div class="biblio-activity-errors">' + run.photo_errors.map((value) => esc(value)).join("<br>") + "</div>"
         : "";
+      const photoResults = (run.photo_results || []).length
+        ? '<details class="biblio-photo-files"><summary>FTP photo files (' + run.photo_results.length + ' recorded)</summary>'
+          + run.photo_results.map((photo) =>
+            '<div class="' + (photo.status === "error" ? "error" : "muted") + '">'
+            + esc(photo.filename) + ' · ' + esc(photo.status === "error" ? "FAILED" : "FTP sent") + '</div>'
+          ).join("") + '</details>'
+        : "";
       return '<div class="biblio-activity-run">'
         + '<div><strong>' + esc(runStatus.label) + '</strong><span>' + esc(when(run.started_at)) + "</span></div>"
         + '<p>' + esc(biblioActivityDetail(run)) + "</p>"
         + (meta ? '<small>' + meta + "</small>" : "")
-        + errors + "</div>";
+        + errors + photoResults + "</div>";
     }).join("")
     : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
   return '<div class="biblio-activity-compact">'
