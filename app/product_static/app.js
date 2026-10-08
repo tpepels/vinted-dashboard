@@ -1138,6 +1138,31 @@ function renderItemMarketplacePanel(data) {
               + '" type="button">Set stock to ' + Number(item.quantity || 0) + '…</button>'
             : '')
         : '')
+
+      + (listing.can_sync_woocommerce_price
+        ? '<details class="item-price-tools"><summary>Regular price · '
+          + esc(money(item.default_price_cents, item.currency)) + '</summary>'
+          + '<p class="muted">Compare the store price first. Promotions are never changed.</p>'
+          + (listing.price_verification !== "not_checked"
+            ? '<p class="item-price-state">'
+              + (listing.price_verification === "price_checked" ? 'Price matches'
+                : listing.price_verification === "price_mismatch" ? 'Price differs'
+                : 'Previous check is outdated')
+              + (Number.isInteger(listing.remote_price_cents)
+                ? ' · Store ' + esc(money(listing.remote_price_cents, item.currency)) : '')
+              + '</p>' : '')
+          + '<div class="actions"><button class="btn item-price-check" type="button">'
+          + (listing.price_verification === "not_checked" ? 'Check price' : 'Check again')
+          + '</button>'
+          + (listing.price_verification === "price_mismatch"
+              && listing.price_verified_at
+              && Number.isFinite(Date.parse(listing.price_verified_at))
+              && Date.now() - Date.parse(listing.price_verified_at) < 300000
+              && Date.now() >= Date.parse(listing.price_verified_at)
+            ? '<button class="btn primary item-price-update" type="button">Set price to '
+              + esc(money(item.default_price_cents, item.currency)) + '…</button>'
+            : '')
+          + '</div></details>' : '')
       + '</div></div>';
   });
   const operationsMarkup = operations.map(op => {
