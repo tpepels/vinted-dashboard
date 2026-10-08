@@ -1044,9 +1044,9 @@ function renderItemMarketplacePanel(data) {
   $$(".item-woo-stock").forEach(button => {
     button.onclick = async () => {
       const desired = Number(item.quantity || 0);
-      if (!window.confirm("Update the linked WooCommerce simple product to "
+      if (!window.confirm("Update the linked WooCommerce product or individually stock-managed variation to "
         + desired + " available unit(s)? This changes WooCommerce stock only, "
-        + "not the physical stock in this dashboard. The product ID and SKU "
+        + "not the physical stock in this dashboard. The exact remote IDs and SKU "
         + "will be checked before writing.")) return;
       button.disabled = true;
       try {

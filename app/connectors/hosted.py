@@ -710,29 +710,62 @@ def _woo_post(
     return response.json()
 
 
+def _woocommerce_stock_path(external_id: str) -> tuple[str, str, str | None]:
+    """Resolve only known simple-product and parent:variation identities."""
+    identity = str(external_id or "")
+    if re.fullmatch(r"[1-9][0-9]*", identity):
+        return f"products/{identity}", identity, None
+    match = re.fullmatch(r"([1-9][0-9]*):([1-9][0-9]*)", identity)
+    if match:
+        return f"products/{match.group(1)}/variations/{match.group(2)}", match.group(2), match.group(1)
+    raise ValueError("WooCommerce stock needs a numeric remote ID or parent:variation numeric IDs")
+
+
+def _woocommerce_stock_record(
+    values: dict[str, str], external_id: str, expected_sku: str | None,
+) -> tuple[str, dict[str, Any], str, bool]:
+    """Verify the remote product/variation identity before reporting stock."""
+    path, remote_id, parent_id = _woocommerce_stock_path(external_id)
+    parent_status = "publish"
+    if parent_id is not None:
+        parent = _woo_get(values, f"products/{parent_id}")
+        if (not isinstance(parent, dict)
+                or str(parent.get("id") or "") != parent_id
+                or str(parent.get("type") or "").lower() != "variable"):
+            raise ValueError("WooCommerce parent product is missing or no longer variable")
+        parent_status = str(parent.get("status") or "")
+    remote = _woo_get(values, path)
+    if not isinstance(remote, dict) or str(remote.get("id") or "") != remote_id:
+        raise RuntimeError("WooCommerce returned a different product or variation ID")
+    if parent_id is None and str(remote.get("type") or "").lower() != "simple":
+        raise ValueError("Only simple WooCommerce products or linked variations are supported")
+    remote_sku = str(remote.get("sku") or "").strip()
+    known_sku = str(expected_sku or "").strip()
+    if parent_id is not None and not known_sku:
+        raise ValueError("WooCommerce variations require a confirmed linked SKU")
+    if known_sku and remote_sku != known_sku:
+        raise ValueError("WooCommerce SKU no longer matches the linked listing; reconcile before changing stock")
+    return path, remote, parent_status, parent_id is not None
+
+
 def read_woocommerce_workspace_stock(
     workspace_id: uuid.UUID,
     *,
     external_id: str,
     expected_sku: str | None,
 ) -> dict[str, Any]:
-    """Read the exact WooCommerce simple product without changing it."""
-    if not re.fullmatch(r"[1-9][0-9]*", str(external_id or "")):
-        raise ValueError("Only a simple WooCommerce product with a numeric remote ID can be inspected")
+    """Read a verified WooCommerce simple product or parent:variation pair."""
+    _woocommerce_stock_path(external_id)
     values = _credentials(workspace_id, Channel.WOOCOMMERCE)
-    remote = _woo_get(values, f"products/{external_id}")
-    if not isinstance(remote, dict) or str(remote.get("id") or "") != str(external_id):
-        raise RuntimeError("WooCommerce returned a different product ID")
-    if str(remote.get("type") or "").lower() != "simple":
-        raise ValueError("Grouped and variation WooCommerce stock require separate support")
-    remote_sku = str(remote.get("sku") or "").strip()
-    if expected_sku and remote_sku != str(expected_sku).strip():
-        raise ValueError("WooCommerce SKU differs from the linked listing")
+    _, remote, parent_status, variation = _woocommerce_stock_record(
+        values, external_id, expected_sku,
+    )
+    managed = remote.get("manage_stock") is True if variation else bool(remote.get("manage_stock"))
     return {
         "external_id": str(external_id),
         "quantity": _woo_quantity(remote),
-        "manage_stock": bool(remote.get("manage_stock")),
-        "status": _woo_status(remote),
+        "manage_stock": managed,
+        "status": _woo_status(remote, parent_status),
         "stock_status": str(remote.get("stock_status") or "").lower(),
     }
 
@@ -744,37 +777,36 @@ def update_woocommerce_workspace_stock(
     expected_sku: str | None,
     quantity: int,
 ) -> dict[str, Any]:
-    """Explicit stock write to one previously linked WooCommerce simple product.
+    """Write stock to the exact simple product or independently managed variation.
 
-    Check the exact remote product ID, SKU and type *before* updating stock.
-    Read the product back after PUT. A timeout between PUT and readback is
-    deliberately ambiguous; callers must not automatically issue another
-    remote write in that case.
+    Parent-managed and untracked variations are refused. Only the linked
+    record's stock fields are updated; remote readback is mandatory and an
+    ambiguous response cannot trigger an automatic retry.
     """
-    if not re.fullmatch(r"[1-9][0-9]*", str(external_id or "")):
-        raise ValueError("Only a simple WooCommerce product with a numeric remote ID can be updated")
+    _woocommerce_stock_path(external_id)
     if type(quantity) is not int or quantity < 0:
         raise ValueError("Physical stock must be a non-negative whole number")
     values = _credentials(workspace_id, Channel.WOOCOMMERCE)
-    path = f"products/{external_id}"
-    remote = _woo_get(values, path)
-    if not isinstance(remote, dict) or str(remote.get("id") or "") != str(external_id):
-        raise RuntimeError("WooCommerce returned a different product than the linked listing")
-    if str(remote.get("type") or "").lower() != "simple":
-        raise ValueError("Variation/grouped WooCommerce stock updates require a separate adapter")
-    remote_sku = str(remote.get("sku") or "").strip()
-    known_sku = str(expected_sku or "").strip()
-    if known_sku and remote_sku != known_sku:
-        raise ValueError("WooCommerce SKU no longer matches the linked listing; reconcile before changing stock")
-    if bool(remote.get("manage_stock")) and _int(remote.get("stock_quantity")) == quantity:
+    path, remote, parent_status, variation = _woocommerce_stock_record(
+        values, external_id, expected_sku,
+    )
+    if variation and remote.get("manage_stock") is not True:
+        raise ValueError("WooCommerce variation manages stock at parent level or has tracking disabled")
+    if variation and str(remote.get("backorders") or "no").lower() != "no":
+        raise ValueError("WooCommerce variation allows backorders; review this manually")
+    managed = remote.get("manage_stock") is True if variation else bool(remote.get("manage_stock"))
+    desired_status = "instock" if quantity else "outofstock"
+    if (managed
+            and _int(remote.get("stock_quantity")) == quantity
+            and str(remote.get("stock_status") or "").lower() == desired_status):
         return {
             "remote_verified": True, "quantity": quantity, "external_id": str(external_id),
-            "status": _woo_status(remote), "already_complete": True,
+            "status": _woo_status(remote, parent_status), "already_complete": True,
         }
     body = {
         "manage_stock": True,
         "stock_quantity": quantity,
-        "stock_status": "instock" if quantity else "outofstock",
+        "stock_status": desired_status,
     }
     response = requests.put(
         _woocommerce_base(values) + "/wp-json/wc/v3/" + path,
@@ -784,23 +816,22 @@ def update_woocommerce_workspace_stock(
     )
     if response.status_code >= 400:
         raise RuntimeError(f"WooCommerce stock update failed ({response.status_code})")
-    # The response alone is an acknowledgement, not authoritative remote
-    # state; verify by reading exactly the same linked product again.
-    verified = _woo_get(values, path)
-    if not isinstance(verified, dict) or str(verified.get("id") or "") != str(external_id):
-        raise RuntimeError("WooCommerce stock update could not be verified by product ID")
+    _, verified, checked_parent_status, checked_variation = _woocommerce_stock_record(
+        values, external_id, expected_sku,
+    )
     if (
-        not bool(verified.get("manage_stock"))
+        checked_variation != variation
+        or (verified.get("manage_stock") is not True
+            if variation else not bool(verified.get("manage_stock")))
         or _int(verified.get("stock_quantity")) != quantity
-        or str(verified.get("stock_status") or "").lower()
-           != ("instock" if quantity else "outofstock")
+        or str(verified.get("stock_status") or "").lower() != desired_status
     ):
         raise RuntimeError("WooCommerce stock differs after write; inspect the remote listing")
     return {
         "remote_verified": True,
         "quantity": quantity,
         "external_id": str(external_id),
-        "status": _woo_status(verified),
+        "status": _woo_status(verified, checked_parent_status),
         "already_complete": False,
     }
 

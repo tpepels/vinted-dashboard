@@ -852,5 +852,5 @@ def test_woo_stock_sync_is_explicit_and_limited_to_linked_inventory():
     assert "Check WooCommerce stock" in APP_JS
     assert '$(".item-woo-stock").forEach' in APP_JS
     assert '$(".item-woo-check").forEach' in APP_JS
-    assert "The product ID and SKU" in APP_JS
-    assert 'if (!window.confirm("Update the linked WooCommerce simple product to "' in APP_JS
+    assert "The exact remote IDs and SKU" in APP_JS
+    assert 'if (!window.confirm("Update the linked WooCommerce product or individually stock-managed variation to "' in APP_JS

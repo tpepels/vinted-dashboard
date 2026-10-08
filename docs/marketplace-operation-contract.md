@@ -273,7 +273,8 @@ supported, and no BIBLIO FTP acknowledgement is called publication proof.
 
 ## Phase 6: hosted-store update adapter, first supported slice
 
-WooCommerce simple products now offer a **manual, item-level stock sync**.
+WooCommerce simple products and independently stock-managed product variations
+now offer a **manual, item-level stock sync**.
 The dashboard takes quantity only from confirmed physical stock, resolves one
 linked WooCommerce numeric product ID and original SKU, then:
 
@@ -291,7 +292,12 @@ product. **Check WooCommerce stock** performs a GET-only remote observation
 and compares it against current physical inventory. A matching check resolves
 an ambiguous operation as verified; a mismatch records the discrepancy and
 requires an explicit update action. The action is in **Inventory → Marketplaces**
-and cannot be used on provisional stock, grouped/variable products or variations.
+and cannot be used on provisional stock, grouped products, or parent-managed
+variations. Variable products are supported only through an exact linked
+`parent_product_id:variation_id` identity, a confirmed variation SKU, a GET
+of the variable parent, a GET of the specific variation, and subsequent
+independent readback. Variations with disabled or parent-managed stock tracking
+or enabled backorders are refused; no parent inventory is changed.
 
 Shopify linked variants now also have **Check Shopify stock** (read-only) and
 **Set Shopify stock** (explicit write). The adapter requires a confirmed SKU,
@@ -306,6 +312,7 @@ requires `read_products`, `read_inventory` and `write_inventory` permission
 for this operation. No changes to master physical inventory occur.
 
 **Remaining Phase 6 work:** equivalent tested adapters for Wix,
-WooCommerce variants, remote price/detail updates and deletion/close support.
+general WooCommerce variation configuration, remote price/detail updates
+and deletion/close support.
 Import-only stores remain read-only until supported account permissions and
 verified write paths are available.
