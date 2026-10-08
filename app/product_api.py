@@ -1727,7 +1727,7 @@ def _woo_price_link(session, workspace_id: uuid.UUID, item_id: uuid.UUID):
     if not is_physical(item):
         raise HTTPException(status_code=409, detail="Confirm physical stock before changing store prices")
     amount = (item.attributes or {}).get("default_price_cents")
-    if type(amount) is not int or not 0 <= amount <= 2000000:
+    if type(amount) is not int or not 0 < amount <= 2000000:
         raise HTTPException(status_code=409, detail="Set a valid default asking price before checking WooCommerce")
     currency = str(item.currency or "").strip().upper()
     if not re.fullmatch(r"[A-Z]{3}", currency):
