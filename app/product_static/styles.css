@@ -46,3 +46,19 @@ table tbody tr{transition:background .12s ease}table tbody tr:hover{background:#
 
 /* Diagnostics */
 .diagnostics-summary{margin:12px 0}.diagnostics-pills{display:flex;gap:8px;flex-wrap:wrap}.diagnostics-pills span{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fbfcfb;font-size:10px;color:var(--muted)}.diagnostics-pills strong{color:var(--ink)}.diagnostics-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:14px 0 8px}.diagnostics-live-title{display:grid;gap:7px}.diagnostics-level-filters{display:flex;gap:6px;flex-wrap:wrap}.diagnostics-level-filter{appearance:none;border:1px solid #3b4744;border-radius:999px;background:#18201e;color:#8fa09b;padding:4px 9px;font:700 9px/1.2 ui-sans-serif,system-ui,sans-serif;cursor:pointer}.diagnostics-level-filter.error.active{border-color:#e56b66;background:#4a2222;color:#ffb4ae}.diagnostics-level-filter.warning.active{border-color:#d5a441;background:#43351c;color:#ffd479}.diagnostics-level-filter.info.active{border-color:#6698c4;background:#1e3345;color:#a8d4ff}.diagnostics-log-window{margin:0;max-height:440px;min-height:220px;overflow:auto;padding:8px;border:1px solid #263330;border-radius:9px;background:#101614;color:#dce8e4;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.diagnostics-log-line{display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;padding:4px 6px;border-radius:5px;white-space:pre-wrap}.diagnostics-log-line+.diagnostics-log-line{margin-top:2px}.diagnostics-log-level{font-size:9px;font-weight:800;letter-spacing:.04em}.diagnostics-log-error{color:#ffb4ae;background:rgba(180,45,45,.14)}.diagnostics-log-warning{color:#ffd479;background:rgba(190,135,25,.12)}.diagnostics-log-info{color:#a8d4ff;background:rgba(70,130,180,.1)}.diagnostics-log-text{min-width:0}.diagnostics-log-empty{padding:12px;color:#8fa09b;font-style:italic}.diagnostics-log-window::selection{background:#34534c}@media(max-width:700px){.diagnostics-live-head{flex-direction:column}.diagnostics-log-window{min-height:180px;max-height:360px}.diagnostics-log-line{grid-template-columns:52px minmax(0,1fr)}}
+
+/* Per-book BIBLIO photo recovery */
+.biblio-photo-recovery{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--soft)}
+.biblio-photo-recovery>strong{display:block;margin-bottom:9px;font-size:11px}
+.biblio-photo-recovery-controls{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+.biblio-photo-recovery-controls input{flex:1 1 210px;min-width:180px;margin:0}
+.biblio-photo-recovery-controls .btn{flex:0 0 auto}
+#biblio-photo-inspection{margin-top:10px}
+#biblio-photo-inspection .diagnostics-pills{margin:7px 0}
+.biblio-photo-inspection-details>strong{font-size:11px}
+.biblio-photo-inspection-details p{margin:6px 0;font-size:10px;line-height:1.55;overflow-wrap:anywhere}
+.biblio-photo-alert{color:#855411;background:#fff4d6;border-radius:7px;padding:8px}
+.biblio-photo-files{margin-top:5px;font-size:10px}
+.biblio-photo-files summary{cursor:pointer;font-weight:600}
+.biblio-photo-files>div{padding:3px 0;overflow-wrap:anywhere}
+@media(max-width:700px){.biblio-photo-recovery-controls input{flex-basis:100%}.biblio-photo-recovery-controls .btn{flex:1}}
