@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
+from app.stock_relations import record_physical_quantity
 from app.constants import ItemCategory, ItemStatus, KNOWN_ITEM_CATEGORIES
 
 
@@ -449,6 +450,7 @@ def create_master_item(
     )
     session.add(item)
     session.flush()
+    record_physical_quantity(session, item, 1)
     return item
 
 
