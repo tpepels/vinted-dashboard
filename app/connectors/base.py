@@ -123,9 +123,10 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         channel=Channel.SHOPIFY,
         display_name=CHANNEL_DISPLAY_NAMES[Channel.SHOPIFY],
         group="store",
-        description="Shopify product variants and orders through the GraphQL Admin API.",
+        description="Shopify variants and orders through GraphQL; manual readback-verified stock edits for single-location linked variants only.",
         capabilities=frozenset({
             Capability.CREATE_LISTING,
+            Capability.UPDATE_LISTING,
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
             Capability.FETCH_ORDERS,
