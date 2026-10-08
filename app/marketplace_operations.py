@@ -99,7 +99,25 @@ def queue_operation(
         )
     ).scalar_one_or_none()
     if existing is not None:
-        if existing.job_type != job_type or dict(existing.job_payload or {}) != dict(payload or {}):
+        requested = dict(payload or {})
+        stored = dict(existing.job_payload or {})
+        if (
+            channel == "biblio"
+            and operation_type == "photos"
+            and existing.status == "queued"
+            and stored.get("automatic_photo_retry")
+            and requested.get("force_photos")
+            and existing.job_type == job_type
+        ):
+            # A user retry must not be blocked for ~26 hours by the
+            # scheduled low-priority photo pickup. Promote that SAME job.
+            job = session.get(BackgroundJob, existing.job_id)
+            if job is not None and job.status == "queued":
+                existing.job_payload = requested
+                job.payload = {**requested, "operation_id": str(existing.id)}
+                job.available_at = utcnow()
+                return existing, False
+        if existing.job_type != job_type or stored != requested:
             raise ValueError("Another operation on this listing is still active")
         return existing, False
 
