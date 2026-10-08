@@ -975,24 +975,23 @@ function renderItemMarketplacePanel(data) {
     + '</strong> physical units in the dashboard · ' + listings.length + ' marketplace links'
     + '<div class="actions"><button class="btn primary item-marketplace-publish" type="button">Publish to another marketplace</button>'
     + '<button class="btn item-marketplace-edit" type="button">Edit this item</button>'
-    + '<button class="btn item-marketplace-refresh" type="button">Refresh this overview</button></div></div>'
+    + '</div></div>'
     + (rows.length ? '<div class="item-marketplace-list">' + rows.join("") + '</div>'
       : '<p class="muted">No marketplace listings are linked to this item yet. Use Publish to review available channels.</p>')
     + (closing.length ? '<div class="item-marketplace-closure"><strong>Sold-out follow-up</strong>'
       + closing.map(action => '<p>' + esc(action.channel.toUpperCase())
         + ': ' + esc(action.status) + ' (' + esc(action.type) + ')</p>').join("") + '</div>' : '')
     + '<details class="item-marketplace-history"><summary>Recent operations (' + operations.length + ')</summary>'
-    + '<p>These are local attempts and transfer results; sending does not prove a listing is publicly visible.</p>'
+    + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
-    + '<p class="item-marketplace-footnote">Check stock before changing it. Updates to supported stores '
-    + 'change marketplace quantities only. BIBLIO listing changes are sent from Connections.</p>';
+    + '<p class="item-marketplace-footnote">Check stock before updating. Supported stores '
+    + 'change marketplace quantities only. Send BIBLIO changes from Connections.</p>';
   const itemId = item.id;
   $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
   $(".item-marketplace-edit").onclick = () => {
     const original = state.inventoryItems.find(row => row.id === itemId);
     if (original) openItemForm(original);
   };
-  $(".item-marketplace-refresh").onclick = () => openItemMarketplaces(itemId);
   $$(".item-marketplace-photos").forEach(button => {
     button.onclick = async () => {
       state.biblioPhotoTarget = button.dataset.book;
@@ -1861,8 +1860,8 @@ function renderBiblioActivity(activity, operational) {
       + '<div class="biblio-task-inner">'
       + '<label class="biblio-field-label" for="biblio-photo-book-select">Choose a BIBLIO book</label>'
       + '<select id="biblio-photo-book-select"><option value="">Loading books when opened…</option></select>'
-      + '<p class="biblio-field-secondary">Or enter a BIBLIO Book ID (for example VINTED-10253402699).</p>'
-      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '">'
+      + '<details class="biblio-photo-manual-id"><summary>Enter a book ID instead</summary>'
+      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '"></details>'
       + '<div class="actions biblio-photo-recovery-controls">'
       + '<button id="biblio-inspect-photos" class="btn" type="button">Check this book’s photos</button>'
       + '<button id="biblio-retry-failed-photos" class="btn" type="button" disabled>Retry failed photo files…</button>'
@@ -4577,7 +4576,7 @@ async function connections() {
           ? '<div class="biblio-primary-task"><div><strong>' + (pending > 0
               ? pending + ' listing change' + (pending === 1 ? '' : 's') + ' waiting to be sent'
               : 'Send new changes when ready') + '</strong>'
-            + '<p>Sends changed books and sold/out-of-stock updates to BIBLIO, plus photos that need uploading. '
+            + '<p>Sends changed listings and photos. ' 
             + 'It does not resend unchanged listings or confirm they are visible to buyers.</p></div>'
             + '<button class="btn primary sync" data-c="biblio" type="button">Send changes to BIBLIO</button></div>'
           : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, you can send changed books and review what was transferred.</p>')
