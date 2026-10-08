@@ -398,7 +398,7 @@ function activateResizableTable(table) {
       || table.classList.contains("stock-scan-table")) return;
   tableResizeSeen.add(table);
   const headers = Array.from(row.cells);
-  const labels = headers.map(cell => cell.textContent.replace(/\\s+/g, " ").trim());
+  const labels = headers.map(cell => cell.textContent.replace(/\s+/g, " ").trim());
   table.classList.add("table-resizable");
   const container = table.closest(".table-wrap");
   if (container && !container.hasAttribute("tabindex")) {
@@ -423,6 +423,7 @@ function activateResizableTable(table) {
     handle.setAttribute("aria-label", "Resize " + (labels[column] || "column " + (column + 1)));
     handle.setAttribute("aria-valuemin", String(TABLE_MIN_COLUMN_WIDTH));
     handle.setAttribute("aria-valuemax", String(TABLE_MAX_COLUMN_WIDTH));
+    if (saved) handle.setAttribute("aria-valuenow", String(saved[column]));
     handle.title = "Drag or use arrow keys to resize; double-click to reset";
     header.appendChild(handle);
     let drag = null;
