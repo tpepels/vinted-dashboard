@@ -276,8 +276,8 @@ def start_inline(
             "running", "queued", "attention", "needs_verification"
         ):
             raise ValueError(
-                "A previous publish may already exist remotely. Verify the listing "
-                "before attempting another create."
+                f"A previous {operation_type} may already have reached the marketplace. "
+                "Check the remote listing before another write."
             )
         op = MarketplaceOperation(
             workspace_id=workspace_id,
