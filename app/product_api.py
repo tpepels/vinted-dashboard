@@ -1657,7 +1657,8 @@ def item_marketplace_status(
                 "can_sync_woocommerce_stock": (
                     listing.channel == Channel.WOOCOMMERCE
                     and is_physical(item)
-                    and bool(re.fullmatch(r"[1-9][0-9]*", str(listing.external_id or "")))
+                    and bool(re.fullmatch(r"(?:[1-9][0-9]*:)?[1-9][0-9]*", str(listing.external_id or "")))
+                    and (":" not in str(listing.external_id) or bool(str(listing.external_sku or "").strip()))
                 ),
                 "can_sync_shopify_stock": (
                     listing.channel == Channel.SHOPIFY
@@ -1692,11 +1693,7 @@ def update_woocommerce_item_stock(
     item_id: uuid.UUID,
     context: RequestContext = Depends(require_write_context),
 ):
-    """Explicitly synchronize one confirmed physical quantity to WooCommerce.
-
-    A linked SKU and remote product ID must agree. No implicit updates to
-    other channels or master quantity are made here.
-    """
+    """Update the linked WooCommerce simple product or stock-managed variation."""
     with db.session_scope() as session:
         item = session.get(models.InventoryItem, item_id)
         if item is None or item.workspace_id != context.workspace.id:
@@ -1713,8 +1710,10 @@ def update_woocommerce_item_stock(
         if len(listings) != 1:
             raise HTTPException(status_code=409, detail="Expected exactly one linked WooCommerce listing")
         listing = listings[0]
-        if not re.fullmatch(r"[1-9][0-9]*", str(listing.external_id or "")):
-            raise HTTPException(status_code=409, detail="Only simple WooCommerce product IDs are supported")
+        if not re.fullmatch(r"(?:[1-9][0-9]*:)?[1-9][0-9]*", str(listing.external_id or "")):
+            raise HTTPException(status_code=409, detail="Expected a WooCommerce product ID or parent:variation IDs")
+        if ":" in str(listing.external_id) and not str(listing.external_sku or "").strip():
+            raise HTTPException(status_code=409, detail="A linked variation SKU is required")
         external_id, expected_sku = listing.external_id, listing.external_sku
         quantity = int(item.quantity or 0)
         listing_id = listing.id
