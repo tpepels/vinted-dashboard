@@ -4274,45 +4274,94 @@ async function connections() {
   });
   const other = state.connectors.filter(connector => !featured.includes(connector));
   const connectorHtml = (connector) => {
-    const connected = connector.status === "connected";
-    const statusClass = connected ? "status-ok" : (connector.configured ? "status-warn" : "");
+    const channel = connector.channel;
+    const ready = Boolean(connector.operational);
+    const display = esc(connector.display_name);
+    const name = esc(channel);
+    const lastSeen = connector.last_synced_at ? " · last import " + esc(when(connector.last_synced_at)) : "";
+    const configure = connectorSchemas[channel]
+      ? '<button class="btn configure" data-c="' + name + '" type="button">'
+        + (connector.configured ? 'Connection settings' : 'Set up connection') + '</button>' : '';
+    if (channel === "biblio") {
+      const health = biblioActivity?.health || {};
+      const pending = Number(health.inventory_changes_pending || 0)
+        + Number(health.deletes_pending || 0);
+      return '<section class="connector connector--biblio" data-connector-channel="biblio" aria-label="BIBLIO">'
+        + '<div class="connector-header"><div><h2>BIBLIO</h2><p>Send and maintain book listings in your BIBLIO seller account.</p></div>'
+        + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">'
+        + (ready ? 'Account set up' : 'Setup required') + '</span></div>'
+        + (ready
+          ? '<div class="biblio-primary-task"><div><strong>' + (pending > 0
+              ? pending + ' listing change' + (pending === 1 ? '' : 's') + ' waiting to be sent'
+              : 'Send new changes when ready') + '</strong>'
+            + '<p>Sends changed books and sold/out-of-stock updates to BIBLIO, plus photos that need uploading. '
+            + 'It does not resend unchanged listings or confirm they are visible to buyers.</p></div>'
+            + '<button class="btn primary sync" data-c="biblio" type="button">Send changes to BIBLIO</button></div>'
+          : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, you can send changed books and review what was transferred.</p>')
+        + renderBiblioActivity(biblioActivity, ready)
+        + '<div class="connector-settings-row">' + configure
+        + '<span>Credentials and upload preferences are separate from book management.</span></div>'
+        + '</section>';
+    }
+    if (channel === "vinted") {
+      const paired = (devices.devices || []).filter(device => !device.revoked).length;
+      return '<section class="connector connector--vinted" data-connector-channel="vinted" aria-label="Vinted">'
+        + '<div class="connector-header"><div><h2>Vinted</h2><p>Your Vinted data comes from the Chrome browser extension while you are signed in to Vinted.</p></div>'
+        + '<span class="connection-state ' + (paired ? 'ready' : 'not-ready') + '">'
+        + (paired ? paired + ' browser' + (paired === 1 ? '' : 's') + ' paired' : 'Browser not paired') + '</span></div>'
+        + '<div class="actions"><button class="btn pair" type="button">' + (paired ? 'Pair another browser' : 'Pair a Chrome browser') + '</button>'
+        + '<a class="btn" href="' + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
+        + '">Download Chrome extension</a></div>'
+        + '<div class="pairing-inline hidden"><p>Enter this code in the Chrome extension within 10 minutes:</p>'
+        + '<strong class="pair-code pair-code-inline"></strong></div>'
+        + '<p class="connector-workflow-hint">Pairing allows uploads; it does not start one. Open Vinted with the extension active to collect new listings and sales. If Vinted has not updated recently, check the extension.</p>'
+        + '</section>';
+    }
     const statusText = connector.authorization_required
-      ? "Authorization required"
-      : (connected
-        ? "Connected"
-        : (connector.configured ? "Configured - not synced yet" : "Not configured"));
-    return '<div class="connector" data-connector-channel="' + esc(connector.channel) + '"><h2>' + esc(connector.display_name) + "</h2><p>"
-      + esc(connector.description) + '</p><div class="meta ' + statusClass + '">'
-      + statusText
-      + (connector.last_synced_at ? " · " + esc(when(connector.last_synced_at)) : "")
-      + '</div><div class="actions">'
-      + (connector.channel === "vinted"
-        ? '<button class="btn primary pair">Pair Chrome</button><a class="btn" href="'
-          + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
-          + '">Download bridge v' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</a>'
-          + '<div class="pairing-inline hidden"><span class="eyebrow">PAIR CODE</span>'
-          + '<strong class="pair-code pair-code-inline"></strong>'
-          + '<small>Enter this in Chrome Bridge. Expires in 10 minutes.</small></div>'
-        : "")
-      + (connectorSchemas[connector.channel]
-        ? '<button class="btn configure" data-c="' + esc(connector.channel) + '">Configure</button>'
-        : "")
+      ? "Authorization needed" : ready ? "Account set up" : connector.configured
+        ? "Needs attention" : "Not connected";
+    return '<section class="connector connector--other" data-connector-channel="' + name + '">'
+      + '<div class="connector-header"><div><h2>' + display + '</h2><p>'
+      + esc(connector.description) + '</p></div>'
+      + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">' + statusText + '</span></div>'
+      + '<div class="actions">' + configure
       + (connector.sync_available
-        ? '<button class="btn sync" data-c="' + esc(connector.channel) + '">'
-          + (connector.channel === "biblio" ? "Sync changes" : "Queue sync") + "</button>"
-        : "")
-      + "</div>"
-      + (connector.note ? '<div class="connector-note">' + esc(connector.note) + "</div>" : "")
-      + (connector.channel === "vinted" ? '<p class="connector-workflow-hint">Listing updates arrive through the Chrome Bridge while signed in to Vinted. Pairing does not start a server-side sync.</p>' : "")
-      + (connector.channel === "biblio" ? '<p class="connector-workflow-hint">Sync changes sends modified records by FTP. For a new book, use Inventory → Publish to BIBLIO; successful transfer is not remote publication confirmation.</p>' : "")
-      + (connector.channel !== "vinted" && connector.channel !== "biblio" && connector.sync_available ? '<p class="connector-workflow-hint">Queue sync imports available listings and orders; it does not publish or update items.</p>' : "")
-      + (connector.channel === "biblio" ? renderBiblioActivity(biblioActivity, connector.operational) : "")
-      + "</div>";
+        ? '<button class="btn sync" data-c="' + name + '" type="button">Import latest data</button>'
+        : '') + '</div>'
+      + (connector.sync_available
+        ? '<p class="connector-workflow-hint">Imports listings and supported orders into the dashboard. It does not publish or edit your listings.</p>'
+        : '<p class="connector-workflow-hint">Connect this marketplace to use the supported import functions.</p>')
+      + (connector.note ? '<p class="connector-workflow-hint">' + esc(connector.note) + '</p>' : "")
+      + (lastSeen ? '<p class="connector-last-sync">' + lastSeen.slice(3) + '</p>' : '')
+      + '</section>';
   };
   $("#connector-grid").innerHTML = featured.map(connectorHtml).join("");
   $("#connector-other-grid").innerHTML = other.map(connectorHtml).join("");
   $("#other-marketplaces-count").textContent = String(other.length);
   $("#other-marketplaces").classList.toggle("hidden", other.length === 0);
+  $("#biblio-compare-panel").classList.toggle("hidden",
+    !state.connectors.some(connector => connector.channel === "biblio" && connector.operational)
+  );
+  const openCompare = $(".biblio-open-compare");
+  if (openCompare) openCompare.onclick = () => {
+    const panel = $("#biblio-compare-panel");
+    panel.open = true;
+    panel.scrollIntoView({behavior:"smooth", block:"start"});
+  };
+  const trackedPanels = [
+    [".biblio-photos-panel", "biblioPhotoExpanded"],
+    [".biblio-history-panel", "biblioActivityExpanded"],
+    [".biblio-recovery-panel", "biblioRecoveryExpanded"],
+  ];
+  trackedPanels.forEach(([selector, key]) => {
+    const panel = $(selector);
+    if (!panel) return;
+    panel.addEventListener("toggle", () => {
+      state[key] = panel.open;
+      if (key === "biblioPhotoExpanded" && panel.open) loadBiblioPhotoChoices();
+    });
+  });
+  if (state.biblioPhotoExpanded) loadBiblioPhotoChoices();
 
   document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
   $$(".configure").forEach((button) => {
@@ -4327,16 +4376,6 @@ async function connections() {
       } catch (error) {
         flash(error.message, true);
       }
-    };
-  });
-  $$(".biblio-activity-toggle").forEach((button) => {
-    button.onclick = () => {
-      const history = button.closest(".biblio-activity-compact")?.querySelector(".biblio-activity-history");
-      if (!history) return;
-      const opening = history.classList.contains("hidden");
-      state.biblioActivityExpanded = opening;
-      history.classList.toggle("hidden", !opening);
-      button.textContent = opening ? "Hide activity" : "View activity";
     };
   });
   $$(".biblio-retry-photos").forEach((button) => {
