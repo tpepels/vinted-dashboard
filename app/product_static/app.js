@@ -1480,11 +1480,11 @@ function biblioActivityDetail(row) {
 function biblioPhotoInspectionHtml() {
   const info = state.biblioPhotoInspection;
   if (state.biblioPhotoError) return '<p class="error">' + esc(state.biblioPhotoError) + '</p>';
-  if (!info) return '<p class="muted">Enter the exact BIBLIO Book ID to inspect its local photo sources and FTP history.</p>';
+  if (!info) return '<p class="muted">Choose a book, or enter its BIBLIO Book ID, to see what photos the dashboard has and what was last sent.</p>';
   const known = Number(info.biblio_source_photos || 0);
   const vinted = info.vinted_source_photos;
   const difference = vinted != null && Number(vinted) !== known
-    ? '<p class="biblio-photo-alert">Vinted and staged BIBLIO photo counts differ. A targeted retry first refreshes the source data.</p>'
+    ? '<p class="biblio-photo-alert">Vinted and staged BIBLIO photo counts differ. Resending this book will refresh the source first.</p>'
     : "";
   const job = info.job
     ? '<p class="muted">Most recent targeted job: ' + esc(info.job.status)
@@ -1494,18 +1494,53 @@ function biblioPhotoInspectionHtml() {
   return '<div class="biblio-photo-inspection-details">'
     + '<strong>' + esc(info.title || info.book_id) + '</strong>'
     + '<div class="diagnostics-pills">'
-    + '<span>Staged for BIBLIO <strong>' + known + '</strong></span>'
-    + '<span>Vinted source <strong>' + esc(vinted == null ? "unknown" : vinted) + '</strong></span>'
-    + '<span>Last FTP batch <strong>' + esc(info.last_ftp_photo_count ?? "unrecorded") + '</strong></span>'
+    + '<span>Saved in dashboard <strong>' + known + '</strong></span>'
+    + '<span>Available on Vinted <strong>' + esc(vinted == null ? "unknown" : vinted) + '</strong></span>'
+    + '<span>Last sent count <strong>' + esc(info.last_ftp_photo_count ?? "unrecorded") + '</strong></span>'
     + '</div>'
     + difference
-    + '<p class="muted">Expected FTP names: ' + esc((info.filenames || []).join(", ") || "none") + '</p>'
-    + '<p class="muted">Photo state: ' + esc(info.photo_state || "not synced")
+    + '<details class="biblio-photo-files"><summary>Technical file names</summary><p>' + esc((info.filenames || []).join(", ") || "None") + '</p></details>'
+    + '<p class="muted">Dashboard transfer status: ' + esc(info.photo_state || "not sent")
     + (info.last_ftp_photo_at ? ' · last FTP ' + esc(when(info.last_ftp_photo_at)) : '') + '</p>'
     + (info.photo_error ? '<p class="error">' + esc(info.photo_error) + '</p>' : '')
     + job
-    + '<p class="muted">FTP uploads cannot prove that BIBLIO has processed or published all images. Compare with BIBLIO’s image history.</p>'
+    + '<p class="muted">These counts describe the dashboard and its file transfers, not pictures visible to buyers. Check the book on BIBLIO to confirm the result.</p>'
     + '</div>';
+}
+
+async function loadBiblioPhotoChoices() {
+  const select = $("#biblio-photo-book-select");
+  if (!select) return;
+  if (state.biblioBookChoices === null) {
+    select.innerHTML = '<option value="">Loading your BIBLIO books…</option>';
+    try {
+      const response = await api("/api/app/listings?channel=biblio");
+      state.biblioBookChoices = (response.listings || [])
+        .filter(book => book.status === "active" && Number(book.quantity || 0) > 0)
+        .sort((a,b) => String(a.title || "").localeCompare(String(b.title || "")));
+    } catch (error) {
+      select.innerHTML = '<option value="">Could not load books. Enter a Book ID below.</option>';
+      return;
+    }
+  }
+  select.innerHTML = '<option value="">Choose a book by title…</option>'
+    + state.biblioBookChoices.map(book =>
+      '<option value="' + esc(book.external_id) + '"'
+      + (state.biblioPhotoTarget === book.external_id ? ' selected' : '') + '>'
+      + esc(book.title || "Untitled") + ' (' + esc(book.external_id) + ')</option>'
+    ).join("");
+}
+
+function resetBiblioPhotoInspection(value) {
+  state.biblioPhotoTarget = value;
+  if (value !== state.biblioPhotoInspection?.book_id) {
+    state.biblioPhotoInspection = null;
+    state.biblioPhotoError = "";
+    const retry = $("#biblio-retry-listing-photos");
+    if (retry) retry.disabled = true;
+    const report = $("#biblio-photo-inspection");
+    if (report) report.innerHTML = biblioPhotoInspectionHtml();
+  }
 }
 
 async function inspectBiblioPhotoTarget() {
