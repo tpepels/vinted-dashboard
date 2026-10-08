@@ -93,6 +93,16 @@ def test_uncertain_price_write_requires_price_read_not_stock_read(monkeypatch):
         op=session.execute(select(MarketplaceOperation)).scalar_one()
         assert op.status=="attention"
         assert op.job_payload["price_cents"]==1125
+    monkeypatch.setattr("app.product_api.read_woocommerce_workspace_stock",
+        lambda *a,**kw:{"manage_stock":True,"quantity":1,
+                         "stock_status":"instock","status":ListingStatus.ACTIVE})
+    checked_stock=client.post(
+        f"/api/app/inventory/{item_id}/marketplaces/woocommerce/check-stock",
+        headers=headers)
+    assert checked_stock.status_code==200,checked_stock.text
+    with db.session_scope() as session:
+        op=session.execute(select(MarketplaceOperation)).scalar_one()
+        assert op.status=="attention", "Stock reads must never release uncertain price writes"
     monkeypatch.setattr("app.product_api.read_woocommerce_workspace_price",
                         lambda *a,**kw:{"regular_price_cents":1125})
     checked=client.post(f"/api/app/inventory/{item_id}/marketplaces/woocommerce/check-price",
