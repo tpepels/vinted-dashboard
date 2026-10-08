@@ -75,13 +75,13 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Book connector. FTP is locked to BIBLIO's documented ftp.biblio.com host/root. The connector tries verified FTPS first. Because BIBLIO publicly documents standard FTP rather than FTPS, legacy plain FTP is available only with explicit opt-in and is otherwise refused. Only changed inventory is sent. The extended BIBLIO format is used automatically, including subtitle, publisher, edition, binding, language, publication date, pages and condition. Photos are converted to JPG and named from the BIBLIO Book ID. For multiple photos, BIBLIO can map the BookID.jpg, BookID_1.jpg, BookID_2.jpg, etc. filename convention for your seller account.",
+    help: "Enter the FTP credentials provided for your BIBLIO seller account. These settings let the dashboard send book information and photos. Saving them does not upload any listings. Technical connection and photo-format details are available below.",
     fields: [
-      ["username", "FTP username", "", "text"],
-      ["password", "FTP password", "", "password"],
-      ["filename_prefix", "Upload filename prefix", "reseller-dashboard", "text"],
-      ["allow_plain_ftp", "Allow legacy plain FTP if verified FTPS is unavailable (credentials and uploads are unencrypted in transit)", "", "checkbox"],
-      ["auto_sync", "Automatically sync changed BIBLIO listings after Vinted browser updates", "", "checkbox"],
+      ["username", "BIBLIO FTP username", "", "text"],
+      ["password", "BIBLIO FTP password", "", "password"],
+      ["filename_prefix", "File name prefix (optional)", "reseller-dashboard", "text"],
+      ["allow_plain_ftp", "Allow unencrypted FTP only if BIBLIO does not support encrypted FTPS (less secure)", "", "checkbox"],
+      ["auto_sync", "Automatically send changed BIBLIO listings after new Vinted updates", "", "checkbox"],
     ],
   },
   ebay: {
@@ -4647,54 +4647,101 @@ function biblioInventoryForm(file, authoritative = false) {
 }
 
 function biblioReconciliationText(result) {
-  const parts = [
-    (result.matched_clean || 0) + " matching",
-    (result.mismatched || 0) + " mismatching",
-    (result.remote_only || 0) + " remote-only",
-    (result.missing_local || 0) + " local-only",
-  ];
-  return parts.join(" · ");
+  return (Number(result.matched_clean || 0)) + " the same in both"
+    + " · " + Number(result.mismatched || 0) + " with different details"
+    + " · " + Number(result.remote_only || 0) + " on BIBLIO only"
+    + " · " + Number(result.missing_local || 0) + " in dashboard only";
 }
+
+function biblioComparisonHtml(result) {
+  const different = (result.mismatch_samples || []).slice(0, 12)
+    .map(row => '<li>' + esc(row.book_id) + ': ' + esc((row.fields || []).join(", ")) + '</li>')
+    .join("");
+  const warnings = Number(result.mismatched || 0) + Number(result.remote_only || 0)
+    + Number(result.missing_local || 0);
+  return '<div class="biblio-comparison-results">'
+    + '<strong>Comparison finished · ' + Number(result.remote_active || 0)
+    + ' active books in the BIBLIO file</strong>'
+    + '<p>' + esc(biblioReconciliationText(result)) + '</p>'
+    + (warnings
+      ? '<p>These are differences to review, not automatic errors or proof a photo is missing.</p>'
+      : '<p>Book identifiers and compared details match. Photos still need checking on BIBLIO.</p>')
+    + (different ? '<details><summary>See books with different details</summary><ul>' + different + '</ul></details>' : "")
+    + (result.remote_only_ids?.length
+      ? '<details><summary>Books only in the BIBLIO file</summary><p>'
+        + esc(result.remote_only_ids.join(", ")) + '</p></details>' : '')
+    + (result.missing_local_ids?.length
+      ? '<details><summary>Books only in the dashboard</summary><p>'
+        + esc(result.missing_local_ids.join(", ")) + '</p></details>' : '')
+    + '<p class="muted">No book descriptions, prices or stock quantities were changed by this comparison.</p>'
+    + '</div>';
+}
+
+const biblioImportInput = $("#biblio-import-file");
+if (biblioImportInput) biblioImportInput.onchange = () => {
+  state.biblioCompareCheckedFile = null;
+  state.biblioCompareResult = null;
+  $("#import-biblio").disabled = true;
+  $("#biblio-compare-result").textContent = "File selected. Compare it first to see what differs.";
+};
 
 $("#verify-biblio").onclick = async () => {
   const file = $("#biblio-import-file").files[0];
-  if (!file) return flash("Choose a BIBLIO inventory download first.", true);
-  $("#connector-config-status").textContent = "Verifying BIBLIO inventory without changing local stock…";
+  if (!file) return flash("Choose an inventory file downloaded from BIBLIO first.", true);
+  const button = $("#verify-biblio");
+  const message = $("#biblio-compare-result");
+  button.disabled = true;
+  $("#import-biblio").disabled = true;
+  state.biblioCompareCheckedFile = null;
+  state.biblioCompareResult = null;
+  message.textContent = "Comparing the BIBLIO file with your dashboard…";
   try {
     const result = await api("/api/app/connectors/biblio/verify", {
       method: "POST",
       body: biblioInventoryForm(file),
     });
-    $("#connector-config-status").textContent = "Verified " + result.remote_active
-      + " active BIBLIO listings · " + biblioReconciliationText(result) + ".";
-    flash("BIBLIO verification complete; no inventory was changed.");
-    await connections();
+    state.biblioCompareCheckedFile = file;
+    state.biblioCompareResult = result;
+    $("#import-biblio").disabled = false;
+    message.innerHTML = biblioComparisonHtml(result);
   } catch (error) {
-    $("#connector-config-status").textContent = error.message;
+    message.textContent = "Comparison failed: " + error.message;
+    flash(error.message, true);
+  } finally {
+    button.disabled = false;
   }
 };
 
 $("#import-biblio").onclick = async () => {
   const file = $("#biblio-import-file").files[0];
-  if (!file) return flash("Choose a BIBLIO inventory download first.", true);
+  if (!file || state.biblioCompareCheckedFile !== file) {
+    return flash("Compare the selected BIBLIO file before applying it.", true);
+  }
   const authoritative = Boolean($("#biblio-import-authoritative")?.checked);
-  if (authoritative && !window.confirm(
-    "This will treat the file as BIBLIO's COMPLETE active inventory and mark local BIBLIO listings missing from it inactive. Continue?"
-  )) return;
-  $("#connector-config-status").textContent = authoritative
-    ? "Applying complete BIBLIO active-inventory snapshot…"
-    : "Safely merging BIBLIO inventory; omitted local rows will not be deactivated…";
+  const message = authoritative
+    ? "This changes dashboard listing records using the BIBLIO file. Because you selected COMPLETE inventory, books missing from that file will also be marked inactive locally. This does NOT edit BIBLIO. Continue?"
+    : "This imports BIBLIO listing information into your dashboard. Books missing from the file remain unchanged. This does NOT edit BIBLIO. Continue?";
+  if (!window.confirm(message)) return;
+  const button = $("#import-biblio");
+  const resultBox = $("#biblio-compare-result");
+  button.disabled = true;
+  resultBox.textContent = "Updating dashboard listing records from the selected BIBLIO file…";
   try {
     const result = await api("/api/app/connectors/biblio/import", {
       method: "POST",
       body: biblioInventoryForm(file, authoritative),
     });
-    $("#connector-config-status").textContent = (authoritative ? "Applied complete snapshot. " : "Merged inventory. ")
-      + biblioReconciliationText(result) + ".";
-    flash(authoritative ? "BIBLIO snapshot reconciled." : "BIBLIO inventory merged safely.");
+    resultBox.innerHTML = '<strong>BIBLIO file applied to the dashboard.</strong>'
+      + '<p>' + esc(biblioReconciliationText(result)) + '</p>'
+      + '<p>This changed local BIBLIO listing records, not your live BIBLIO account.</p>';
+    state.biblioCompareCheckedFile = null;
+    state.biblioCompareResult = null;
+    flash("Dashboard listing records updated. No files were sent to BIBLIO.");
     await connections();
   } catch (error) {
-    $("#connector-config-status").textContent = error.message;
+    resultBox.textContent = "Could not apply file: " + error.message;
+    button.disabled = false;
+    flash(error.message, true);
   }
 };
 
