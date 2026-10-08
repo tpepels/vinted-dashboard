@@ -166,3 +166,73 @@ def test_empty_source_photos_cannot_queue_retry():
         json={"book_id": "VINTED-10253402699"},
     )
     assert response.status_code == 409, response.text
+
+
+def test_failed_only_retry_requires_partial_ftp_evidence_and_scopes_job_to_book():
+    from app.connectors.hosted import biblio_photo_file_signature
+    import uuid
+
+    client, csrf = register("selective-photo-recovery@example.test")
+    response = client.put(
+        "/api/app/connectors/biblio/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {"username": "seller", "password": "secret"}},
+    )
+    assert response.status_code == 200, response.text
+    with db.session_scope() as session:
+        ws = session.execute(select(models.Membership)).scalar_one().workspace_id
+    listing_id = make_book(ws, book_id="BK-FAILED", count=3, source_count=3)
+    with db.session_scope() as session:
+        listing = session.get(models.ChannelListing, uuid.UUID(listing_id))
+        attrs = dict(listing.extra or {})
+        attrs["photo_sync_state"] = "error"
+        attrs["photo_sync_error"] = "second image transfer failed"
+        attrs["photo_file_receipts"] = {
+            "BK-FAILED.jpg": biblio_photo_file_signature(
+                "BK-FAILED", 0, "https://images1.vinted.net/t/p0.jpg"),
+            "BK-FAILED_2.jpg": biblio_photo_file_signature(
+                "BK-FAILED", 2, "https://images1.vinted.net/t/p2.jpg"),
+        }
+        listing.extra = attrs
+    preflight = client.get(
+        "/api/app/connectors/biblio/photo-status", params={"book_id": "BK-FAILED"},
+    )
+    assert preflight.status_code == 200, preflight.text
+    info = preflight.json()
+    assert info["successful_file_transfers"] == 2
+    assert info["unconfirmed_file_transfers"] == 1
+    assert [row["filename"] for row in info["file_progress"] if not row["sent_to_ftp"]] == ["BK-FAILED_1.jpg"]
+
+    queued = client.post(
+        "/api/app/connectors/biblio/retry-listing-photos",
+        headers={"X-CSRF-Token": csrf},
+        json={"book_id": "BK-FAILED", "failed_only": True},
+    )
+    assert queued.status_code == 200, queued.text
+    with db.session_scope() as session:
+        jobs = session.execute(select(BackgroundJob)).scalars().all()
+        assert len(jobs) == 1
+        assert jobs[0].payload["listing_id"] == listing_id
+        assert jobs[0].payload["photos_only"] is True
+        assert jobs[0].payload["failed_photos_only"] is True
+        assert jobs[0].payload["force_photos"] is False
+
+
+def test_selective_retry_fails_closed_without_partial_success_evidence():
+    client, csrf = register("selective-photo-unsafe@example.test")
+    response = client.put(
+        "/api/app/connectors/biblio/credentials",
+        headers={"X-CSRF-Token": csrf},
+        json={"values": {"username": "seller", "password": "secret"}},
+    )
+    assert response.status_code == 200, response.text
+    with db.session_scope() as session:
+        ws = session.execute(select(models.Membership)).scalar_one().workspace_id
+    make_book(ws, book_id="BK-UNVERIFIED", count=3, source_count=3)
+    response = client.post(
+        "/api/app/connectors/biblio/retry-listing-photos",
+        headers={"X-CSRF-Token": csrf},
+        json={"book_id": "BK-UNVERIFIED", "failed_only": True},
+    )
+    assert response.status_code == 409, response.text
+    assert "No verifiable partial photo transfer" in response.json()["detail"]
