@@ -710,6 +710,33 @@ def _woo_post(
     return response.json()
 
 
+def read_woocommerce_workspace_stock(
+    workspace_id: uuid.UUID,
+    *,
+    external_id: str,
+    expected_sku: str | None,
+) -> dict[str, Any]:
+    """Read the exact WooCommerce simple product without changing it."""
+    if not re.fullmatch(r"[1-9][0-9]*", str(external_id or "")):
+        raise ValueError("Only a simple WooCommerce product with a numeric remote ID can be inspected")
+    values = _credentials(workspace_id, Channel.WOOCOMMERCE)
+    remote = _woo_get(values, f"products/{external_id}")
+    if not isinstance(remote, dict) or str(remote.get("id") or "") != str(external_id):
+        raise RuntimeError("WooCommerce returned a different product ID")
+    if str(remote.get("type") or "").lower() != "simple":
+        raise ValueError("Grouped and variation WooCommerce stock require separate support")
+    remote_sku = str(remote.get("sku") or "").strip()
+    if expected_sku and remote_sku != str(expected_sku).strip():
+        raise ValueError("WooCommerce SKU differs from the linked listing")
+    return {
+        "external_id": str(external_id),
+        "quantity": _woo_quantity(remote),
+        "manage_stock": bool(remote.get("manage_stock")),
+        "status": _woo_status(remote),
+        "stock_status": str(remote.get("stock_status") or "").lower(),
+    }
+
+
 def update_woocommerce_workspace_stock(
     workspace_id: uuid.UUID,
     *,
