@@ -31,6 +31,9 @@ const state = {
   stockAudioContext: null,
   biblioPublish: null,
   biblioActivity: null,
+  biblioPhotoTarget: "",
+  biblioPhotoInspection: null,
+  biblioPhotoError: "",
   biblioActivityTimer: null,
   biblioInventoryTimer: null,
   biblioListingsTimer: null,
@@ -1464,6 +1467,60 @@ function biblioActivityDetail(row) {
   }
   if (row.error) parts.push(row.error);
   return parts.join(" · ") || "BIBLIO FTP activity recorded.";
+}
+
+function biblioPhotoInspectionHtml() {
+  const info = state.biblioPhotoInspection;
+  if (state.biblioPhotoError) return '<p class="error">' + esc(state.biblioPhotoError) + '</p>';
+  if (!info) return '<p class="muted">Enter the exact BIBLIO Book ID to inspect its local photo sources and FTP history.</p>';
+  const known = Number(info.biblio_source_photos || 0);
+  const vinted = info.vinted_source_photos;
+  const difference = vinted != null && Number(vinted) !== known
+    ? '<p class="biblio-photo-alert">Vinted and staged BIBLIO photo counts differ. A targeted retry first refreshes the source data.</p>'
+    : "";
+  const job = info.job
+    ? '<p class="muted">Most recent targeted job: ' + esc(info.job.status)
+      + (info.job.available_at ? ' · ' + esc(when(info.job.available_at)) : '')
+      + (info.job.error ? ' · ' + esc(info.job.error) : '') + '</p>'
+    : "";
+  return '<div class="biblio-photo-inspection-details">'
+    + '<strong>' + esc(info.title || info.book_id) + '</strong>'
+    + '<div class="diagnostics-pills">'
+    + '<span>Staged for BIBLIO <strong>' + known + '</strong></span>'
+    + '<span>Vinted source <strong>' + esc(vinted == null ? "unknown" : vinted) + '</strong></span>'
+    + '<span>Last FTP batch <strong>' + esc(info.last_ftp_photo_count ?? "unrecorded") + '</strong></span>'
+    + '</div>'
+    + difference
+    + '<p class="muted">Expected FTP names: ' + esc((info.filenames || []).join(", ") || "none") + '</p>'
+    + '<p class="muted">Photo state: ' + esc(info.photo_state || "not synced")
+    + (info.last_ftp_photo_at ? ' · last FTP ' + esc(when(info.last_ftp_photo_at)) : '') + '</p>'
+    + (info.photo_error ? '<p class="error">' + esc(info.photo_error) + '</p>' : '')
+    + job
+    + '<p class="muted">FTP uploads cannot prove that BIBLIO has processed or published all images. Compare with BIBLIO’s image history.</p>'
+    + '</div>';
+}
+
+async function inspectBiblioPhotoTarget() {
+  const field = $("#biblio-photo-book-id");
+  const target = (field?.value || "").trim();
+  state.biblioPhotoTarget = target;
+  state.biblioPhotoError = "";
+  state.biblioPhotoInspection = null;
+  if (!target) {
+    state.biblioPhotoError = "Enter a BIBLIO Book ID.";
+  } else {
+    try {
+      state.biblioPhotoInspection = await api(
+        "/api/app/connectors/biblio/photo-status?book_id=" + encodeURIComponent(target)
+      );
+    } catch (error) {
+      state.biblioPhotoError = error.message;
+    }
+  }
+  $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
+  const retry = $("#biblio-retry-listing-photos");
+  if (retry) retry.disabled = !state.biblioPhotoInspection?.active
+    || !(state.biblioPhotoInspection.biblio_source_photos || state.biblioPhotoInspection.vinted_source_photos);
 }
 
 function renderBiblioActivity(activity, operational) {
