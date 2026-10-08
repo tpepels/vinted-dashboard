@@ -208,6 +208,11 @@ def test_biblio_sync_uploads_inventory_and_vinted_photos(monkeypatch):
     assert marked[0][2] == 2
     assert inventory_marks == active
     assert any(kwargs.get("status") == "success" for _args, kwargs in updates)
+    assert any(
+        [photo["filename"] for photo in kwargs.get("detail", {}).get("photo_results", [])]
+        == ["BK-1.jpg", "BK-1_1.jpg"]
+        for _args, kwargs in updates
+    )
 
 
 def test_partial_biblio_photo_failure_is_retried_later(monkeypatch):
