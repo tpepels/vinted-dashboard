@@ -77,5 +77,5 @@ assert.equal(elements["#other-marketplaces"].open, true);
 assert.equal(ebayCard.scrolled, true);
 
 context.renderMarketplaceDevelopment(null);
-assert.match(elements["#marketplace-development"].innerHTML, /No marketplace audit/);
+assert.match(elements["#marketplace-development"].textContent, /No marketplace audit/);
 console.log("Connections technical matrix interaction smoke test: passed");
