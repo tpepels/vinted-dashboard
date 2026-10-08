@@ -79,7 +79,7 @@ def test_item_marketplace_status_is_workspace_scoped_read_only(monkeypatch):
     assert status["last_operation"]["status"] == "attention"
     assert status["can_inspect_photos"] is True
     assert len(info["operations"]) == before["operations"]
-    assert "cannot" in info["notes"]["close"]
+    assert "not inferred" in info["notes"]["close"]
     assert other.get(f"/api/app/inventory/{item_id}/marketplace-status").status_code == 404
     assert client.get(f"/api/app/inventory/{uuid.uuid4()}/marketplace-status").status_code == 404
     with db.session_scope() as session:
