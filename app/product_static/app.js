@@ -32,6 +32,11 @@ const state = {
   biblioPublish: null,
   biblioActivity: null,
   biblioActivityExpanded: false,
+  biblioPhotoExpanded: false,
+  biblioRecoveryExpanded: false,
+  biblioBookChoices: null,
+  biblioCompareCheckedFile: null,
+  biblioCompareResult: null,
   biblioPhotoTarget: "",
   biblioPhotoInspection: null,
   biblioPhotoError: "",
@@ -1527,74 +1532,87 @@ async function inspectBiblioPhotoTarget() {
 }
 
 function renderBiblioActivity(activity, operational) {
-  const current = activity?.current || null;
-  const status = biblioActivityStatus(current);
-  const runs = activity?.runs || [];
   const health = activity?.health || {};
-  const safety = health.safety || {};
-  const healthHtml = health.active_listings == null
-    ? ""
-    : '<div class="biblio-activity-note"><strong>BIBLIO health:</strong> '
-      + esc(health.active_listings || 0) + ' active · '
-      + esc(health.inventory_changes_pending || 0) + ' changed records pending · '
-      + esc(health.deletes_pending || 0) + ' deletes pending · '
-      + esc(health.remote_verified_matching || 0) + ' verified/matching · '
-      + esc(health.remote_verified_mismatching || 0) + ' mismatching · '
-      + esc(health.remote_verified_uncompared || 0) + ' remote-only · '
-      + esc(health.remote_unverified || 0) + ' unverified · '
-      + esc(health.remote_verification_stale || 0) + ' stale verification · '
-      + esc(health.photo_attention || 0) + ' photo attention · '
-      + esc(health.publish_attention || 0) + ' publish attention'
-      + (safety.ftps_preferred ? ' · verified FTPS preferred' : '')
-      + (safety.plain_ftp_requires_opt_in ? ' · plain FTP requires opt-in' : '')
-      + (safety.ftp_host_locked ? ' · host/root locked' : '')
-      + '</div>';
-  const history = runs.length
-    ? runs.map((run) => {
-      const runStatus = biblioActivityStatus(run);
-      const files = [run.inventory_filename, run.deletes_filename].filter(Boolean).map(esc).join(" · ");
-      const meta = [
-        run.upload_profile ? "profile " + esc(run.upload_profile) : "",
-        run.transport ? "transport " + esc(run.transport === "ftps" ? "FTPS/TLS" : run.transport) : "",
-        files,
-      ].filter(Boolean).join(" · ");
-      const errors = (run.photo_errors || []).length
-        ? '<div class="biblio-activity-errors">' + run.photo_errors.map((value) => esc(value)).join("<br>") + "</div>"
-        : "";
-      const photoResults = (run.photo_results || []).length
-        ? '<details class="biblio-photo-files"><summary>FTP photo files (' + run.photo_results.length + ' recorded)</summary>'
-          + run.photo_results.map((photo) =>
-            '<div class="' + (photo.status === "error" ? "error" : "muted") + '">'
-            + esc(photo.filename) + ' · ' + esc(photo.status === "error" ? "FAILED" : "FTP sent") + '</div>'
-          ).join("") + '</details>'
-        : "";
-      return '<div class="biblio-activity-run">'
-        + '<div><strong>' + esc(runStatus.label) + '</strong><span>' + esc(when(run.started_at)) + "</span></div>"
-        + '<p>' + esc(biblioActivityDetail(run)) + "</p>"
-        + (meta ? '<small>' + meta + "</small>" : "")
-        + errors + photoResults + "</div>";
-    }).join("")
-    : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
-  return '<div class="biblio-activity-compact">'
-    + healthHtml
-    + '<div class="biblio-activity-current"><span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
-    + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
-    + '<div class="actions biblio-activity-actions">'
-    + '<button class="btn biblio-activity-toggle" type="button">' + (state.biblioActivityExpanded ? 'Hide activity' : 'View activity') + '</button>'
-    + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry all photos</button>' : "")
-    + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
+  const count = (key) => Number(health[key] || 0);
+  const waiting = count("inventory_changes_pending") + count("deletes_pending");
+  const last = activity?.current || null;
+  const status = biblioActivityStatus(last);
+  const runs = activity?.runs || [];
+  const lastSentAt = last?.completed_at || last?.started_at;
+  const verified = count("remote_verified_matching") + count("remote_verified_mismatching");
+  const overview = '<div class="biblio-summary">'
+    + '<div class="biblio-summary-stats">'
+    + '<div><strong>' + count("active_listings") + '</strong><span>Books prepared for BIBLIO</span></div>'
+    + '<div><strong>' + waiting + '</strong><span>Changes waiting to be sent</span></div>'
+    + '<div><strong>' + count("photo_attention") + '</strong><span>Books with photo work pending or in error</span></div>'
     + '</div>'
-    + (operational ? '<div class="biblio-photo-recovery"><strong>Photo recovery for one book</strong>'
-      + '<div class="biblio-photo-recovery-controls">'
-      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="e.g. VINTED-10253402699" value="' + esc(state.biblioPhotoTarget) + '">'
-      + '<button id="biblio-inspect-photos" class="btn" type="button">Inspect photos</button>'
-      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Retry this book</button>'
-      + '</div><div id="biblio-photo-inspection">' + biblioPhotoInspectionHtml() + '</div></div>'
+    + (count("remote_verified_mismatching") || count("remote_verification_stale")
+      ? '<p class="biblio-user-warning"><strong>Listings to review:</strong> '
+        + count("remote_verified_mismatching") + ' differ from the last BIBLIO comparison; '
+        + count("remote_verification_stale") + ' have changed since they were checked.</p>'
       : "")
-    + '<div class="biblio-activity-history' + (state.biblioActivityExpanded ? '' : ' hidden') + '">'
-    + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards. For a brand-new listing, the dashboard schedules one delayed photo-only retry because BIBLIO ignores an image if there is no active listing to attach it to.</div>'
-    + '<div class="biblio-activity-note"><strong>Orders:</strong> automatic BIBLIO order handling remains disabled until BIBLIO enables Bulk Order Management for the seller account and supplies its private protocol documentation.</div>'
-    + history + "</div></div>";
+    + '<p class="biblio-user-note">These are dashboard records, not a confirmed count of books visible on BIBLIO. '
+    + (verified ? verified + ' listings have been compared with a BIBLIO file. ' : 'No BIBLIO inventory comparison has been recorded yet. ')
+    + 'Use <strong>Compare BIBLIO inventory</strong> below to check what BIBLIO reports.</p></div>';
+  const latest = '<div class="biblio-latest">'
+    + '<span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
+    + '<div><strong>' + esc(last ? status.label : "Nothing sent yet") + '</strong>'
+    + '<p>' + (last ? esc(biblioActivityDetail(last)) : "Send changed books when you are ready.")
+    + (lastSentAt ? ' · ' + esc(when(lastSentAt)) : '') + '</p></div></div>';
+  const photoHelp = operational
+    ? '<details class="biblio-task-panel biblio-photos-panel"'
+      + (state.biblioPhotoExpanded ? ' open' : '') + '>'
+      + '<summary><span><strong>Fix photos for one book</strong><small>Check the pictures available locally, then resend that book’s photos if needed</small></span></summary>'
+      + '<div class="biblio-task-inner">'
+      + '<label class="biblio-field-label" for="biblio-photo-book-select">Choose a BIBLIO book</label>'
+      + '<select id="biblio-photo-book-select"><option value="">Loading books when opened…</option></select>'
+      + '<p class="biblio-field-secondary">Or enter a BIBLIO Book ID (for example VINTED-10253402699).</p>'
+      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '">'
+      + '<div class="actions biblio-photo-recovery-controls">'
+      + '<button id="biblio-inspect-photos" class="btn" type="button">Check this book’s photos</button>'
+      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend this book’s photos…</button>'
+      + '</div><div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
+      + '</div></details>'
+    : '';
+  const fileHistory = runs.map((run) => {
+    const state = biblioActivityStatus(run);
+    const photos = (run.photo_results || []).length
+      ? '<details class="biblio-photo-files"><summary>See individual photo transfer results (' + run.photo_results.length + ')</summary>'
+        + run.photo_results.map(photo => '<div class="' + (photo.status === "error" ? "error" : "muted") + '">'
+          + esc(photo.filename) + ' · ' + esc(photo.status === "error" ? "Transfer failed" : "Sent to BIBLIO") + '</div>').join("") + '</details>'
+      : "";
+    return '<article class="biblio-activity-run"><div><strong>' + esc(state.label) + '</strong><time>' + esc(when(run.started_at)) + '</time></div>'
+      + '<p>' + esc(biblioActivityDetail(run)) + '</p>'
+      + ((run.photo_errors || []).length ? '<p class="error">' + esc(run.photo_errors.join(" · ")) + '</p>' : '')
+      + photos + '</article>';
+  }).join("");
+  const history = '<details class="biblio-task-panel biblio-history-panel"'
+    + (state.biblioActivityExpanded ? ' open' : '') + '><summary>'
+    + '<span><strong>What has the dashboard sent?</strong><small>Recent transfers and individual photo results</small></span>'
+    + '</summary><div class="biblio-task-inner">'
+    + '<p>“Sent” means that BIBLIO received the files. BIBLIO may need additional time to process and display the books and photos.</p>'
+    + '<div class="biblio-activity-history">' + (fileHistory || '<p>No transfers have been recorded yet.</p>') + '</div>'
+    + '</div></details>';
+  const advanced = operational
+    ? '<details class="biblio-task-panel biblio-recovery-panel"'
+      + (state.biblioRecoveryExpanded ? ' open' : '') + '><summary>'
+      + '<span><strong>Advanced recovery</strong><small>Resend everything only when normal uploads have not worked</small></span></summary>'
+      + '<div class="biblio-task-inner">'
+      + '<div class="biblio-recovery-row"><div><strong>Resend all photos</strong><p>Reuploads pictures for every active BIBLIO book. Use the one-book tool above for a single missing image.</p></div>'
+      + '<button class="btn biblio-retry-photos" type="button">Resend all photos…</button></div>'
+      + '<div class="biblio-recovery-row"><div><strong>Resend the entire catalogue</strong><p>Reuploads every active listing, updates and photos, even if nothing has changed. Usually unnecessary.</p></div>'
+      + '<button class="btn biblio-full-sync" type="button">Resend all listings…</button></div>'
+      + '<p class="biblio-user-note">This does not confirm publication. BIBLIO orders are not imported automatically because the separate Bulk Order Management interface is not connected.</p>'
+      + '</div></details>'
+    : '';
+  return '<div class="biblio-human-workflow">'
+    + overview + latest
+    + '<div class="biblio-next-actions">'
+    + '<button class="btn biblio-open-compare" type="button">Compare BIBLIO inventory</button>'
+    + '<span>Download a listing file from your BIBLIO seller account; checking it here does not alter your books.</span>'
+    + '</div>'
+    + photoHelp + history + advanced
+    + '</div>';
 }
 
 async function inspectInventoryRelationships() {
