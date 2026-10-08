@@ -39,6 +39,8 @@ const state = {
   biblioListingsTimer: null,
   crossList: null,
   connectors: [],
+  marketplaceDevelopment: null,
+  marketplaceSelected: "biblio",
   barcodeStream: null,
   barcodeTimer: null,
   barcodeDetector: null,
@@ -3981,16 +3983,114 @@ function exportInventory(format) {
 $("#export-csv").onclick = () => exportInventory("csv");
 $("#export-xlsx").onclick = () => exportInventory("xlsx");
 
+
+function marketplaceRuntimeDetails(market, definitions) {
+  if (!market) return "";
+  const runtime = market.runtime || {};
+  const operations = definitions.operations || [];
+  const statusText = runtime.credential_ready ? "Credentials present" : "Not ready to connect";
+  const recent = runtime.last_run;
+  const recentText = recent
+    ? (recent.status || "unknown") + " (" + esc(recent.type || "sync") + ") · " + esc(when(recent.started_at))
+    : "No recorded runs";
+  const rows = operations.map((operation) => {
+    const value = market.operations?.[operation.key] || {status:"missing"};
+    const info = value.note ? '<div class="sub">' + esc(value.note) + '</div>' : "";
+    const evidence = value.evidence
+      ? '<div class="sub">Code: ' + esc(value.evidence) + '</div>'
+      : "";
+    return '<tr><th scope="row">' + esc(operation.label) + '</th>'
+      + '<td><span class="market-status market-status-' + esc(value.status) + '">'
+      + esc(value.status.replaceAll("_", " ")) + '</span></td>'
+      + '<td>' + esc(operation.acceptance) + info + evidence + '</td></tr>';
+  }).join("");
+  return '<h3>' + esc(market.display_name) + ' · detailed operation audit</h3>'
+    + '<div class="market-runtime">'
+    + '<span><strong>Account:</strong> ' + esc(statusText) + '</span>'
+    + '<span><strong>Last successful sync:</strong> ' + esc(runtime.last_successful_sync_at ? when(runtime.last_successful_sync_at) : "none") + '</span>'
+    + '<span><strong>Latest run:</strong> ' + recentText + '</span>'
+    + '<span><strong>Listings:</strong> ' + Number(runtime.listing_count || 0) + '</span>'
+    + '<span><strong>Master references:</strong> ' + Number(runtime.master_references || 0) + '</span>'
+    + '<span><strong>Unlinked listings:</strong> ' + Number(runtime.unlinked_listings || 0) + '</span>'
+    + '<span><strong>Provisional stock references:</strong> ' + Number(runtime.import_placeholders || 0) + '</span>'
+    + '<span><strong>Seller sales:</strong> ' + Number(runtime.seller_sales || 0) + '</span>'
+    + '<span><strong>Sales without master:</strong> ' + Number(runtime.sales_unlinked_to_master || 0) + '</span>'
+    + '</div>'
+    + '<p class="muted">References do not prove two marketplace listings describe the same physical copy. Provisional counts cover newly imported placeholders; older imports may lack this marker.</p>'
+    + '<div class="market-matrix-scroll"><table class="market-matrix market-details-table"><thead>'
+    + '<tr><th>Operation</th><th>Code status</th><th>Acceptance criteria, caveats and evidence</th></tr>'
+    + '</thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+function renderMarketplaceDevelopment(definitions) {
+  const root = $("#marketplace-development");
+  if (!root) return;
+  const markets = definitions?.channels || [];
+  if (!markets.length) {
+    root.textContent = "No marketplace audit is available.";
+    return;
+  }
+  const ops = definitions.operations || [];
+  const legend = Object.entries(definitions.statuses || {}).map(([status, label]) =>
+    '<span class="market-status market-status-' + esc(status) + '" title="' + esc(label) + '">'
+    + esc(status.replaceAll("_", " ")) + '</span>'
+  ).join("");
+  const rows = markets.map((market) => {
+    const configured = market.runtime?.credential_ready ? "Connected/configured" : "Not ready";
+    const statuses = ops.map((operation) => {
+      const value = market.operations?.[operation.key] || { status: "missing" };
+      return '<td><span class="market-status market-status-' + esc(value.status)
+        + '" title="' + esc(operation.label + ": " + value.status + (value.note ? " - " + value.note : "")) + '">'
+        + esc(value.status) + '</span></td>';
+    }).join("");
+    return '<tr><th scope="row"><button type="button" class="market-select'
+      + (market.channel === state.marketplaceSelected ? ' active' : '')
+      + '" data-market-channel="' + esc(market.channel) + '">' + esc(market.display_name)
+      + '</button><span class="sub">' + esc(configured) + '</span></th>' + statuses + '</tr>';
+  }).join("");
+  const headers = ops.map(op => '<th title="' + esc(op.acceptance) + '">' + esc(op.label) + '</th>').join("");
+  root.innerHTML = '<p class="muted">Code coverage only. A successful job does not establish that a marketplace published the result.</p>'
+    + '<div class="market-status-legend">' + legend + '</div>'
+    + '<div class="market-matrix-scroll"><table class="market-matrix">'
+    + '<thead><tr><th>Marketplace</th>' + headers + '</tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>'
+    + '<div id="marketplace-detail" class="marketplace-detail"></div>'
+    + '<details class="market-relations"><summary>Shared relationship rules</summary><ul>'
+    + (definitions.relations || []).map(rel => '<li><strong>' + esc(rel.key) + ':</strong> ' + esc(rel.rule) + '</li>').join("")
+    + '</ul></details>';
+  if (!markets.some(row => row.channel === state.marketplaceSelected)) {
+    state.marketplaceSelected = markets[0].channel;
+  }
+  function showSelected() {
+    const selected = markets.find(row => row.channel === state.marketplaceSelected);
+    $("#marketplace-detail").innerHTML = marketplaceRuntimeDetails(selected, definitions);
+    $(".market-select").forEach(button => {
+      button.classList.toggle("active", button.dataset.marketChannel === state.marketplaceSelected);
+      button.setAttribute("aria-pressed", String(button.dataset.marketChannel === state.marketplaceSelected));
+    });
+  }
+  $(".market-select").forEach(button => {
+    button.onclick = () => {
+      state.marketplaceSelected = button.dataset.marketChannel;
+      showSelected();
+    };
+  });
+  showSelected();
+}
+
 async function connections() {
   if (state.biblioActivityTimer) {
     clearTimeout(state.biblioActivityTimer);
     state.biblioActivityTimer = null;
   }
-  const [data, devices, biblioActivity] = await Promise.all([
+  const [data, devices, biblioActivity, development] = await Promise.all([
     api("/api/app/connectors"),
     api("/api/app/extension/devices"),
     api("/api/app/connectors/biblio/activity"),
+    api("/api/app/connectors/development"),
   ]);
+  state.marketplaceDevelopment = development;
+  renderMarketplaceDevelopment(development);
   state.connectors = data.connectors || [];
   state.biblioActivity = biblioActivity;
   $("#connector-grid").innerHTML = data.connectors.map((connector) => {
