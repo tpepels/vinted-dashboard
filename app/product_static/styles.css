@@ -300,7 +300,9 @@ input,select,textarea{max-width:100%}
 .cross-list-destination.review,.cross-list-destination.connect{
   color:var(--state-warning);background:var(--state-warning-bg);border-color:var(--state-warning-line)
 }
-.cross-list-destination.ready,.biblio-photo-preview{border-color:var(--state-success-line);background:var(--state-success-bg)}
+.cross-list-destination.ready{border-color:var(--accent);background:var(--soft)}
+.biblio-photo-preview{border-color:var(--state-neutral-line);background:var(--state-neutral-bg)}
+.stock-row-state.ready{color:var(--accent-strong);background:var(--soft);border-color:var(--line)}
 .biblio-activity-errors{color:var(--state-danger);background:var(--state-danger-bg)}
 /* Tables are scrollable regions, not page-width constraints. */
 .table-wrap,.market-matrix-scroll{
