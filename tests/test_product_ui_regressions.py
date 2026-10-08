@@ -644,7 +644,7 @@ def test_biblio_safe_compare_first_workflow_is_separate_from_credentials():
     assert 'id="import-biblio" class="btn danger" type="button" disabled' in html
     assert '"/api/app/connectors/biblio/verify"' in APP_JS
     assert '"/api/app/connectors/biblio/import"' in APP_JS
-    assert "Compare this BIBLIO file before applying it" in APP_JS
+    assert "Compare the selected BIBLIO file before applying it" in APP_JS
     assert "if (!window.confirm(explanation)) return;" in APP_JS
     assert 'id="biblio-compare-result"' in html
     assert "No book descriptions, prices or stock quantities were changed" in APP_JS
