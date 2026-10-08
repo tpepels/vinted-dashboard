@@ -16,7 +16,7 @@ const reviewButtons = [{dataset:{item:"abc"},onclick:null}];
 let openedItem = null;
 const ctx = {
   $: selector => elements[selector],
-  $: selector => selector === ".store-stock-audit-open" ? reviewButtons : [],
+  $$: selector => selector === ".store-stock-audit-open" ? reviewButtons : [],
   openItemMarketplaces: id => { openedItem = id; },
   esc: value => String(value ?? "").replace(/[&<>"']/g, char =>
     ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[char])),
