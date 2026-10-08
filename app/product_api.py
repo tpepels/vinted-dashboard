@@ -1637,7 +1637,9 @@ def item_marketplace_status(
             "operations": [serialize_marketplace_operation(op) for op in operations],
             "closure_actions": [
                 {"id": str(action.id), "channel": action.channel, "status": action.status,
-                 "type": action.action_type, "listing_id": str(action.channel_listing_id)}
+                 "type": action.action_type, "listing_id": str(action.channel_listing_id),
+                 "needs_reopen": bool((action.detail or {}).get("needs_reopen")),
+                 "reopen_reason": (action.detail or {}).get("reopen_reason")}
                 for action in actions
             ],
             "notes": {
