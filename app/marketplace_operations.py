@@ -252,8 +252,9 @@ def start_inline(
     target_key: str,
     *,
     inventory_item_id: uuid.UUID | None = None,
+    channel_listing_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
-    """Reserve one synchronous remote create before invoking the adapter.
+    """Reserve one synchronous remote write before invoking the adapter.
 
     After an uncertain failure, this target requires investigation instead
     of another create request; this protects against duplicate remote posts.
@@ -261,7 +262,7 @@ def start_inline(
     if operation_type not in {"publish", "update"}:
         raise ValueError("Unsupported inline remote operation")
     with db.session_scope() as session:
-        _owned_targets(session, workspace_id, inventory_item_id, None)
+        _owned_targets(session, workspace_id, inventory_item_id, channel_listing_id)
         key = _identity(channel, operation_type, target_key)
         existing = session.execute(
             select(MarketplaceOperation).where(
@@ -285,6 +286,7 @@ def start_inline(
             target_key=target_key,
             active_key=key,
             inventory_item_id=inventory_item_id,
+            channel_listing_id=channel_listing_id,
             job_type=None,
             job_payload={},
             status="running",
