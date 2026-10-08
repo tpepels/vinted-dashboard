@@ -98,26 +98,27 @@ def test_worker_schedules_one_delayed_photo_retry_for_new_listing(monkeypatch):
             "deferred_photo_retry_listing_ids": [str(listing_id)]
         },
     )
-    monkeypatch.setattr(
-        worker.jobs,
-        "enqueue",
-        lambda job_type, payload, workspace, delay_seconds=0: queued.append(
-            (job_type, payload, workspace, delay_seconds)
-        ) or uuid.uuid4(),
-    )
+    def capture_operation(session, workspace, channel, operation_type, target, **kwargs):
+        queued.append((workspace, channel, operation_type, target, kwargs))
+        return object(), True
+
+    monkeypatch.setattr("app.marketplace_operations.queue_operation", capture_operation)
 
     worker._sync_biblio({"listing_id": str(listing_id)}, workspace_id)
 
     assert queued == [
         (
-            "biblio_sync",
+            workspace_id, "biblio", "photos", str(listing_id),
             {
-                "listing_id": str(listing_id),
-                "photos_only": True,
-                "force_photos": False,
-                "automatic_photo_retry": True,
+                "job_type": "biblio_sync",
+                "payload": {
+                    "listing_id": str(listing_id),
+                    "photos_only": True,
+                    "force_photos": False,
+                    "automatic_photo_retry": True,
+                },
+                "channel_listing_id": listing_id,
+                "delay_seconds": 123,
             },
-            workspace_id,
-            123,
         )
     ]
