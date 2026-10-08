@@ -1693,6 +1693,7 @@ def update_woocommerce_item_stock(
         operation_id = start_inline(
             context.workspace.id, Channel.WOOCOMMERCE, "update", str(listing_id),
             inventory_item_id=item_id,
+            channel_listing_id=listing_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
