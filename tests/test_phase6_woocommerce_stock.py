@@ -48,7 +48,7 @@ def test_woo_simple_product_stock_update_matches_identity_and_readback(monkeypat
 
 
 def test_woo_rejects_variants_sku_drift_and_invalid_remote_ids(monkeypatch):
-    for remote_id in ("42:7", "0", "http://evil.example"):
+    for remote_id in ("0", "http://evil.example", "42:0", "0:7", "42:7:8"):
         with pytest.raises(ValueError, match="numeric remote ID"):
             hosted.update_woocommerce_workspace_stock(
                 __import__("uuid").uuid4(), external_id=remote_id,
@@ -214,3 +214,88 @@ def test_woo_readback_releases_ambiguous_write_when_stock_is_observed(monkeypatc
         op = session.get(MarketplaceOperation, op_id)
         assert op.status == "succeeded"
         assert op.verification == "remote_verified"
+
+
+def _variation_shop(monkeypatch, *, managed=True, parent_type="variable",
+                    sku="BOOK-77", before=3, after=0, backorders="no"):
+    calls = []
+    reads = {"variation": 0}
+    monkeypatch.setattr(hosted, "_credentials", lambda *args: {
+        "store_url": "https://shop.example", "consumer_key": "key", "consumer_secret": "secret",
+    })
+    monkeypatch.setattr(hosted, "_woocommerce_base", lambda values: "https://shop.example")
+    def get(values, path, **kwargs):
+        calls.append(("GET", path))
+        if path == "products/22":
+            return {"id": 22, "type": parent_type, "status": "publish"}
+        assert path == "products/22/variations/77"
+        reads["variation"] += 1
+        quantity = before if reads["variation"] == 1 else after
+        return {"id": 77, "sku": sku, "manage_stock": managed,
+                "stock_quantity": quantity, "backorders": backorders,
+                "stock_status": "instock" if quantity else "outofstock"}
+    def put(url, *, headers, json, timeout):
+        calls.append(("PUT", url, json))
+        return SimpleNamespace(status_code=200)
+    monkeypatch.setattr(hosted, "_woo_get", get)
+    monkeypatch.setattr(hosted.requests, "put", put)
+    return calls
+
+
+def test_variation_stock_updates_only_the_exact_variation_and_checks_readback(monkeypatch):
+    calls = _variation_shop(monkeypatch)
+    result = hosted.update_woocommerce_workspace_stock(
+        __import__("uuid").uuid4(), external_id="22:77", expected_sku="BOOK-77", quantity=0,
+    )
+    assert result["remote_verified"] and result["quantity"] == 0
+    assert [c[0] for c in calls] == ["GET", "GET", "PUT", "GET", "GET"]
+    assert calls[2][1].endswith("/products/22/variations/77")
+    assert calls[2][2] == {
+        "manage_stock": True, "stock_quantity": 0, "stock_status": "outofstock",
+    }
+
+
+def test_variation_stock_noop_requires_matching_quantity_and_status(monkeypatch):
+    calls = _variation_shop(monkeypatch, before=2)
+    result = hosted.update_woocommerce_workspace_stock(
+        __import__("uuid").uuid4(), external_id="22:77", expected_sku="BOOK-77", quantity=2,
+    )
+    assert result["already_complete"] and result["remote_verified"]
+    assert [c[0] for c in calls] == ["GET", "GET"]
+
+
+@pytest.mark.parametrize("kwargs,expected", [
+    ({"managed": False}, "manages stock at parent level"),
+    ({"managed": "parent"}, "manages stock at parent level"),
+    ({"backorders": "yes"}, "allows backorders"),
+    ({"sku": "CHANGED"}, "SKU no longer matches"),
+    ({"parent_type": "simple"}, "no longer variable"),
+])
+def test_variation_rejects_unsafe_stock_edits(monkeypatch, kwargs, expected):
+    calls = _variation_shop(monkeypatch, **kwargs)
+    with pytest.raises(ValueError, match=expected):
+        hosted.update_woocommerce_workspace_stock(
+            __import__("uuid").uuid4(), external_id="22:77",
+            expected_sku="BOOK-77", quantity=0,
+        )
+    assert all(c[0] != "PUT" for c in calls)
+
+
+def test_variation_requires_a_known_sku_before_its_first_remote_write(monkeypatch):
+    calls = _variation_shop(monkeypatch)
+    with pytest.raises(ValueError, match="confirmed linked SKU"):
+        hosted.update_woocommerce_workspace_stock(
+            __import__("uuid").uuid4(), external_id="22:77",
+            expected_sku=None, quantity=0,
+        )
+    assert all(c[0] != "PUT" for c in calls)
+
+
+def test_variation_after_write_mismatch_requires_attention(monkeypatch):
+    calls = _variation_shop(monkeypatch, before=3, after=3)
+    with pytest.raises(RuntimeError, match="differs after write"):
+        hosted.update_woocommerce_workspace_stock(
+            __import__("uuid").uuid4(), external_id="22:77",
+            expected_sku="BOOK-77", quantity=0,
+        )
+    assert [c[0] for c in calls].count("PUT") == 1
