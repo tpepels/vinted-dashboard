@@ -418,3 +418,17 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   .store-stock-audit-row{align-items:stretch;flex-direction:column}
   .store-stock-audit-row .btn{align-self:flex-start}
 }
+
+/* WooCommerce regular-price editor is an optional secondary item action. */
+.item-price-tools{margin-top:8px;border-top:1px solid var(--line);
+  padding-top:9px;min-width:0;max-width:100%;font-size:12px}
+.item-price-tools>summary{cursor:pointer;font-weight:700;color:var(--accent-strong);
+  list-style-position:inside;line-height:1.5}
+.item-price-tools>p{margin:8px 0;line-height:1.45}
+.item-price-tools .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.item-price-tools .btn{min-width:0;white-space:normal}
+.item-price-state{font-weight:650;color:var(--state-warning)}
+.item-marketplace-actions .item-price-tools{width:100%;flex:1 1 100%}
+@media(max-width:600px){
+  .item-price-tools .btn{flex:1 1 145px}
+}
