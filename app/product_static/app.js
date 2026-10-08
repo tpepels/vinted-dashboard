@@ -1101,10 +1101,11 @@ function renderItemMarketplacePanel(data) {
       listing.last_operation?.error,
     ].filter(Boolean);
     const caution = listing.attention || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification);
+    const verified = !caution && ["matches", "stock_checked"].includes(listing.verification);
     return '<div class="item-marketplace-row">'
       + '<div class="item-marketplace-main">'
       + '<div class="item-marketplace-head"><strong>' + esc(listing.channel.toUpperCase())
-      + '</strong><span class="item-marketplace-state ' + (caution ? 'attention' : '') + '">'
+      + '</strong><span class="item-marketplace-state ' + (caution ? 'attention' : verified ? 'verified' : '') + '">'
       + esc(listing.status) + (caution ? " · review needed" : "") + '</span></div>'
       + '<p>' + esc(itemMarketplaceStatusLabel(listing)) + '</p>'
       + '<p class="muted">Marketplace reference: ' + esc(listing.external_id)
@@ -4653,6 +4654,11 @@ function renderMarketplaceOperations(data) {
     + '</tr></thead><tbody>'
     + operations.map(op => {
       const requiresCheck = op.status === "needs_verification" || op.status === "attention";
+      const statusTone = op.status === "failed" ? "danger"
+        : requiresCheck ? "warning"
+        : ["queued", "running"].includes(op.status) ? "info"
+        : op.status === "succeeded" && op.verification === "remote_verified" ? "success"
+        : "neutral";
       const result = Object.entries(op.result || {}).slice(0, 6)
         .map(([key, value]) => esc(key.replaceAll("_", " ") + ": " + String(value))).join(" · ");
       const next = op.can_retry
@@ -4670,7 +4676,8 @@ function renderMarketplaceOperations(data) {
       return '<tr><td><strong>' + esc(op.channel.toUpperCase()) + ' · ' + esc(actionLabel)
         + '</strong><div class="sub">' + esc(verificationLabels[op.verification] || op.verification) + '</div></td>'
         + '<td>' + esc(targetLabel) + '</td>'
-        + '<td><strong>' + esc(statuses[op.status] || op.status) + '</strong>'
+        + '<td><span class="operation-status operation-status-' + statusTone + '">'
+        + esc(statuses[op.status] || op.status) + '</span>'
         + (op.error ? '<div class="error">' + esc(op.error) + '</div>' : "")
         + (result ? '<details class="operation-technical"><summary>Transfer details</summary><p>' + result + '</p></details>' : "")
         + '</td><td>' + esc(when(op.created_at)) + '</td><td>' + next + '</td></tr>';
