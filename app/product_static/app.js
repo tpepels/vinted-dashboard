@@ -4220,9 +4220,10 @@ function renderMarketplaceOperations(data) {
           + (op.type === "photos" ? "Try sending photos again…" : "Try again…") + '</button>'
         : requiresCheck ? '<span class="muted">Check the result on the marketplace first</span>'
         : "";
-      const actionLabel = {sync:"Update dashboard", publish:"Add listing",
-        update:"Update listing", photos:"Send photos", close:"Close sold listing",
-        verify:"Check listing"}[op.type] || op.type;
+      const actionLabel = op.type === "sync"
+        ? (op.channel === "biblio" ? "Send listing changes" : "Import marketplace data")
+        : ({publish:"Add listing", update:"Update listing", photos:"Send photos",
+          close:"Close sold listing", verify:"Check listing"}[op.type] || op.type);
       const targetLabel = op.target === "all" ? "All relevant listings"
         : /^[0-9a-f-]{36}$/i.test(op.target || "") ? "One listing"
         : op.target || "Single listing";
@@ -4726,6 +4727,7 @@ $("#verify-biblio").onclick = async () => {
     state.biblioCompareResult = result;
     $("#import-biblio").disabled = false;
     message.innerHTML = biblioComparisonHtml(result);
+    await connections();
   } catch (error) {
     message.textContent = "Comparison failed: " + error.message;
     flash(error.message, true);
