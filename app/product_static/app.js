@@ -1573,7 +1573,15 @@ function renderBiblioActivity(activity, operational) {
     + '<button class="btn biblio-activity-toggle" type="button">View activity</button>'
     + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry photos</button>' : "")
     + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
-    + '</div><div class="biblio-activity-history hidden">'
+    + '</div>'
+    + (operational ? '<div class="biblio-photo-recovery"><strong>Photo recovery for one book</strong>'
+      + '<div class="biblio-photo-recovery-controls">'
+      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="e.g. VINTED-10253402699" value="' + esc(state.biblioPhotoTarget) + '">'
+      + '<button id="biblio-inspect-photos" class="btn" type="button">Inspect photos</button>'
+      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Retry this book</button>'
+      + '</div><div id="biblio-photo-inspection">' + biblioPhotoInspectionHtml() + '</div></div>'
+      : "")
+    + '<div class="biblio-activity-history hidden">'
     + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards. For a brand-new listing, the dashboard schedules one delayed photo-only retry because BIBLIO ignores an image if there is no active listing to attach it to.</div>'
     + '<div class="biblio-activity-note"><strong>Orders:</strong> automatic BIBLIO order handling remains disabled until BIBLIO enables Bulk Order Management for the seller account and supplies its private protocol documentation.</div>'
     + history + "</div></div>";
@@ -4063,6 +4071,46 @@ async function connections() {
       }
     };
   });
+
+  const inspectPhotosButton = $("#biblio-inspect-photos");
+  if (inspectPhotosButton) {
+    inspectPhotosButton.onclick = () => inspectBiblioPhotoTarget();
+    const field = $("#biblio-photo-book-id");
+    field.oninput = () => {
+      if (field.value.trim() !== state.biblioPhotoTarget) {
+        $("#biblio-retry-listing-photos").disabled = true;
+      }
+    };
+    field.onkeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        inspectBiblioPhotoTarget();
+      }
+    };
+  }
+  const retryPhotosButton = $("#biblio-retry-listing-photos");
+  if (retryPhotosButton) {
+    retryPhotosButton.disabled = !state.biblioPhotoInspection?.active
+      || !(state.biblioPhotoInspection.biblio_source_photos || state.biblioPhotoInspection.vinted_source_photos);
+    retryPhotosButton.onclick = async () => {
+      const info = state.biblioPhotoInspection;
+      if (!info || $("#biblio-photo-book-id").value.trim() !== info.book_id) return;
+      retryPhotosButton.disabled = true;
+      try {
+        const result = await api("/api/app/connectors/biblio/retry-listing-photos", {
+          method: "POST",
+          body: JSON.stringify({ book_id: info.book_id }),
+        });
+        flash("Photo-only retry queued for " + result.book_id + ". No inventory records will be resent.");
+        await inspectBiblioPhotoTarget();
+        await connections();
+      } catch (error) {
+        state.biblioPhotoError = error.message;
+        $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
+        flash(error.message, true);
+      }
+    };
+  }
 
   $("#devices").innerHTML = devices.devices.length
     ? devices.devices.map((device) =>
