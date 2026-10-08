@@ -264,3 +264,56 @@ def test_explicit_merge_marks_verified_stock_and_does_not_sum_advertised_quantit
         assert len(session.execute(
             select(models.ChannelListing).where(models.ChannelListing.inventory_item_id == target.id)
         ).scalars().all()) == 2
+
+
+def test_relationship_audit_is_read_only_workspace_scoped_and_shows_sku_conflicts(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    first = TestClient(entry.app)
+    second = TestClient(entry.app)
+    for client, address in ((first, "phase1-audit-one@example.test"), (second, "phase1-audit-two@example.test")):
+        response = client.post("/api/auth/register", json={
+            "email": address, "password": "a-long-test-password",
+            "workspace_name": address,
+        })
+        assert response.status_code == 200, response.text
+    with db.session_scope() as session:
+        first_email = session.execute(
+            select(models.User).where(models.User.email == "phase1-audit-one@example.test")
+        ).scalar_one()
+        workspace = session.execute(
+            select(models.Membership).where(models.Membership.user_id == first_email.id)
+        ).scalar_one().workspace_id
+        master = _physical(session, workspace, sku="REPEATED-SKU", quantity=1)
+        master_id = master.id
+        _listing(session, workspace, master, "vinted", "V-1")
+        # The remote SKU matches even though its physical identity has not
+        # been confirmed. A safe audit must show a warning, not auto-merge.
+    record_workspace_channel_snapshot(
+        workspace, "ebay", [{"source_id": "E-1", "sku": "REPEATED-SKU",
+                              "title": "One particular physical copy",
+                              "quantity": 1, "status": "active"}],
+        synced_at=datetime.now(timezone.utc), full_snapshot=True,
+    )
+    anonymous = TestClient(entry.app)
+    assert anonymous.get("/api/app/inventory/relationship-audit").status_code == 401
+    result = first.get("/api/app/inventory/relationship-audit")
+    assert result.status_code == 200, result.text
+    data = result.json()
+    assert data["physical"] == 1
+    assert len(data["provisional"]) == 1
+    assert len(data["shared_marketplace_skus"]) == 1
+    assert len(data["shared_marketplace_skus"][0]["item_ids"]) == 2
+    assert master_id in {
+        __import__("uuid").UUID(value)
+        for value in data["shared_marketplace_skus"][0]["item_ids"]
+    }
+    other = second.get("/api/app/inventory/relationship-audit")
+    assert other.status_code == 200, other.text
+    assert other.json()["stock_items"] == 0
+    assert other.json()["shared_marketplace_skus"] == []
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, master_id)
+        assert item.quantity == 1
+        assert len(session.execute(select(models.InventoryItem).where(
+            models.InventoryItem.workspace_id == workspace,
+        )).scalars().all()) == 2
