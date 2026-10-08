@@ -4164,7 +4164,7 @@ function renderMarketplaceOperations(data) {
         + '</td><td>' + esc(when(op.created_at)) + '</td><td>' + next + '</td></tr>';
     }).join("")
     + '</tbody></table></div>';
-  $(".marketplace-operation-retry").forEach(button => {
+  $$(".marketplace-operation-retry").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Retry this failed operation? Only supported idempotent operations can be retried.")) return;
       button.disabled = true;
