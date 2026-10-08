@@ -53,12 +53,12 @@ context.renderMarketplaceOperations({
     },
   ],
 });
-assert.match(root.innerHTML, /Transfer accepted · verification needed/);
-assert.match(root.innerHTML, /Check in marketplace before further action/);
+assert.match(root.innerHTML, /Sent; check the marketplace/);
+assert.match(root.innerHTML, /Check the result on the marketplace first/);
 assert.match(root.innerHTML, /data-id="2"/);
 assert.doesNotMatch(root.innerHTML, /data-id="1"/);
 assert.doesNotMatch(root.innerHTML, /data-id="3"/);
-assert.match(root.innerHTML, /Review remote outcome/);
+assert.match(root.innerHTML, /Needs your attention/);
 
 context.renderMarketplaceOperations({operations:[]});
 assert.match(root.innerHTML, /No audited marketplace operations yet/);
