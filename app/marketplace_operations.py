@@ -217,7 +217,8 @@ def complete_operation(operation_id: uuid.UUID, result: dict[str, Any] | None = 
         op.result = safe
         op.active_key = None
         op.completed_at = utcnow()
-        op.last_error = None
+        if op.status != "attention":
+            op.last_error = None
 
 
 def fail_operation(operation_id: uuid.UUID, error: str, *, will_retry: bool = False) -> None:
