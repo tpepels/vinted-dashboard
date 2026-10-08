@@ -2910,6 +2910,7 @@ def _serialize_biblio_activity_run(run: models.ConnectorSyncRun) -> dict[str, An
         "photos_pending_listings": detail.get("photos_pending_listings"),
         "photo_retry_scheduled": detail.get("photo_retry_scheduled"),
         "photo_errors": list(detail.get("photo_errors") or []),
+        "photo_results": list(detail.get("photo_results") or []),
         "error": run.error,
     }
 
@@ -3111,6 +3112,103 @@ def biblio_activity(
         "jobs": serialized_jobs,
         "health": health,
     }
+
+
+
+def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any]:
+    """Local preflight; FTP completion never proves BIBLIO has processed an image."""
+    book_id = book_id.strip()
+    if not book_id or len(book_id) > 200:
+        raise HTTPException(status_code=400, detail="Invalid Book ID")
+    with db.session_scope() as session:
+        rows = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+                models.ChannelListing.external_id == book_id,
+            )
+        ).scalars().all()
+        if not rows:
+            raise HTTPException(status_code=404, detail="BIBLIO Book ID not found in this workspace")
+        if len(rows) != 1:
+            raise HTTPException(status_code=409, detail="Ambiguous BIBLIO Book ID")
+        listing = rows[0]
+        extra = dict(listing.extra or {})
+        urls = [str(url).strip() for url in extra.get("image_urls") or [] if str(url).strip()][:12]
+        source = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.inventory_item_id == listing.inventory_item_id,
+                models.ChannelListing.channel == Channel.VINTED,
+            )
+        ).scalars().all()
+        source_counts = [
+            len([url for url in (row.extra or {}).get("image_urls") or [] if url])
+            for row in source
+        ]
+        jobs_found = session.execute(
+            select(BackgroundJob).where(
+                BackgroundJob.workspace_id == workspace_id,
+                BackgroundJob.job_type == "biblio_sync",
+            ).order_by(BackgroundJob.created_at.desc()).limit(100)
+        ).scalars().all()
+        matching_job = next(
+            (job for job in jobs_found if str(dict(job.payload or {}).get("listing_id") or "") == str(listing.id)),
+            None,
+        )
+        return {
+            "book_id": book_id,
+            "listing_id": str(listing.id),
+            "title": listing.title,
+            "active": listing.status == ListingStatus.ACTIVE and int(listing.quantity or 0) > 0,
+            "biblio_source_photos": len(urls),
+            "vinted_source_photos": max(source_counts) if source_counts else None,
+            "filenames": [
+                book_id + (f"_{index}" if index else "") + ".jpg"
+                for index in range(len(urls))
+            ],
+            "last_ftp_photo_count": extra.get("photo_count"),
+            "last_ftp_photo_at": extra.get("photo_synced_at"),
+            "photo_state": extra.get("photo_sync_state"),
+            "photo_error": extra.get("photo_sync_error"),
+            "job": (
+                {
+                    "status": matching_job.status,
+                    "id": str(matching_job.id),
+                    "error": matching_job.last_error,
+                    "available_at": matching_job.available_at.isoformat() if matching_job.available_at else None,
+                } if matching_job else None
+            ),
+        }
+
+
+@router.get("/api/app/connectors/biblio/photo-status")
+def biblio_photo_status(book_id: str, context: RequestContext = Depends(require_context)):
+    return _biblio_photo_status(context.workspace.id, book_id)
+
+
+class BiblioTargetedPhotoRetry(BaseModel):
+    book_id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/api/app/connectors/biblio/retry-listing-photos")
+def biblio_retry_listing_photos(
+    payload: BiblioTargetedPhotoRetry,
+    context: RequestContext = Depends(require_write_context),
+):
+    if not _biblio_configured_for_workspace(context.workspace):
+        raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
+    info = _biblio_photo_status(context.workspace.id, payload.book_id)
+    if not info["active"]:
+        raise HTTPException(status_code=409, detail="Listing is not active with stock available")
+    if not info["biblio_source_photos"] and not info["vinted_source_photos"]:
+        raise HTTPException(status_code=409, detail="No source photographs available; refresh Vinted first")
+    job_id = jobs.enqueue_unique(
+        "biblio_sync",
+        {"listing_id": info["listing_id"], "photos_only": True, "force_photos": True},
+        context.workspace.id,
+    )
+    return {"ok": True, "job_id": str(job_id), **info}
 
 
 @router.post("/api/app/connectors/biblio/full-sync")

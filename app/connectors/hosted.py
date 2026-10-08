@@ -4465,6 +4465,8 @@ def sync_biblio_workspace(
     photo_synced: list[tuple[str, str, int]] = []
     deferred_photo_retry_listing_ids: list[str] = []
     photo_errors: list[str] = []
+    # Bound detail size on full sync; targeted photo retries retain every file.
+    photo_results: list[dict[str, str]] = []
     photos_uploaded = 0
     try:
         _update_biblio_run(
@@ -4524,6 +4526,8 @@ def sync_biblio_workspace(
             book_id = str(row.get("sku") or row.get("source_id") or "").strip()
             row_errors: list[str] = []
             for index, url in enumerate(row.get("image_urls") or []):
+                filename = ""
+                result_state = "ftp_uploaded"
                 try:
                     filename = _biblio_photo_filename(book_id, index)
                     jpeg = _download_biblio_jpeg(url)
@@ -4531,15 +4535,23 @@ def sync_biblio_workspace(
                     uploaded += 1
                     photos_uploaded += 1
                 except Exception as exc:
+                    result_state = "error"
                     message = f"{book_id} photo {index + 1}: {exc}"
                     photo_errors.append(message)
                     row_errors.append(message)
+                if len(photo_results) < 100:
+                    photo_results.append({
+                        "book_id": book_id,
+                        "filename": filename or f"photo {index + 1}",
+                        "status": result_state,
+                    })
                 _update_biblio_run(
                     run_id,
                     detail={
                         "stage": "photos_uploading",
                         "photos_uploaded": photos_uploaded,
                         "photo_errors": photo_errors[:20],
+                        "photo_results": photo_results,
                         "message": f"Uploaded {photos_uploaded}/{photo_total} photo(s)",
                     },
                 )
@@ -4608,6 +4620,7 @@ def sync_biblio_workspace(
                 "photos_total": photo_total,
                 "photos_uploaded": photos_uploaded,
                 "photo_errors": photo_errors[:20],
+                "photo_results": photo_results,
                 "message": "BIBLIO FTP sync failed",
             },
             error=error,
@@ -4631,6 +4644,7 @@ def sync_biblio_workspace(
             "photos_uploaded": photos_uploaded,
             "photos_pending_listings": len(photo_rows),
             "photo_errors": photo_errors[:20],
+            "photo_results": photo_results,
             "photo_retry_scheduled": len(deferred_photo_retry_listing_ids),
             "message": (
                 "FTP upload complete with photo warnings"

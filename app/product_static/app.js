@@ -31,6 +31,9 @@ const state = {
   stockAudioContext: null,
   biblioPublish: null,
   biblioActivity: null,
+  biblioPhotoTarget: "",
+  biblioPhotoInspection: null,
+  biblioPhotoError: "",
   biblioActivityTimer: null,
   biblioInventoryTimer: null,
   biblioListingsTimer: null,
@@ -1466,6 +1469,60 @@ function biblioActivityDetail(row) {
   return parts.join(" · ") || "BIBLIO FTP activity recorded.";
 }
 
+function biblioPhotoInspectionHtml() {
+  const info = state.biblioPhotoInspection;
+  if (state.biblioPhotoError) return '<p class="error">' + esc(state.biblioPhotoError) + '</p>';
+  if (!info) return '<p class="muted">Enter the exact BIBLIO Book ID to inspect its local photo sources and FTP history.</p>';
+  const known = Number(info.biblio_source_photos || 0);
+  const vinted = info.vinted_source_photos;
+  const difference = vinted != null && Number(vinted) !== known
+    ? '<p class="biblio-photo-alert">Vinted and staged BIBLIO photo counts differ. A targeted retry first refreshes the source data.</p>'
+    : "";
+  const job = info.job
+    ? '<p class="muted">Most recent targeted job: ' + esc(info.job.status)
+      + (info.job.available_at ? ' · ' + esc(when(info.job.available_at)) : '')
+      + (info.job.error ? ' · ' + esc(info.job.error) : '') + '</p>'
+    : "";
+  return '<div class="biblio-photo-inspection-details">'
+    + '<strong>' + esc(info.title || info.book_id) + '</strong>'
+    + '<div class="diagnostics-pills">'
+    + '<span>Staged for BIBLIO <strong>' + known + '</strong></span>'
+    + '<span>Vinted source <strong>' + esc(vinted == null ? "unknown" : vinted) + '</strong></span>'
+    + '<span>Last FTP batch <strong>' + esc(info.last_ftp_photo_count ?? "unrecorded") + '</strong></span>'
+    + '</div>'
+    + difference
+    + '<p class="muted">Expected FTP names: ' + esc((info.filenames || []).join(", ") || "none") + '</p>'
+    + '<p class="muted">Photo state: ' + esc(info.photo_state || "not synced")
+    + (info.last_ftp_photo_at ? ' · last FTP ' + esc(when(info.last_ftp_photo_at)) : '') + '</p>'
+    + (info.photo_error ? '<p class="error">' + esc(info.photo_error) + '</p>' : '')
+    + job
+    + '<p class="muted">FTP uploads cannot prove that BIBLIO has processed or published all images. Compare with BIBLIO’s image history.</p>'
+    + '</div>';
+}
+
+async function inspectBiblioPhotoTarget() {
+  const field = $("#biblio-photo-book-id");
+  const target = (field?.value || "").trim();
+  state.biblioPhotoTarget = target;
+  state.biblioPhotoError = "";
+  state.biblioPhotoInspection = null;
+  if (!target) {
+    state.biblioPhotoError = "Enter a BIBLIO Book ID.";
+  } else {
+    try {
+      state.biblioPhotoInspection = await api(
+        "/api/app/connectors/biblio/photo-status?book_id=" + encodeURIComponent(target)
+      );
+    } catch (error) {
+      state.biblioPhotoError = error.message;
+    }
+  }
+  $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
+  const retry = $("#biblio-retry-listing-photos");
+  if (retry) retry.disabled = !state.biblioPhotoInspection?.active
+    || !(state.biblioPhotoInspection.biblio_source_photos || state.biblioPhotoInspection.vinted_source_photos);
+}
+
 function renderBiblioActivity(activity, operational) {
   const current = activity?.current || null;
   const status = biblioActivityStatus(current);
@@ -1501,11 +1558,18 @@ function renderBiblioActivity(activity, operational) {
       const errors = (run.photo_errors || []).length
         ? '<div class="biblio-activity-errors">' + run.photo_errors.map((value) => esc(value)).join("<br>") + "</div>"
         : "";
+      const photoResults = (run.photo_results || []).length
+        ? '<details class="biblio-photo-files"><summary>FTP photo files (' + run.photo_results.length + ' recorded)</summary>'
+          + run.photo_results.map((photo) =>
+            '<div class="' + (photo.status === "error" ? "error" : "muted") + '">'
+            + esc(photo.filename) + ' · ' + esc(photo.status === "error" ? "FAILED" : "FTP sent") + '</div>'
+          ).join("") + '</details>'
+        : "";
       return '<div class="biblio-activity-run">'
         + '<div><strong>' + esc(runStatus.label) + '</strong><span>' + esc(when(run.started_at)) + "</span></div>"
         + '<p>' + esc(biblioActivityDetail(run)) + "</p>"
         + (meta ? '<small>' + meta + "</small>" : "")
-        + errors + "</div>";
+        + errors + photoResults + "</div>";
     }).join("")
     : '<div class="empty">No completed BIBLIO FTP runs yet.</div>';
   return '<div class="biblio-activity-compact">'
@@ -1514,9 +1578,17 @@ function renderBiblioActivity(activity, operational) {
     + '<div><strong>' + esc(status.label) + '</strong><span>' + esc(biblioActivityDetail(current)) + "</span></div></div>"
     + '<div class="actions biblio-activity-actions">'
     + '<button class="btn biblio-activity-toggle" type="button">View activity</button>'
-    + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry photos</button>' : "")
+    + (operational ? '<button class="btn biblio-retry-photos" type="button">Retry all photos</button>' : "")
     + (operational ? '<button class="btn biblio-full-sync" type="button">Full resync</button>' : "")
-    + '</div><div class="biblio-activity-history hidden">'
+    + '</div>'
+    + (operational ? '<div class="biblio-photo-recovery"><strong>Photo recovery for one book</strong>'
+      + '<div class="biblio-photo-recovery-controls">'
+      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="e.g. VINTED-10253402699" value="' + esc(state.biblioPhotoTarget) + '">'
+      + '<button id="biblio-inspect-photos" class="btn" type="button">Inspect photos</button>'
+      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Retry this book</button>'
+      + '</div><div id="biblio-photo-inspection">' + biblioPhotoInspectionHtml() + '</div></div>'
+      : "")
+    + '<div class="biblio-activity-history hidden">'
     + '<div class="biblio-activity-note">FTP uploaded means the files reached BIBLIO. BIBLIO still has to process the inventory/filter and attach images afterwards. For a brand-new listing, the dashboard schedules one delayed photo-only retry because BIBLIO ignores an image if there is no active listing to attach it to.</div>'
     + '<div class="biblio-activity-note"><strong>Orders:</strong> automatic BIBLIO order handling remains disabled until BIBLIO enables Bulk Order Management for the seller account and supplies its private protocol documentation.</div>'
     + history + "</div></div>";
@@ -3981,6 +4053,7 @@ async function connections() {
   });
   $(".biblio-retry-photos").forEach((button) => {
     button.onclick = async () => {
+      if (!window.confirm("Retry all photos will resend every active BIBLIO listing's images. Use the single-book photo recovery tool below when only one book is affected. Continue?")) return;
       button.disabled = true;
       try {
         await api("/api/app/connectors/biblio/retry-photos", { method: "POST" });
@@ -4007,6 +4080,51 @@ async function connections() {
     };
   });
 
+  const inspectPhotosButton = $("#biblio-inspect-photos");
+  if (inspectPhotosButton) {
+    inspectPhotosButton.onclick = () => inspectBiblioPhotoTarget();
+    const field = $("#biblio-photo-book-id");
+    field.oninput = () => {
+      const value = field.value.trim();
+      state.biblioPhotoTarget = value;
+      if (value !== state.biblioPhotoInspection?.book_id) {
+        state.biblioPhotoInspection = null;
+        state.biblioPhotoError = "";
+        $("#biblio-retry-listing-photos").disabled = true;
+        $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
+      }
+    };
+    field.onkeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        inspectBiblioPhotoTarget();
+      }
+    };
+  }
+  const retryPhotosButton = $("#biblio-retry-listing-photos");
+  if (retryPhotosButton) {
+    retryPhotosButton.disabled = !state.biblioPhotoInspection?.active
+      || !(state.biblioPhotoInspection.biblio_source_photos || state.biblioPhotoInspection.vinted_source_photos);
+    retryPhotosButton.onclick = async () => {
+      const info = state.biblioPhotoInspection;
+      if (!info || $("#biblio-photo-book-id").value.trim() !== info.book_id) return;
+      retryPhotosButton.disabled = true;
+      try {
+        const result = await api("/api/app/connectors/biblio/retry-listing-photos", {
+          method: "POST",
+          body: JSON.stringify({ book_id: info.book_id }),
+        });
+        flash("Photo-only retry queued for " + result.book_id + ". No inventory records will be resent.");
+        await inspectBiblioPhotoTarget();
+        await connections();
+      } catch (error) {
+        state.biblioPhotoError = error.message;
+        $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
+        flash(error.message, true);
+      }
+    };
+  }
+
   $("#devices").innerHTML = devices.devices.length
     ? devices.devices.map((device) =>
       '<div class="device-row"><div><strong>' + esc(device.name) + '</strong><div class="sub">Version '
@@ -4031,6 +4149,7 @@ async function connections() {
 
   const currentStatus = String(biblioActivity?.current?.status || "");
   if (["queued", "running"].includes(currentStatus) && state.view === "connections") {
+    if (state.biblioPhotoInspection) inspectBiblioPhotoTarget();
     state.biblioActivityTimer = setTimeout(() => {
       if (state.view === "connections") connections();
     }, 2500);
