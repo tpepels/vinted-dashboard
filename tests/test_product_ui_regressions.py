@@ -801,3 +801,22 @@ def test_connections_hides_advanced_tools_and_separates_comparison_from_settings
     assert 'panel.addEventListener("toggle"' in APP_JS
     assert 'data-connector-channel="biblio"' in APP_JS
     assert html.index('id="biblio-compare-panel"') < html.index('id="connector-config"')
+
+
+def test_item_marketplace_panel_exposes_safe_real_actions():
+    index = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="item-marketplaces-panel"' in index
+    assert 'id="item-marketplaces-content"' in index
+    assert 'id="close-item-marketplaces"' in index
+    assert 'function openItemMarketplaces(itemId)' in APP_JS
+    assert '/marketplace-status' in APP_JS
+    assert 'function renderItemMarketplacePanel(data)' in APP_JS
+    assert 'class="btn item-marketplaces"' in APP_JS
+    assert 'class="btn item-marketplace-photos"' in APP_JS
+    assert 'class="btn item-marketplace-verify"' in APP_JS
+    assert 'class="btn item-marketplace-retry"' in APP_JS
+    assert 'data-book=' in APP_JS
+    assert 'state.biblioPhotoTarget = button.dataset.book' in APP_JS
+    assert 'this panel deliberately does not offer a blind remote delete' in APP_JS
