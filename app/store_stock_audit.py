@@ -130,6 +130,8 @@ def _result(workspace_id: uuid.UUID, job_id: str, target: dict[str, Any]) -> Non
         extra = dict(listing.extra or {})
         extra["store_stock_audit"] = {
             "run_id": job_id, "state": state,
+            "external_id": target["external_id"],
+            "external_sku": target["expected_sku"],
             "local_quantity": target["local_quantity"],
             "remote_quantity": remote_quantity, "checked_at": when,
             "message": message,
@@ -189,6 +191,16 @@ def latest(workspace_id: uuid.UUID) -> dict[str, Any]:
             info = dict((listing.extra or {}).get("store_stock_audit") or {})
             if info.get("run_id") != job_id:
                 continue
+            changed_since_check = (
+                int(item.quantity or 0) != info.get("local_quantity")
+                or listing.external_id != info.get("external_id")
+                or listing.external_sku != info.get("external_sku")
+                or not is_physical(item)
+            )
+            if changed_since_check:
+                info["state"] = "changed"
+                info["message"] = "Stock or listing link changed after the check; run it again"
+                info["remote_quantity"] = None
             results.append({
                 "item_id": str(item.id), "title": item.title,
                 "channel": listing.channel, "sku": item.sku,
