@@ -505,7 +505,7 @@
         <details id="biblio-compare-panel" class="card connection-task-panel hidden">
           <summary><span><strong>Check what is actually on BIBLIO</strong><small>Compare your dashboard with an inventory file downloaded from BIBLIO</small></span></summary>
           <div class="connection-task-content">
-            <p>Uploads tell us what was sent, not what BIBLIO accepted. Download your inventory from your BIBLIO seller account and choose that file here. Comparing will <strong>not change your books or listings</strong>.</p>
+            <p>Uploads tell us what was sent, not what BIBLIO accepted. Download your inventory from your BIBLIO seller account and choose that file here. Comparing will <strong>not change book details, prices or stock quantities</strong>. It records which BIBLIO listings were checked.</p>
             <label class="connection-file-label" for="biblio-import-file">Inventory file downloaded from BIBLIO</label>
             <input id="biblio-import-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv">
             <div class="actions"><button id="verify-biblio" class="btn primary" type="button">Compare without changing anything</button></div>
@@ -514,7 +514,7 @@
               <summary>Advanced: update the dashboard from this file</summary>
               <p>This imports listing information from the selected BIBLIO file into your dashboard. It does not publish anything to BIBLIO. Review the comparison first.</p>
               <label class="checkline"><input id="biblio-import-authoritative" type="checkbox"> <span><strong>This file contains every active BIBLIO listing.</strong> Treat missing listings as inactive in the dashboard. Only tick this for a complete BIBLIO export.</span></label>
-              <button id="import-biblio" class="btn danger" type="button">Apply file to dashboard…</button>
+              <button id="import-biblio" class="btn danger" type="button" disabled>Apply file to dashboard…</button>
             </details>
           </div>
         </details>
