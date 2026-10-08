@@ -480,21 +480,24 @@ def reconcile_sale_state(
             external_item_id=external_item_id,
         )
 
+    item = resolve_sale_item(session, sale, external_item_id=external_item_id)
+    if item is not None:
+        recompute_inventory_item(session, item)
+        if is_physical(item):
+            _cancel_stale_closures(session, item)
+            return []
+    # Legacy/provisional historical orders have no authoritative physical
+    # baseline, but may still have a manual follow-up linked to this order.
     pending = session.execute(
         select(CrossChannelAction).where(
             CrossChannelAction.trigger_sale_id == sale.id,
-            CrossChannelAction.status.in_(["queued", "running", "attention", "error"]),
+            CrossChannelAction.status.in_(["queued", "attention", "error"]),
         )
     ).scalars().all()
     for action in pending:
         action.status = "cancelled"
         action.completed_at = utcnow()
         action.last_error = None
-
-    item = resolve_sale_item(session, sale, external_item_id=external_item_id)
-    if item is not None:
-        recompute_inventory_item(session, item)
-        _cancel_stale_closures(session, item)
     return []
 
 
@@ -510,6 +513,27 @@ def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
         action = _get_action(session, action_id)
         if action.status in {"success", "acknowledged", "cancelled"}:
             return {"ok": True, "already_complete": True}
+        item = session.get(models.InventoryItem, action.inventory_item_id) if action.inventory_item_id else None
+        if item is None or item.workspace_id != action.workspace_id:
+            action.status = "cancelled"
+            action.completed_at = utcnow()
+            return {"ok": True, "skipped": "Missing physical stock relationship"}
+        if is_physical(item):
+            recompute_inventory_item(session, item)
+            if item.quantity > 0:
+                _cancel_stale_closures(session, item)
+                return {"ok": True, "skipped": "Available physical stock; no close permitted"}
+            consuming = session.execute(
+                select(models.Sale).where(
+                    models.Sale.workspace_id == item.workspace_id,
+                    models.Sale.inventory_item_id == item.id,
+                    models.Sale.direction == "sell",
+                )
+            ).scalars().all()
+            if not any(sale_counts_as_sold(row) for row in consuming):
+                action.status = "cancelled"
+                action.completed_at = utcnow()
+                return {"ok": True, "skipped": "No confirmed consuming sale"}
         if action.mode != "remote":
             raise RuntimeError("Manual action cannot be executed by the worker")
         listing = session.get(models.ChannelListing, action.channel_listing_id)
@@ -560,6 +584,16 @@ def execute_action(action_id: uuid.UUID) -> dict[str, Any]:
         action.completed_at = completed_at
         action.last_error = None
         action.detail = {**dict(action.detail or {}), **dict(detail or {})}
+        item = session.get(models.InventoryItem, action.inventory_item_id) if action.inventory_item_id else None
+        if item is not None and is_physical(item):
+            recompute_inventory_item(session, item)
+            if item.quantity > 0:
+                # The sale may have been cancelled while the remote FTP/API
+                # request was in flight. Do not misrepresent it as reopened.
+                updated = dict(action.detail or {})
+                updated["needs_reopen"] = True
+                updated["reopen_reason"] = "Stock restored while remote listing close was in flight"
+                action.detail = updated
     return {"ok": True, **dict(detail or {})}
 
 
@@ -605,6 +639,13 @@ def retry_action(
         raise ValueError("Cross-channel action not found")
     if action.mode != "remote" or action.status != "error":
         raise ValueError("Only failed remote actions can be retried")
+    item = session.get(models.InventoryItem, action.inventory_item_id) if action.inventory_item_id else None
+    if item is None or item.workspace_id != workspace_id:
+        raise ValueError("Stock relationship no longer exists")
+    if is_physical(item):
+        recompute_inventory_item(session, item)
+        if item.quantity > 0:
+            raise ValueError("Stock is available; closing this listing is no longer appropriate")
     action.status = "queued"
     action.completed_at = None
     action.last_error = None
@@ -638,6 +679,8 @@ def serialize_actions(
                 "action_type": action.action_type,
                 "attempts": action.attempts,
                 "last_error": action.last_error,
+                "needs_reopen": bool((action.detail or {}).get("needs_reopen")),
+                "reopen_reason": (action.detail or {}).get("reopen_reason"),
                 "created_at": action.created_at.isoformat() if action.created_at else None,
                 "completed_at": action.completed_at.isoformat() if action.completed_at else None,
                 "listing": {
