@@ -78,6 +78,7 @@ from app.connectors.hosted import (
     test_squarespace_workspace,
     test_wix_workspace,
     test_woocommerce_workspace,
+    update_woocommerce_workspace_stock,
 )
 from app.connectors.workspace_sync import recompute_inventory_item
 from app import cross_listing
@@ -1629,6 +1630,11 @@ def item_marketplace_status(
                 "photo_count": len(extra.get("image_urls") or []) if is_biblio else None,
                 "can_inspect_photos": is_biblio and bool(listing.external_id),
                 "can_open_remote": bool(listing.url),
+                "can_sync_woocommerce_stock": (
+                    listing.channel == Channel.WOOCOMMERCE
+                    and is_physical(item)
+                    and bool(re.fullmatch(r"[1-9][0-9]*", str(listing.external_id or "")))
+                ),
             })
         return {
             "item": {"id": str(item.id), "title": item.title, "sku": item.sku,
@@ -1649,6 +1655,86 @@ def item_marketplace_status(
                 "verify": "BIBLIO requires a downloaded seller inventory file or a direct marketplace check to verify publication.",
             },
         }
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/woocommerce/stock")
+def update_woocommerce_item_stock(
+    item_id: uuid.UUID,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Explicitly synchronize one confirmed physical quantity to WooCommerce.
+
+    A linked SKU and remote product ID must agree. No implicit updates to
+    other channels or master quantity are made here.
+    """
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        if item is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        if not is_physical(item):
+            raise HTTPException(status_code=409, detail="Confirm this physical stock before remote updates")
+        listings = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.inventory_item_id == item_id,
+                models.ChannelListing.channel == Channel.WOOCOMMERCE,
+            )
+        ).scalars().all()
+        if len(listings) != 1:
+            raise HTTPException(status_code=409, detail="Expected exactly one linked WooCommerce listing")
+        listing = listings[0]
+        if not re.fullmatch(r"[1-9][0-9]*", str(listing.external_id or "")):
+            raise HTTPException(status_code=409, detail="Only simple WooCommerce product IDs are supported")
+        external_id, expected_sku = listing.external_id, listing.external_sku
+        quantity = int(item.quantity or 0)
+        listing_id = listing.id
+
+    try:
+        operation_id = start_inline(
+            context.workspace.id, Channel.WOOCOMMERCE, "update", str(listing_id),
+            inventory_item_id=item_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        result = update_woocommerce_workspace_stock(
+            context.workspace.id,
+            external_id=external_id,
+            expected_sku=expected_sku,
+            quantity=quantity,
+        )
+        with db.session_scope() as session:
+            listing = session.get(models.ChannelListing, listing_id)
+            item = session.get(models.InventoryItem, item_id)
+            if (
+                listing is None or item is None
+                or item.workspace_id != context.workspace.id
+                or listing.workspace_id != context.workspace.id
+                or not is_physical(item)
+                or int(item.quantity or 0) != quantity
+            ):
+                raise RuntimeError(
+                    "Physical inventory changed during the remote update; "
+                    "reconcile WooCommerce stock before the next write"
+                )
+            listing.quantity = quantity
+            listing.status = result["status"]
+            extra = dict(listing.extra or {})
+            extra["stock_synced_at"] = utcnow().isoformat()
+            extra["stock_synced_quantity"] = quantity
+            extra["stock_remote_readback_verified"] = True
+            listing.extra = extra
+        complete_operation(operation_id, result)
+        return {"ok": True, "operation_id": str(operation_id), **result}
+    except Exception as exc:
+        fail_operation(operation_id, str(exc))
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=502,
+            detail="WooCommerce stock update was not confirmed. Inspect the remote product "
+                   "before sending another update.",
+        ) from exc
 
 
 @router.get("/api/app/inventory/{item_id}/cross-list")
