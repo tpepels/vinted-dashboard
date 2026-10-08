@@ -1630,6 +1630,9 @@ function biblioActivityDetail(row) {
   if (row.photos_total != null) {
     parts.push("photos sent " + Number(row.photos_uploaded || 0) + "/" + Number(row.photos_total || 0));
   }
+  if (Number(row.photos_skipped || 0) > 0) {
+    parts.push(Number(row.photos_skipped) + " previously accepted photos skipped");
+  }
   if (Number(row.photo_retry_scheduled || 0) > 0) {
     parts.push(Number(row.photo_retry_scheduled) + " automatic photo follow-up");
   }
