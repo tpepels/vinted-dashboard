@@ -41,7 +41,7 @@ def _check_workspace_write_access(workspace_id: uuid.UUID | None, job_type: str)
             )
 
 
-def _sync_biblio(payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_biblio(payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_biblio_workspace
 
     resolved_workspace = _require_workspace("biblio_sync", workspace_id)
@@ -66,75 +66,87 @@ def _sync_biblio(payload: dict, workspace_id: uuid.UUID | None) -> None:
             int(os.getenv("BIBLIO_PHOTO_RETRY_DELAY_SECONDS", "93600")),
         )
         for raw_id in result.get("deferred_photo_retry_listing_ids") or []:
-            jobs.enqueue(
-                "biblio_sync",
-                {
-                    "listing_id": str(raw_id),
-                    "photos_only": True,
-                    "force_photos": False,
-                    "automatic_photo_retry": True,
-                },
-                resolved_workspace,
-                delay_seconds=delay_seconds,
-            )
+            from app import db
+            from app.marketplace_operations import queue_operation
+            try:
+                with db.session_scope() as session:
+                    queue_operation(
+                        session, resolved_workspace, "biblio", "photos", str(raw_id),
+                        job_type="biblio_sync",
+                        payload={
+                            "listing_id": str(raw_id),
+                            "photos_only": True,
+                            "force_photos": False,
+                            "automatic_photo_retry": True,
+                        },
+                        channel_listing_id=uuid.UUID(str(raw_id)),
+                        delay_seconds=delay_seconds,
+                    )
+            except ValueError:
+                # A manual photo job may already be queued or executing.
+                # Follow-up scheduling cannot turn a successful FTP send into
+                # another expensive/duplicate inventory upload.
+                logger.info("BIBLIO photo follow-up already active for %s", raw_id)
+
+    return result
 
 
-def _sync_ebay(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_ebay(_payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_ebay_workspace
 
-    sync_ebay_workspace(_require_workspace("ebay_sync", workspace_id))
+    return sync_ebay_workspace(_require_workspace("ebay_sync", workspace_id))
 
 
-def _sync_etsy(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_etsy(_payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_etsy_workspace
 
-    sync_etsy_workspace(_require_workspace("etsy_sync", workspace_id))
+    return sync_etsy_workspace(_require_workspace("etsy_sync", workspace_id))
 
 
-def _sync_woocommerce(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_woocommerce(_payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_woocommerce_workspace
 
-    sync_woocommerce_workspace(_require_workspace("woocommerce_sync", workspace_id))
+    return sync_woocommerce_workspace(_require_workspace("woocommerce_sync", workspace_id))
 
 
-def _sync_shopify(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_shopify(_payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_shopify_workspace
 
-    sync_shopify_workspace(_require_workspace("shopify_sync", workspace_id))
+    return sync_shopify_workspace(_require_workspace("shopify_sync", workspace_id))
 
 
-def _sync_bigcommerce(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_bigcommerce(_payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_bigcommerce_workspace
 
-    sync_bigcommerce_workspace(_require_workspace("bigcommerce_sync", workspace_id))
+    return sync_bigcommerce_workspace(_require_workspace("bigcommerce_sync", workspace_id))
 
 
-def _sync_squarespace(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_squarespace(_payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_squarespace_workspace
 
-    sync_squarespace_workspace(_require_workspace("squarespace_sync", workspace_id))
+    return sync_squarespace_workspace(_require_workspace("squarespace_sync", workspace_id))
 
 
-def _sync_wix(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_wix(_payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_wix_workspace
 
-    sync_wix_workspace(_require_workspace("wix_sync", workspace_id))
+    return sync_wix_workspace(_require_workspace("wix_sync", workspace_id))
 
 
-def _sync_depop(_payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _sync_depop(_payload: dict, workspace_id: uuid.UUID | None) -> dict:
     from app.connectors.hosted import sync_depop_workspace
 
-    sync_depop_workspace(_require_workspace("depop_sync", workspace_id))
+    return sync_depop_workspace(_require_workspace("depop_sync", workspace_id))
 
 
-def _cross_channel_close(payload: dict, workspace_id: uuid.UUID | None) -> None:
+def _cross_channel_close(payload: dict, workspace_id: uuid.UUID | None) -> dict:
     _require_workspace("cross_channel_close", workspace_id)
     action_id = payload.get("action_id")
     if not action_id:
         raise RuntimeError("cross_channel_close job is missing action_id")
     from app.cross_channel import execute_action
 
-    execute_action(uuid.UUID(str(action_id)))
+    return execute_action(uuid.UUID(str(action_id)))
 
 
 def _noop(_payload: dict, _workspace_id: uuid.UUID | None) -> None:
@@ -156,7 +168,7 @@ _JOB_HANDLERS = {
 }
 
 
-def handle(job: dict) -> None:
+def handle(job: dict) -> dict | None:
     job_type = str(job.get("job_type") or "")
     handler = _JOB_HANDLERS.get(job_type)
     if handler is None:
@@ -168,7 +180,7 @@ def handle(job: dict) -> None:
         else None
     )
     _check_workspace_write_access(workspace_id, job_type)
-    handler(job.get("payload") or {}, workspace_id)
+    return handler(job.get("payload") or {}, workspace_id)
 
 
 def run_forever() -> None:
@@ -199,12 +211,25 @@ def run_forever() -> None:
             job.get("workspace_id"),
             job.get("attempts"),
         )
+        operation_id = (job.get("payload") or {}).get("operation_id")
         try:
-            handle(job)
+            if operation_id:
+                from app.marketplace_operations import begin_operation
+                if not begin_operation(uuid.UUID(str(operation_id)), uuid.UUID(job["id"])):
+                    jobs.complete(job["id"])
+                    continue
+            result_data = handle(job)
         except Exception as exc:
             logger.exception("job %s failed", job["id"])
             if job.get("job_type") == "cross_channel_close":
-                result = jobs.retry(job["id"], str(exc))
+                # Do not automatically repeat uncertain remote closes.
+                result = (
+                    {"will_retry": False}
+                    if operation_id
+                    else jobs.retry(job["id"], str(exc))
+                )
+                if operation_id:
+                    jobs.fail(job["id"], str(exc))
                 action_id = (job.get("payload") or {}).get("action_id")
                 if action_id:
                     try:
@@ -243,7 +268,22 @@ def run_forever() -> None:
                             logger.exception("could not mark BIBLIO job for retry")
             else:
                 jobs.fail(job["id"], str(exc))
+            if operation_id:
+                try:
+                    from app.marketplace_operations import fail_operation
+                    fail_operation(
+                        uuid.UUID(str(operation_id)), str(exc),
+                        will_retry=bool(result.get("will_retry")) if (
+                            job.get("job_type") == "cross_channel_close"
+                            or (job.get("job_type") == "biblio_sync" and str(exc) == "BIBLIO FTP sync failed")
+                        ) else False,
+                    )
+                except Exception:
+                    logger.exception("failed to persist marketplace operation failure")
         else:
+            if operation_id:
+                from app.marketplace_operations import complete_operation
+                complete_operation(uuid.UUID(str(operation_id)), result_data)
             jobs.complete(job["id"])
             logger.info(
                 "job completed id=%s type=%s workspace=%s",

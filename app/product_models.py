@@ -178,6 +178,50 @@ class BackgroundJob(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_utcnow)
 
 
+class MarketplaceOperation(Base):
+    """One durable, workspace-scoped marketplace operation attempt.
+
+    A nullable, unique active_key prevents concurrent jobs for the same
+    channel/target/action. Terminal operations clear it, preserving history.
+    External writes with uncertain acknowledgement are not auto-replayed.
+    """
+
+    __tablename__ = "marketplace_operations"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "active_key", name="uq_marketplace_operations_active_key"),
+        Index("ix_marketplace_operations_workspace_created", "workspace_id", "created_at"),
+        Index("ix_marketplace_operations_workspace_status", "workspace_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)
+    operation_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    target_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    active_key: Mapped[Optional[str]] = mapped_column(String(240), nullable=True)
+    inventory_item_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("inventory_items.id", ondelete="SET NULL"), nullable=True
+    )
+    channel_listing_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("channel_listings.id", ondelete="SET NULL"), nullable=True
+    )
+    job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("background_jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    job_type: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    job_payload: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
+    verification: Mapped[str] = mapped_column(String(30), nullable=False, default="not_checked")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
 class CrossChannelAction(Base):
     """Audited action created when one physical item sells on one channel
     while linked listings remain live elsewhere."""

@@ -4131,6 +4131,68 @@ function renderMarketplaceDevelopment(definitions) {
   showSelected();
 }
 
+function renderMarketplaceOperations(data) {
+  const root = $("#marketplace-operations-list");
+  if (!root) return;
+  const operations = data?.operations || [];
+  if (!operations.length) {
+    root.innerHTML = '<p class="muted">No audited marketplace operations yet. New syncs, uploads and cross-market close jobs will appear here.</p>';
+    return;
+  }
+  const statuses = {
+    queued: "Queued", running: "Running",
+    succeeded: "Completed", needs_verification: "Transfer accepted · verification needed",
+    failed: "Failed", attention: "Review remote outcome", cancelled: "Cancelled",
+  };
+  root.innerHTML = '<div class="table-wrap"><table><thead><tr>'
+    + '<th>Marketplace / action</th><th>Target</th><th>Status</th><th>Created</th><th>Next step</th>'
+    + '</tr></thead><tbody>'
+    + operations.map(op => {
+      const requiresCheck = op.status === "needs_verification" || op.status === "attention";
+      const result = Object.entries(op.result || {}).slice(0, 6)
+        .map(([key, value]) => esc(key.replaceAll("_", " ") + ": " + String(value))).join(" · ");
+      const next = op.can_retry
+        ? '<button class="btn marketplace-operation-retry" type="button" data-id="' + esc(op.id) + '">Retry safely</button>'
+        : requiresCheck ? '<span class="muted">Check in marketplace before further action</span>'
+        : "";
+      return '<tr><td><strong>' + esc(op.channel.toUpperCase()) + ' · ' + esc(op.type)
+        + '</strong><div class="sub">' + esc(op.verification) + '</div></td>'
+        + '<td>' + esc(op.target || "all") + '</td>'
+        + '<td><strong>' + esc(statuses[op.status] || op.status) + '</strong>'
+        + (op.error ? '<div class="error">' + esc(op.error) + '</div>' : "")
+        + (result ? '<div class="sub">' + result + '</div>' : "")
+        + '</td><td>' + esc(when(op.created_at)) + '</td><td>' + next + '</td></tr>';
+    }).join("")
+    + '</tbody></table></div>';
+  $$(".marketplace-operation-retry").forEach(button => {
+    button.onclick = async () => {
+      if (!window.confirm("Retry this failed operation? Only supported idempotent operations can be retried.")) return;
+      button.disabled = true;
+      try {
+        await api("/api/app/marketplace-operations/" + button.dataset.id + "/retry", {method:"POST"});
+        flash("Marketplace operation queued for retry.");
+        await refreshMarketplaceOperations();
+      } catch (error) {
+        flash(error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+}
+
+async function refreshMarketplaceOperations() {
+  const data = await api("/api/app/marketplace-operations?limit=60");
+  renderMarketplaceOperations(data);
+}
+
+$("#marketplace-operations-refresh").onclick = async () => {
+  const button = $("#marketplace-operations-refresh");
+  button.disabled = true;
+  try { await refreshMarketplaceOperations(); }
+  catch (error) { flash(error.message, true); }
+  finally { button.disabled = false; }
+};
+
 async function connections() {
   if (state.biblioActivityTimer) {
     clearTimeout(state.biblioActivityTimer);
@@ -4146,6 +4208,11 @@ async function connections() {
   state.biblioActivity = biblioActivity;
   state.marketplaceDevelopment = development;
   renderMarketplaceDevelopment(development);
+  try {
+    await refreshMarketplaceOperations();
+  } catch (error) {
+    $("#marketplace-operations-list").textContent = "Operation history unavailable: " + error.message;
+  }
   const featured = state.connectors.filter(connector =>
     connector.configured || connector.channel === "vinted" || connector.channel === "biblio"
   ).sort((a, b) => {

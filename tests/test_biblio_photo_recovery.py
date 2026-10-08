@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app import db, entry, models
 from app.constants import Channel, ListingStatus
-from app.product_models import BackgroundJob
+from app.product_models import BackgroundJob, MarketplaceOperation
 
 
 def register(email):
@@ -114,7 +114,13 @@ def test_photo_status_identifies_missing_staged_source_and_only_retries_one_book
             "listing_id": listing_id,
             "photos_only": True,
             "force_photos": True,
+            "operation_id": first.json()["operation_id"],
         }
+        op = session.get(MarketplaceOperation, __import__("uuid").UUID(first.json()["operation_id"]))
+        assert op is not None
+        assert op.job_id == queued[0].id
+        assert op.status == "queued"
+        assert op.operation_type == "photos"
 
 
 def test_photo_recovery_requires_auth_and_does_not_expose_other_workspaces():

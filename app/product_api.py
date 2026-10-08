@@ -29,6 +29,12 @@ from app.diagnostics import build_bundle, recent_logs, redact_text
 from app.bridge_package import extension_source_version
 from app.connectors.biblio_format import parse_biblio_inventory
 from app.connectors.development import contract as marketplace_contract
+from app.marketplace_operations import (
+    queue_operation, retry_operation, serialize as serialize_marketplace_operation,
+    start_inline, complete_operation, fail_operation,
+)
+from app.product_models import MarketplaceOperation
+
 from app.auth import (
     RequestContext,
     clear_session_cookies,
@@ -1634,12 +1640,26 @@ def cross_list_publish(
         overrides.pop("source_listing_id", None)
         if overrides:
             candidate = cross_listing.apply_overrides(candidate, overrides)
-        return cross_listing.publish(
-            context.workspace.id,
-            item_id,
-            channel,
-            candidate,
+        if candidate.get("missing"):
+            raise ValueError("Listing is missing: " + ", ".join(map(str, candidate["missing"])))
+        with db.session_scope() as session:
+            if cross_listing.existing_channel_listing(session, context.workspace.id, item_id, channel):
+                raise ValueError("This physical item already has a listing on this marketplace.")
+        operation_id = start_inline(
+            context.workspace.id, channel, "publish", str(item_id),
+            inventory_item_id=item_id,
         )
+        try:
+            result = cross_listing.publish(
+                context.workspace.id, item_id, channel, candidate,
+            )
+        except Exception as exc:
+            # The remote call may have succeeded before a response or local
+            # linkage failed. Block blind duplicate creation on retry.
+            fail_operation(operation_id, str(exc))
+            raise
+        complete_operation(operation_id, result)
+        return {**result, "operation_id": str(operation_id)}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1718,9 +1738,17 @@ def biblio_publish(
                 candidate,
             )
             listing_id = str(listing.id)
-        job_id = jobs.enqueue("biblio_sync", {"listing_id": listing_id}, context.workspace.id)
         with db.session_scope() as session:
             queued_listing = session.get(models.ChannelListing, uuid.UUID(listing_id))
+            operation, created = queue_operation(
+                session, context.workspace.id, "biblio",
+                "update" if candidate.get("already_listed") else "publish",
+                listing_id, job_type="biblio_sync",
+                payload={"listing_id": listing_id},
+                inventory_item_id=item_id,
+                channel_listing_id=uuid.UUID(listing_id),
+            )
+            job_id, operation_id = operation.job_id, operation.id
             if queued_listing is not None and queued_listing.workspace_id == context.workspace.id:
                 extra = dict(queued_listing.extra or {})
                 extra["publish_job_id"] = str(job_id)
@@ -1733,6 +1761,8 @@ def biblio_publish(
         "ok": True,
         "listing_id": listing_id,
         "job_id": str(job_id),
+        "operation_id": str(operation_id),
+        "already_queued": not created,
         "queued": True,
         "candidate": candidate,
     }
@@ -2857,6 +2887,55 @@ def export_inventory(
     )
 
 
+@router.get("/api/app/marketplace-operations")
+def marketplace_operations_list(
+    channel: str = "",
+    limit: int = 100,
+    context: RequestContext = Depends(require_context),
+):
+    """Current and historical marketplace attempts for this workspace only."""
+    limit = max(1, min(int(limit), 200))
+    with db.session_scope() as session:
+        query = select(MarketplaceOperation).where(
+            MarketplaceOperation.workspace_id == context.workspace.id
+        )
+        if channel:
+            query = query.where(MarketplaceOperation.channel == channel.strip().lower())
+        rows = session.execute(
+            query.order_by(MarketplaceOperation.created_at.desc(), MarketplaceOperation.id.desc()).limit(limit)
+        ).scalars().all()
+        return {"operations": [serialize_marketplace_operation(row) for row in rows]}
+
+
+@router.get("/api/app/marketplace-operations/{operation_id}")
+def marketplace_operation_detail(
+    operation_id: uuid.UUID,
+    context: RequestContext = Depends(require_context),
+):
+    with db.session_scope() as session:
+        row = session.get(MarketplaceOperation, operation_id)
+        if row is None or row.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Marketplace operation not found")
+        return serialize_marketplace_operation(row)
+
+
+@router.post("/api/app/marketplace-operations/{operation_id}/retry")
+def retry_marketplace_operation(
+    operation_id: uuid.UUID,
+    context: RequestContext = Depends(require_write_context),
+):
+    try:
+        with db.session_scope() as session:
+            row = retry_operation(session, context.workspace.id, operation_id)
+            return {"ok": True, "operation": serialize_marketplace_operation(row)}
+    except ValueError as exc:
+        detail = str(exc)
+        raise HTTPException(
+            status_code=404 if detail == "Marketplace operation not found" else 409,
+            detail=detail,
+        ) from exc
+
+
 @router.get("/api/app/connectors/development")
 def connector_development_status(context: RequestContext = Depends(require_context)):
     """Reviewable code capabilities alongside live, workspace-scoped evidence.
@@ -3382,12 +3461,23 @@ def biblio_retry_listing_photos(
         raise HTTPException(status_code=409, detail="Listing is not active with stock available")
     if not info["biblio_source_photos"] and not info["vinted_source_photos"]:
         raise HTTPException(status_code=409, detail="No source photographs available; refresh Vinted first")
-    job_id = jobs.enqueue_unique(
-        "biblio_sync",
-        {"listing_id": info["listing_id"], "photos_only": True, "force_photos": True},
-        context.workspace.id,
-    )
-    return {"ok": True, "job_id": str(job_id), **info}
+    try:
+        with db.session_scope() as session:
+            operation, created = queue_operation(
+                session, context.workspace.id, "biblio", "photos",
+                str(info["listing_id"]), job_type="biblio_sync",
+                payload={
+                    "listing_id": info["listing_id"],
+                    "photos_only": True,
+                    "force_photos": True,
+                },
+                channel_listing_id=uuid.UUID(str(info["listing_id"])),
+            )
+            job_id, operation_id = operation.job_id, operation.id
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
+            "already_queued": not created, **info}
 
 
 @router.post("/api/app/connectors/biblio/full-sync")
@@ -3396,12 +3486,18 @@ def enqueue_biblio_full_sync(
 ):
     if not _biblio_configured_for_workspace(context.workspace):
         raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
-    job_id = jobs.enqueue(
-        "biblio_sync",
-        {"full_sync": True, "force_photos": True},
-        context.workspace.id,
-    )
-    return {"ok": True, "job_id": str(job_id), "queued": True}
+    try:
+        with db.session_scope() as session:
+            operation, created = queue_operation(
+                session, context.workspace.id, "biblio", "sync", "all",
+                job_type="biblio_sync",
+                payload={"full_sync": True, "force_photos": True},
+            )
+            job_id, operation_id = operation.job_id, operation.id
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
+            "queued": True, "already_queued": not created}
 
 
 @router.post("/api/app/connectors/biblio/retry-photos")
@@ -3410,12 +3506,18 @@ def enqueue_biblio_photo_retry(
 ):
     if not _biblio_configured_for_workspace(context.workspace):
         raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
-    job_id = jobs.enqueue(
-        "biblio_sync",
-        {"photos_only": True, "force_photos": True},
-        context.workspace.id,
-    )
-    return {"ok": True, "job_id": str(job_id), "queued": True}
+    try:
+        with db.session_scope() as session:
+            operation, created = queue_operation(
+                session, context.workspace.id, "biblio", "photos", "all",
+                job_type="biblio_sync",
+                payload={"photos_only": True, "force_photos": True},
+            )
+            job_id, operation_id = operation.job_id, operation.id
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
+            "queued": True, "already_queued": not created}
 
 
 @router.put("/api/app/connectors/{channel}/credentials")
@@ -3870,12 +3972,20 @@ def enqueue_connector_sync(
             status_code=400,
             detail=f"{channel} credentials are not configured",
         )
-    job_id = (
-        jobs.enqueue_unique("biblio_sync", {}, context.workspace.id)
-        if channel == Channel.BIBLIO
-        else jobs.enqueue(f"{channel}_sync", {}, context.workspace.id)
-    )
-    return {"ok": True, "job_id": str(job_id), "queued": True}
+    try:
+        with db.session_scope() as session:
+            operation, created = queue_operation(
+                session, context.workspace.id, channel, "sync", "all",
+                job_type=f"{channel}_sync",
+            )
+            job_id = operation.job_id
+            operation_id = operation.id
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
+        "queued": True, "already_queued": not created,
+    }
 
 
 @router.post("/api/app/connectors/biblio/verify")
