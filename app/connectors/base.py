@@ -74,23 +74,25 @@ CONNECTORS: dict[str, ConnectorInfo] = {
         channel=Channel.EBAY,
         display_name=CHANNEL_DISPLAY_NAMES[Channel.EBAY],
         group="marketplace",
-        description="eBay seller inventory through the official seller API.",
+        description="eBay active-listing import and sold-out close through the seller API; order import is not yet implemented.",
         capabilities=frozenset({
             Capability.IMPORT_INVENTORY,
             Capability.FETCH_LISTINGS,
-            Capability.FETCH_ORDERS,
+            Capability.CLOSE_LISTING,
         }),
     ),
     Channel.BIBLIO: ConnectorInfo(
         channel=Channel.BIBLIO,
         display_name=CHANNEL_DISPLAY_NAMES[Channel.BIBLIO],
         group="books",
-        description="Optional BIBLIO book inventory import and FTP synchronization.",
+        description="BIBLIO inventory-file import, FTP publishing/updates and sold-out close; orders require separately enabled Bulk Order Management.",
         capabilities=frozenset({
             Capability.IMPORT_INVENTORY,
             Capability.EXPORT_INVENTORY,
             Capability.SYNC_INVENTORY,
             Capability.CREATE_LISTING,
+            Capability.UPDATE_LISTING,
+            Capability.CLOSE_LISTING,
         }),
     ),
     Channel.ETSY: ConnectorInfo(
