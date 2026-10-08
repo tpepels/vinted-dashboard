@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake
+from app.stock_relations import record_physical_quantity, confirm_physical_relation, is_physical, is_provisional
 from app.diagnostics import build_bundle, recent_logs, redact_text
 from app.bridge_package import extension_source_version
 from app.connectors.biblio_format import parse_biblio_inventory
@@ -445,6 +446,8 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
         "title": item.title,
         "category": item.category,
         "quantity": item.quantity,
+        "stock_authority": ("physical" if is_physical(item) else "provisional" if is_provisional(item) else "legacy"),
+        "relation_confirmed_at": attributes.get("relationship_confirmed_at"),
         "condition": item.condition,
         "cost_cents": item.cost_cents,
         "default_price_cents": default_price,
@@ -1272,6 +1275,7 @@ def create_inventory_item(
         )
         session.add(item)
         session.flush()
+        record_physical_quantity(session, item, payload.quantity)
         result = _serialize_item(item, [])
     return {"ok": True, "item": result}
 
@@ -1343,10 +1347,19 @@ def update_inventory_item(
         values = payload.model_dump(exclude_unset=True)
         if "quantity" in values and values["quantity"] is not None and values["quantity"] < 0:
             raise HTTPException(status_code=400, detail="Quantity cannot be negative")
+        if "attributes" in values and values["attributes"] is not None:
+            # Internal stock relation provenance is not client-editable.
+            protected = {"stock_authority", "stock_base_quantity", "relationship_confirmed_at",
+                         "connector_import_placeholder", "connector_import_channel",
+                         "connector_import_external_id", "connector_import_sku"}
+            values["attributes"] = {
+                **{k: v for k, v in dict(item.attributes or {}).items() if k in protected},
+                **{k: v for k, v in dict(values["attributes"]).items() if k not in protected},
+            }
         for key, value in values.items():
             setattr(item, key, value)
-        if "quantity" in values and "status" not in values:
-            item.status = ItemStatus.ACTIVE if int(item.quantity or 0) > 0 else ItemStatus.ARCHIVED
+        if "quantity" in values and values["quantity"] is not None:
+            record_physical_quantity(session, item, int(item.quantity or 0))
         session.flush()
         listings = session.execute(
             select(models.ChannelListing).where(
@@ -1744,7 +1757,12 @@ def link_listing(
         ):
             raise HTTPException(status_code=404, detail="Item or listing not found")
         previous_item_id = listing.inventory_item_id
+        confirm_physical_relation(session, item)
         listing.inventory_item_id = item.id
+        extra = dict(listing.extra or {})
+        extra["master_link_confirmed_at"] = utcnow().isoformat()
+        extra["master_link_source"] = "user"
+        listing.extra = extra
         session.flush()
         recompute_inventory_item(session, item)
         if previous_item_id and previous_item_id != item.id:
