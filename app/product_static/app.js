@@ -9,6 +9,7 @@ const state = {
   mappings: [],
   onboarding: null,
   inventoryItems: [],
+  itemMarketplaceId: null,
   listings: [],
   reconciliation: [],
   crossChannelActions: [],
@@ -873,9 +874,168 @@ function updateInventorySelection() {
   }
 }
 
+function itemMarketplaceStatusLabel(listing) {
+  if (listing.channel === "biblio") {
+    return {
+      matches: "Matches last BIBLIO inventory download",
+      differs: "Details differ from the BIBLIO download",
+      stale: "Changed since last BIBLIO check",
+      compared: "Found in BIBLIO; details not compared",
+      not_verified: "Not yet verified on BIBLIO",
+    }[listing.verification] || "Not independently checked";
+  }
+  return "Imported or linked; current remote publication not independently verified";
+}
+
+function itemMarketplaceOperationText(op) {
+  if (!op) return "No tracked operation yet";
+  const status = {
+    queued:"Waiting", running:"In progress",
+    succeeded:"Completed locally", needs_verification:"Sent; remote check needed",
+    failed:"Failed", attention:"Needs your attention", cancelled:"Cancelled",
+  };
+  return (status[op.status] || op.status) + (op.completed_at ? " · " + when(op.completed_at) : "");
+}
+
+function renderItemMarketplacePanel(data) {
+  const item = data.item || {};
+  const listings = data.listings || [];
+  const operations = data.operations || [];
+  const closing = data.closure_actions || [];
+  $("#item-marketplaces-title").textContent = "Where is " + (item.title || "this item") + " listed?";
+  const rows = listings.map(listing => {
+    const errors = [
+      listing.photo_error,
+      listing.last_operation?.error,
+    ].filter(Boolean);
+    const caution = listing.attention || listing.verification === "differs" || listing.verification === "stale";
+    return '<div class="item-marketplace-row">'
+      + '<div class="item-marketplace-main">'
+      + '<div class="item-marketplace-head"><strong>' + esc(listing.channel.toUpperCase())
+      + '</strong><span class="item-marketplace-state ' + (caution ? 'attention' : '') + '">'
+      + esc(listing.status) + (caution ? " · review needed" : "") + '</span></div>'
+      + '<p>' + esc(itemMarketplaceStatusLabel(listing)) + '</p>'
+      + '<p class="muted">Marketplace reference: ' + esc(listing.external_id)
+      + ' · Advertised quantity: ' + Number(listing.quantity ?? 0)
+      + (listing.verified_at ? ' · Last checked: ' + esc(when(listing.verified_at)) : '')
+      + '</p>'
+      + '<p class="muted">Latest action: ' + esc(itemMarketplaceOperationText(listing.last_operation)) + '</p>'
+      + (listing.channel === "biblio" ? '<p class="muted">Dashboard photos: '
+        + Number(listing.photo_count || 0) + ' · Transfer state: '
+        + esc(listing.photo_state || "not recorded") + '</p>' : '')
+      + errors.map(error => '<p class="error">' + esc(error) + '</p>').join("")
+      + '</div><div class="item-marketplace-actions">'
+      + (listing.url ? '<a class="btn" href="' + esc(listing.url)
+        + '" target="_blank" rel="noreferrer">Open marketplace listing</a>' : "")
+      + (listing.can_inspect_photos ? '<button class="btn item-marketplace-photos" type="button" data-book="'
+        + esc(listing.external_id) + '">Check / repair photos</button>' : "")
+      + (listing.channel === "biblio" ? '<button class="btn item-marketplace-verify" type="button">Compare BIBLIO inventory</button>' : "")
+      + '</div></div>';
+  });
+  const operationsMarkup = operations.map(op => {
+    const title = {
+      publish:"Publish",update:"Update",photos:"Send photos",
+      close:"Close after sale",sync:"Synchronize",verify:"Verify",
+    }[op.type] || op.type;
+    return '<div class="item-marketplace-history-row"><div><strong>' + esc(op.channel.toUpperCase())
+      + ' · ' + esc(title) + '</strong><span>' + esc(itemMarketplaceOperationText(op))
+      + (op.error ? ' · ' + esc(op.error) : '') + '</span></div>'
+      + (op.can_retry
+        ? '<button class="btn item-marketplace-retry" data-id="' + esc(op.id)
+          + '" type="button">Retry this safe operation…</button>'
+        : '') + '</div>';
+  }).join("");
+  $("#item-marketplaces-content").innerHTML =
+    '<div class="item-marketplace-summary"><strong>' + Number(item.quantity ?? 0)
+    + '</strong> physical units in the dashboard · ' + listings.length + ' marketplace links'
+    + '<div class="actions"><button class="btn primary item-marketplace-publish" type="button">Publish to another marketplace</button>'
+    + '<button class="btn item-marketplace-edit" type="button">Edit this item</button>'
+    + '<button class="btn item-marketplace-refresh" type="button">Refresh this overview</button></div></div>'
+    + (rows.length ? '<div class="item-marketplace-list">' + rows.join("") + '</div>'
+      : '<p class="muted">No marketplace listings are linked to this item yet. Use Publish to review available channels.</p>')
+    + (closing.length ? '<div class="item-marketplace-closure"><strong>Sold-out follow-up</strong>'
+      + closing.map(action => '<p>' + esc(action.channel.toUpperCase())
+        + ': ' + esc(action.status) + ' (' + esc(action.type) + ')</p>').join("") + '</div>' : '')
+    + '<details class="item-marketplace-history"><summary>Recent operations (' + operations.length + ')</summary>'
+    + '<p>These are local attempts and transfer results; sending does not prove a listing is publicly visible.</p>'
+    + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
+    + '<p class="item-marketplace-footnote"><strong>Updates and closing:</strong> Edit local book details before sending BIBLIO changes. '
+    + 'Other marketplace edits require a supported adapter. Sold-out closures use sale reconciliation; '
+    + 'this panel deliberately does not offer a blind remote delete.</p>';
+  const itemId = item.id;
+  $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
+  $(".item-marketplace-edit").onclick = () => {
+    const original = state.inventoryItems.find(row => row.id === itemId);
+    if (original) openItemForm(original);
+  };
+  $(".item-marketplace-refresh").onclick = () => openItemMarketplaces(itemId);
+  $(".item-marketplace-photos").forEach(button => {
+    button.onclick = async () => {
+      state.biblioPhotoTarget = button.dataset.book;
+      state.biblioPhotoExpanded = true;
+      await selectView("connections");
+      const target = $(".biblio-photos-panel");
+      if (target) {
+        target.open = true;
+        target.scrollIntoView({behavior:"smooth",block:"center"});
+        const field = $("#biblio-photo-book-id");
+        if (field) field.value = button.dataset.book;
+        await inspectBiblioPhotoTarget();
+      }
+    };
+  });
+  $(".item-marketplace-verify").forEach(button => {
+    button.onclick = async () => {
+      await selectView("connections");
+      const target = $("#biblio-compare-panel");
+      if (target) {
+        target.open = true;
+        target.scrollIntoView({behavior:"smooth",block:"center"});
+      }
+    };
+  });
+  $(".item-marketplace-retry").forEach(button => {
+    button.onclick = async () => {
+      if (!window.confirm("Retry this supported operation? Check any uncertain remote result before resending.")) return;
+      button.disabled = true;
+      try {
+        await api("/api/app/marketplace-operations/" + encodeURIComponent(button.dataset.id) + "/retry",
+          {method:"POST"});
+        flash("Safe operation queued. It will appear in this item's history.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash(error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+}
+
+async function openItemMarketplaces(itemId) {
+  state.itemMarketplaceId = itemId;
+  const panel = $("#item-marketplaces-panel");
+  panel.classList.remove("hidden");
+  $("#item-marketplaces-content").textContent = "Loading linked listings and operation history…";
+  panel.scrollIntoView({behavior:"smooth",block:"start"});
+  try {
+    const data = await api("/api/app/inventory/" + encodeURIComponent(itemId) + "/marketplace-status");
+    if (state.itemMarketplaceId === itemId) renderItemMarketplacePanel(data);
+  } catch (error) {
+    $("#item-marketplaces-content").textContent = "Could not load marketplace status: " + error.message;
+  }
+}
+
+$("#close-item-marketplaces").onclick = () => {
+  state.itemMarketplaceId = null;
+  $("#item-marketplaces-panel").classList.add("hidden");
+};
+
 function inventoryCrossListAction(item) {
   if (!item?.id) return "";
-  return '<button class="btn cross-list" data-item-id="' + esc(item.id) + '">Cross-list</button>';
+  return '<button class="btn item-marketplaces" data-item-id="' + esc(item.id)
+    + '" type="button">Marketplaces</button>'
+    + '<button class="btn cross-list" data-item-id="' + esc(item.id)
+    + '" type="button">Publish</button>';
 }
 
 function listingCrossListAction(row) {
@@ -1750,7 +1910,10 @@ async function inventory() {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
   });
   bindCrossListButtons();
-  $$(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
+  $(".item-marketplaces").forEach(button => {
+    button.onclick = () => openItemMarketplaces(button.dataset.itemId);
+  });
+  $(".inventory-select").forEach((box) => { box.onchange = updateInventorySelection; });
   const selectAll = $("#inventory-select-all");
   if (selectAll) {
     selectAll.onchange = () => {
