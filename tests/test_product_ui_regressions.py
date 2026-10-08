@@ -511,20 +511,20 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
 
 
 
-def test_biblio_connections_expose_real_activity_progress_and_recovery_controls():
+def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert 'api("/api/app/connectors/biblio/activity")' in APP_JS
     assert "function renderBiblioActivity(activity, operational)" in APP_JS
-    assert "View activity" in APP_JS
-    assert "Sync changes" in APP_JS
-    assert "Retry all photos" in APP_JS
-    assert "Retry this book" in APP_JS
-    assert "Full resync" in APP_JS
+    assert "Send changes to BIBLIO" in APP_JS
+    assert "Fix photos for one book" in APP_JS
+    assert "Resend this book’s photos" in APP_JS
+    assert "Advanced recovery" in APP_JS
+    assert "Resend all photos" in APP_JS
+    assert "Resend all listings" in APP_JS
+    assert "These are dashboard records, not a confirmed count" in APP_JS
     assert '"/api/app/connectors/biblio/retry-photos"' in APP_JS
     assert '"/api/app/connectors/biblio/full-sync"' in APP_JS
-    assert "photos " in APP_JS
-    assert "FTP uploaded means the files reached BIBLIO" in APP_JS
-    assert "BIBLIO still has to process" in APP_JS
-
+    assert "photos sent " in APP_JS
+    assert "BIBLIO may need additional time to process" in APP_JS
 
 def test_biblio_inventory_and_listing_rows_show_publication_state():
     assert "function biblioListingState(sync)" in APP_JS
@@ -623,33 +623,30 @@ def test_biblio_review_exposes_every_supported_prefilled_book_field():
 
 def test_biblio_extended_upload_profile_is_automatic():
     assert '["upload_profile", "Upload profile (core or extended)"' not in APP_JS
-    assert "The extended BIBLIO format is used automatically" in APP_JS
+    assert "The extended BIBLIO format will send" in APP_JS
     assert 'data.upload_profile === "core"' not in APP_JS
     assert "The extended BIBLIO format will send" in APP_JS
 
 
-def test_biblio_connection_is_host_pinned_and_import_is_safe_by_default():
+def test_biblio_safe_compare_first_workflow_is_separate_from_credentials():
     html = (
         Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
     ).read_text(encoding="utf-8")
     assert '["host", "FTP host"' not in APP_JS
-    assert "FTP is locked to BIBLIO's documented ftp.biblio.com host" in APP_JS
     assert '"allow_plain_ftp"' in APP_JS
     assert '"auto_sync"' in APP_JS
-    assert "Automatically sync changed BIBLIO listings after Vinted browser updates" in APP_JS
-    assert "legacy plain FTP" in APP_JS
-    assert "plain FTP requires opt-in" in APP_JS
+    assert "Automatically send changed BIBLIO listings after new Vinted updates" in APP_JS
+    assert "Saving these settings does not upload any books" in APP_JS
+    assert 'id="biblio-compare-panel"' in html
     assert 'id="verify-biblio"' in html
     assert 'id="biblio-import-authoritative"' in html
+    assert 'id="import-biblio" class="btn danger" type="button" disabled' in html
     assert '"/api/app/connectors/biblio/verify"' in APP_JS
-    assert "Verification is read-only" in html
-    assert "complete active-inventory download" in html
-    assert "mark local BIBLIO listings missing from it inactive" in APP_JS
-    assert "BIBLIO health:" in APP_JS
-    assert "changed records pending" in APP_JS
-    assert "deletes pending" in APP_JS
-
-
+    assert '"/api/app/connectors/biblio/import"' in APP_JS
+    assert "Compare this BIBLIO file before applying it" in APP_JS
+    assert "if (!window.confirm(explanation)) return;" in APP_JS
+    assert 'id="biblio-compare-result"' in html
+    assert "No book descriptions, prices or stock quantities were changed" in APP_JS
 
 def test_connector_forms_prefill_saved_nonsecret_settings_only():
     assert "connector?.saved_values || {}" in APP_JS
@@ -776,5 +773,30 @@ def test_connections_uses_multi_element_queries_for_action_handlers():
     for selector in (".market-select", ".biblio-retry-photos", ".biblio-full-sync"):
         assert f'$$("{selector}").forEach' in APP_JS
         assert f' $("{selector}").forEach' not in APP_JS
-    assert 'state.biblioActivityExpanded = opening;' in APP_JS
+    assert '[".biblio-history-panel", "biblioActivityExpanded"]' in APP_JS
     assert 'Go to connection controls' in APP_JS
+
+
+def test_biblio_photo_repair_has_title_picker_and_confirmation():
+    assert 'id="biblio-photo-book-select"' in APP_JS
+    assert 'api("/api/app/listings?channel=biblio")' in APP_JS
+    assert "Choose a book by title" in APP_JS
+    assert "The book details will not be resent" in APP_JS
+    assert "Resend this book’s photos" in APP_JS
+    assert "loadBiblioPhotoChoices()" in APP_JS
+
+
+def test_connections_hides_advanced_tools_and_separates_comparison_from_settings():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert '<details id="biblio-compare-panel"' in html
+    assert '<details id="marketplace-operations-panel"' in html
+    assert '<details id="paired-browsers-panel"' in html
+    assert '<details id="marketplace-development-panel"' in html
+    assert "biblio-photos-panel" in APP_JS
+    assert "biblio-history-panel" in APP_JS
+    assert "biblio-recovery-panel" in APP_JS
+    assert 'panel.addEventListener("toggle"' in APP_JS
+    assert "data-connector-channel=\\\"biblio\\\"" in APP_JS
+    assert html.index('id="biblio-compare-panel"') < html.index('id="connector-config"')
