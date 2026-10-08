@@ -842,3 +842,12 @@ def test_cross_channel_refunds_warn_about_already_closed_marketplace_listings():
     assert "Stock available: reopen this listing on the marketplace" in APP_JS
     assert "Manual reopening required: stock is available again." in APP_JS
     assert "needs_reopen" in APP_JS
+
+
+def test_woo_stock_sync_is_explicit_and_limited_to_linked_inventory():
+    assert "Set WooCommerce stock to " in APP_JS
+    assert "item-woo-stock" in APP_JS
+    assert "/marketplaces/woocommerce/stock" in APP_JS
+    assert "The product ID and SKU" in APP_JS
+    assert 'if (!window.confirm("Update the linked WooCommerce simple product to "' in APP_JS
+    assert 'for (const' not in APP_JS[0:0]  # no inert controls used as evidence
