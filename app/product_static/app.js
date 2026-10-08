@@ -889,6 +889,14 @@ function itemMarketplaceStatusLabel(listing) {
       not_verified: "Not yet verified on BIBLIO",
     }[listing.verification] || "Not independently checked";
   }
+  if (listing.channel === "woocommerce" || listing.channel === "shopify") {
+    return {
+      stock_checked: "Stock matched the dashboard at the last marketplace check",
+      stock_mismatch: "Marketplace stock differed at the last check",
+      stock_stale: "Stock was checked before local inventory changed; check again",
+      not_checked: "Marketplace stock has not been checked",
+    }[listing.verification] || "Marketplace stock has not been checked";
+  }
   return "Imported or linked; current remote publication not independently verified";
 }
 
@@ -915,7 +923,7 @@ function renderItemMarketplacePanel(data) {
       listing.photo_error,
       listing.last_operation?.error,
     ].filter(Boolean);
-    const caution = listing.attention || listing.verification === "differs" || listing.verification === "stale";
+    const caution = listing.attention || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification);
     return '<div class="item-marketplace-row">'
       + '<div class="item-marketplace-main">'
       + '<div class="item-marketplace-head"><strong>' + esc(listing.channel.toUpperCase())
@@ -977,7 +985,7 @@ function renderItemMarketplacePanel(data) {
     + '<p>These are local attempts and transfer results; sending does not prove a listing is publicly visible.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
     + '<p class="item-marketplace-footnote"><strong>Updates and closing:</strong> Edit local book details before sending BIBLIO changes. '
-    + 'Other marketplace edits require a supported adapter. Sold-out closures use sale reconciliation; '
+    + 'WooCommerce and Shopify support explicit stock-only checks and updates for eligible linked products. Sold-out closures use sale reconciliation; '
     + 'this panel deliberately does not offer a blind remote delete.</p>';
   const itemId = item.id;
   $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
