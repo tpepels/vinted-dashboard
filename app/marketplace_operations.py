@@ -175,7 +175,7 @@ def _public_result(result: dict[str, Any] | None) -> dict[str, Any]:
         "inventory_total", "deletes", "deletes_uploaded", "photos_uploaded",
         "photos_total", "photos_skipped", "photo_count", "photo_retry_scheduled",
         "remote", "external_id", "listing_id", "url", "already_complete",
-        "message", "skipped",
+        "message", "skipped", "remote_verified", "quantity", "status",
     }
     for key, value in (result or {}).items():
         if key in allowed and isinstance(value, (str, int, float, bool, type(None))):
@@ -189,7 +189,10 @@ def complete_operation(operation_id: uuid.UUID, result: dict[str, Any] | None = 
         if op is None or op.status in TERMINAL:
             return
         safe = _public_result(result)
-        if op.operation_type == "close" and (result or {}).get("skipped"):
+        if op.operation_type == "update" and (result or {}).get("remote_verified") is True:
+            op.status = "succeeded"
+            op.verification = "remote_verified"
+        elif op.operation_type == "close" and (result or {}).get("skipped"):
             # A late stock restoration can cancel the work after the worker
             # began. Do not label an intentionally skipped close "sent".
             op.status = "cancelled"
@@ -255,8 +258,8 @@ def start_inline(
     After an uncertain failure, this target requires investigation instead
     of another create request; this protects against duplicate remote posts.
     """
-    if operation_type != "publish":
-        raise ValueError("Inline execution is currently supported only for publish")
+    if operation_type not in {"publish", "update"}:
+        raise ValueError("Unsupported inline remote operation")
     with db.session_scope() as session:
         _owned_targets(session, workspace_id, inventory_item_id, None)
         key = _identity(channel, operation_type, target_key)
