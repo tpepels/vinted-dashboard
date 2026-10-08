@@ -1629,6 +1629,7 @@ function renderBiblioActivity(activity, operational) {
     + '<span><strong>What has the dashboard sent?</strong><small>Recent transfers and individual photo results</small></span>'
     + '</summary><div class="biblio-task-inner">'
     + '<p>“Sent” means that BIBLIO received the files. BIBLIO may need additional time to process and display the books and photos.</p>'
+    + '<p>For a newly added book, BIBLIO may not recognize its photos immediately. The dashboard automatically attempts one later photo follow-up when needed; you normally do not need to resend all photos.</p>'
     + '<div class="biblio-activity-history">' + (fileHistory || '<p>No transfers have been recorded yet.</p>') + '</div>'
     + '</div></details>';
   const advanced = operational
@@ -4329,6 +4330,7 @@ async function connections() {
         + '<div class="actions"><button class="btn pair" type="button">' + (paired ? 'Pair another browser' : 'Pair a Chrome browser') + '</button>'
         + '<a class="btn" href="' + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
         + '">Download Chrome extension</a></div>'
+        + '<p class="connector-version">Chrome extension version ' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</p>'
         + '<div class="pairing-inline hidden"><p>Enter this code in the Chrome extension within 10 minutes:</p>'
         + '<strong class="pair-code pair-code-inline"></strong></div>'
         + '<p class="connector-workflow-hint">Pairing allows uploads; it does not start one. Open Vinted with the extension active to collect new listings and sales. If Vinted has not updated recently, check the extension.</p>'
