@@ -516,7 +516,8 @@ def test_biblio_connections_expose_real_activity_progress_and_recovery_controls(
     assert "function renderBiblioActivity(activity, operational)" in APP_JS
     assert "View activity" in APP_JS
     assert "Sync changes" in APP_JS
-    assert "Retry photos" in APP_JS
+    assert "Retry all photos" in APP_JS
+    assert "Retry this book" in APP_JS
     assert "Full resync" in APP_JS
     assert '"/api/app/connectors/biblio/retry-photos"' in APP_JS
     assert '"/api/app/connectors/biblio/full-sync"' in APP_JS
