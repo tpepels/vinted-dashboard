@@ -2910,6 +2910,7 @@ def _serialize_biblio_activity_run(run: models.ConnectorSyncRun) -> dict[str, An
         "photos_pending_listings": detail.get("photos_pending_listings"),
         "photo_retry_scheduled": detail.get("photo_retry_scheduled"),
         "photo_errors": list(detail.get("photo_errors") or []),
+        "photo_results": list(detail.get("photo_results") or []),
         "error": run.error,
     }
 
