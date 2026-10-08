@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import db, models
+from app.diagnostics import redact_text
 from app.product_models import BackgroundJob, MarketplaceOperation
 
 ACTIVE = frozenset({"queued", "running"})
@@ -226,7 +227,7 @@ def fail_operation(operation_id: uuid.UUID, error: str, *, will_retry: bool = Fa
         op = session.get(MarketplaceOperation, operation_id)
         if op is None or op.status in TERMINAL:
             return
-        op.last_error = str(error)[:2000]
+        op.last_error = redact_text(str(error))[:2000]
         if will_retry:
             op.status = "queued"
             return
