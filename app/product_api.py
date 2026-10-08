@@ -3200,7 +3200,7 @@ def biblio_retry_listing_photos(
     info = _biblio_photo_status(context.workspace.id, payload.book_id)
     if not info["active"]:
         raise HTTPException(status_code=409, detail="Listing is not active with stock available")
-    if not info["biblio_source_photos"]:
+    if not info["biblio_source_photos"] and not info["vinted_source_photos"]:
         raise HTTPException(status_code=409, detail="No source photographs available; refresh Vinted first")
     job_id = jobs.enqueue_unique(
         "biblio_sync",
