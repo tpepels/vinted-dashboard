@@ -1388,9 +1388,16 @@ function renderItemMarketplacePanel(data) {
     return '<div class="item-marketplace-history-row"><div><strong>' + esc(op.channel.toUpperCase())
       + ' · ' + esc(title) + '</strong><span>' + esc(itemMarketplaceOperationText(op))
       + (op.error ? ' · ' + esc(op.error) : '') + '</span></div>'
-      + (op.can_retry
+      + (op.next_step
+        ? '<span class="marketplace-next-step">' + esc(op.next_step.detail) + '</span>'
+        : '')
+      + (op.next_step && ["biblio_photos","biblio_compare","inspect_item"].includes(op.next_step.kind)
+        ? '<button class="btn item-marketplace-recovery" data-kind="' + esc(op.next_step.kind)
+          + '" type="button">' + esc(op.next_step.label) + '</button>'
+        : '')
+      + (op.can_retry && op.next_step?.kind === "retry_import"
         ? '<button class="btn item-marketplace-retry" data-id="' + esc(op.id)
-          + '" type="button">Retry this safe operation…</button>'
+          + '" type="button">Retry read-only import…</button>'
         : '') + '</div>';
   }).join("");
   $("#item-marketplaces-content").innerHTML =
@@ -1636,9 +1643,19 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $$(".item-marketplace-retry").forEach(button => {
+  $(".item-marketplace-recovery").forEach(button => {
     button.onclick = async () => {
-      if (!window.confirm("Retry this supported operation? Check any uncertain remote result before resending.")) return;
+      if (button.dataset.kind === "inspect_item") {
+        return openItemMarketplaces(itemId);
+      }
+      await selectView("connections");
+      await openMarketplaceRecovery(button.dataset.kind, itemId);
+    };
+  });
+  $(".item-marketplace-retry").forEach(button => {
+    button.onclick = async () => {
+      if (!window.confirm("Retry this read-only import? It does not publish listings, "
+        + "change stock or resend photographs.")) return;
       button.disabled = true;
       try {
         await api("/api/app/marketplace-operations/" + encodeURIComponent(button.dataset.id) + "/retry",
