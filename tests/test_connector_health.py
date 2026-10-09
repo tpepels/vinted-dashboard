@@ -191,3 +191,24 @@ def test_ebay_workspace_endpoint_checks_listings_not_orders(monkeypatch):
     assert response.status_code == 200, response.text
     assert "Order imports and listing edits were not tested" in response.json()["detail"]
     assert connector(client, "ebay")["connection_check"]["status"] == "passed"
+
+
+def test_outdated_result_is_not_attached_after_credentials_change_during_test(monkeypatch):
+    client, headers = registration("connection-race@example.test")
+    assert client.put("/api/app/connectors/shopify/credentials", headers=headers,
+                      json={"values": shopify_credentials()}).status_code == 200
+
+    def tested_old_token(_wid):
+        # This credential update races with the in-flight remote read.
+        updated = client.put(
+            "/api/app/connectors/shopify/credentials", headers=headers,
+            json={"values": {"order_days": "60"}},
+        )
+        assert updated.status_code == 200, updated.text
+        return {"ok": True}
+
+    monkeypatch.setattr("app.product_api.test_shopify_workspace", tested_old_token)
+    result = client.post("/api/app/connectors/shopify/test-connection", headers=headers)
+    assert result.status_code == 409
+    assert "changed during the test" in result.json()["detail"]
+    assert connector(client)["connection_check"]["status"] == "not_checked"
