@@ -3710,6 +3710,7 @@ function openItemForm(item) {
     setFormValue(form, "price", item.attributes?.default_price_cents == null ? "" : (Number(item.attributes.default_price_cents) / 100).toFixed(2));
     setFormValue(form, "currency", item.currency || "EUR");
     setFormValue(form, "notes", item.notes);
+    setFormValue(form, "description", item.attributes?.description);
     [
       "barcode", "author", "isbn", "subtitle", "publisher", "edition",
       "binding", "language", "publish_date", "publication_year", "pages",
@@ -3731,7 +3732,7 @@ $("#item-form").onsubmit = async (event) => {
   const existing = state.inventoryItems.find((item) => item.id === state.editItemId);
   const attributes = Object.assign({}, existing?.attributes || {});
   const attributeKeys = [
-    "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+    "description", "barcode", "author", "isbn", "subtitle", "publisher", "edition",
     "binding", "language", "publish_date", "publication_year", "pages",
     "brand", "size", "colour", "material", "measurements",
   ];
