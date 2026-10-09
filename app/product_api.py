@@ -86,6 +86,8 @@ from app.connectors.hosted import (
 from app.connectors.wix_stock import read_wix_workspace_stock, update_wix_workspace_stock
 from app.connectors.wix_price import read_wix_workspace_price, update_wix_workspace_price
 from app.connectors.woocommerce_price import read_woocommerce_workspace_price, update_woocommerce_workspace_price
+from app.connectors.woocommerce_content import read_woocommerce_workspace_content, update_woocommerce_workspace_content
+from app import listing_content
 from app.connectors.shopify_price import read_shopify_workspace_price, update_shopify_workspace_price
 from app.connectors.workspace_sync import recompute_inventory_item
 from app import cross_listing
@@ -213,6 +215,10 @@ class InventoryPatchRequest(BaseModel):
     notes: str | None = None
     status: str | None = None
     attributes: dict[str, Any] | None = None
+
+
+class ContentFieldsRequest(BaseModel):
+    fields: list[str] = Field(min_length=1, max_length=2)
 
 
 class InventoryBulkRequest(BaseModel):
@@ -1780,6 +1786,228 @@ def _woo_price_link(session, workspace_id: uuid.UUID, item_id: uuid.UUID):
     if listing.currency and str(listing.currency).upper() != currency:
         raise HTTPException(status_code=409, detail="Linked listing and inventory currencies differ")
     return item, listing, amount, currency
+
+
+def _content_link(session, workspace_id: uuid.UUID, item_id: uuid.UUID):
+    item = session.get(models.InventoryItem, item_id)
+    if item is None or item.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+    if not is_physical(item):
+        raise HTTPException(status_code=409, detail="Confirm the physical item before remote content updates")
+    listings = session.execute(select(models.ChannelListing).where(
+        models.ChannelListing.workspace_id == workspace_id,
+        models.ChannelListing.inventory_item_id == item_id,
+        models.ChannelListing.channel == Channel.WOOCOMMERCE,
+    )).scalars().all()
+    if len(listings) != 1:
+        raise HTTPException(status_code=409, detail="Exactly one WooCommerce listing is required")
+    listing = listings[0]
+    if (not re.fullmatch(r"(?:[1-9][0-9]*:)?[1-9][0-9]*", str(listing.external_id or ""))
+            or not str(listing.external_sku or "").strip()):
+        raise HTTPException(status_code=409, detail="A confirmed WooCommerce product ID and SKU are required")
+    return item, listing
+
+
+@router.get("/api/app/inventory/{item_id}/content-comparison")
+def item_content_comparison(
+    item_id: uuid.UUID, context: RequestContext = Depends(require_context),
+):
+    """Compare only recorded listing snapshots; never suggest these are live."""
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        if item is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        master = listing_content.master_values(item)
+        listings = session.execute(select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.inventory_item_id == item_id,
+        ).order_by(models.ChannelListing.channel)).scalars().all()
+        result = []
+        for listing in listings:
+            extra = dict(listing.extra or {})
+            cached = extra.get("content_check") or {}
+            checked = cached.get("checked_at")
+            current_master = listing_content.fingerprint(master)
+            confirmed = (
+                listing.channel == Channel.WOOCOMMERCE
+                and cached.get("external_id") == listing.external_id
+                and cached.get("sku") == listing.external_sku
+                and cached.get("master_fingerprint") == current_master
+            )
+            if confirmed and isinstance(cached.get("fields"), dict):
+                remote = cached["fields"]
+                source = "previous_live_check"
+                editable = set(cached.get("writable_fields") or [])
+            else:
+                remote = listing_content.saved_listing_values(listing)
+                source = "imported_snapshot"
+                editable = set()
+                checked = None
+            result.append({
+                "listing_id": str(listing.id), "channel": listing.channel,
+                "source": source, "checked_at": checked,
+                "remote_id": listing.external_id,
+                "fields": listing_content.rows(
+                    master, remote, source=source, writable=editable,
+                ),
+                "can_check_live": (
+                    listing.channel == Channel.WOOCOMMERCE
+                    and is_physical(item)
+                    and bool(re.fullmatch(r"(?:[1-9][0-9]*:)?[1-9][0-9]*",
+                                          str(listing.external_id or "")))
+                    and bool(str(listing.external_sku or "").strip())
+                ),
+                "notes": ("Only a live WooCommerce check can enable editing."
+                          if listing.channel == Channel.WOOCOMMERCE else
+                          "Imported snapshot only; this is not a live marketplace check."),
+            })
+    return {"item_id": str(item_id), "master": master, "listings": result}
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/woocommerce/check-content")
+def check_woocommerce_item_content(
+    item_id: uuid.UUID, context: RequestContext = Depends(require_write_context),
+):
+    """Read the exact remote fields; store snapshot with provenance for review."""
+    with db.session_scope() as session:
+        item, listing = _content_link(session, context.workspace.id, item_id)
+        expected = (
+            listing.id, listing.external_id, listing.external_sku,
+            listing_content.fingerprint(listing_content.master_values(item)),
+        )
+    try:
+        remote = read_woocommerce_workspace_content(
+            context.workspace.id, external_id=expected[1],
+            expected_sku=expected[2],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not inspect WooCommerce listing content") from exc
+    with db.session_scope() as session:
+        item, listing = _content_link(session, context.workspace.id, item_id)
+        master = listing_content.master_values(item)
+        if (listing.id != expected[0] or listing.external_id != expected[1]
+                or listing.external_sku != expected[2]
+                or listing_content.fingerprint(master) != expected[3]):
+            raise HTTPException(status_code=409, detail="Item or marketplace link changed during inspection")
+        checked = utcnow().isoformat()
+        extra = dict(listing.extra or {})
+        extra["content_check"] = {
+            "checked_at": checked, "external_id": expected[1], "sku": expected[2],
+            "remote_fingerprint": remote["fingerprint"],
+            "master_fingerprint": expected[3],
+            "fields": remote["fields"],
+            "writable_fields": remote["writable_fields"],
+        }
+        listing.extra = extra
+        # A content check can reconcile only a previously uncertain content
+        # operation, and only by observing the exact fields previously sent.
+        previous = session.execute(select(MarketplaceOperation).where(
+            MarketplaceOperation.workspace_id == context.workspace.id,
+            MarketplaceOperation.channel_listing_id == listing.id,
+            MarketplaceOperation.operation_type == "update",
+            MarketplaceOperation.target_key == f"{listing.id}:content",
+            MarketplaceOperation.status.in_(["attention", "needs_verification"]),
+        ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
+        if previous:
+            sent = (previous.job_payload or {}).get("changes")
+            if isinstance(sent, dict) and sent:
+                matches = all(remote["fields"].get(key) == value
+                              for key, value in sent.items())
+                previous.status = "succeeded" if matches else "failed"
+                previous.verification = "remote_verified" if matches else "remote_mismatch"
+                previous.last_error = None if matches else "Content still differs after remote inspection"
+                previous.completed_at = utcnow()
+                previous.active_key = None
+        return {
+            "ok": True, "source": "live_woocommerce",
+            "checked_at": checked,
+            "fields": listing_content.rows(
+                master, remote["fields"], source="live_woocommerce",
+                writable=set(remote["writable_fields"]),
+            ),
+            "note": "Read-only content check; no remote fields changed.",
+        }
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/woocommerce/content")
+def update_woocommerce_item_content(
+    item_id: uuid.UUID, payload: ContentFieldsRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Explicit field-selection write. No unselected field is sent remotely."""
+    selected = list(dict.fromkeys(payload.fields))
+    if any(key not in {"title", "description"} for key in selected):
+        raise HTTPException(status_code=422, detail="Only title and description are editable")
+    with db.session_scope() as session:
+        item, listing = _content_link(session, context.workspace.id, item_id)
+        master = listing_content.master_values(item)
+        extra = dict(listing.extra or {})
+        check = extra.get("content_check") or {}
+        try:
+            checked_at = datetime.fromisoformat(str(check.get("checked_at")))
+            recent = checked_at.tzinfo is not None and (
+                timedelta(0) <= utcnow() - checked_at <= timedelta(minutes=5)
+            )
+        except (ValueError, TypeError):
+            recent = False
+        if (not recent or check.get("external_id") != listing.external_id
+                or check.get("sku") != listing.external_sku
+                or check.get("master_fingerprint") != listing_content.fingerprint(master)
+                or not isinstance(check.get("remote_fingerprint"), str)
+                or not set(selected).issubset(set(check.get("writable_fields") or []))):
+            raise HTTPException(status_code=409, detail="Check WooCommerce content again before updating")
+        changes = {key: master.get(key) for key in selected}
+        if any(not value or len(value) > listing_content.MAX_TEXT[key]
+               for key, value in changes.items()):
+            raise HTTPException(status_code=409, detail="Selected master fields must be nonempty and within length limits")
+        remote = check.get("fields") or {}
+        if any(changes[key] == remote.get(key) for key in selected):
+            raise HTTPException(status_code=409, detail="Select only fields that differ")
+        listing_id, external_id, sku = listing.id, listing.external_id, listing.external_sku
+        expected_master = listing_content.fingerprint(master)
+        expected_remote = check["remote_fingerprint"]
+    try:
+        op_id = start_inline(
+            context.workspace.id, Channel.WOOCOMMERCE, "update",
+            f"{listing_id}:content", inventory_item_id=item_id,
+            channel_listing_id=listing_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    with db.session_scope() as session:
+        op = session.get(MarketplaceOperation, op_id)
+        op.job_payload = {"scope": "content", "changes": changes}
+    try:
+        outcome = update_woocommerce_workspace_content(
+            context.workspace.id, external_id=external_id, expected_sku=sku,
+            expected_fingerprint=expected_remote, changes=changes,
+        )
+        with db.session_scope() as session:
+            item, listing = _content_link(session, context.workspace.id, item_id)
+            if (listing.id != listing_id or listing.external_id != external_id
+                    or listing.external_sku != sku
+                    or listing_content.fingerprint(listing_content.master_values(item)) != expected_master):
+                raise RuntimeError("Item or WooCommerce link changed after content write; inspect remote listing")
+            extra = dict(listing.extra or {})
+            extra.pop("content_check", None)  # Force a new read for subsequent edits.
+            if "description" in changes:
+                extra["description"] = changes["description"]
+            listing.extra = extra
+            if "title" in changes:
+                listing.title = changes["title"]
+        complete_operation(op_id, outcome)
+        return {"ok": True, "remote_verified": True,
+                "updated_fields": selected, "operation_id": str(op_id)}
+    except Exception as exc:
+        fail_operation(op_id, str(exc))
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=(
+            "WooCommerce content update not confirmed. Check the live listing "
+            "before attempting another write."
+        )) from exc
 
 
 @router.post("/api/app/inventory/{item_id}/marketplaces/woocommerce/check-price")
