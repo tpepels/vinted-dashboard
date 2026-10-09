@@ -38,6 +38,9 @@ assert.equal(get({channel:"shopify",configured:true,last_run:{status:"failed"},
   last_synced_at:new Date().toISOString()}).state,"attention",
   "An earlier successful import cannot hide the last failed attempt");
 assert.equal(get({channel:"shopify",configured:true,last_run:{status:"running"}}).state,"busy");
+assert.equal(get({channel:"biblio",configured:true,operational:true,
+  connection_check:{status:"passed",scope:"ftp_login",checked_at:new Date().toISOString()}}).label,
+  "FTP login checked");
 assert.match(get({channel:"shopify",configured:true}).next,/Test read access/);
 const button={disabled:false};
 (async()=>{
