@@ -71,6 +71,7 @@ from app.connectors.hosted import (
     import_biblio_workspace,
     verify_biblio_workspace,
     test_biblio_workspace,
+    test_ebay_workspace,
     test_bigcommerce_workspace,
     test_depop_workspace,
     test_etsy_workspace,
@@ -5939,6 +5940,7 @@ def check_connector_read_access(
     """
     tests = {
         Channel.BIBLIO: test_biblio_workspace,
+        Channel.EBAY: test_ebay_workspace,
         Channel.ETSY: test_etsy_workspace,
         Channel.WOOCOMMERCE: test_woocommerce_workspace,
         Channel.SHOPIFY: test_shopify_workspace,
@@ -5990,6 +5992,8 @@ def check_connector_read_access(
             "BIBLIO FTP login and directory access confirmed. "
             "No file was uploaded; remote book and photo publication were not tested."
             if channel == Channel.BIBLIO else
+            "eBay active listing read access confirmed. Order imports and listing edits were not tested."
+            if channel == Channel.EBAY else
             "Marketplace catalog and order read access confirmed. "
             "Publishing, stock edits and remote listing state were not tested."
         ),
