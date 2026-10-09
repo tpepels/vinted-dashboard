@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# Push and PR checks for the same branch are identical. Keep only the latest
+# attempt, avoiding duplicate Docker Hub pulls and transient 429 failures.
+concurrency:
+  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -71,4 +77,11 @@ jobs:
         env:
           DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
       - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.4.1 --output /tmp/chrome-bridge.zip
-      - run: docker build -t vinted-dashboard:test .
+      - name: Build Docker image (retry registry throttling)
+        run: |
+          for attempt in 1 2 3; do
+            if docker build -t vinted-dashboard:test .; then exit 0; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            echo "Docker image retrieval failed; retrying after registry cooldown"
+            sleep 30
+          done
