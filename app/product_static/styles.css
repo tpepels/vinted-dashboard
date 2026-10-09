@@ -538,3 +538,104 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
  .item-content-pair{grid-template-columns:1fr}
  .item-content-tools .actions .btn{flex:1 1 160px}
 }
+
+
+/* Adapt tables to their actual content width, not just the device viewport.
+   This also handles a laptop with the sidebar taking up table space. */
+.table-wrap.mobile-card-host{container:data-table / inline-size}
+.mobile-table-tools{display:none}
+.table-wrap .stock-scan-table{min-width:980px}
+@container data-table (max-width:860px){
+  .mobile-table-tools{
+    display:flex;align-items:end;justify-content:space-between;flex-wrap:wrap;
+    gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);
+    background:var(--state-neutral-bg);
+  }
+  .mobile-table-sort{display:grid;gap:4px;min-width:0;flex:1 1 180px;
+    font-size:11px;font-weight:700;color:var(--state-neutral)}
+  .mobile-table-sort select{width:100%;min-width:0;min-height:38px;
+    padding:8px 10px;background:var(--card);font-size:13px}
+  .mobile-table-select-all{display:flex;align-items:center;gap:8px;
+    padding:8px 4px;white-space:nowrap;font-size:12px;font-weight:700}
+  .mobile-table-select-all input{width:18px;height:18px;accent-color:var(--accent)}
+  .table-wrap table.mobile-cards{
+    display:block;width:100%!important;min-width:0!important;
+    max-width:100%;table-layout:auto!important;border-collapse:separate;
+  }
+  .table-wrap table.mobile-cards>colgroup{display:none!important}
+  .table-wrap table.mobile-cards>thead{display:none}
+  .table-wrap table.mobile-cards>tbody{
+    display:grid;grid-template-columns:minmax(0,1fr);gap:10px;
+    padding:10px 12px;
+  }
+  .table-wrap table.mobile-cards>tbody>tr{
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+    align-items:start;gap:9px 14px;position:relative;
+    border:1px solid var(--line);border-radius:10px;
+    padding:13px 14px;background:var(--card);
+    box-shadow:0 1px 3px rgba(20,45,35,.035);
+  }
+  .table-wrap table.mobile-cards>tbody>tr.duplicate-row{
+    background:var(--state-warning-bg);border-color:var(--state-warning-line);
+  }
+  .table-wrap table.mobile-cards td{
+    display:block;min-width:0;width:auto;max-width:none;
+    padding:0!important;border:0;white-space:normal;
+    font-size:12px;overflow-wrap:anywhere;line-height:1.45;
+  }
+  .table-wrap table.mobile-cards td::before{
+    content:attr(data-label);display:block;margin-bottom:3px;
+    color:var(--state-neutral);font-size:10px;letter-spacing:.02em;
+    font-weight:700;
+  }
+  .table-wrap table.mobile-cards td[data-label=""]::before,
+  .table-wrap table.mobile-cards td[data-label="Item"]::before,
+  .table-wrap table.mobile-cards td[data-label="Listing"]::before,
+  .table-wrap table.mobile-cards td[data-label="Actions"]::before{display:none}
+  .table-wrap table.mobile-cards td .title{font-size:14px;line-height:1.35;
+    overflow-wrap:anywhere}
+  .table-wrap table.mobile-cards td .sub{font-size:11px;line-height:1.45;
+    white-space:normal;overflow-wrap:anywhere}
+  .table-wrap table.mobile-cards td[data-label="Actions"]{
+    grid-column:1/-1;display:flex;flex-wrap:wrap;gap:7px;
+    border-top:1px solid var(--line);padding-top:10px!important;
+  }
+  .table-wrap table.mobile-cards td[data-label="Actions"] .btn{
+    flex:1 1 110px;min-height:38px;white-space:normal;
+  }
+  .table-wrap table.mobile-cards[data-mobile-kind="inventory"] td:first-child{
+    position:absolute;right:12px;top:12px;z-index:1;
+  }
+  .table-wrap table.mobile-cards[data-mobile-kind="inventory"] td:first-child input{
+    width:19px;height:19px;accent-color:var(--accent);
+  }
+  .table-wrap table.mobile-cards[data-mobile-kind="inventory"] td:nth-child(2){
+    grid-column:1/-1;padding-right:32px!important;
+  }
+  .table-wrap table.mobile-cards[data-mobile-kind="listings"] td:first-child,
+  .table-wrap table.mobile-cards[data-mobile-kind="analytics"] td:first-child{
+    grid-column:1/-1;
+  }
+  .table-wrap table.mobile-cards[data-mobile-kind="sales"] td:nth-child(3){
+    grid-column:1/-1;order:-1;font-size:14px;font-weight:700;
+  }
+  .table-wrap table.mobile-cards[data-mobile-kind="sales"] td:nth-child(3)::before{
+    display:none;
+  }
+}
+
+/* Editable reconciliation rows retain readable input sizes inside local scrolling. */
+.table-wrap .editable-table{min-width:860px}
+
+/* Wider card layouts use the available horizontal space without returning to
+   cramped 10- to 12-column tables. Phone cards keep the two-column layout. */
+@container data-table (min-width:610px) and (max-width:860px){
+  .table-wrap table.mobile-cards>tbody>tr{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+}
+@container data-table (min-width:760px) and (max-width:860px){
+  .table-wrap table.mobile-cards>tbody>tr{
+    grid-template-columns:repeat(4,minmax(0,1fr));
+  }
+}

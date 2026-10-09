@@ -136,6 +136,14 @@ for (const breakpoint of [1200, 900, 600, 380]) {
     "Viewport coverage missing at " + breakpoint + "px");
 }
 assert.ok(css.includes("overscroll-behavior-x:contain"));
+assert.ok(css.includes("@container data-table (max-width:860px)"),
+  "Table layout must respond to available container width, not only viewport");
+assert.ok(css.includes("table.mobile-cards") && css.includes("min-width:0!important"),
+  "Card mode must override desktop inline and saved column widths");
+assert.ok(js.includes("activateMobileCardTable(table)"),
+  "Live table re-renders must receive mobile labels and controls");
+assert.ok(js.includes("inventory-mobile-select-all"),
+  "Inventory bulk selection must remain usable without visible table headers");
 assert.ok(css.includes(".shell{grid-template-columns:220px minmax(0,1fr)}"));
 assert.ok(js.includes("window.matchMedia(\"(max-width: 900px), (pointer: coarse)\")"),
   "Touch/tablet users should scroll instead of dragging columns");

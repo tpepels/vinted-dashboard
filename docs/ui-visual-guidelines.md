@@ -35,9 +35,21 @@ as a separate technical surface.
   changes, discard old saved widths.
 - Editable scanning/intake tables should preserve predictable field widths
   rather than have resize controls.
-- On touch and narrow screens, hide resize handles and expose the table through
-  horizontal scrolling. Do not make an 11-column table into 11 rows per item
-  or reduce data text until unreadable.
+- Size tables according to their number of fields instead of compressing 12
+  columns into a narrow fixed minimum. Horizontal scrolling belongs to the
+  table region, never the whole page.
+- When a table's own container is 860px wide or less, Inventory, Listings,
+  Sales and the four Vinted analytics tables become labelled row cards
+  with two, three or four fact columns depending on the available width. Show every value and preserve the original buttons and checkboxes.
+  Keep compact mobile sort controls, plus Select all for inventory. Existing
+  listing-specific sorting remains the authority for listings.
+- Keep dense editable stock scanning and reconciliation matrices as tables
+  with local horizontal scrolling. Do not convert input fields into cards.
+- On a wider fine-pointer view, keep draggable/keyboard column resizing;
+  saved desktop widths must not force card layouts to overflow.
+- Re-run browser-level checks for widths 360, 390, 768, 1024 and 1440
+  using representative table rows, checking actions, selection, sorting,
+  scroll containment and screenshots.
 
 ## Viewports to check
 
