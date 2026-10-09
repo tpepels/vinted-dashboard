@@ -884,3 +884,19 @@ def test_inventory_and_connection_click_collections_are_real_collections():
                      ".market-select", ".configure"):
         assert f'$$("{selector}").forEach' in APP_JS
         assert not re.search(r'(?<!\$)' + re.escape(f'$("{selector}").forEach'), APP_JS)
+
+
+def test_listing_content_comparison_editor_uses_master_description():
+    html = (
+        Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'textarea name="description"' in html
+    assert "private inventory notes" in html
+    assert 'setFormValue(form, "description", item.attributes?.description)' in APP_JS
+    assert '"description", "barcode", "author", "isbn"' in APP_JS
+    assert '"/content-comparison"' in APP_JS
+    assert '"/marketplaces/woocommerce/check-content"' in APP_JS
+    assert '"/marketplaces/woocommerce/content"' in APP_JS
+    assert '$$(".item-content-check").forEach' in APP_JS
+    assert '$$(".item-content-tools").forEach' in APP_JS
+    assert 'body:JSON.stringify({fields})' in APP_JS
