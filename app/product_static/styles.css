@@ -680,3 +680,63 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   #connections .connector--other .actions>.btn{flex:1 1 155px}
   #connections .connector-next-step{overflow-wrap:anywhere}
 }
+
+/* Marketplace history: prioritize the next human decision, not database fields.
+   Cards reflow without horizontal scrolling on narrow Connections pages. */
+#connections .marketplace-activity-toolbar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin:13px 0 16px
+}
+#connections .marketplace-activity-toolbar p{
+  margin:0;font-size:12px;color:var(--state-neutral);line-height:1.6
+}
+#connections .marketplace-activity-toolbar label{
+  display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:650
+}
+#connections .marketplace-activity-toolbar select{
+  min-width:148px;max-width:100%;font-size:12px;padding:8px 10px;
+  border:1px solid var(--line);border-radius:8px;background:var(--card)
+}
+#connections .marketplace-activity-list{display:grid;gap:10px}
+#connections .marketplace-activity-row{
+  min-width:0;border:1px solid var(--line);border-radius:10px;
+  padding:14px 16px;background:var(--card);overflow-wrap:anywhere
+}
+#connections .marketplace-activity-header{
+  display:flex;justify-content:space-between;gap:10px 15px;align-items:start;flex-wrap:wrap
+}
+#connections .marketplace-activity-header strong{font-size:13px}
+#connections .marketplace-activity-header p{
+  margin:4px 0 0;font-size:11px;color:var(--state-neutral)
+}
+#connections .marketplace-activity-verification,
+#connections .marketplace-activity-next,
+#connections .marketplace-activity-error{
+  font-size:12px;line-height:1.55;margin:9px 0 0
+}
+#connections .marketplace-activity-verification{color:var(--state-neutral)}
+#connections .marketplace-activity-next{max-width:760px}
+#connections .marketplace-activity-error{color:var(--state-danger)}
+#connections .marketplace-activity-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+#connections .marketplace-activity-actions .btn{font-size:12px;white-space:normal;min-height:38px}
+#connections .marketplace-activity-row .operation-technical{
+  border-top:1px solid var(--line);padding-top:8px;margin-top:12px
+}
+#connections .marketplace-activity-row .operation-technical summary{
+  cursor:pointer;font-size:11px;font-weight:650;color:var(--state-neutral)
+}
+#connections .marketplace-activity-row .operation-technical p{
+  margin:8px 0 0;line-height:1.55;font-size:11px;overflow-wrap:anywhere
+}
+#connections .marketplace-activity-row :is(button,summary,select):focus-visible{
+  outline:3px solid var(--accent);outline-offset:3px
+}
+#item-marketplaces-panel .item-marketplace-history-row .marketplace-next-step{
+  display:block;font-size:12px;line-height:1.55;margin-top:7px;color:var(--state-neutral)
+}
+@media(max-width:680px){
+  #connections .marketplace-activity-toolbar{align-items:stretch;flex-direction:column}
+  #connections .marketplace-activity-toolbar label{justify-content:space-between}
+  #connections .marketplace-activity-row{padding:12px}
+  #connections .marketplace-activity-actions .btn{width:100%;flex:1 1 100%}
+}
