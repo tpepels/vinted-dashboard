@@ -1027,6 +1027,8 @@ function crossChannelActionControls(row) {
 function bindCrossChannelButtons(after) {
   $$(".stock-ack").forEach((button) => {
     button.onclick = async () => {
+      if (!window.confirm("Confirm that you checked the marketplace and closed this listing yourself? "
+        + "Marking it handled does not make any changes on the marketplace.")) return;
       try {
         await api("/api/app/cross-channel-actions/" + button.dataset.id + "/acknowledge", { method: "POST" });
         flash("Manual close marked handled.");
@@ -1150,7 +1152,8 @@ function renderItemMarketplacePanel(data) {
   const item = data.item || {};
   const listings = data.listings || [];
   const operations = data.operations || [];
-  const closing = data.closure_actions || [];
+  const closing = (data.closure_actions || []).filter(action =>
+    action.needs_reopen || ["attention", "error", "running", "queued"].includes(action.status));
   const comparison = data.content_comparison || null;
   $("#item-marketplaces-title").textContent = "Marketplace listings · " + (item.title || "this item");
   const reviewCount = listings.filter(listing =>
@@ -1165,7 +1168,8 @@ function renderItemMarketplacePanel(data) {
       || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification)
       || ["price_mismatch", "price_stale"].includes(listing.price_verification);
     const verified = !attention && ["matches", "stock_checked"].includes(listing.verification);
-    const statusText = attention ? "Needs review" : verified ? "Last check matched" : "Not verified";
+    const statusText = listing.can_check_woocommerce_close ? "Sold-out follow-up"
+      : attention ? "Needs review" : verified ? "Last check matched" : "Not verified";
     const errors = [listing.photo_error, listing.last_operation?.error].filter(Boolean);
     const stockText = listing.verification === "stock_mismatch"
       ? "Different quantities" : listing.verification === "stock_checked"
@@ -1295,7 +1299,11 @@ function renderItemMarketplacePanel(data) {
       : '<p class="muted">No marketplace listings are linked to this item yet. Use Publish to review available channels.</p>')
     + (closing.length ? '<div class="item-marketplace-closure"><strong>Sold-out follow-up</strong>'
       + closing.map(action => '<p>' + esc(action.channel.toUpperCase())
-        + ': ' + esc(action.status) + ' (' + esc(action.type) + ')</p>').join("") + '</div>' : '')
+        + ' · ' + (action.needs_reopen ? 'Stock restored: check whether the listing needs reopening'
+          : action.status === "attention" ? "Needs manual review"
+          : action.status === "error" ? "Close was not verified"
+          : action.status === "running" ? "Closing"
+          : "Waiting to close") + '</p>').join("") + '</div>' : '')
     + '<details class="item-marketplace-history"><summary>Recent operations (' + operations.length + ')</summary>'
     + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
