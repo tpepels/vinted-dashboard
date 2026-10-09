@@ -142,5 +142,38 @@ const result={
     quantifiedPriceComparisons:channels.length,
   },
 };
+const evidenceDir="ui-evidence";
+fs.mkdirSync(evidenceDir,{recursive:true});
+const baselineCSS=execFileSync(
+  "git",["show",baselineSha+":app/product_static/styles.css"],
+  {encoding:"utf8",maxBuffer:10*1024*1024},
+);
+const currentCSS=fs.readFileSync("app/product_static/styles.css","utf8");
+function visualFixture(html, css, name) {
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<title>' + name + ' · Marketplace UI test fixture</title><style>'
+    + css + '</style><style>'
+    + '.ui-proof-frame{max-width:1160px;margin:0 auto;padding:16px}'
+    + '.ui-proof-disclaimer{font-size:12px;padding:7px 0;color:#53625d}'
+    + '</style></head><body><main class="ui-proof-frame">'
+    + '<p class="ui-proof-disclaimer">Rendered test fixture using actual production UI code; not a live seller account.</p>'
+    + '<section id="item-marketplaces-panel" class="card form">'
+    + '<div class="card-head"><h2>Marketplace listings · Two copies of a novel</h2></div>'
+    + '<div id="item-marketplaces-content">' + html + '</div></section>'
+    + '<output id="viewport-metrics" hidden></output>'
+    + '</main><script>'
+    + 'window.addEventListener("load",()=>{'
+    + 'const target=document.querySelector("#item-marketplaces-panel");'
+    + 'const output=document.querySelector("#viewport-metrics");'
+    + 'output.dataset.viewport=String(innerWidth);'
+    + 'output.dataset.scroll=String(document.documentElement.scrollWidth);'
+    + 'output.dataset.panel=String(Math.ceil(target.getBoundingClientRect().width));'
+    + '});'
+    + '<\\/script></body></html>';
+}
+fs.writeFileSync(evidenceDir+"/before.html",visualFixture(before,baselineCSS,"Before"));
+fs.writeFileSync(evidenceDir+"/after.html",visualFixture(after,currentCSS,"After"));
+fs.writeFileSync(evidenceDir+"/metrics.json",JSON.stringify(result,null,2)+"\\n");
 console.log("UI_BEFORE_AFTER_EVIDENCE "+JSON.stringify(result));
 console.log("Marketplace usability regression: PASS");
