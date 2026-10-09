@@ -639,3 +639,44 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
     grid-template-columns:repeat(4,minmax(0,1fr));
   }
 }
+
+/* Integration health: credential presence is neutral until a read-only
+   access check actually succeeds; unsuccessful imports need clear next steps. */
+#connections .connections-health-summary{
+  font-size:13px;font-weight:700;color:var(--state-neutral);margin:16px 18px 5px;
+  line-height:1.55
+}
+#connections .connections-workflow{
+  font-size:12px;line-height:1.7;color:var(--state-neutral);
+  margin:0 18px 8px;max-width:750px
+}
+#connections .connector-health-copy{font-size:12px;line-height:1.55;margin:9px 0 12px}
+#connections .connector-next-step{
+  margin:12px 0 5px;font-size:12px;line-height:1.55;color:var(--state-neutral)
+}
+#connections .connector-last-attempt{
+  margin:5px 0 0;font-size:11px;line-height:1.5;color:var(--state-neutral)
+}
+#connections .connector--other .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#connections .connector--other .actions>.btn{flex:0 1 auto;min-height:38px}
+#connections .connection-state.verified{
+  background:var(--state-success-bg);color:var(--state-success);
+  border-color:var(--state-success-line)
+}
+#connections .connection-state.attention{
+  background:var(--state-warning-bg);color:var(--state-warning);
+  border-color:var(--state-warning-line)
+}
+#connections .connection-state.unverified,#connections .connection-state.setup{
+  background:var(--state-neutral-bg);color:var(--state-neutral);
+  border-color:var(--state-neutral-line)
+}
+#connections .connection-state.busy{
+  background:var(--state-info-bg);color:var(--state-info);border-color:var(--state-info-line)
+}
+@media(max-width:680px){
+  #connections .connections-health-summary{margin-inline:12px}
+  #connections .connections-workflow{margin-inline:12px}
+  #connections .connector--other .actions>.btn{flex:1 1 155px}
+  #connections .connector-next-step{overflow-wrap:anywhere}
+}
