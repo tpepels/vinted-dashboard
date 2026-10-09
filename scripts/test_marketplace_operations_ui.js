@@ -5,6 +5,8 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const app = fs.readFileSync("app/product_static/app.js", "utf8");
+assert.match(app, /\$\$\("\.item-marketplace-recovery"\)\.forEach/,
+  "Per-item recovery handlers must bind a collection, not one DOM element");
 const start = app.indexOf("function renderMarketplaceOperations(");
 const end = app.indexOf("async function connections()", start);
 assert(start !== -1 && end > start);
