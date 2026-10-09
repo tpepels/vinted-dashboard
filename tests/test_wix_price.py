@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.connectors import wix_price, hosted
-from tests.test_phase6_wix_stock import PRODUCT, VARIANT, EXTERNAL
+PRODUCT = "babd2bcc-ea03-4b63-8053-0ec59c73fc36"
+VARIANT = "590cef15-c81d-4ed7-970c-1ff879946306"
+EXTERNAL = f"{PRODUCT}:{VARIANT}"
 
 
 def product(price="8.50", *, sku="BOOK-1", revision="3",
