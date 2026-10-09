@@ -73,7 +73,7 @@ for(const width of widths){
     'const measure=id=>{const host=document.getElementById(id);const table=host.querySelector("table");const tr=table.tBodies[0].rows[0];return {host:host.clientWidth,hostScroll:host.scrollWidth,table:Math.round(table.getBoundingClientRect().width),tableDisplay:getComputedStyle(table).display,rowDisplay:getComputedStyle(tr).display,cards:table.classList.contains("mobile-cards"),labels:tr.cells[1].dataset.label||null};};',
     'const output=document.createElement("output");',
     'output.id="responsive-table-metrics";',
-    'output.dataset.state=encodeURIComponent(JSON.stringify({requestedWidth:parseInt(shell.dataset.width),shellWidth:shell.clientWidth,shellScroll:shell.scrollWidth,bodyScroll:document.documentElement.scrollWidth,viewport:innerWidth,buttonClicked:clicked,selected,sorted,mobileSortVisible:sort&&getComputedStyle(sort.parentElement).display!=="none",inventory:measure("inventory-table"),listings:measure("listings-table"),sales:measure("sales-table"),editable:measure("editable-table")}));',
+    'output.dataset.state=encodeURIComponent(JSON.stringify({requestedWidth:parseInt(shell.dataset.width),shellWidth:shell.clientWidth,shellScroll:shell.scrollWidth,bodyScroll:document.documentElement.scrollWidth,viewport:innerWidth,buttonClicked:clicked,selected,sorted,mobileSortVisible:sort&&getComputedStyle(sort.closest(".mobile-table-tools")).display!=="none",inventory:measure("inventory-table"),listings:measure("listings-table"),sales:measure("sales-table"),editable:measure("editable-table")}));',
     'document.body.appendChild(output);',
   ].join("\n");
   const html='<!doctype html><html lang="en"><head><meta charset="utf-8">'+
