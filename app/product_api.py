@@ -90,6 +90,9 @@ from app.connectors.woocommerce_content import read_woocommerce_workspace_conten
 from app.connectors.woocommerce_close import (
     read_woocommerce_workspace_publication, unpublish_woocommerce_workspace_product,
 )
+from app.connectors.shopify_close import (
+    read_shopify_workspace_publication, unpublish_shopify_workspace_product,
+)
 from app import listing_content
 from app.connectors.shopify_price import read_shopify_workspace_price, update_shopify_workspace_price
 from app.connectors.workspace_sync import recompute_inventory_item
@@ -1607,7 +1610,7 @@ def item_marketplace_status(
         pending_closes = {
             action.channel_listing_id: action
             for action in reversed(actions)
-            if action.channel == Channel.WOOCOMMERCE
+            if action.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY}
             and action.status in {"attention", "error", "running"}
         }
         rows = []
@@ -1653,16 +1656,21 @@ def item_marketplace_status(
             )
             close_check = extra.get("close_check") or {}
             can_check_close = (
-                listing.channel == Channel.WOOCOMMERCE
+                listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY}
                 and close_action is not None
                 and is_physical(item)
                 and int(item.quantity or 0) == 0
-                and bool(re.fullmatch(r"[1-9][0-9]*", str(listing.external_id or "")))
+                and bool(re.fullmatch(
+                    r"[1-9][0-9]*" if listing.channel == Channel.WOOCOMMERCE
+                    else r"gid://shopify/ProductVariant/[1-9][0-9]*",
+                    str(listing.external_id or ""),
+                ))
                 and bool(str(listing.external_sku or "").strip())
             )
             rows.append({
                 "close_action_id": str(close_action.id) if can_check_close else None,
-                "can_check_woocommerce_close": can_check_close,
+                "can_check_woocommerce_close": can_check_close and listing.channel == Channel.WOOCOMMERCE,
+                "can_check_shopify_close": can_check_close and listing.channel == Channel.SHOPIFY,
                 "close_remote_status": close_check.get("status") if can_check_close else None,
                 "close_checked_at": close_check.get("checked_at") if can_check_close else None,
                 "listing_id": str(listing.id),
@@ -2224,6 +2232,198 @@ def unpublish_woocommerce_item_after_sale(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise HTTPException(status_code=502, detail=(
             "WooCommerce closure was not confirmed. Check publication status before attempting another write."
+        )) from exc
+
+
+def _shopify_close_link(session, workspace_id: uuid.UUID, item_id: uuid.UUID):
+    """Require a linked Shopify variant; remote adapter validates sole variant."""
+    item = session.get(models.InventoryItem, item_id)
+    if item is None or item.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+    if not is_physical(item):
+        raise HTTPException(status_code=409, detail="Confirm the physical stock record first")
+    recompute_inventory_item(session, item)
+    if int(item.quantity or 0) != 0:
+        raise HTTPException(status_code=409, detail="Physical stock is available; cannot close the listing")
+    consuming = session.execute(select(models.Sale).where(
+        models.Sale.workspace_id == workspace_id,
+        models.Sale.inventory_item_id == item_id,
+        models.Sale.direction == "sell",
+    )).scalars().all()
+    if not any(sale_counts_as_sold(sale) for sale in consuming):
+        raise HTTPException(status_code=409, detail="No confirmed sale consumed this physical stock")
+    listings = session.execute(select(models.ChannelListing).where(
+        models.ChannelListing.workspace_id == workspace_id,
+        models.ChannelListing.inventory_item_id == item_id,
+        models.ChannelListing.channel == Channel.SHOPIFY,
+    )).scalars().all()
+    if len(listings) != 1:
+        raise HTTPException(status_code=409, detail="Exactly one Shopify listing is required")
+    listing = listings[0]
+    if (not re.fullmatch(r"gid://shopify/ProductVariant/[1-9][0-9]*", str(listing.external_id or ""))
+            or not str(listing.external_sku or "").strip()):
+        raise HTTPException(status_code=409, detail="A linked Shopify ProductVariant ID and SKU are required")
+    actions = session.execute(select(CrossChannelAction).where(
+        CrossChannelAction.workspace_id == workspace_id,
+        CrossChannelAction.inventory_item_id == item_id,
+        CrossChannelAction.channel_listing_id == listing.id,
+        CrossChannelAction.channel == Channel.SHOPIFY,
+    ).order_by(CrossChannelAction.created_at.desc())).scalars().all()
+    action = next((a for a in actions if a.status in {"attention", "error", "running"}), None)
+    if action is None:
+        raise HTTPException(status_code=409, detail="No outstanding sold-out closure task")
+    return item, listing, action
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/shopify/check-close")
+def check_shopify_item_closure(
+    item_id: uuid.UUID, context: RequestContext = Depends(require_write_context),
+):
+    """Read publication status. Reconcile an uncertain write without resending it."""
+    with db.session_scope() as session:
+        _item, listing, action = _shopify_close_link(session, context.workspace.id, item_id)
+        expected = listing.id, listing.external_id, listing.external_sku, action.id
+    try:
+        remote = read_shopify_workspace_publication(
+            context.workspace.id, external_id=expected[1], expected_sku=expected[2],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not check Shopify publication status") from exc
+    with db.session_scope() as session:
+        _item, listing, action = _shopify_close_link(session, context.workspace.id, item_id)
+        if (listing.id, listing.external_id, listing.external_sku, action.id) != expected:
+            raise HTTPException(status_code=409, detail="Closure task or link changed during inspection")
+        checked = utcnow()
+        extra = dict(listing.extra or {})
+        extra["close_check"] = {
+            "checked_at": checked.isoformat(), "external_id": expected[1],
+            "sku": expected[2], "status": remote["status"],
+            "fingerprint": remote["fingerprint"],
+        }
+        listing.extra = extra
+        unresolved = session.execute(select(MarketplaceOperation).where(
+            MarketplaceOperation.workspace_id == context.workspace.id,
+            MarketplaceOperation.channel_listing_id == listing.id,
+            MarketplaceOperation.operation_type == "close",
+            MarketplaceOperation.target_key == f"{listing.id}:unpublish",
+            MarketplaceOperation.status.in_(["attention", "needs_verification"]),
+        ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
+        if unresolved is not None:
+            verified = remote["status"] == "draft"
+            unresolved.status = "succeeded" if verified else "failed"
+            unresolved.verification = "remote_verified" if verified else "remote_mismatch"
+            unresolved.last_error = None if verified else "Product is still published after uncertain write"
+            unresolved.active_key = None
+            unresolved.completed_at = checked
+        if remote["status"] == "draft":
+            listing.status = ListingStatus.ENDED
+            listing.quantity = 0
+            action.status = "success"
+            action.mode = "remote"
+            action.completed_at = checked
+            action.last_error = None
+            action.detail = {**dict(action.detail or {}), "remote": "draft_verified",
+                             "checked_at": checked.isoformat()}
+        elif unresolved is not None:
+            action.status = "attention"
+            action.mode = "manual"
+            action.last_error = "Shopify product remains active; review before attempting closure again"
+        return {"ok": True, "status": remote["status"],
+                "can_unpublish": remote["can_unpublish"],
+                "verified_closed": remote["status"] == "draft",
+                "checked_at": checked.isoformat(),
+                "note": "Read-only Shopify publication check."}
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/shopify/close")
+def unpublish_shopify_item_after_sale(
+    item_id: uuid.UUID, context: RequestContext = Depends(require_write_context),
+):
+    """An explicitly confirmed, single-record unpublish after a recent remote check."""
+    with db.session_scope() as session:
+        _item, listing, action = _shopify_close_link(session, context.workspace.id, item_id)
+        check = (listing.extra or {}).get("close_check") or {}
+        try:
+            checked_at = datetime.fromisoformat(str(check.get("checked_at")))
+            recent = checked_at.tzinfo is not None and (
+                timedelta(0) <= utcnow() - checked_at <= timedelta(minutes=5)
+            )
+        except (TypeError, ValueError):
+            recent = False
+        if (not recent or listing.status not in {ListingStatus.ACTIVE, getattr(ListingStatus, "RESERVED", "reserved")}
+                or action.status != "attention"
+                or check.get("external_id") != listing.external_id
+                or check.get("sku") != listing.external_sku
+                or check.get("status") != "active"
+                or not isinstance(check.get("fingerprint"), str)):
+            raise HTTPException(status_code=409, detail="Check the published Shopify listing again before closing")
+        listing_id, external_id, sku, action_id = (
+            listing.id, listing.external_id, listing.external_sku, action.id
+        )
+        expected_fingerprint = check["fingerprint"]
+    try:
+        op_id = start_inline(
+            context.workspace.id, Channel.SHOPIFY, "close",
+            f"{listing_id}:unpublish", inventory_item_id=item_id,
+            channel_listing_id=listing_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    with db.session_scope() as session:
+        op = session.get(MarketplaceOperation, op_id)
+        op.job_payload = {"scope": "unpublish", "expected_status": "draft"}
+        action = session.get(CrossChannelAction, action_id)
+        action.status = "running"
+        action.mode = "remote"
+        action.attempts += 1
+    try:
+        result = unpublish_shopify_workspace_product(
+            context.workspace.id, external_id=external_id, expected_sku=sku,
+            expected_fingerprint=expected_fingerprint,
+        )
+        with db.session_scope() as session:
+            listing = session.get(models.ChannelListing, listing_id)
+            action = session.get(CrossChannelAction, action_id)
+            item = session.get(models.InventoryItem, item_id)
+            if (listing is None or listing.workspace_id != context.workspace.id
+                    or listing.inventory_item_id != item_id or listing.external_id != external_id
+                    or listing.external_sku != sku or item is None
+                    or item.workspace_id != context.workspace.id):
+                raise RuntimeError("Shopify link changed after unpublishing; inspect remote product")
+            listing.status = ListingStatus.ENDED
+            listing.quantity = 0
+            extra = dict(listing.extra or {})
+            extra.pop("close_check", None)
+            extra["remote_unpublished_at"] = utcnow().isoformat()
+            listing.extra = extra
+            action.status = "success"
+            action.completed_at = utcnow()
+            action.last_error = None
+            action.detail = {**dict(action.detail or {}), "remote": "draft_verified"}
+            recompute_inventory_item(session, item)
+            if int(item.quantity or 0) > 0:
+                action.detail = {
+                    **dict(action.detail or {}), "needs_reopen": True,
+                    "reopen_reason": "Stock restored while Shopify unpublish was in flight",
+                }
+        complete_operation(op_id, result)
+        return {"ok": True, "remote_verified": True,
+                "status": "draft", "operation_id": str(op_id)}
+    except Exception as exc:
+        fail_operation(op_id, str(exc))
+        with db.session_scope() as session:
+            action = session.get(CrossChannelAction, action_id)
+            if action and action.status == "running":
+                action.status = "attention"
+                action.mode = "manual"
+                action.last_error = "Remote unpublish not confirmed; check publication status"
+                action.completed_at = utcnow()
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=(
+            "Shopify closure was not confirmed. Check publication status before attempting another write."
         )) from exc
 
 
