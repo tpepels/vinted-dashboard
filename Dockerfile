@@ -1,4 +1,7 @@
-FROM python:3.13-slim
+# Production defaults to the Docker Hub official image. CI may select the
+# official Docker mirror in public ECR when Docker Hub is rate-limiting.
+ARG PYTHON_BASE_IMAGE=python:3.13-slim
+FROM ${PYTHON_BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
