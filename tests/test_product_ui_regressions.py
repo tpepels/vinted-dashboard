@@ -820,7 +820,13 @@ def test_item_marketplace_panel_exposes_safe_real_actions():
     assert 'class="btn item-marketplace-retry"' in APP_JS
     assert 'data-book=' in APP_JS
     assert 'state.biblioPhotoTarget = button.dataset.book' in APP_JS
-    assert "WooCommerce price updates change regular price only" in APP_JS
+    assert "WooCommerce regular prices and Shopify base prices change only" in APP_JS
+    assert 'listing.can_sync_woocommerce_price || listing.can_sync_shopify_price' in APP_JS
+    assert '$(".item-price-check").forEach' in APP_JS
+    assert '$(".item-price-update").forEach' in APP_JS
+    assert 'data-channel="' in APP_JS
+    assert '"/marketplaces/" + channel + "/check-price"' in APP_JS
+    assert '"/marketplaces/" + channel + "/price"' in APP_JS
     assert "Stock and price changes are separate, explicit actions" in APP_JS
 
 
