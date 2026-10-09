@@ -7,6 +7,7 @@ media and taxonomy are read-only to avoid destructive array replacement.
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from curl_cffi import requests
@@ -18,6 +19,16 @@ from app.listing_content import fingerprint
 
 def _string(value: Any) -> str | None:
     return str(value) if isinstance(value, str) else None
+
+
+def _cents(value: Any) -> str | None:
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    if not amount.is_finite() or amount < 0 or amount.as_tuple().exponent < -2:
+        return None
+    return str(int(amount * 100))
 
 
 def _inspect(values: dict[str, str], external_id: str, sku: str) -> dict[str, Any]:
@@ -49,6 +60,7 @@ def _inspect(values: dict[str, str], external_id: str, sku: str) -> dict[str, An
     fields = {
         "title": _string(remote.get("name")) if not variation else None,
         "description": _string(remote.get("description")),
+        "price": _cents(remote.get("regular_price")),
         "condition": attributes.get("condition"),
         "isbn": _string(remote.get("global_unique_id")),
         "author": attributes.get("author"),
