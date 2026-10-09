@@ -626,3 +626,16 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
 
 /* Editable reconciliation rows retain readable input sizes inside local scrolling. */
 .table-wrap .editable-table{min-width:860px}
+
+/* Wider card layouts use the available horizontal space without returning to
+   cramped 10- to 12-column tables. Phone cards keep the two-column layout. */
+@container data-table (min-width:610px) and (max-width:860px){
+  .table-wrap table.mobile-cards>tbody>tr{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+}
+@container data-table (min-width:760px) and (max-width:860px){
+  .table-wrap table.mobile-cards>tbody>tr{
+    grid-template-columns:repeat(4,minmax(0,1fr));
+  }
+}
