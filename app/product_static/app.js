@@ -1139,10 +1139,10 @@ function renderItemMarketplacePanel(data) {
             : '')
         : '')
 
-      + (listing.can_sync_woocommerce_price || listing.can_sync_shopify_price
+      + (listing.can_sync_woocommerce_price || listing.can_sync_shopify_price || listing.can_sync_wix_price
         ? '<details class="item-price-tools"'
           + (listing.price_verification === "price_mismatch" ? ' open' : '')
-          + '><summary>' + (listing.channel === "shopify" ? 'Base price' : 'Regular price') + ' · '
+          + '><summary>' + (listing.channel === "shopify" ? 'Base price' : listing.channel === "wix" ? 'Actual price' : 'Regular price') + ' · '
           + esc(money(item.default_price_cents, item.currency)) + '</summary>'
           + '<p class="muted">Compare the store price first. Promotions and regional prices are not changed.</p>'
           + (listing.price_verification !== "not_checked"
@@ -1195,7 +1195,7 @@ function renderItemMarketplacePanel(data) {
     + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
     + '<p class="item-marketplace-footnote">Stock and price changes are separate, explicit actions. '
-    + 'WooCommerce regular prices and Shopify base prices change only when explicitly confirmed. Send BIBLIO changes from Connections.</p>';
+    + 'WooCommerce regular prices, Shopify base prices and Wix actual prices change only when explicitly confirmed. Send BIBLIO changes from Connections.</p>';
   const itemId = item.id;
   $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
   $(".item-marketplace-edit").onclick = () => {
@@ -1285,7 +1285,7 @@ function renderItemMarketplacePanel(data) {
   $$(".item-price-check").forEach(button => {
     button.onclick = async () => {
       const channel = button.dataset.channel;
-      const store = {woocommerce:"WooCommerce regular price",shopify:"Shopify base price"}[channel];
+      const store = {woocommerce:"WooCommerce regular price",shopify:"Shopify base price",wix:"Wix actual price"}[channel];
       if (!store) return;
       button.disabled = true;
       try {
@@ -1303,7 +1303,7 @@ function renderItemMarketplacePanel(data) {
   $$(".item-price-update").forEach(button => {
     button.onclick = async () => {
       const channel = button.dataset.channel;
-      const store = {woocommerce:"WooCommerce regular price",shopify:"Shopify base price"}[channel];
+      const store = {woocommerce:"WooCommerce regular price",shopify:"Shopify base price",wix:"Wix actual price"}[channel];
       if (!store) return;
       const price = money(item.default_price_cents, item.currency);
       if (!window.confirm("Set the " + store + " to " + price + "? "
