@@ -623,3 +623,6 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
     display:none;
   }
 }
+
+/* Editable reconciliation rows retain readable input sizes inside local scrolling. */
+.table-wrap .editable-table{min-width:860px}
