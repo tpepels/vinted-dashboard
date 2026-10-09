@@ -1636,8 +1636,10 @@ def item_marketplace_status(
                     stock_verification = "stock_checked"
                 else:
                     stock_verification = "stock_stale"
+            close_action = pending_closes.get(listing.id)
             needs_attention = (
-                any(op.status in {"attention", "failed"} for op in recent)
+                close_action is not None
+                or                 any(op.status in {"attention", "failed"} for op in recent)
                 or stock_verification in {"stock_mismatch", "stock_stale"}
                 or (listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY, Channel.WIX} and bool(extra.get("price_last_checked_at")) and (
                     extra.get("price_last_master_cents") != (item.attributes or {}).get("default_price_cents")
@@ -1649,7 +1651,6 @@ def item_marketplace_status(
                     or str(extra.get("publish_state") or "") == "error"
                 ))
             )
-            close_action = pending_closes.get(listing.id)
             close_check = extra.get("close_check") or {}
             can_check_close = (
                 listing.channel == Channel.WOOCOMMERCE
