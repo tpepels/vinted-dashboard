@@ -2151,7 +2151,7 @@ def unpublish_woocommerce_item_after_sale(
             )
         except (TypeError, ValueError):
             recent = False
-        if (not recent or listing.status not in {ListingStatus.ACTIVE, ListingStatus.RESERVED}
+        if (not recent or listing.status not in {ListingStatus.ACTIVE, getattr(ListingStatus, "RESERVED", "reserved")}
                 or action.status != "attention"
                 or check.get("external_id") != listing.external_id
                 or check.get("sku") != listing.external_sku
@@ -2215,7 +2215,8 @@ def unpublish_woocommerce_item_after_sale(
         with db.session_scope() as session:
             action = session.get(CrossChannelAction, action_id)
             if action and action.status == "running":
-                action.status = "error"
+                action.status = "attention"
+                action.mode = "manual"
                 action.last_error = "Remote unpublish not confirmed; check publication status"
                 action.completed_at = utcnow()
         if isinstance(exc, ValueError):
