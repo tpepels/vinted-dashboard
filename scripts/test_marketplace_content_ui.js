@@ -13,7 +13,7 @@ const elements = {
   "#item-marketplaces-title": {textContent:""},
   "#item-marketplaces-content": {innerHTML:""},
 };
-const readBtn = {onclick:null,disabled:false};
+const readBtn = {onclick:null,disabled:false,dataset:{channel:"woocommerce"}};
 const updateBtn = {onclick:null,disabled:true,textContent:""};
 const boxes = ["title","description"].map(value=>({
   value,checked:false,onchange:null,
