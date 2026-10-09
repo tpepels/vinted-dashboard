@@ -4983,14 +4983,16 @@ def connectors(context: RequestContext = Depends(require_context)):
     # Surface the last attempted import independently from an older successful
     # import. A saved password is never proof that remote access works.
     with db.session_scope() as session:
-        channel_runs = session.execute(
-            select(models.ConnectorSyncRun).where(
-                models.ConnectorSyncRun.workspace_id == context.workspace.id,
-            ).order_by(models.ConnectorSyncRun.started_at.desc())
-        ).scalars().all()
-    last_run_by_channel = {}
-    for run in channel_runs:
-        last_run_by_channel.setdefault(run.channel, run)
+        last_run_by_channel = {}
+        for channel_name in (row["channel"] for row in connector_catalog()):
+            latest = session.execute(
+                select(models.ConnectorSyncRun).where(
+                    models.ConnectorSyncRun.workspace_id == context.workspace.id,
+                    models.ConnectorSyncRun.channel == channel_name,
+                ).order_by(models.ConnectorSyncRun.started_at.desc()).limit(1)
+            ).scalars().first()
+            if latest is not None:
+                last_run_by_channel[channel_name] = latest
     result = []
     for info in connector_catalog():
         channel = info["channel"]
@@ -5959,18 +5961,48 @@ def check_connector_read_access(
     )
     if not available or not available["operational"]:
         raise HTTPException(status_code=409, detail="Save and authorize this connection before testing")
+    rate_limiter.check(
+        f"connector-check:{context.workspace.id}:{channel}",
+        limit=12, window_seconds=900,
+    )
+    with db.session_scope() as session:
+        current_credential = session.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.workspace_id == context.workspace.id,
+                ConnectorCredential.channel == channel,
+            )
+        ).scalar_one_or_none()
+        checked_credential = (
+            current_credential.encrypted_payload if current_credential else None
+        )
+
+    def record_check(status: str, scope: str | None = None) -> bool:
+        # A credential edit during remote I/O invalidates the result. Never
+        # attach positive or negative evidence to a replacement API token.
+        with db.session_scope() as session:
+            fresh = session.execute(
+                select(ConnectorCredential).where(
+                    ConnectorCredential.workspace_id == context.workspace.id,
+                    ConnectorCredential.channel == channel,
+                )
+            ).scalar_one_or_none()
+            if (fresh.encrypted_payload if fresh else None) != checked_credential:
+                return False
+            account, _ = get_or_create_channel_account(session, context.workspace, channel, {})
+            account.config = {
+                **dict(account.config or {}),
+                "connection_check_status": status,
+                "connection_check_scope": scope,
+                "connection_checked_at": utcnow().isoformat(),
+            }
+        return True
+
     try:
         outcome = tests[channel](context.workspace.id)
         if not isinstance(outcome, dict) or outcome.get("ok") is not True:
             raise RuntimeError("Read access was not confirmed")
     except Exception as exc:
-        with db.session_scope() as session:
-            account, _ = get_or_create_channel_account(session, context.workspace, channel, {})
-            account.config = {
-                **dict(account.config or {}),
-                "connection_check_status": "failed",
-                "connection_checked_at": utcnow().isoformat(),
-            }
+        record_check("failed")
         # Connector exceptions can contain URLs, tokens or remote bodies.
         # Never pass them to users as raw public API error messages.
         raise HTTPException(
@@ -5978,14 +6010,11 @@ def check_connector_read_access(
             detail="Could not verify marketplace read access. Check credentials and permissions, then test again.",
         ) from exc
     scope = "ftp_login" if channel == Channel.BIBLIO else "read_only"
-    with db.session_scope() as session:
-        account, _ = get_or_create_channel_account(session, context.workspace, channel, {})
-        account.config = {
-            **dict(account.config or {}),
-            "connection_check_status": "passed",
-            "connection_check_scope": scope,
-            "connection_checked_at": utcnow().isoformat(),
-        }
+    if not record_check("passed", scope):
+        raise HTTPException(
+            status_code=409,
+            detail="Connection credentials changed during the test. Test the new credentials again.",
+        )
     return {
         "ok": True, "status": "passed", "scope": scope,
         "detail": (
