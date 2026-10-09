@@ -81,7 +81,7 @@ def test_ambiguous_readback_does_not_claim_success(monkeypatch):
 
 
 def test_draft_cannot_be_unpublished_again(monkeypatch):
-    puts = _stub(monkeypatch, _product(status="draft"))
+    puts = _stub(monkeypatch, _product(status="draft"), _product(status="draft"))
     checked = woocommerce_close.read_woocommerce_workspace_publication(
         uuid4(), external_id="12", expected_sku="PH-1",
     )
