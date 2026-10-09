@@ -9,10 +9,11 @@ const app = fs.readFileSync("app/product_static/app.js", "utf8");
 const styles = fs.readFileSync("app/product_static/styles.css", "utf8");
 const sortStart = app.indexOf("const tableNumberFormat =");
 const sortEnd = app.indexOf('document.addEventListener("click",', sortStart);
+const resizeStart = app.indexOf("const tableResizeSeen = new WeakSet();");
 const mobileStart = app.indexOf("const mobileCardTableIds =");
 const mobileEnd = app.indexOf("function startResponsiveTables()", mobileStart);
-assert(sortStart>=0 && sortEnd>sortStart && mobileStart>=0 && mobileEnd>mobileStart);
-const realHelpers = app.slice(sortStart,sortEnd)+"\n"+app.slice(mobileStart,mobileEnd);
+assert(sortStart>=0 && sortEnd>sortStart && resizeStart>=0 && mobileStart>resizeStart && mobileEnd>mobileStart);
+const realHelpers = app.slice(sortStart,sortEnd)+"\n"+app.slice(resizeStart,mobileEnd);
 const browser = process.env.CHROME_BIN || execFileSync(
   "bash",["-lc","command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser"],
   {encoding:"utf8"},
@@ -59,7 +60,7 @@ for(const width of widths){
     'const inventory=document.querySelector("#inventory-table table");',
     'const headerSelect=document.querySelector("#inventory-select-all");',
     'headerSelect.addEventListener("change",()=>{inventory.querySelectorAll(".inventory-select").forEach(box=>box.checked=headerSelect.checked);});',
-    'document.querySelectorAll(".table-wrap table").forEach(activateMobileCardTable);',
+    'document.querySelectorAll(".table-wrap table").forEach(table=>{activateResizableTable(table);activateMobileCardTable(table);});',
     'let clicked=0;',
     'document.querySelector(".fixture-action").addEventListener("click",()=>clicked++);',
     'document.querySelector(".fixture-action").click();',
