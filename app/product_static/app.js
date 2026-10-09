@@ -1219,7 +1219,7 @@ function renderItemMarketplacePanel(data) {
     + '<strong>' + Number(item.quantity ?? 0) + '</strong><span>physical units in stock</span>'
     + '<span>' + listings.length + ' linked marketplaces</span>'
     + (reviewCount ? '<span class="item-marketplace-review-count">' + reviewCount
-      + ' need review</span>' : '<span>No detected discrepancies</span>')
+      + ' need review</span>' : '<span>No issues recorded · unverified listings may remain</span>')
     + '</div>'
     + '<div class="actions"><button class="btn primary item-marketplace-publish" type="button">Publish to another marketplace</button>'
     + '<button class="btn item-marketplace-edit" type="button">Edit this item</button>'
