@@ -15,6 +15,7 @@ from app import models
 FIELDS = (
     ("title", "Title"),
     ("description", "Description"),
+    ("price", "Asking price"),
     ("condition", "Condition"),
     ("isbn", "ISBN"),
     ("author", "Author"),
@@ -31,6 +32,7 @@ def master_values(item: models.InventoryItem) -> dict[str, str | None]:
         "title": str(item.title or "").strip() or None,
         "description": _value(attributes.get("description")),
         "condition": _value(item.condition),
+        "price": _cents(attributes.get("default_price_cents")),
         **{key: _value(attributes.get(key)) for key in
            ("isbn", "author", "publisher", "edition", "language")},
     }
@@ -43,11 +45,15 @@ def _value(value: Any) -> str | None:
     return result or None
 
 
+def _cents(value: Any) -> str | None:
+    return str(value) if type(value) is int and value >= 0 else None
+
+
 def saved_listing_values(listing: models.ChannelListing) -> dict[str, str | None]:
     extra = dict(listing.extra or {})
     # This is deliberately a conservative snapshot: absent data stays unknown,
     # not an empty string that the system could mistake for a difference.
-    values = {"title": _value(listing.title)}
+    values = {"title": _value(listing.title), "price": _cents(listing.price_cents)}
     for key in ("description", "condition", "isbn", "author", "publisher",
                 "edition", "language"):
         values[key] = _value(extra.get(key))
