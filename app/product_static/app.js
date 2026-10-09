@@ -5437,10 +5437,10 @@ async function connections() {
   if (state.biblioPhotoExpanded) loadBiblioPhotoChoices();
 
   document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
-  $(".configure").forEach((button) => {
+  $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
-  $(".test-marketplace").forEach(button => {
+  $$(".test-marketplace").forEach(button => {
     button.onclick = () => testMarketplaceConnection(button.dataset.c, button);
   });
   $$(".sync").forEach((button) => {
