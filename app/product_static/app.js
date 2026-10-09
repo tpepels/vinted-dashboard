@@ -1139,12 +1139,12 @@ function renderItemMarketplacePanel(data) {
             : '')
         : '')
 
-      + (listing.can_sync_woocommerce_price
+      + (listing.can_sync_woocommerce_price || listing.can_sync_shopify_price
         ? '<details class="item-price-tools"'
           + (listing.price_verification === "price_mismatch" ? ' open' : '')
-          + '><summary>Regular price · '
+          + '><summary>' + (listing.channel === "shopify" ? 'Base price' : 'Regular price') + ' · '
           + esc(money(item.default_price_cents, item.currency)) + '</summary>'
-          + '<p class="muted">Compare the store price first. Promotions are never changed.</p>'
+          + '<p class="muted">Compare the store price first. Promotions and regional prices are not changed.</p>'
           + (listing.price_verification !== "not_checked"
             ? '<p class="item-price-state">'
               + (listing.price_verification === "price_checked" ? 'Price matches'
@@ -1153,7 +1153,7 @@ function renderItemMarketplacePanel(data) {
               + (Number.isInteger(listing.remote_price_cents)
                 ? ' · Store ' + esc(money(listing.remote_price_cents, item.currency)) : '')
               + '</p>' : '')
-          + '<div class="actions"><button class="btn item-price-check" type="button">'
+          + '<div class="actions"><button class="btn item-price-check" type="button" data-channel="' + esc(listing.channel) + '">'
           + (listing.price_verification === "not_checked" ? 'Check price' : 'Check again')
           + '</button>'
           + (listing.price_verification === "price_mismatch"
@@ -1161,7 +1161,7 @@ function renderItemMarketplacePanel(data) {
               && Number.isFinite(Date.parse(listing.price_verified_at))
               && Date.now() - Date.parse(listing.price_verified_at) < 300000
               && Date.now() >= Date.parse(listing.price_verified_at)
-            ? '<button class="btn primary item-price-update" type="button">Set price to '
+            ? '<button class="btn primary item-price-update" type="button" data-channel="' + esc(listing.channel) + '">Set price to '
               + esc(money(item.default_price_cents, item.currency)) + '…</button>'
             : '')
           + '</div></details>' : '')
@@ -1195,7 +1195,7 @@ function renderItemMarketplacePanel(data) {
     + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
     + '<p class="item-marketplace-footnote">Stock and price changes are separate, explicit actions. '
-    + 'WooCommerce price updates change regular price only. Send BIBLIO changes from Connections.</p>';
+    + 'WooCommerce regular prices and Shopify base prices change only when explicitly confirmed. Send BIBLIO changes from Connections.</p>';
   const itemId = item.id;
   $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
   $(".item-marketplace-edit").onclick = () => {
@@ -1282,36 +1282,42 @@ function renderItemMarketplacePanel(data) {
     };
   });
 
-  $(".item-price-check").forEach(button => {
+  $$(".item-price-check").forEach(button => {
     button.onclick = async () => {
+      const channel = button.dataset.channel;
+      const store = {woocommerce:"WooCommerce regular price",shopify:"Shopify base price"}[channel];
+      if (!store) return;
       button.disabled = true;
       try {
         const result = await api("/api/app/inventory/" + encodeURIComponent(itemId)
-          + "/marketplaces/woocommerce/check-price", {method:"POST"});
-        flash(result.matches ? "WooCommerce regular price matches."
-          : "WooCommerce regular price differs from the default asking price.");
+          + "/marketplaces/" + channel + "/check-price", {method:"POST"});
+        flash(result.matches ? store + " matches the dashboard."
+          : store + " differs from the default asking price.");
         await openItemMarketplaces(itemId);
       } catch (error) {
-        flash("WooCommerce price check: " + error.message, true);
+        flash(store + " check: " + error.message, true);
         button.disabled = false;
       }
     };
   });
-  $(".item-price-update").forEach(button => {
+  $$(".item-price-update").forEach(button => {
     button.onclick = async () => {
+      const channel = button.dataset.channel;
+      const store = {woocommerce:"WooCommerce regular price",shopify:"Shopify base price"}[channel];
+      if (!store) return;
       const price = money(item.default_price_cents, item.currency);
-      if (!window.confirm("Set the WooCommerce regular price to " + price + "? "
-        + "This changes only the linked WooCommerce product or variation's regular price. "
-        + "Existing sale prices and promotions will not be modified.")) return;
+      if (!window.confirm("Set the " + store + " to " + price + "? "
+        + "Only this linked product or variant price is changed. "
+        + "Stock, promotions and regional prices will not be modified.")) return;
       button.disabled = true;
       try {
         const result = await api("/api/app/inventory/" + encodeURIComponent(itemId)
-          + "/marketplaces/woocommerce/price", {method:"POST"});
-        flash(result.remote_verified ? "WooCommerce regular price verified at " + price + "."
+          + "/marketplaces/" + channel + "/price", {method:"POST"});
+        flash(result.remote_verified ? store + " verified at " + price + "."
           : "Price update needs remote verification.");
         await openItemMarketplaces(itemId);
       } catch (error) {
-        flash("WooCommerce price was not confirmed. Check the store before retrying. "
+        flash(store + " not confirmed. Check the store before retrying. "
           + error.message, true);
         button.disabled = false;
       }
