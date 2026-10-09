@@ -284,6 +284,45 @@ def _fetch_ebay_active(values: dict[str, str]) -> list[dict[str, Any]]:
     return items
 
 
+def test_ebay_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
+    """Read at most one active eBay listing to validate seller inventory access.
+
+    Uses GetMyeBaySelling but never imports, publishes, ends or edits a listing.
+    eBay seller-order access and write permissions are not tested.
+    """
+    values = _workspace_or_env_ebay_values(workspace_id)
+    token = _ebay_access_token(values)
+    site_id = values.get("site_id", "0").strip() or "0"
+    compatibility = values.get("compatibility_level", "1477").strip() or "1477"
+    body = ("""<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <ActiveList><Include>true</Include><Pagination>
+    <EntriesPerPage>1</EntriesPerPage><PageNumber>1</PageNumber>
+  </Pagination></ActiveList>
+</GetMyeBaySellingRequest>""")
+    response = requests.post(
+        "https://api.ebay.com/ws/api.dll",
+        headers={
+            "Content-Type": "text/xml",
+            "X-EBAY-API-CALL-NAME": "GetMyeBaySelling",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": compatibility,
+            "X-EBAY-API-SITEID": site_id,
+            "X-EBAY-API-IAF-TOKEN": token,
+        },
+        data=body.encode("utf-8"),
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError("eBay seller-listing read check failed")
+    root = ET.fromstring(response.content)
+    ns = {"e": "urn:ebay:apis:eBLBaseComponents"}
+    ack = root.findtext("e:Ack", namespaces=ns)
+    if ack not in {"Success", "Warning"}:
+        raise RuntimeError("eBay did not confirm listing read access")
+    return {"ok": True, "detail": "eBay active-listing read access confirmed."}
+
+
 def sync_ebay_workspace(workspace_id: uuid.UUID) -> dict[str, Any]:
     values = _workspace_or_env_ebay_values(workspace_id)
     items = _fetch_ebay_active(values)
