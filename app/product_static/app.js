@@ -1099,77 +1099,107 @@ function renderItemMarketplacePanel(data) {
   const listings = data.listings || [];
   const operations = data.operations || [];
   const closing = data.closure_actions || [];
-  $("#item-marketplaces-title").textContent = "Where is " + (item.title || "this item") + " listed?";
+  $("#item-marketplaces-title").textContent = "Marketplace listings · " + (item.title || "this item");
+  const reviewCount = listings.filter(listing =>
+    listing.attention || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification)
+    || ["price_mismatch", "price_stale"].includes(listing.price_verification)
+  ).length;
   const rows = listings.map(listing => {
-    const errors = [
-      listing.photo_error,
-      listing.last_operation?.error,
-    ].filter(Boolean);
-    const caution = listing.attention || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification);
-    const verified = !caution && ["matches", "stock_checked"].includes(listing.verification);
-    return '<div class="item-marketplace-row">'
-      + '<div class="item-marketplace-main">'
-      + '<div class="item-marketplace-head"><strong>' + esc(listing.channel.toUpperCase())
-      + '</strong><span class="item-marketplace-state ' + (caution ? 'attention' : verified ? 'verified' : '') + '">'
-      + esc(listing.status) + (caution ? " · review needed" : "") + '</span></div>'
-      + '<p>' + esc(itemMarketplaceStatusLabel(listing)) + '</p>'
-      + '<p class="muted">Marketplace reference: ' + esc(listing.external_id)
-      + ' · Advertised quantity: ' + Number(listing.quantity ?? 0)
-      + (listing.verified_at ? ' · Last checked: ' + esc(when(listing.verified_at)) : '')
-      + '</p>'
-      + '<p class="muted">Latest action: ' + esc(itemMarketplaceOperationText(listing.last_operation)) + '</p>'
-      + (listing.channel === "biblio" ? '<p class="muted">Dashboard photos: '
-        + Number(listing.photo_count || 0) + ' · Transfer state: '
-        + esc(listing.photo_state || "not recorded") + '</p>' : '')
-      + errors.map(error => '<p class="error">' + esc(error) + '</p>').join("")
-      + '</div><div class="item-marketplace-actions">'
-      + (listing.url ? '<a class="btn" href="' + esc(listing.url)
-        + '" target="_blank" rel="noreferrer">Open marketplace listing</a>' : "")
-      + (listing.can_inspect_photos ? '<button class="btn item-marketplace-photos" type="button" data-book="'
-        + esc(listing.external_id) + '">Check / repair photos</button>' : "")
-      + (listing.channel === "biblio" ? '<button class="btn item-marketplace-verify" type="button">Compare BIBLIO inventory</button>' : "")
+    const store = ["woocommerce", "shopify", "wix"].includes(listing.channel);
+    const priceType = listing.channel === "shopify" ? "Base price"
+      : listing.channel === "wix" ? "Actual price" : "Regular price";
+    const attention = listing.attention
+      || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification)
+      || ["price_mismatch", "price_stale"].includes(listing.price_verification);
+    const verified = !attention && ["matches", "stock_checked"].includes(listing.verification);
+    const statusText = attention ? "Needs review" : verified ? "Last check matched" : "Not verified";
+    const errors = [listing.photo_error, listing.last_operation?.error].filter(Boolean);
+    const stockText = listing.verification === "stock_mismatch"
+      ? "Different quantities" : listing.verification === "stock_checked"
+      ? "Matched at last check" : listing.verification === "stock_stale"
+      ? "Check may be outdated" : "Not checked";
+    const priceText = {
+      price_checked: "Matched at last check", price_mismatch: "Different prices",
+      price_stale: "Check may be outdated", not_checked: "Not checked",
+    }[listing.price_verification] || "Not checked";
+    const actions = (listing.can_inspect_photos
+        ? '<button class="btn item-marketplace-photos" type="button" data-book="'
+          + esc(listing.external_id) + '">Check or resend book photos</button>' : "")
+      + (listing.channel === "biblio"
+        ? '<button class="btn item-marketplace-verify" type="button">Compare with BIBLIO export</button>' : "")
       + ((listing.can_sync_woocommerce_stock || listing.can_sync_shopify_stock || listing.can_sync_wix_stock)
-        ? '<button class="btn item-stock-check" data-channel="' + esc(listing.channel)
-          + '" type="button">'
-          + (listing.verification === "stock_checked" ? "Check again" : "Check stock")
+        ? '<div class="item-marketplace-tool-group"><strong>Stock</strong>'
+          + '<p>Check the store first. Changes affect this linked store listing, not the physical stock record.</p>'
+          + '<div class="actions"><button class="btn item-stock-check" data-channel="'
+          + esc(listing.channel) + '" type="button">'
+          + (listing.verification === "stock_checked" ? "Check stock again" : "Check store stock")
           + '</button>'
           + (listing.verification === "stock_mismatch"
             ? '<button class="btn primary item-stock-update" data-channel="' + esc(listing.channel)
-              + '" type="button">Set stock to ' + Number(item.quantity || 0) + '…</button>'
-            : '')
-        : '')
-
+              + '" type="button">Set store stock to ' + Number(item.quantity || 0) + '…</button>'
+            : '') + '</div></div>' : '')
       + (listing.can_sync_woocommerce_price || listing.can_sync_shopify_price || listing.can_sync_wix_price
-        ? '<details class="item-price-tools"'
-          + (listing.price_verification === "price_mismatch" ? ' open' : '')
-          + '><summary>' + (listing.channel === "shopify" ? 'Base price' : listing.channel === "wix" ? 'Actual price' : 'Regular price') + ' · '
-          + esc(money(item.default_price_cents, item.currency)) + '</summary>'
-          + '<p class="muted">Compare the store price first. Promotions and regional prices are not changed.'
+        ? '<details class="item-price-tools"><summary>Edit ' + priceType.toLowerCase()
+          + ' · ' + esc(money(item.default_price_cents, item.currency)) + '</summary>'
+          + '<p>Check the store price first. Promotions and regional prices are not changed.'
           + (listing.channel === "wix"
-              ? ' Wix price updates support one default variant without product options or modifiers.'
-              : '')
-          + '</p>'
-          + (listing.price_verification !== "not_checked"
-            ? '<p class="item-price-state">'
-              + (listing.price_verification === "price_checked" ? 'Price matches'
-                : listing.price_verification === "price_mismatch" ? 'Price differs'
-                : 'Previous check is outdated')
-              + (Number.isInteger(listing.remote_price_cents)
-                ? ' · Store ' + esc(money(listing.remote_price_cents, item.currency)) : '')
-              + '</p>' : '')
-          + '<div class="actions"><button class="btn item-price-check" type="button" data-channel="' + esc(listing.channel) + '">'
-          + (listing.price_verification === "not_checked" ? 'Check price' : 'Check again')
+              ? ' Wix supports one default variant without options or modifiers.'
+              : '') + '</p>'
+          + '<div class="actions"><button class="btn item-price-check" type="button" data-channel="'
+          + esc(listing.channel) + '">'
+          + (listing.price_verification === "not_checked" ? "Check store price" : "Check price again")
           + '</button>'
           + (listing.price_verification === "price_mismatch"
               && listing.price_verified_at
               && Number.isFinite(Date.parse(listing.price_verified_at))
               && Date.now() - Date.parse(listing.price_verified_at) < 300000
               && Date.now() >= Date.parse(listing.price_verified_at)
-            ? '<button class="btn primary item-price-update" type="button" data-channel="' + esc(listing.channel) + '">Set price to '
+            ? '<button class="btn primary item-price-update" type="button" data-channel="'
+              + esc(listing.channel) + '">Set store price to '
               + esc(money(item.default_price_cents, item.currency)) + '…</button>'
             : '')
-          + '</div></details>' : '')
-      + '</div></div>';
+          + '</div></details>' : '');
+    const facts = store
+      ? '<div class="item-marketplace-facts">'
+        + '<div class="item-marketplace-fact"><span>Stock · ' + esc(stockText) + '</span>'
+        + '<strong>Dashboard ' + Number(item.quantity ?? 0) + ' · Store '
+        + (Number.isInteger(listing.remote_stock_quantity) ? Number(listing.remote_stock_quantity)
+          : listing.verification === "stock_checked" ? Number(item.quantity ?? 0) : "not checked")
+        + '</strong></div>'
+        + '<div class="item-marketplace-fact"><span>' + priceType + ' · ' + esc(priceText) + '</span>'
+        + '<strong>Dashboard ' + esc(money(item.default_price_cents, item.currency))
+        + ' · Store ' + (Number.isInteger(listing.remote_price_cents)
+          ? esc(money(listing.remote_price_cents, item.currency)) : "not checked")
+        + '</strong></div></div>'
+      : '<p class="item-marketplace-evidence">' + esc(itemMarketplaceStatusLabel(listing)) + '</p>'
+        + (listing.channel === "biblio" ? '<p class="item-marketplace-evidence">Photos saved locally: '
+          + Number(listing.photo_count || 0) + ' · Last transfer: '
+          + esc(listing.photo_state || "not recorded") + '</p>' : '');
+    return '<article class="item-marketplace-row" data-marketplace="' + esc(listing.channel) + '">'
+      + '<div class="item-marketplace-main">'
+      + '<div class="item-marketplace-head"><strong>' + esc(listing.channel.toUpperCase())
+      + '</strong><span class="item-marketplace-state '
+      + (attention ? 'attention' : verified ? 'verified' : '') + '">'
+      + statusText + '</span></div>'
+      + facts
+      + (errors.length ? '<div class="item-marketplace-errors">'
+        + errors.map(error => '<p class="error">' + esc(error) + '</p>').join("") + '</div>' : '')
+      + '<p class="item-marketplace-secondary">Last recorded activity: '
+      + esc(itemMarketplaceOperationText(listing.last_operation))
+      + (listing.verified_at ? ' · Checked ' + esc(when(listing.verified_at)) : '') + '</p>'
+      + '<div class="item-marketplace-utility">'
+      + (listing.url ? '<a href="' + esc(listing.url)
+          + '" target="_blank" rel="noopener noreferrer">View listing on marketplace ↗</a>' : '')
+      + '<details class="item-marketplace-metadata"><summary>Listing ID &amp; details</summary>'
+      + '<p>Reference: ' + esc(listing.external_id) + '</p>'
+      + '<p>Listing status: ' + esc(listing.status) + '</p>'
+      + '<p>Last recorded quantity: ' + Number(listing.quantity ?? 0) + '</p>'
+      + '</details></div></div>'
+      + '<details class="item-marketplace-manage"><summary>'
+      + (attention ? 'Review this listing' : 'Manage this listing')
+      + '</summary><div class="item-marketplace-actions">'
+      + (actions || '<p>There are no automated edits for this marketplace. Use its website to make changes.</p>')
+      + '</div></details></article>';
   });
   const operationsMarkup = operations.map(op => {
     const title = {
@@ -1185,8 +1215,12 @@ function renderItemMarketplacePanel(data) {
         : '') + '</div>';
   }).join("");
   $("#item-marketplaces-content").innerHTML =
-    '<div class="item-marketplace-summary"><strong>' + Number(item.quantity ?? 0)
-    + '</strong> physical units in the dashboard · ' + listings.length + ' marketplace links'
+    '<div class="item-marketplace-summary"><div class="item-marketplace-summary-copy">'
+    + '<strong>' + Number(item.quantity ?? 0) + '</strong><span>physical units in stock</span>'
+    + '<span>' + listings.length + ' linked marketplaces</span>'
+    + (reviewCount ? '<span class="item-marketplace-review-count">' + reviewCount
+      + ' need review</span>' : '<span>No detected discrepancies</span>')
+    + '</div>'
     + '<div class="actions"><button class="btn primary item-marketplace-publish" type="button">Publish to another marketplace</button>'
     + '<button class="btn item-marketplace-edit" type="button">Edit this item</button>'
     + '</div></div>'
