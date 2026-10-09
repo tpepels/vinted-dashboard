@@ -1094,7 +1094,7 @@ function itemMarketplaceOperationText(op) {
     + (op.completed_at ? " · " + when(op.completed_at) : "");
 }
 
-function itemContentComparisonMarkup(listing, comparison) {
+function itemContentComparisonMarkup(listing, comparison, currency) {
   const panel = comparison?.listings?.find(row => row.listing_id === listing.listing_id);
   if (!panel) return "";
   const live = panel.source === "previous_live_check";
@@ -1108,8 +1108,10 @@ function itemContentComparisonMarkup(listing, comparison) {
     const marker = row.status === "match" ? "Matches"
       : row.status === "differs" ? "Different"
       : row.status === "unknown" ? "Not recorded" : "No master value";
-    const master = row.master == null ? "Not provided" : row.master;
-    const remote = row.marketplace == null ? "Not recorded" : row.marketplace;
+    const master = row.master == null ? "Not provided"
+      : row.key === "price" ? money(Number(row.master), currency) : row.master;
+    const remote = row.marketplace == null ? "Not recorded"
+      : row.key === "price" ? money(Number(row.marketplace), currency) : row.marketplace;
     return '<div class="item-content-row ' + (row.status === "differs" ? 'different' : '') + '">'
       + '<div class="item-content-field">'
       + '<strong>' + esc(row.label) + '</strong>'
@@ -1189,7 +1191,7 @@ function renderItemMarketplacePanel(data) {
             ? '<button class="btn primary item-stock-update" data-channel="' + esc(listing.channel)
               + '" type="button">Set store stock to ' + Number(item.quantity || 0) + '…</button>'
             : '') + '</div></div>' : '')
-      + itemContentComparisonMarkup(listing, comparison)
+      + itemContentComparisonMarkup(listing, comparison, item.currency)
       + (listing.can_sync_woocommerce_price || listing.can_sync_shopify_price || listing.can_sync_wix_price
         ? '<details class="item-price-tools"><summary>Edit ' + priceType.toLowerCase()
           + ' · ' + esc(money(item.default_price_cents, item.currency)) + '</summary>'
