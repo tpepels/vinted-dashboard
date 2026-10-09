@@ -1103,7 +1103,7 @@ function itemContentComparisonMarkup(listing, comparison, currency) {
     && Date.now() - Date.parse(panel.checked_at) <= 300000;
   const fields = panel.fields || [];
   const differences = fields.filter(row => row.status === "differs").length;
-  const choices = fields.filter(row => row.writable && row.status === "differs" && fresh);
+  const choices = fields.filter(row => panel.can_check_live && row.writable && row.status === "differs" && fresh);
   const details = fields.map(row => {
     const marker = row.status === "match" ? "Matches"
       : row.status === "differs" ? "Different"
@@ -1136,7 +1136,7 @@ function itemContentComparisonMarkup(listing, comparison, currency) {
     + '<p class="muted">Compare title, description and book details. Missing values are not treated as differences.</p>'
     + '<div class="item-content-fields">' + details + '</div>'
     + (panel.can_check_live
-      ? '<div class="actions"><button class="btn item-content-check" type="button">Check current WooCommerce details</button>'
+      ? '<div class="actions"><button class="btn item-content-check" data-channel="woocommerce" type="button">Check current WooCommerce details</button>'
         + (choices.length
           ? '<button class="btn primary item-content-update" type="button" disabled>'
             + 'Update selected fields…</button>' : '') + '</div>'
@@ -1249,7 +1249,7 @@ function renderItemMarketplacePanel(data) {
       + '<p>Listing status: ' + esc(listing.status) + '</p>'
       + '<p>Last recorded quantity: ' + Number(listing.quantity ?? 0) + '</p>'
       + '</details></div></div>'
-      + '<details class="item-marketplace-manage"><summary>'
+      + '<details class="item-marketplace-manage"' + (state.itemMarketplaceOpenChannel === listing.channel ? ' open' : '') + '><summary>'
       + (attention ? 'Review this listing' : 'Manage this listing')
       + '</summary><div class="item-marketplace-actions">'
       + (actions || '<p>There are no automated edits for this marketplace. Use its website to make changes.</p>')
@@ -1419,6 +1419,7 @@ function renderItemMarketplacePanel(data) {
   $$(".item-content-check").forEach(button => {
     button.onclick = async () => {
       button.disabled = true;
+      state.itemMarketplaceOpenChannel = button.dataset.channel;
       try {
         await api("/api/app/inventory/" + encodeURIComponent(itemId)
           + "/marketplaces/woocommerce/check-content", {method:"POST"});
@@ -1447,6 +1448,7 @@ function renderItemMarketplacePanel(data) {
         + " on this linked WooCommerce listing? Stock, price, ISBN, images and publication status will not change. "
         + "Unselected fields will be left unchanged.")) return;
       submit.disabled = true;
+      state.itemMarketplaceOpenChannel = "woocommerce";
       try {
         await api("/api/app/inventory/" + encodeURIComponent(itemId)
           + "/marketplaces/woocommerce/content",
@@ -1478,6 +1480,7 @@ function renderItemMarketplacePanel(data) {
 }
 
 async function openItemMarketplaces(itemId) {
+  if (state.itemMarketplaceId !== itemId) state.itemMarketplaceOpenChannel = null;
   state.itemMarketplaceId = itemId;
   const panel = $("#item-marketplaces-panel");
   panel.classList.remove("hidden");
@@ -1499,6 +1502,7 @@ async function openItemMarketplaces(itemId) {
 
 $("#close-item-marketplaces").onclick = () => {
   state.itemMarketplaceId = null;
+  state.itemMarketplaceOpenChannel = null;
   $("#item-marketplaces-panel").classList.add("hidden");
 };
 
