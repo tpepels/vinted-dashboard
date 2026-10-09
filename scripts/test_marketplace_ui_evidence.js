@@ -170,10 +170,10 @@ function visualFixture(html, css, name) {
     + 'output.dataset.scroll=String(document.documentElement.scrollWidth);'
     + 'output.dataset.panel=String(Math.ceil(target.getBoundingClientRect().width));'
     + '});'
-    + '<\\/script></body></html>';
+    + '</script></body></html>';
 }
 fs.writeFileSync(evidenceDir+"/before.html",visualFixture(before,baselineCSS,"Before"));
 fs.writeFileSync(evidenceDir+"/after.html",visualFixture(after,currentCSS,"After"));
-fs.writeFileSync(evidenceDir+"/metrics.json",JSON.stringify(result,null,2)+"\\n");
+fs.writeFileSync(evidenceDir+"/metrics.json",JSON.stringify(result,null,2)+String.fromCharCode(10));
 console.log("UI_BEFORE_AFTER_EVIDENCE "+JSON.stringify(result));
 console.log("Marketplace usability regression: PASS");
