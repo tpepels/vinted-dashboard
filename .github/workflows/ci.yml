@@ -36,6 +36,7 @@ jobs:
       - run: python -m pytest -q
       - run: node --check app/product_static/app.js
       - run: node scripts/test_connections_ui.js
+      - run: node scripts/test_connection_health_ui.js
       - run: node scripts/test_biblio_connections_ui.js
       - run: node scripts/test_marketplace_operations_ui.js
       - run: node scripts/test_table_ui.js
