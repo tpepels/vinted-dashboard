@@ -42,6 +42,17 @@ jobs:
       - run: node scripts/test_store_stock_audit_ui.js
       - run: node scripts/test_marketplace_price_ui.js
       - run: node scripts/test_marketplace_ui_evidence.js
+      - run: node scripts/test_marketplace_visual_layout.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: marketplace-ui-before-after
+          path: |
+            ui-evidence/*.html
+            ui-evidence/*.json
+            ui-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 14
       - run: node --check app/extension/background.js
       - run: node --check app/extension/vinted_age.js
       - run: node --check app/extension/content.js
