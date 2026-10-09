@@ -820,8 +820,8 @@ def test_item_marketplace_panel_exposes_safe_real_actions():
     assert 'class="btn item-marketplace-retry"' in APP_JS
     assert 'data-book=' in APP_JS
     assert 'state.biblioPhotoTarget = button.dataset.book' in APP_JS
-    assert "WooCommerce regular prices and Shopify base prices change only" in APP_JS
-    assert 'listing.can_sync_woocommerce_price || listing.can_sync_shopify_price' in APP_JS
+    assert "WooCommerce regular prices, Shopify base prices and Wix actual prices change only" in APP_JS
+    assert 'listing.can_sync_woocommerce_price || listing.can_sync_shopify_price || listing.can_sync_wix_price' in APP_JS
     assert '$(".item-price-check").forEach' in APP_JS
     assert '$(".item-price-update").forEach' in APP_JS
     assert 'data-channel="' in APP_JS
