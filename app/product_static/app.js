@@ -5253,11 +5253,15 @@ function connectorHealth(connector) {
       next:"Test the connection again before relying on a new import.",
     };
     return {
-      state:"verified",label:"Read access checked",
-      message:"Catalog/order read access passed. Publishing and stock writes were not tested.",
-      next:connector.last_synced_at
-        ? "Review imported listings in Inventory."
-        : "Import marketplace data to populate the dashboard.",
+      state:"verified",label:connector.channel === "biblio" ? "FTP login checked" : "Read access checked",
+      message:connector.channel === "biblio"
+        ? "FTP login and directory access were checked. Book and photo publication were not verified."
+        : "Catalog/order read access passed. Publishing and stock writes were not tested.",
+      next:connector.channel === "biblio"
+        ? "Send changed listings, then compare with a BIBLIO export to verify processing."
+        : connector.last_synced_at
+          ? "Review imported listings in Inventory."
+          : "Import marketplace data to populate the dashboard.",
     };
   }
   return {
@@ -5272,13 +5276,15 @@ function connectorHealth(connector) {
 }
 
 async function testMarketplaceConnection(channel, button) {
-  if (!connectorSchemas[channel]?.test) return;
+  if (channel !== "biblio" && !connectorSchemas[channel]?.test) return;
   const title = connectorSchemas[channel].title;
   if (button) button.disabled = true;
   try {
     const result = await api("/api/app/connectors/" + encodeURIComponent(channel)
       + "/test-connection", {method:"POST"});
-    const message = title + ": read access confirmed. Publishing and stock edits were not tested.";
+    const message = channel === "biblio"
+      ? "BIBLIO: FTP login checked. Book and photo publication were not checked."
+      : title + ": read access confirmed. Publishing and stock edits were not tested.";
     if (state.connectorChannel === channel) $("#connector-config-status").textContent = message;
     flash(message);
     await connections();
@@ -5354,8 +5360,8 @@ async function connections() {
         + Number(health.deletes_pending || 0);
       return '<section class="connector connector--biblio" data-connector-channel="biblio" aria-label="BIBLIO">'
         + '<div class="connector-header"><div><h2>BIBLIO</h2><p>Send and maintain book listings in your BIBLIO seller account.</p></div>'
-        + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">'
-        + (ready ? 'Credentials stored' : 'Setup required') + '</span></div>'
+        + '<span class="connection-state ' + esc(health.state) + '">'
+        + esc(ready ? health.label : "Setup required") + '</span></div>'
         + (ready
           ? '<div class="biblio-primary-task"><div><strong>' + (pending > 0
               ? pending + ' listing change' + (pending === 1 ? '' : 's') + ' waiting to be sent'
@@ -5365,7 +5371,11 @@ async function connections() {
             + '<button class="btn primary sync" data-c="biblio" type="button">Send changes to BIBLIO</button></div>'
           : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, you can send changed books and review what was transferred.</p>')
         + renderBiblioActivity(biblioActivity, ready)
-        + '<div class="connector-settings-row">' + configure + '</div>'
+        + '<div class="connector-settings-row">' + configure
+        + (ready ? '<button class="btn test-marketplace" data-c="biblio" type="button">Check FTP login</button>' : '')
+        + '</div>'
+        + '<p class="connector-next-step"><strong>Connection:</strong> ' + esc(health.message) + ' '
+          + esc(health.next) + '</p>'
         + '</section>';
     }
     if (channel === "vinted") {
@@ -5733,14 +5743,9 @@ $("#test-connector").onclick = () => {
   return testMarketplaceConnection(channel, $("#test-connector"));
 };
 
-$("#test-biblio").onclick = async () => {
-  $("#connector-config-status").textContent = "Testing BIBLIO transfer security…";
-  try {
-    const result = await api("/api/app/connectors/biblio/test", { method: "POST" });
-    $("#connector-config-status").textContent = result.detail || "BIBLIO connection succeeded.";
-  } catch (error) {
-    $("#connector-config-status").textContent = error.message;
-  }
+$("#test-biblio").onclick = () => {
+  $("#connector-config-status").textContent = "Checking BIBLIO FTP login and directory access…";
+  return testMarketplaceConnection("biblio", $("#test-biblio"));
 };
 
 function biblioInventoryForm(file, authoritative = false) {
