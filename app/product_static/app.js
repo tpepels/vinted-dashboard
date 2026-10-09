@@ -401,6 +401,9 @@ function activateResizableTable(table) {
   const headers = Array.from(row.cells);
   const labels = headers.map(cell => cell.textContent.replace(/\s+/g, " ").trim());
   table.classList.add("table-resizable");
+  // Do not compress a dozen columns into a 600px-wide table. Keep enough
+  // intrinsic space for labels and controls; only the table region scrolls.
+  table.style.minWidth = Math.max(720, row.cells.length * 118) + "px";
   const container = table.closest(".table-wrap");
   if (container && !container.hasAttribute("tabindex")) {
     container.tabIndex = 0;
@@ -484,11 +487,107 @@ function activateResizableTable(table) {
   });
 }
 
+// A narrow content area (including a laptop with an open sidebar) deserves
+// legible row cards. Keep the actual table DOM, cells, checkboxes, links and
+// buttons, so existing selection, sorting and marketplace handlers still work.
+const mobileCardTableIds = new Set([
+  "inventory-table", "listings-table", "sales-table",
+  "vinted-categories", "vinted-sold-stock",
+  "vinted-efficiency", "analytics-listings",
+]);
+const mobileCardSeen = new WeakSet();
+
+function activateMobileCardTable(table) {
+  if (mobileCardSeen.has(table)) return;
+  const scope = table.closest("#" + [...mobileCardTableIds].join(", #"));
+  if (!scope || !table.tHead?.rows?.length || !table.tBodies?.[0]) return;
+  const headerRow = table.tHead.rows[0];
+  const headers = Array.from(headerRow.cells);
+  if (!headers.length || headers.some(cell => cell.colSpan !== 1)) return;
+  mobileCardSeen.add(table);
+  const labels = headers.map(cell => cell.textContent.replace(/\\s+/g, " ").trim());
+  const kind = scope.id === "inventory-table" ? "inventory"
+    : scope.id === "listings-table" ? "listings"
+    : scope.id === "sales-table" ? "sales" : "analytics";
+  table.classList.add("mobile-cards");
+  table.dataset.mobileKind = kind;
+  table.closest(".table-wrap")?.classList.add("mobile-card-host");
+  Array.from(table.tBodies[0].rows).forEach(row => {
+    Array.from(row.cells).forEach((cell, index) => {
+      cell.dataset.label = labels[index] || "";
+    });
+  });
+
+  // Header sorting becomes a visible control when headers are visually
+  // hidden in card mode. Listings already has its own sorting toolbar.
+  const controls = document.createElement("div");
+  controls.className = "mobile-table-tools";
+  if (kind !== "listings") {
+    const label = document.createElement("label");
+    label.className = "mobile-table-sort";
+    const caption = document.createElement("span");
+    caption.textContent = "Sort rows";
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Sort table rows");
+    const initial = document.createElement("option");
+    initial.value = "";
+    initial.textContent = "Choose a column";
+    select.appendChild(initial);
+    headers.forEach((header, index) => {
+      if (!labels[index] || header.querySelector("a, input, select")) return;
+      for (const direction of ["asc", "desc"]) {
+        const option = document.createElement("option");
+        option.value = index + ":" + direction;
+        option.textContent = labels[index] + (direction === "asc" ? " · ascending" : " · descending");
+        select.appendChild(option);
+      }
+    });
+    select.addEventListener("change", () => {
+      if (!select.value) return;
+      const [column, direction] = select.value.split(":");
+      const header = headers[Number(column)];
+      if (!header) return;
+      header.dataset.sortDirection = direction === "asc" ? "desc" : "asc";
+      sortTableByHeader(header);
+    });
+    label.append(caption, select);
+    controls.appendChild(label);
+  }
+  if (kind === "inventory") {
+    const label = document.createElement("label");
+    label.className = "mobile-table-select-all";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.id = "inventory-mobile-select-all";
+    checkbox.setAttribute("aria-label", "Select all visible inventory items");
+    checkbox.addEventListener("change", () => {
+      const original = table.querySelector("#inventory-select-all");
+      if (original) {
+        original.checked = checkbox.checked;
+        original.dispatchEvent(new Event("change", {bubbles: true}));
+      }
+    });
+    const caption = document.createElement("span");
+    caption.textContent = "Select all";
+    label.append(checkbox, caption);
+    controls.appendChild(label);
+    table.addEventListener("change", event => {
+      if (!event.target.matches(".inventory-select, #inventory-select-all")) return;
+      const boxes = Array.from(table.querySelectorAll(".inventory-select"));
+      checkbox.checked = boxes.length > 0 && boxes.every(box => box.checked);
+      checkbox.indeterminate = boxes.some(box => box.checked) && !checkbox.checked;
+    });
+  }
+  if (controls.childElementCount) table.parentNode.insertBefore(controls, table);
+}
+
 function startResponsiveTables() {
   const root = document.querySelector("main");
   if (!root) return;
-  const scan = () => root.querySelectorAll(".table-wrap table")
-    .forEach(activateResizableTable);
+  const scan = () => root.querySelectorAll(".table-wrap table").forEach(table => {
+    activateResizableTable(table);
+    activateMobileCardTable(table);
+  });
   scan();
   const observer = new MutationObserver(records => {
     if (records.some(record => record.addedNodes.length)) scan();
