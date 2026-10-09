@@ -1027,6 +1027,8 @@ function crossChannelActionControls(row) {
 function bindCrossChannelButtons(after) {
   $$(".stock-ack").forEach((button) => {
     button.onclick = async () => {
+      if (!window.confirm("Confirm that you checked the marketplace and closed this listing yourself? "
+        + "Marking it handled does not make any changes on the marketplace.")) return;
       try {
         await api("/api/app/cross-channel-actions/" + button.dataset.id + "/acknowledge", { method: "POST" });
         flash("Manual close marked handled.");
@@ -1150,7 +1152,8 @@ function renderItemMarketplacePanel(data) {
   const item = data.item || {};
   const listings = data.listings || [];
   const operations = data.operations || [];
-  const closing = data.closure_actions || [];
+  const closing = (data.closure_actions || []).filter(action =>
+    action.needs_reopen || ["attention", "error", "running", "queued"].includes(action.status));
   const comparison = data.content_comparison || null;
   $("#item-marketplaces-title").textContent = "Marketplace listings · " + (item.title || "this item");
   const reviewCount = listings.filter(listing =>
@@ -1165,7 +1168,8 @@ function renderItemMarketplacePanel(data) {
       || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification)
       || ["price_mismatch", "price_stale"].includes(listing.price_verification);
     const verified = !attention && ["matches", "stock_checked"].includes(listing.verification);
-    const statusText = attention ? "Needs review" : verified ? "Last check matched" : "Not verified";
+    const statusText = listing.can_check_woocommerce_close ? "Sold-out follow-up"
+      : attention ? "Needs review" : verified ? "Last check matched" : "Not verified";
     const errors = [listing.photo_error, listing.last_operation?.error].filter(Boolean);
     const stockText = listing.verification === "stock_mismatch"
       ? "Different quantities" : listing.verification === "stock_checked"
@@ -1190,6 +1194,18 @@ function renderItemMarketplacePanel(data) {
           + (listing.verification === "stock_mismatch"
             ? '<button class="btn primary item-stock-update" data-channel="' + esc(listing.channel)
               + '" type="button">Set store stock to ' + Number(item.quantity || 0) + '…</button>'
+            : '') + '</div></div>' : '')
+      + (listing.can_check_woocommerce_close
+        ? '<div class="item-marketplace-tool-group"><strong>After a sale</strong>'
+          + '<p>This linked copy has sold out. Check its WooCommerce publication status before unpublishing. '
+          + 'Unpublishing saves the product as a draft; it does not delete it.</p>'
+          + '<div class="actions"><button class="btn item-close-check" type="button">Check publication status</button>'
+          + (listing.close_remote_status === "publish"
+              && listing.close_checked_at
+              && Number.isFinite(Date.parse(listing.close_checked_at))
+              && Date.now() >= Date.parse(listing.close_checked_at)
+              && Date.now() - Date.parse(listing.close_checked_at) < 300000
+            ? '<button class="btn danger item-close-unpublish" type="button">Unpublish this product…</button>'
             : '') + '</div></div>' : '')
       + itemContentComparisonMarkup(listing, comparison, item.currency)
       + (listing.can_sync_woocommerce_price || listing.can_sync_shopify_price || listing.can_sync_wix_price
@@ -1283,7 +1299,11 @@ function renderItemMarketplacePanel(data) {
       : '<p class="muted">No marketplace listings are linked to this item yet. Use Publish to review available channels.</p>')
     + (closing.length ? '<div class="item-marketplace-closure"><strong>Sold-out follow-up</strong>'
       + closing.map(action => '<p>' + esc(action.channel.toUpperCase())
-        + ': ' + esc(action.status) + ' (' + esc(action.type) + ')</p>').join("") + '</div>' : '')
+        + ' · ' + (action.needs_reopen ? 'Stock restored: check whether the listing needs reopening'
+          : action.status === "attention" ? "Needs manual review"
+          : action.status === "error" ? "Close was not verified"
+          : action.status === "running" ? "Closing"
+          : "Waiting to close") + '</p>').join("") + '</div>' : '')
     + '<details class="item-marketplace-history"><summary>Recent operations (' + operations.length + ')</summary>'
     + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
@@ -1317,6 +1337,45 @@ function renderItemMarketplacePanel(data) {
       if (target) {
         target.open = true;
         target.scrollIntoView({behavior:"smooth",block:"center"});
+      }
+    };
+  });
+  $$(".item-close-check").forEach(button => {
+    button.onclick = async () => {
+      state.itemMarketplaceOpenChannel = "woocommerce";
+      button.disabled = true;
+      try {
+        const result = await api("/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/woocommerce/check-close", {method:"POST"});
+        flash(result.verified_closed
+          ? "WooCommerce confirms this product is already unpublished."
+          : result.can_unpublish
+            ? "WooCommerce confirms this product is published. You can now unpublish it."
+            : "WooCommerce status is " + result.status + ". Review it on WooCommerce.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("Could not verify WooCommerce publication status: " + error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $$(".item-close-unpublish").forEach(button => {
+    button.onclick = async () => {
+      if (!window.confirm("Unpublish the linked WooCommerce product for this sold-out item? "
+        + "It will become a draft and disappear from the public store. "
+        + "This does not delete it or change physical stock. Restoring it requires "
+        + "checking and republishing the product on WooCommerce.")) return;
+      state.itemMarketplaceOpenChannel = "woocommerce";
+      button.disabled = true;
+      try {
+        await api("/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/woocommerce/close", {method:"POST"});
+        flash("WooCommerce confirmed that this product is now a draft.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("WooCommerce closure not verified. Check publication status before retrying. "
+          + error.message, true);
+        button.disabled = false;
       }
     };
   });

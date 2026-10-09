@@ -190,7 +190,7 @@ def complete_operation(operation_id: uuid.UUID, result: dict[str, Any] | None = 
         if op is None or op.status in TERMINAL:
             return
         safe = _public_result(result)
-        if op.operation_type == "update" and (result or {}).get("remote_verified") is True:
+        if op.operation_type in {"update", "close"} and (result or {}).get("remote_verified") is True:
             op.status = "succeeded"
             op.verification = "remote_verified"
         elif op.operation_type == "close" and (result or {}).get("skipped"):
@@ -260,7 +260,7 @@ def start_inline(
     After an uncertain failure, this target requires investigation instead
     of another create request; this protects against duplicate remote posts.
     """
-    if operation_type not in {"publish", "update"}:
+    if operation_type not in {"publish", "update", "close"}:
         raise ValueError("Unsupported inline remote operation")
     with db.session_scope() as session:
         _owned_targets(session, workspace_id, inventory_item_id, channel_listing_id)
