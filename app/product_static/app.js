@@ -88,6 +88,7 @@ const connectorSchemas = {
   },
   ebay: {
     title: "eBay",
+    test: true,
     help: "Use either a current OAuth token, or refreshable OAuth credentials. Secrets are encrypted server-side.",
     fields: [
       ["oauth_token", "OAuth access token", "", "password"],
@@ -5214,6 +5215,96 @@ $("#marketplace-operations-refresh").onclick = async () => {
   finally { button.disabled = false; }
 };
 
+// Connection health deliberately separates saved credentials, successful
+// remote read access, imported data and a failed latest attempt.
+function connectorHealth(connector) {
+  const last = connector?.last_run || {};
+  const check = connector?.connection_check || {};
+  const failedImport = ["failed", "error"].includes(String(last.status || "").toLowerCase());
+  if (connector?.authorization_required) return {
+    state:"attention", label:"Authorize account",
+    message:"App settings are saved, but account authorization is incomplete.",
+    next:"Open settings and authorize the marketplace.",
+  };
+  if (!connector?.configured) return {
+    state:"setup",label:"Not set up",
+    message:"Add your marketplace credentials before importing.",
+    next:"Set up connection.",
+  };
+  if (check.status === "failed") return {
+    state:"attention",label:"Read access failed",
+    message:"The last connection check could not read the marketplace.",
+    next:"Review credentials or permissions, then run the test again.",
+  };
+  if (failedImport) return {
+    state:"attention",label:"Import failed",
+    message:"The latest import did not complete. An earlier import may still be available.",
+    next:"Check recent marketplace activity and test access before importing again.",
+  };
+  if (["queued", "running"].includes(String(last.status || "").toLowerCase())) return {
+    state:"busy",label:"Import in progress",
+    message:"The dashboard has started an import; it is not confirmed complete yet.",
+    next:"Refresh activity to see whether it finished.",
+  };
+  if (check.status === "passed" && check.checked_at) {
+    const age = Date.now() - Date.parse(check.checked_at);
+    if (Number.isFinite(age) && age > 30 * 86400000) return {
+      state:"unverified",label:"Check is outdated",
+      message:"Read access was checked more than 30 days ago; permissions may have changed.",
+      next:"Test the connection again before relying on a new import.",
+    };
+    return {
+      state:"verified",label:connector.channel === "biblio" ? "FTP login checked" : "Read access checked",
+      message:connector.channel === "biblio"
+        ? "FTP login and directory access were checked. Book and photo publication were not verified."
+        : connector.channel === "ebay"
+          ? "Active-listing read access passed. Order imports and listing writes were not tested."
+          : "Catalog/order read access passed. Publishing and stock writes were not tested.",
+      next:connector.channel === "biblio"
+        ? "Send changed listings, then compare with a BIBLIO export to verify processing."
+        : connector.last_synced_at
+          ? "Review imported listings in Inventory."
+          : "Import marketplace data to populate the dashboard.",
+    };
+  }
+  return {
+    state:"unverified",label:"Credentials saved",
+    message:connector.last_synced_at
+      ? "An earlier import exists, but current credentials have not been tested."
+      : "Marketplace credentials are stored; remote access has not been checked.",
+    next:connectorSchemas[connector.channel]?.test
+      ? "Test read access, then import the listings."
+      : "Import to check whether the integration can read your account.",
+  };
+}
+
+async function testMarketplaceConnection(channel, button) {
+  if (channel !== "biblio" && !connectorSchemas[channel]?.test) return;
+  const title = connectorSchemas[channel].title;
+  if (button) button.disabled = true;
+  try {
+    const result = await api("/api/app/connectors/" + encodeURIComponent(channel)
+      + "/test-connection", {method:"POST"});
+    const message = channel === "biblio"
+      ? "BIBLIO: FTP login checked. Book and photo publication were not checked."
+      : channel === "ebay"
+        ? "eBay: seller listing access confirmed. Order import and listing edits were not tested."
+        : title + ": read access confirmed. Publishing and stock edits were not tested.";
+    if (state.connectorChannel === channel) $("#connector-config-status").textContent = message;
+    flash(message);
+    await connections();
+    return result;
+  } catch (error) {
+    const message = title + ": connection check failed. " + error.message;
+    if (state.connectorChannel === channel) $("#connector-config-status").textContent = message;
+    flash(message, true);
+    await connections().catch(() => {});
+    return null;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 async function connections() {
   if (state.biblioActivityTimer) {
     clearTimeout(state.biblioActivityTimer);
@@ -5234,6 +5325,18 @@ async function connections() {
   } catch (error) {
     $("#marketplace-operations-list").textContent = "Operation history unavailable: " + error.message;
   }
+  const integrated = state.connectors.filter(connector =>
+    !["csv", "excel", "vinted"].includes(connector.channel)
+    && connector.configured);
+  const attentionCount = integrated.filter(connector =>
+    connectorHealth(connector).state === "attention").length;
+  const checkedCount = integrated.filter(connector =>
+    connectorHealth(connector).state === "verified").length;
+  $("#connection-health-summary").textContent = integrated.length
+    ? integrated.length + " marketplace account(s) configured · " + checkedCount
+      + " with recently checked read access"
+      + (attentionCount ? " · " + attentionCount + " need attention" : "")
+    : "No marketplace account configured yet. Set up one below, then test and import.";
   const featured = state.connectors.filter(connector =>
     connector.configured || connector.channel === "vinted" || connector.channel === "biblio"
   ).sort((a, b) => {
@@ -5246,7 +5349,13 @@ async function connections() {
     const ready = Boolean(connector.operational);
     const display = esc(connector.display_name);
     const name = esc(channel);
-    const lastSeen = connector.last_synced_at ? " · last import " + esc(when(connector.last_synced_at)) : "";
+    const health = connectorHealth(connector);
+    const lastSeen = connector.last_synced_at ? "Last successful import: " + esc(when(connector.last_synced_at))
+      : "No successful import recorded";
+    const latestAttempt = connector.last_run?.started_at
+      ? '<p class="connector-last-attempt">Last import attempt: '
+        + esc(when(connector.last_run.started_at)) + ' · '
+        + esc(connector.last_run.status || "unknown") + '</p>' : "";
     const configure = connectorSchemas[channel]
       ? '<button class="btn configure" data-c="' + name + '" type="button">'
         + (connector.configured ? 'Connection settings' : 'Set up connection') + '</button>' : '';
@@ -5256,8 +5365,8 @@ async function connections() {
         + Number(health.deletes_pending || 0);
       return '<section class="connector connector--biblio" data-connector-channel="biblio" aria-label="BIBLIO">'
         + '<div class="connector-header"><div><h2>BIBLIO</h2><p>Send and maintain book listings in your BIBLIO seller account.</p></div>'
-        + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">'
-        + (ready ? 'Account set up' : 'Setup required') + '</span></div>'
+        + '<span class="connection-state ' + esc(health.state) + '">'
+        + esc(ready ? health.label : "Setup required") + '</span></div>'
         + (ready
           ? '<div class="biblio-primary-task"><div><strong>' + (pending > 0
               ? pending + ' listing change' + (pending === 1 ? '' : 's') + ' waiting to be sent'
@@ -5267,7 +5376,11 @@ async function connections() {
             + '<button class="btn primary sync" data-c="biblio" type="button">Send changes to BIBLIO</button></div>'
           : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, you can send changed books and review what was transferred.</p>')
         + renderBiblioActivity(biblioActivity, ready)
-        + '<div class="connector-settings-row">' + configure + '</div>'
+        + '<div class="connector-settings-row">' + configure
+        + (ready ? '<button class="btn test-marketplace" data-c="biblio" type="button">Check FTP login</button>' : '')
+        + '</div>'
+        + '<p class="connector-next-step"><strong>Connection:</strong> ' + esc(health.message) + ' '
+          + esc(health.next) + '</p>'
         + '</section>';
     }
     if (channel === "vinted") {
@@ -5288,17 +5401,22 @@ async function connections() {
         + '</strong></p>'
         + '</section>';
     }
-    const statusText = connector.authorization_required
-      ? "Authorization needed" : ready ? "Account set up" : connector.configured
-        ? "Needs attention" : "Not connected";
+    const statusText = health.label;
     return '<section class="connector connector--other" data-connector-channel="' + name + '">'
       + '<div class="connector-header"><div><h2>' + display + '</h2></div>'
-      + '<span class="connection-state ' + (ready ? 'ready' : 'not-ready') + '">' + statusText + '</span></div>'
+      + '<span class="connection-state ' + esc(health.state) + '">' + esc(statusText) + '</span></div>'
+      + '<p class="connector-health-copy">' + esc(health.message) + '</p>'
       + '<div class="actions">' + configure
+      + (connector.operational && connectorSchemas[channel]?.test
+        ? '<button class="btn test-marketplace" data-c="' + name
+          + '" type="button">Test read access</button>' : '')
       + (connector.sync_available
-        ? '<button class="btn sync" data-c="' + name + '" type="button">Import latest data</button>'
+        ? '<button class="btn sync" data-c="' + name + '" type="button">'
+          + (health.state === "attention" ? "Retry import…" : "Import latest data") + '</button>'
         : '') + '</div>'
-      + (lastSeen ? '<p class="connector-last-sync">' + lastSeen.slice(3) + '</p>' : '')
+      + '<p class="connector-next-step"><strong>Next:</strong> ' + esc(health.next) + '</p>'
+      + '<p class="connector-last-sync">' + lastSeen + '</p>'
+      + latestAttempt
       + '<details class="connection-technical-help"><summary>About this connection</summary>'
       + '<p class="connector-workflow-hint">' + esc(connector.description) + '</p>'
       + (connector.note ? '<p class="connector-workflow-hint">' + esc(connector.note) + '</p>' : "")
@@ -5336,6 +5454,9 @@ async function connections() {
   document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
   $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
+  });
+  $$(".test-marketplace").forEach(button => {
+    button.onclick = () => testMarketplaceConnection(button.dataset.c, button);
   });
   $$(".sync").forEach((button) => {
     button.onclick = async () => {
@@ -5541,7 +5662,7 @@ function openConnectorConfig(channel, connector) {
   $("#test-connector").classList.toggle("hidden", !schema.test || !connector?.operational);
   $("#remove-connector").classList.toggle("hidden", !connector?.configured);
   $("#connector-config-status").textContent = connector?.configured
-    ? "Credentials are stored. Leave an existing secret field blank to keep its current value."
+    ? "Credentials are stored, but may not have been tested. Leave a secret field blank to keep its saved value."
     : "";
   $("#connector-config").classList.remove("hidden");
   $("#connector-config").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -5570,14 +5691,14 @@ $("#connector-config").onsubmit = async (event) => {
     });
     $("#connector-config-status").textContent = channel === "etsy" && !saved.operational
       ? "App details saved. Authorize with Etsy next."
-      : "Connection settings saved.";
+      : "Settings saved, but remote access has not been tested. Use Test read access.";
     $("#test-connector").classList.toggle(
       "hidden",
       !connectorSchemas[channel]?.test || !saved.operational,
     );
     flash(channel === "etsy" && !saved.operational
       ? "Etsy app details saved."
-      : connectorSchemas[channel].title + " configured.");
+      : connectorSchemas[channel].title + " settings saved. Test access before importing.");
     const data = await connections();
     if (state.connectorChannel === channel) {
       renderEtsyOAuthTools(data.connectors.find((row) => row.channel === channel));
@@ -5605,6 +5726,10 @@ $("#authorize-etsy").onclick = async () => {
 
 $("#remove-connector").onclick = async () => {
   if (!state.connectorChannel) return;
+  const label = connectorSchemas[state.connectorChannel]?.title || state.connectorChannel;
+  if (!window.confirm("Remove saved " + label + " credentials? "
+    + "Existing inventory and history will be kept, but further imports and "
+    + "remote operations through this connection will stop until you reconnect.")) return;
   try {
     await api("/api/app/connectors/" + state.connectorChannel + "/credentials", { method: "DELETE" });
     flash("Connector credentials removed.");
@@ -5616,26 +5741,16 @@ $("#remove-connector").onclick = async () => {
   }
 };
 
-$("#test-connector").onclick = async () => {
+$("#test-connector").onclick = () => {
   const channel = state.connectorChannel;
-  if (!channel || !connectorSchemas[channel]?.test) return;
-  $("#connector-config-status").textContent = "Testing connection…";
-  try {
-    const result = await api("/api/app/connectors/" + channel + "/test-connection", { method: "POST" });
-    $("#connector-config-status").textContent = result.detail || "Connection succeeded.";
-  } catch (error) {
-    $("#connector-config-status").textContent = error.message;
-  }
+  if (!channel) return;
+  $("#connector-config-status").textContent = "Checking marketplace read access…";
+  return testMarketplaceConnection(channel, $("#test-connector"));
 };
 
-$("#test-biblio").onclick = async () => {
-  $("#connector-config-status").textContent = "Testing BIBLIO transfer security…";
-  try {
-    const result = await api("/api/app/connectors/biblio/test", { method: "POST" });
-    $("#connector-config-status").textContent = result.detail || "BIBLIO connection succeeded.";
-  } catch (error) {
-    $("#connector-config-status").textContent = error.message;
-  }
+$("#test-biblio").onclick = () => {
+  $("#connector-config-status").textContent = "Checking BIBLIO FTP login and directory access…";
+  return testMarketplaceConnection("biblio", $("#test-biblio"));
 };
 
 function biblioInventoryForm(file, authoritative = false) {

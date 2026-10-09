@@ -71,6 +71,7 @@ from app.connectors.hosted import (
     import_biblio_workspace,
     verify_biblio_workspace,
     test_biblio_workspace,
+    test_ebay_workspace,
     test_bigcommerce_workspace,
     test_depop_workspace,
     test_etsy_workspace,
@@ -4979,6 +4980,19 @@ def connectors(context: RequestContext = Depends(require_context)):
         ).scalar_one()
 
     account_by_channel = {row.channel: row for row in accounts}
+    # Surface the last attempted import independently from an older successful
+    # import. A saved password is never proof that remote access works.
+    with db.session_scope() as session:
+        last_run_by_channel = {}
+        for channel_name in (row["channel"] for row in connector_catalog()):
+            latest = session.execute(
+                select(models.ConnectorSyncRun).where(
+                    models.ConnectorSyncRun.workspace_id == context.workspace.id,
+                    models.ConnectorSyncRun.channel == channel_name,
+                ).order_by(models.ConnectorSyncRun.started_at.desc()).limit(1)
+            ).scalars().first()
+            if latest is not None:
+                last_run_by_channel[channel_name] = latest
     result = []
     for info in connector_catalog():
         channel = info["channel"]
@@ -5054,6 +5068,32 @@ def connectors(context: RequestContext = Depends(require_context)):
                 "configured": configured,
                 "saved_values": saved_values,
                 "operational": operational,
+                # 'operational' currently means credentials/authorization present,
+                # not that the credentials were tested or a sync succeeded.
+                "connection_check": {
+                    "status": (
+                        (account.config or {}).get("connection_check_status", "not_checked")
+                        if account and configured else "not_checked"
+                    ),
+                    "checked_at": (
+                        (account.config or {}).get("connection_checked_at")
+                        if account and configured else None
+                    ),
+                    "scope": (
+                        (account.config or {}).get("connection_check_scope", "ftp_login" if channel == Channel.BIBLIO else "read_only")
+                        if account and configured else None
+                    ),
+                },
+                "last_run": (
+                    {
+                        "status": last_run_by_channel[channel].status,
+                        "type": last_run_by_channel[channel].run_type,
+                        "started_at": (
+                            last_run_by_channel[channel].started_at.isoformat()
+                            if last_run_by_channel[channel].started_at else None
+                        ),
+                    } if channel in last_run_by_channel else None
+                ),
                 "sync_available": operational and channel in {
                     Channel.BIBLIO,
                     Channel.EBAY,
@@ -5647,6 +5687,9 @@ def save_connector_credentials(
             **dict(account.config or {}),
             "credentials_stored": True,
             "integration_state": "configured" if operational else "authorization_required",
+            "connection_check_status": "not_checked",
+            "connection_check_scope": None,
+            "connection_checked_at": None,
         }
     return {
         "ok": True,
@@ -5847,6 +5890,9 @@ def complete_etsy_oauth(
             **dict(account.config or {}),
             "credentials_stored": True,
             "integration_state": "configured",
+            "connection_check_status": "not_checked",
+            "connection_check_scope": None,
+            "connection_checked_at": None,
         }
 
     return RedirectResponse(url="/?connector=etsy&oauth=connected", status_code=303)
@@ -5874,7 +5920,113 @@ def delete_connector_credentials(
         ).scalar_one_or_none()
         if account is not None:
             account.status = ChannelAccountStatus.DISCONNECTED
+            account.config = {
+                **dict(account.config or {}),
+                "connection_check_status": "not_checked",
+                "connection_check_scope": None,
+                "connection_checked_at": None,
+                "credentials_stored": False,
+            }
     return {"ok": True}
+
+
+@router.post("/api/app/connectors/{channel}/test-connection")
+def check_connector_read_access(
+    channel: str,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Explicit remote read-only health check; never publish or change stock.
+
+    Supported adapters inspect catalog/order access. Unknown and legacy
+    channels are never dispatched through a generic protocol fallback.
+    """
+    tests = {
+        Channel.BIBLIO: test_biblio_workspace,
+        Channel.EBAY: test_ebay_workspace,
+        Channel.ETSY: test_etsy_workspace,
+        Channel.WOOCOMMERCE: test_woocommerce_workspace,
+        Channel.SHOPIFY: test_shopify_workspace,
+        Channel.BIGCOMMERCE: test_bigcommerce_workspace,
+        Channel.SQUARESPACE: test_squarespace_workspace,
+        Channel.WIX: test_wix_workspace,
+        Channel.DEPOP: test_depop_workspace,
+    }
+    if channel not in tests:
+        raise HTTPException(status_code=400, detail="No safe connection test for this marketplace")
+    # Do not attempt a network request for an unconfigured or unauthorized
+    # account; never treat another workspace's credential as sufficient.
+    available = next(
+        (row for row in connectors(context)["connectors"] if row["channel"] == channel),
+        None,
+    )
+    if not available or not available["operational"]:
+        raise HTTPException(status_code=409, detail="Save and authorize this connection before testing")
+    rate_limiter.check(
+        f"connector-check:{context.workspace.id}:{channel}",
+        limit=12, window_seconds=900,
+    )
+    with db.session_scope() as session:
+        current_credential = session.execute(
+            select(ConnectorCredential).where(
+                ConnectorCredential.workspace_id == context.workspace.id,
+                ConnectorCredential.channel == channel,
+            )
+        ).scalar_one_or_none()
+        checked_credential = (
+            current_credential.encrypted_payload if current_credential else None
+        )
+
+    def record_check(status: str, scope: str | None = None) -> bool:
+        # A credential edit during remote I/O invalidates the result. Never
+        # attach positive or negative evidence to a replacement API token.
+        with db.session_scope() as session:
+            fresh = session.execute(
+                select(ConnectorCredential).where(
+                    ConnectorCredential.workspace_id == context.workspace.id,
+                    ConnectorCredential.channel == channel,
+                )
+            ).scalar_one_or_none()
+            if (fresh.encrypted_payload if fresh else None) != checked_credential:
+                return False
+            account, _ = get_or_create_channel_account(session, context.workspace, channel, {})
+            account.config = {
+                **dict(account.config or {}),
+                "connection_check_status": status,
+                "connection_check_scope": scope,
+                "connection_checked_at": utcnow().isoformat(),
+            }
+        return True
+
+    try:
+        outcome = tests[channel](context.workspace.id)
+        if not isinstance(outcome, dict) or outcome.get("ok") is not True:
+            raise RuntimeError("Read access was not confirmed")
+    except Exception as exc:
+        record_check("failed")
+        # Connector exceptions can contain URLs, tokens or remote bodies.
+        # Never pass them to users as raw public API error messages.
+        raise HTTPException(
+            status_code=502,
+            detail="Could not verify marketplace read access. Check credentials and permissions, then test again.",
+        ) from exc
+    scope = "ftp_login" if channel == Channel.BIBLIO else "read_only"
+    if not record_check("passed", scope):
+        raise HTTPException(
+            status_code=409,
+            detail="Connection credentials changed during the test. Test the new credentials again.",
+        )
+    return {
+        "ok": True, "status": "passed", "scope": scope,
+        "detail": (
+            "BIBLIO FTP login and directory access confirmed. "
+            "No file was uploaded; remote book and photo publication were not tested."
+            if channel == Channel.BIBLIO else
+            "eBay active listing read access confirmed. Order imports and listing edits were not tested."
+            if channel == Channel.EBAY else
+            "Marketplace catalog and order read access confirmed. "
+            "Publishing, stock edits and remote listing state were not tested."
+        ),
+    }
 
 
 @router.post("/api/app/connectors/{channel}/sync")

@@ -519,6 +519,8 @@
             <button id="connections-inventory" class="btn primary" type="button">Open Inventory</button>
             <button id="connections-reconcile" class="btn" type="button">Review stock links</button>
           </div>
+          <p id="connection-health-summary" class="connections-health-summary" role="status" aria-live="polite">Checking marketplace connections…</p>
+          <p class="connections-workflow">How it works: <strong>1.</strong> Save account details · <strong>2.</strong> Test read access · <strong>3.</strong> Import listings · <strong>4.</strong> Review and manage individual listings in Inventory. Importing never publishes or edits marketplace items.</p>
           <div id="connector-grid" class="connector-grid"></div>
           <details id="other-marketplaces" class="connections-other-markets">
             <summary>Other marketplaces (<span id="other-marketplaces-count">0</span>) · connect another service</summary>
@@ -554,7 +556,7 @@
             <button id="test-biblio" class="btn" type="button">Check BIBLIO connection</button>
             <details class="connection-technical-help"><summary>About FTP and secure connections</summary><p>The dashboard prefers encrypted FTPS. BIBLIO documents standard FTP; unencrypted FTP needs your explicit permission in the settings above. An FTP connection test does not mean a book is publicly listed.</p></details>
           </div>
-          <div class="actions"><button class="btn primary">Save connection</button><button id="test-connector" class="btn hidden" type="button">Test connection</button><button id="remove-connector" class="btn danger hidden" type="button">Remove credentials</button></div>
+          <div class="actions"><button class="btn primary">Save connection</button><button id="test-connector" class="btn hidden" type="button">Test read access</button><button id="remove-connector" class="btn danger hidden" type="button">Remove credentials</button></div>
           <p id="connector-config-status" class="muted"></p>
         </form>
         <details id="marketplace-operations-panel" class="card connection-task-panel">
