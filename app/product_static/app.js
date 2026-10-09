@@ -1340,7 +1340,7 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-close-check").forEach(button => {
+  $$(".item-close-check").forEach(button => {
     button.onclick = async () => {
       state.itemMarketplaceOpenChannel = "woocommerce";
       button.disabled = true;
@@ -1359,7 +1359,7 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-close-unpublish").forEach(button => {
+  $$(".item-close-unpublish").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Unpublish the linked WooCommerce product for this sold-out item? "
         + "It will become a draft and disappear from the public store. "
