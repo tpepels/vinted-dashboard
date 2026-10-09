@@ -70,7 +70,7 @@ for(const width of widths){
     'const sort=document.querySelector("#inventory-table .mobile-table-sort select");',
     'if(sort){sort.value="4:desc";sort.dispatchEvent(new Event("change",{bubbles:true}));}',
     'const sorted=inventory.tBodies[0].rows[0].cells[4].textContent.trim()==="3";',
-    'const measure=id=>{const host=document.getElementById(id);const table=host.querySelector("table");const tr=table.tBodies[0].rows[0];return {host:host.clientWidth,hostScroll:host.scrollWidth,table:Math.round(table.getBoundingClientRect().width),tableDisplay:getComputedStyle(table).display,rowDisplay:getComputedStyle(tr).display,cards:table.classList.contains("mobile-cards"),labels:tr.cells[1].dataset.label||null};};',
+    'const measure=id=>{const host=document.getElementById(id);const table=host.querySelector("table");const tr=table.tBodies[0].rows[0];return {host:host.clientWidth,hostScroll:host.scrollWidth,table:Math.round(table.getBoundingClientRect().width),tableDisplay:getComputedStyle(table).display,rowDisplay:getComputedStyle(tr).display,gridColumns:getComputedStyle(tr).gridTemplateColumns.trim().split(/\\s+/).filter(Boolean).length,cards:table.classList.contains("mobile-cards"),labels:tr.cells[1].dataset.label||null};};',
     'const output=document.createElement("output");',
     'output.id="responsive-table-metrics";',
     'output.dataset.state=encodeURIComponent(JSON.stringify({requestedWidth:parseInt(shell.dataset.width),shellWidth:shell.clientWidth,shellScroll:shell.scrollWidth,bodyScroll:document.documentElement.scrollWidth,viewport:innerWidth,buttonClicked:clicked,selected,sorted,mobileSortVisible:sort&&getComputedStyle(sort.closest(".mobile-table-tools")).display!=="none",inventory:measure("inventory-table"),listings:measure("listings-table"),sales:measure("sales-table"),editable:measure("editable-table")}));',
@@ -109,6 +109,9 @@ for(const width of widths){
       "Unexpected "+key+" row layout at "+width+": "+JSON.stringify(data[key]));
     if(shouldBeCards){
       assert(data[key].table<=data[key].host+2,"Card is wider than its container");
+      const columns=data[key].host>=760 ? 4 : data[key].host>=610 ? 3 : 2;
+      assert.equal(data[key].gridColumns,columns,
+        "Card facts should use available tablet/phone width: "+key+" at "+width);
     }
   }
   assert.equal(data.mobileSortVisible,shouldBeCards,
