@@ -8,10 +8,28 @@ from __future__ import annotations
 
 import re
 import uuid
+from decimal import Decimal, InvalidOperation
 
 from app.constants import Channel
 from app.connectors import hosted
-from app.connectors.woocommerce_price import _cents, _money
+def _money(cents: int) -> str:
+    if type(cents) is not int or not 0 < cents <= 2000000:
+        raise ValueError("Price must be between 0.01 and 20000.00")
+    return f"{cents // 100}.{cents % 100:02d}"
+
+
+def _cents(value: object) -> int:
+    raw = str(value if value is not None else "").strip()
+    if not raw:
+        raise ValueError("Shopify variant has no base price")
+    try:
+        number = Decimal(raw)
+    except InvalidOperation as exc:
+        raise ValueError("Shopify returned an invalid base price") from exc
+    if (not number.is_finite() or not 0 < number <= 20000
+            or number.as_tuple().exponent < -2):
+        raise ValueError("Shopify base price is outside the supported two-decimal range")
+    return int(number * 100)
 
 
 SHOPIFY_PRICE_QUERY = """
@@ -106,8 +124,6 @@ def update_shopify_workspace_price(
     """
     _money(old_price_cents)
     desired = _money(new_price_cents)
-    if new_price_cents <= 0:
-        raise ValueError("Shopify base price must be positive")
     values = hosted._credentials(workspace_id, Channel.SHOPIFY)
     before = _snapshot(values, external_id, expected_sku, expected_currency)
     if before["regular_price_cents"] != old_price_cents:
