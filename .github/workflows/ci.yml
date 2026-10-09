@@ -44,6 +44,7 @@ jobs:
       - run: node scripts/test_marketplace_price_ui.js
       - run: node scripts/test_marketplace_content_ui.js
       - run: node scripts/test_marketplace_close_ui.js
+      - run: node scripts/test_shopify_close_ui.js
       - run: node scripts/test_marketplace_ui_evidence.js
       - run: node scripts/test_marketplace_visual_layout.js
       - uses: actions/upload-artifact@v4

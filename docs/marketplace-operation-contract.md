@@ -69,7 +69,12 @@ per-market physical-stock reference counts.
 3. **Etsy**: OAuth, active listings and receipt/order reads exist. Remote
    create/edit/end operations are not implemented.
 4. **WooCommerce / Shopify / Wix**: remote create, inventory and order
-   reads exist. General edit/update and automatic close after sales do not.
+   reads exist. WooCommerce and Shopify have explicit, limited stock and price
+   changes; WooCommerce additionally has selected content updates. WooCommerce
+   simple products and Shopify products with exactly one linked variant offer
+   **manual, verified, sold-out unpublish** after a confirmed sale; neither
+   closure path runs automatically on sale import. Multi-variant Shopify
+   products, WooCommerce variations and Wix closure remain manual.
    Photo upload during creation does not prove later media synchronization.
 5. **BigCommerce / Squarespace**: read products and orders. Publishing and
    updates are not wired through cross-listing.

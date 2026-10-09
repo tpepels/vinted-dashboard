@@ -1269,7 +1269,7 @@ function renderItemMarketplacePanel(data) {
       || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification)
       || ["price_mismatch", "price_stale"].includes(listing.price_verification);
     const verified = !attention && ["matches", "stock_checked"].includes(listing.verification);
-    const statusText = listing.can_check_woocommerce_close ? "Sold-out follow-up"
+    const statusText = (listing.can_check_woocommerce_close || listing.can_check_shopify_close) ? "Sold-out follow-up"
       : attention ? "Needs review" : verified ? "Last check matched" : "Not verified";
     const errors = [listing.photo_error, listing.last_operation?.error].filter(Boolean);
     const stockText = listing.verification === "stock_mismatch"
@@ -1296,17 +1296,23 @@ function renderItemMarketplacePanel(data) {
             ? '<button class="btn primary item-stock-update" data-channel="' + esc(listing.channel)
               + '" type="button">Set store stock to ' + Number(item.quantity || 0) + '…</button>'
             : '') + '</div></div>' : '')
-      + (listing.can_check_woocommerce_close
+      + ((listing.can_check_woocommerce_close || listing.can_check_shopify_close)
         ? '<div class="item-marketplace-tool-group"><strong>After a sale</strong>'
-          + '<p>This linked copy has sold out. Check its WooCommerce publication status before unpublishing. '
-          + 'Unpublishing saves the product as a draft; it does not delete it.</p>'
-          + '<div class="actions"><button class="btn item-close-check" type="button">Check publication status</button>'
-          + (listing.close_remote_status === "publish"
+          + '<p>This linked copy has sold out. Check its ' + esc(listing.channel === "shopify" ? "Shopify" : "WooCommerce")
+          + ' publication status first. Unpublishing moves '
+          + (listing.channel === "shopify"
+            ? 'the entire single-variant Shopify product'
+            : 'the WooCommerce product')
+          + ' to drafts without deleting it.</p>'
+          + '<div class="actions"><button class="btn item-close-check" data-channel="'
+          + esc(listing.channel) + '" type="button">Check publication status</button>'
+          + (listing.close_remote_status === (listing.channel === "shopify" ? "active" : "publish")
               && listing.close_checked_at
               && Number.isFinite(Date.parse(listing.close_checked_at))
               && Date.now() >= Date.parse(listing.close_checked_at)
               && Date.now() - Date.parse(listing.close_checked_at) < 300000
-            ? '<button class="btn danger item-close-unpublish" type="button">Unpublish this product…</button>'
+            ? '<button class="btn danger item-close-unpublish" data-channel="' + esc(listing.channel)
+              + '" type="button">Unpublish this product…</button>'
             : '') + '</div></div>' : '')
       + itemContentComparisonMarkup(listing, comparison, item.currency)
       + (listing.can_sync_woocommerce_price || listing.can_sync_shopify_price || listing.can_sync_wix_price
@@ -1443,38 +1449,45 @@ function renderItemMarketplacePanel(data) {
   });
   $$(".item-close-check").forEach(button => {
     button.onclick = async () => {
-      state.itemMarketplaceOpenChannel = "woocommerce";
+      const channel = button.dataset?.channel === "shopify" ? "shopify" : "woocommerce";
+      const label = channel === "shopify" ? "Shopify" : "WooCommerce";
+      state.itemMarketplaceOpenChannel = channel;
       button.disabled = true;
       try {
         const result = await api("/api/app/inventory/" + encodeURIComponent(itemId)
-          + "/marketplaces/woocommerce/check-close", {method:"POST"});
+          + "/marketplaces/" + channel + "/check-close", {method:"POST"});
         flash(result.verified_closed
-          ? "WooCommerce confirms this product is already unpublished."
+          ? label + " confirms this product is already a draft."
           : result.can_unpublish
-            ? "WooCommerce confirms this product is published. You can now unpublish it."
-            : "WooCommerce status is " + result.status + ". Review it on WooCommerce.");
+            ? label + " confirms this product is active. You can now unpublish it."
+            : label + " status is " + result.status + ". Review the product on " + label + ".");
         await openItemMarketplaces(itemId);
       } catch (error) {
-        flash("Could not verify WooCommerce publication status: " + error.message, true);
+        flash("Could not verify " + label + " publication status: " + error.message, true);
         button.disabled = false;
       }
     };
   });
   $$(".item-close-unpublish").forEach(button => {
     button.onclick = async () => {
-      if (!window.confirm("Unpublish the linked WooCommerce product for this sold-out item? "
+      const channel = button.dataset?.channel === "shopify" ? "shopify" : "woocommerce";
+      const label = channel === "shopify" ? "Shopify" : "WooCommerce";
+      if (!window.confirm("Unpublish the linked " + label + " product for this sold-out item? "
+        + (channel === "shopify"
+          ? "Shopify changes publication for the whole product, which must have exactly one variant. "
+          : "")
         + "It will become a draft and disappear from the public store. "
         + "This does not delete it or change physical stock. Restoring it requires "
-        + "checking and republishing the product on WooCommerce.")) return;
-      state.itemMarketplaceOpenChannel = "woocommerce";
+        + "checking and republishing the product on " + label + ".")) return;
+      state.itemMarketplaceOpenChannel = channel;
       button.disabled = true;
       try {
         await api("/api/app/inventory/" + encodeURIComponent(itemId)
-          + "/marketplaces/woocommerce/close", {method:"POST"});
-        flash("WooCommerce confirmed that this product is now a draft.");
+          + "/marketplaces/" + channel + "/close", {method:"POST"});
+        flash(label + " confirmed that this product is now a draft.");
         await openItemMarketplaces(itemId);
       } catch (error) {
-        flash("WooCommerce closure not verified. Check publication status before retrying. "
+        flash(label + " closure not verified. Check publication status before retrying. "
           + error.message, true);
         button.disabled = false;
       }

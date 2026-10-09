@@ -43,8 +43,8 @@ COVERAGE = {
     Channel.BIBLIO:       "IPIIPIBPPP",
     Channel.EBAY:         "IINNPINPPP",
     Channel.ETSY:         "IINN PMIN PP".replace(" ", ""),
-    Channel.WOOCOMMERCE:  "IIIP PMIP PP".replace(" ", ""),
-    Channel.SHOPIFY:      "IIIP PMIP PP".replace(" ", ""),
+    Channel.WOOCOMMERCE:  "IIIP PPIP PP".replace(" ", ""),
+    Channel.SHOPIFY:      "IIIP PPIP PP".replace(" ", ""),
     Channel.BIGCOMMERCE:  "IINN PMIN PP".replace(" ", ""),
     Channel.SQUARESPACE:  "IINN PMIN PP".replace(" ", ""),
     Channel.WIX:          "IIIP PMIP PP".replace(" ", ""),
@@ -83,9 +83,11 @@ NOTES = {
     (Channel.EBAY, "read_orders"): "No eBay seller-order importer exists yet, despite the earlier coarse capability flag.",
     (Channel.EBAY, "close"): "EndItem is available when a linked item sells elsewhere; not a general edit/publish adapter.",
     (Channel.EBAY, "stock"): "Can end a sold-out item; routine quantity updates are not implemented.",
-    (Channel.WOOCOMMERCE, "update"): "Explicit stock-only PUT for linked simple products or independently stock-managed parent:variation pairs; general edits remain unsupported.",
+    (Channel.WOOCOMMERCE, "update"): "Guarded stock, regular price and title/description edits for eligible linked records; not arbitrary full-product editing.",
+    (Channel.WOOCOMMERCE, "close"): "Manual, check-first WooCommerce draft transition for exactly one linked simple product, after a confirmed sold-out sale; no automatic trigger or live-store certification.",
+    (Channel.SHOPIFY, "close"): "Manual, check-first Shopify draft transition only when a linked product has exactly one variant; multi-variant products must be handled in Shopify.",
     (Channel.WOOCOMMERCE, "stock"): "Manually triggered physical quantity sync with exact SKU/ID checks, parent verification for variations, and WooCommerce GET readback.",
-    (Channel.SHOPIFY, "update"): "Explicit stock-only change for one linked, tracked variant at exactly one location; no product-detail updates.",
+    (Channel.SHOPIFY, "update"): "Guarded stock and base-price changes for linked variants; not arbitrary full-product editing.",
     (Channel.SHOPIFY, "stock"): "Manual compare-and-set available quantity, idempotent operation key and GraphQL readback; rejects multi-location stock.",
     (Channel.WIX, "update"): "Explicit Wix Catalog V3 stock-only PATCH for one tracked variant/location; other edits unsupported.",
     (Channel.WIX, "stock"): "Manual exact product:variant and SKU check, single-location revision PATCH and remote inventory readback.",
@@ -134,6 +136,10 @@ def contract() -> dict:
                 evidence = "app.product_api.update_woocommerce_item_stock; remote GET -> PUT -> GET"
             elif key == "update" and channel == Channel.BIBLIO:
                 evidence = "app.connectors.hosted.sync_biblio_workspace (signature-based incremental FTP)"
+            elif key == "close" and channel == Channel.WOOCOMMERCE:
+                evidence = "app.product_api.unpublish_woocommerce_item_after_sale; app.connectors.woocommerce_close"
+            elif key == "close" and channel == Channel.SHOPIFY:
+                evidence = "app.product_api.unpublish_shopify_item_after_sale; app.connectors.shopify_close"
             elif key == "close" and channel in {Channel.BIBLIO, Channel.EBAY}:
                 evidence = "app.cross_channel.execute_action; app.connectors.hosted.close_" + channel + "_workspace_listing"
             elif key == "photos" and channel == Channel.BIBLIO:
