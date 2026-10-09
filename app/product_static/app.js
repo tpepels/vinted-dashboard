@@ -396,7 +396,9 @@ function activateResizableTable(table) {
   const key = tableResizeKey(table);
   if (!row || !key || row.cells.length < 3 || row.cells.length > 25
       || Array.from(row.cells).some(cell => cell.colSpan !== 1)
-      || table.classList.contains("stock-scan-table")) return;
+      || table.classList.contains("stock-scan-table")
+      || table.classList.contains("editable-table")
+      || table.querySelector("tbody input, tbody select, tbody textarea")) return;
   tableResizeSeen.add(table);
   const headers = Array.from(row.cells);
   const labels = headers.map(cell => cell.textContent.replace(/\s+/g, " ").trim());
@@ -4496,7 +4498,7 @@ function renderPurchaseCostSuggestions() {
   $("#purchase-cost-summary").textContent = parts.join(" · ") || "No cost suggestions";
 
   $("#purchase-cost-suggestions").innerHTML = rows.length
-    ? '<table><thead><tr><th>Purchase</th><th>Matched stock</th><th>Match</th><th>Order amount</th><th>Cost to record</th><th></th></tr></thead><tbody>'
+    ? '<table class="editable-table"><thead><tr><th>Purchase</th><th>Matched stock</th><th>Match</th><th>Order amount</th><th>Cost to record</th><th></th></tr></thead><tbody>'
       + rows.map((row) => {
         const purchase = row.purchase;
         const item = row.item;
