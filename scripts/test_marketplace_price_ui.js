@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const js = fs.readFileSync("app/product_static/app.js", "utf8");
-const begin = js.indexOf("function renderItemMarketplacePanel(data) {");
+const begin = js.indexOf("function itemContentComparisonMarkup(listing, comparison) {");
 const end = js.indexOf("async function openItemMarketplaces(itemId)", begin);
 assert(begin > 0 && end > begin, "Item marketplace renderer must exist");
 const panel = {"#item-marketplaces-title":{textContent:""},
