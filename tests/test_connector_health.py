@@ -88,7 +88,7 @@ def test_unconfigured_and_unsupported_connections_never_dispatch(monkeypatch):
     assert client.post("/api/app/connectors/shopify/test-connection",
                        headers=headers).status_code == 409
     assert client.post("/api/app/connectors/ebay/test-connection",
-                       headers=headers).status_code == 400
+                       headers=headers).status_code == 409
     assert client.post("/api/app/connectors/notreal/test-connection",
                        headers=headers).status_code == 400
     assert not calls
@@ -143,3 +143,51 @@ def test_biblio_ftp_check_proves_login_only_and_writes_no_files(monkeypatch):
     status = connector(client, "biblio")["connection_check"]
     assert status["status"] == "passed"
     assert status["scope"] == "ftp_login"
+
+
+def test_ebay_lightweight_active_listing_read_only(monkeypatch):
+    from types import SimpleNamespace
+    from app.connectors import hosted
+
+    monkeypatch.setattr(hosted, "_workspace_or_env_ebay_values", lambda wid: {
+        "site_id": "0", "compatibility_level": "1477", "oauth_token": "secret",
+    })
+    monkeypatch.setattr(hosted, "_ebay_access_token", lambda values: "secret")
+    calls = []
+    def request(url, *, headers, data, timeout):
+        calls.append((url, headers, data, timeout))
+        return SimpleNamespace(status_code=200, content=(
+            b'<GetMyeBaySellingResponse xmlns="urn:ebay:apis:eBLBaseComponents">'
+            b'<Ack>Success</Ack></GetMyeBaySellingResponse>'
+        ))
+    monkeypatch.setattr(hosted.requests, "post", request)
+    result = hosted.test_ebay_workspace(None)
+    assert result["ok"]
+    assert len(calls) == 1
+    assert calls[0][1]["X-EBAY-API-CALL-NAME"] == "GetMyeBaySelling"
+    assert b"<EntriesPerPage>1</EntriesPerPage>" in calls[0][2]
+    assert b"EndItem" not in calls[0][2]
+    assert b"ReviseItem" not in calls[0][2]
+
+    def denied(*args, **kwargs):
+        return SimpleNamespace(status_code=200, content=(
+            b'<GetMyeBaySellingResponse xmlns="urn:ebay:apis:eBLBaseComponents">'
+            b'<Ack>Failure</Ack><Errors><LongMessage>token-private-secret</LongMessage></Errors>'
+            b'</GetMyeBaySellingResponse>'
+        ))
+    monkeypatch.setattr(hosted.requests, "post", denied)
+    import pytest
+    with pytest.raises(RuntimeError, match="did not confirm"):
+        hosted.test_ebay_workspace(None)
+
+
+def test_ebay_workspace_endpoint_checks_listings_not_orders(monkeypatch):
+    client, headers = registration("connection-ebay@example.test")
+    saved = client.put("/api/app/connectors/ebay/credentials", headers=headers,
+                       json={"values": {"oauth_token": "eBay-test-access-token"}})
+    assert saved.status_code == 200, saved.text
+    monkeypatch.setattr("app.product_api.test_ebay_workspace", lambda wid: {"ok": True})
+    response = client.post("/api/app/connectors/ebay/test-connection", headers=headers)
+    assert response.status_code == 200, response.text
+    assert "Order imports and listing edits were not tested" in response.json()["detail"]
+    assert connector(client, "ebay")["connection_check"]["status"] == "passed"
