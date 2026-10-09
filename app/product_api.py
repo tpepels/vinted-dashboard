@@ -1624,7 +1624,7 @@ def item_marketplace_status(
             needs_attention = (
                 any(op.status in {"attention", "failed"} for op in recent)
                 or stock_verification in {"stock_mismatch", "stock_stale"}
-                or (listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY} and bool(extra.get("price_last_checked_at")) and (
+                or (listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY, Channel.WIX} and bool(extra.get("price_last_checked_at")) and (
                     extra.get("price_last_master_cents") != (item.attributes or {}).get("default_price_cents")
                     or extra.get("price_last_remote_cents") != (item.attributes or {}).get("default_price_cents")
                 ))
@@ -1674,9 +1674,9 @@ def item_marketplace_status(
                     )
                     else "price_mismatch" if extra.get("price_last_remote_cents") != (item.attributes or {}).get("default_price_cents")
                     else "price_checked"
-                ) if listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY} else None,
-                "remote_price_cents": extra.get("price_last_remote_cents") if listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY} else None,
-                "price_verified_at": extra.get("price_last_checked_at") if listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY} else None,
+                ) if listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY, Channel.WIX} else None,
+                "remote_price_cents": extra.get("price_last_remote_cents") if listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY, Channel.WIX} else None,
+                "price_verified_at": extra.get("price_last_checked_at") if listing.channel in {Channel.WOOCOMMERCE, Channel.SHOPIFY, Channel.WIX} else None,
                 "can_sync_woocommerce_price": (
                     listing.channel == Channel.WOOCOMMERCE
                     and is_physical(item)
@@ -1696,6 +1696,17 @@ def item_marketplace_status(
                     and (not listing.currency or str(listing.currency).upper() == str(item.currency).upper())
                     and bool(str(listing.external_sku or "").strip())
                     and bool(re.fullmatch(r"gid://shopify/ProductVariant/[1-9][0-9]*",
+                                          str(listing.external_id or "")))
+                ),
+                "can_sync_wix_price": (
+                    listing.channel == Channel.WIX
+                    and is_physical(item)
+                    and type((item.attributes or {}).get("default_price_cents")) is int
+                    and 0 < (item.attributes or {}).get("default_price_cents") <= 2000000
+                    and bool(re.fullmatch(r"[A-Z]{3}", str(item.currency or "").strip().upper()))
+                    and (not listing.currency or str(listing.currency).upper() == str(item.currency).upper())
+                    and bool(str(listing.external_sku or "").strip())
+                    and bool(re.fullmatch(r"[0-9a-fA-F-]{36}:[0-9a-fA-F-]{36}",
                                           str(listing.external_id or "")))
                 ),
                 "can_sync_woocommerce_stock": (
