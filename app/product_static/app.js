@@ -398,7 +398,7 @@ function activateResizableTable(table) {
       || Array.from(row.cells).some(cell => cell.colSpan !== 1)
       || table.classList.contains("stock-scan-table")
       || table.classList.contains("editable-table")
-      || table.querySelector("tbody input, tbody select, tbody textarea")) return;
+      || table.querySelector('tbody input:not([type="checkbox"]), tbody select, tbody textarea')) return;
   tableResizeSeen.add(table);
   const headers = Array.from(row.cells);
   const labels = headers.map(cell => cell.textContent.replace(/\s+/g, " ").trim());
