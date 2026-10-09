@@ -1657,6 +1657,9 @@ def item_marketplace_status(
                     extra.get("remote_verified_at") if is_biblio
                     else latest_stock_check if is_store_stock else None
                 ),
+                "remote_stock_quantity": (
+                    stock_check_quantity if type(stock_check_quantity) is int else None
+                ) if is_store_stock else None,
                 "photo_state": photo_state if is_biblio else None,
                 "photo_error": redact_text(str(extra.get("photo_sync_error") or ""))[:500] if is_biblio else None,
                 "photo_count": len(extra.get("image_urls") or []) if is_biblio else None,
