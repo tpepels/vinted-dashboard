@@ -80,7 +80,7 @@ jobs:
       - name: Build Docker image (retry registry throttling)
         run: |
           for attempt in 1 2 3; do
-            if docker build -t vinted-dashboard:test .; then exit 0; fi
+            if docker build --build-arg PYTHON_BASE_IMAGE=public.ecr.aws/docker/library/python:3.13-slim -t vinted-dashboard:test .; then exit 0; fi
             if [ "$attempt" -eq 3 ]; then exit 1; fi
             echo "Docker image retrieval failed; retrying after registry cooldown"
             sleep 30
