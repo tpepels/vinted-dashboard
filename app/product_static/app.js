@@ -1094,11 +1094,64 @@ function itemMarketplaceOperationText(op) {
     + (op.completed_at ? " · " + when(op.completed_at) : "");
 }
 
+function itemContentComparisonMarkup(listing, comparison, currency) {
+  const panel = comparison?.listings?.find(row => row.listing_id === listing.listing_id);
+  if (!panel) return "";
+  const live = panel.source === "previous_live_check";
+  const fresh = live && panel.checked_at && Number.isFinite(Date.parse(panel.checked_at))
+    && Date.now() >= Date.parse(panel.checked_at)
+    && Date.now() - Date.parse(panel.checked_at) <= 300000;
+  const fields = panel.fields || [];
+  const differences = fields.filter(row => row.status === "differs").length;
+  const choices = fields.filter(row => panel.can_check_live && row.writable && row.status === "differs" && fresh);
+  const details = fields.map(row => {
+    const marker = row.status === "match" ? "Matches"
+      : row.status === "differs" ? "Different"
+      : row.status === "unknown" ? "Not recorded" : "No master value";
+    const master = row.master == null ? "Not provided"
+      : row.key === "price" ? money(Number(row.master), currency) : row.master;
+    const remote = row.marketplace == null ? "Not recorded"
+      : row.key === "price" ? money(Number(row.marketplace), currency) : row.marketplace;
+    return '<div class="item-content-row ' + (row.status === "differs" ? 'different' : '') + '">'
+      + '<div class="item-content-field">'
+      + '<strong>' + esc(row.label) + '</strong>'
+      + '<span>' + esc(marker) + '</span></div>'
+      + '<div class="item-content-pair">'
+      + '<div><small>Inventory</small><p>' + esc(master) + '</p></div>'
+      + '<div><small>' + (live ? 'WooCommerce at last check' : 'Last imported snapshot')
+      + '</small><p>' + esc(remote) + '</p></div></div>'
+      + (choices.some(choice => choice.key === row.key)
+        ? '<label class="item-content-choice"><input class="item-content-select" type="checkbox" value="'
+          + esc(row.key) + '"> Update ' + esc(row.label.toLowerCase()) + '</label>'
+        : '') + '</div>';
+  }).join("");
+  return '<details class="item-content-tools"'
+    + (live && differences ? ' open' : '') + '>'
+    + '<summary>Compare listing details'
+    + (differences ? ' · ' + differences + ' different' : '') + '</summary>'
+    + '<p class="item-content-provenance">'
+    + (live ? 'Last live WooCommerce check' + (panel.checked_at ? ' · ' + esc(when(panel.checked_at)) : '')
+      : 'Saved listing data only · not verified on the marketplace')
+    + '</p>'
+    + '<p class="muted">Compare title, description and book details. Missing values are not treated as differences.</p>'
+    + '<div class="item-content-fields">' + details + '</div>'
+    + (panel.can_check_live
+      ? '<div class="actions"><button class="btn item-content-check" data-channel="woocommerce" type="button">Check current WooCommerce details</button>'
+        + (choices.length
+          ? '<button class="btn primary item-content-update" type="button" disabled>'
+            + 'Update selected fields…</button>' : '') + '</div>'
+      : '<p class="muted">This channel is comparison-only; there is no supported content editing adapter.</p>')
+    + (panel.can_check_live && !fresh
+      ? '<p class="muted">A fresh live check (within five minutes) is required before editing.</p>' : '')
+    + '</details>';
+}
+
 function renderItemMarketplacePanel(data) {
   const item = data.item || {};
   const listings = data.listings || [];
   const operations = data.operations || [];
   const closing = data.closure_actions || [];
+  const comparison = data.content_comparison || null;
   $("#item-marketplaces-title").textContent = "Marketplace listings · " + (item.title || "this item");
   const reviewCount = listings.filter(listing =>
     listing.attention || ["differs", "stale", "stock_mismatch", "stock_stale"].includes(listing.verification)
@@ -1138,6 +1191,7 @@ function renderItemMarketplacePanel(data) {
             ? '<button class="btn primary item-stock-update" data-channel="' + esc(listing.channel)
               + '" type="button">Set store stock to ' + Number(item.quantity || 0) + '…</button>'
             : '') + '</div></div>' : '')
+      + itemContentComparisonMarkup(listing, comparison, item.currency)
       + (listing.can_sync_woocommerce_price || listing.can_sync_shopify_price || listing.can_sync_wix_price
         ? '<details class="item-price-tools"><summary>Edit ' + priceType.toLowerCase()
           + ' · ' + esc(money(item.default_price_cents, item.currency)) + '</summary>'
@@ -1195,7 +1249,7 @@ function renderItemMarketplacePanel(data) {
       + '<p>Listing status: ' + esc(listing.status) + '</p>'
       + '<p>Last recorded quantity: ' + Number(listing.quantity ?? 0) + '</p>'
       + '</details></div></div>'
-      + '<details class="item-marketplace-manage"><summary>'
+      + '<details class="item-marketplace-manage"' + (state.itemMarketplaceOpenChannel === listing.channel ? ' open' : '') + '><summary>'
       + (attention ? 'Review this listing' : 'Manage this listing')
       + '</summary><div class="item-marketplace-actions">'
       + (actions || '<p>There are no automated edits for this marketplace. Use its website to make changes.</p>')
@@ -1203,7 +1257,8 @@ function renderItemMarketplacePanel(data) {
   });
   const operationsMarkup = operations.map(op => {
     const title = {
-      publish:"Publish",update:op.target?.endsWith(":price") ? "Price update" : "Stock update",photos:"Send photos",
+      publish:"Publish",update:op.target?.endsWith(":price") ? "Price update"
+        : op.target?.endsWith(":content") ? "Listing details update" : "Stock update",photos:"Send photos",
       close:"Close after sale",sync:"Synchronize",verify:"Verify",
     }[op.type] || op.type;
     return '<div class="item-marketplace-history-row"><div><strong>' + esc(op.channel.toUpperCase())
@@ -1361,6 +1416,52 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
+  $$(".item-content-check").forEach(button => {
+    button.onclick = async () => {
+      button.disabled = true;
+      state.itemMarketplaceOpenChannel = button.dataset.channel;
+      try {
+        await api("/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/woocommerce/check-content", {method:"POST"});
+        flash("WooCommerce details checked. Review individual differences below.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("Could not check WooCommerce details: " + error.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+  $$(".item-content-tools").forEach(panel => {
+    const boxes = Array.from(panel.querySelectorAll(".item-content-select"));
+    const submit = panel.querySelector(".item-content-update");
+    if (!submit) return;
+    const update = () => {
+      const count = boxes.filter(box => box.checked).length;
+      submit.disabled = count === 0;
+      submit.textContent = count ? "Update " + count + " selected field(s)…" : "Update selected fields…";
+    };
+    boxes.forEach(box => { box.onchange = update; });
+    submit.onclick = async () => {
+      const fields = boxes.filter(box => box.checked).map(box => box.value);
+      if (!fields.length) return;
+      if (!window.confirm("Update only " + fields.join(" and ")
+        + " on this linked WooCommerce listing? Stock, price, ISBN, images and publication status will not change. "
+        + "Unselected fields will be left unchanged.")) return;
+      submit.disabled = true;
+      state.itemMarketplaceOpenChannel = "woocommerce";
+      try {
+        await api("/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/woocommerce/content",
+          {method:"POST", body:JSON.stringify({fields})});
+        flash("WooCommerce confirmed the selected content changes.");
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("Content update not verified. Check WooCommerce before retrying: "
+          + error.message, true);
+        submit.disabled = false;
+      }
+    };
+  });
   $$(".item-marketplace-retry").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Retry this supported operation? Check any uncertain remote result before resending.")) return;
@@ -1379,14 +1480,21 @@ function renderItemMarketplacePanel(data) {
 }
 
 async function openItemMarketplaces(itemId) {
+  if (state.itemMarketplaceId !== itemId) state.itemMarketplaceOpenChannel = null;
   state.itemMarketplaceId = itemId;
   const panel = $("#item-marketplaces-panel");
   panel.classList.remove("hidden");
   $("#item-marketplaces-content").textContent = "Loading linked listings and operation history…";
   panel.scrollIntoView({behavior:"smooth",block:"start"});
   try {
-    const data = await api("/api/app/inventory/" + encodeURIComponent(itemId) + "/marketplace-status");
-    if (state.itemMarketplaceId === itemId) renderItemMarketplacePanel(data);
+    const base = "/api/app/inventory/" + encodeURIComponent(itemId);
+    const [data, comparison] = await Promise.all([
+      api(base + "/marketplace-status"),
+      api(base + "/content-comparison"),
+    ]);
+    if (state.itemMarketplaceId === itemId) renderItemMarketplacePanel({
+      ...data, content_comparison: comparison,
+    });
   } catch (error) {
     $("#item-marketplaces-content").textContent = "Could not load marketplace status: " + error.message;
   }
@@ -1394,6 +1502,7 @@ async function openItemMarketplaces(itemId) {
 
 $("#close-item-marketplaces").onclick = () => {
   state.itemMarketplaceId = null;
+  state.itemMarketplaceOpenChannel = null;
   $("#item-marketplaces-panel").classList.add("hidden");
 };
 
@@ -3601,6 +3710,7 @@ function openItemForm(item) {
     setFormValue(form, "price", item.attributes?.default_price_cents == null ? "" : (Number(item.attributes.default_price_cents) / 100).toFixed(2));
     setFormValue(form, "currency", item.currency || "EUR");
     setFormValue(form, "notes", item.notes);
+    setFormValue(form, "description", item.attributes?.description);
     [
       "barcode", "author", "isbn", "subtitle", "publisher", "edition",
       "binding", "language", "publish_date", "publication_year", "pages",
@@ -3622,7 +3732,7 @@ $("#item-form").onsubmit = async (event) => {
   const existing = state.inventoryItems.find((item) => item.id === state.editItemId);
   const attributes = Object.assign({}, existing?.attributes || {});
   const attributeKeys = [
-    "barcode", "author", "isbn", "subtitle", "publisher", "edition",
+    "description", "barcode", "author", "isbn", "subtitle", "publisher", "edition",
     "binding", "language", "publish_date", "publication_year", "pages",
     "brand", "size", "colour", "material", "measurements",
   ];

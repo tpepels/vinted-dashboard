@@ -50,7 +50,9 @@ const fixture={
 };
 
 function render(source) {
-  const begin = source.indexOf("function renderItemMarketplacePanel(data) {");
+  const contentHelper = source.indexOf("function itemContentComparisonMarkup(");
+  const begin = contentHelper >= 0 ? contentHelper
+    : source.indexOf("function renderItemMarketplacePanel(data) {");
   const end = source.indexOf("async function openItemMarketplaces(itemId)", begin);
   assert(begin > 0 && end > begin, "Expected real production renderer");
   const elements={

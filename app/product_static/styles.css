@@ -514,3 +514,27 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
  #item-marketplaces-panel .item-marketplace-actions .actions{flex-direction:column}
  #item-marketplaces-panel .item-marketplace-actions .actions .btn{flex:0 0 auto;width:100%}
 }
+
+/* Listing content comparisons: readable on desktop and narrow viewports. */
+.item-content-tools{margin-top:12px;padding:10px 0;border-top:1px solid var(--line);max-width:100%;min-width:0}
+.item-content-tools>summary{font-size:12px;font-weight:750;cursor:pointer;color:var(--accent-strong)}
+.item-content-tools>p{font-size:11px;line-height:1.5;margin:9px 0;color:var(--muted)}
+.item-content-provenance{font-weight:700;color:var(--muted)}
+.item-content-fields{display:grid;gap:6px;margin-top:12px}
+.item-content-row{padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--card);min-width:0}
+.item-content-row.different{border-color:#d8bf85;background:#fffdf8}
+.item-content-field{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px;font-size:11px}
+.item-content-field>span{font-size:10px;font-weight:650;color:var(--muted)}
+.item-content-row.different .item-content-field>span{color:#8e6918}
+.item-content-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:7px}
+.item-content-pair>div{min-width:0;padding:8px;border-radius:6px;background:rgba(0,0,0,.025)}
+.item-content-pair small{font-size:10px;color:var(--muted);display:block;margin-bottom:5px}
+.item-content-pair p{margin:0;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-height:190px;overflow:auto}
+.item-content-choice{display:flex!important;align-items:center!important;gap:7px!important;margin:10px 0 0!important;font-size:11px!important;cursor:pointer}
+.item-content-choice input{height:16px;width:16px;flex:0 0 auto}
+.item-content-tools .actions{flex-wrap:wrap;gap:7px}
+.item-content-tools .btn{white-space:normal}
+@media(max-width:650px){
+ .item-content-pair{grid-template-columns:1fr}
+ .item-content-tools .actions .btn{flex:1 1 160px}
+}
