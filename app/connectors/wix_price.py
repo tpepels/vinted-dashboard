@@ -92,6 +92,26 @@ def _snapshot(
     actual = price.get("actualPrice") or {}
     if not isinstance(actual, dict):
         raise ValueError("Wix actual price is malformed")
+    # Preserve supported editable variant metadata when replacing the array.
+    # A richer product is excluded until its additional fields can be modeled
+    # safely, rather than risking silent loss of variant configuration.
+    for field in ("revenueDetails", "subscriptionPricesInfo", "digitalProperties",
+                  "linkedMedia", "inventoryItem"):
+        if variant.get(field) not in (None, {}, []):
+            raise ValueError("Wix variant has additional configuration; edit its price in Wix")
+    fields: dict[str, Any] = {
+        "id": variant_id, "sku": expected_sku, "choices": [],
+    }
+    if variant.get("barcode") is not None:
+        fields["barcode"] = variant["barcode"]
+    if variant.get("visible") is not None:
+        if type(variant["visible"]) is not bool:
+            raise ValueError("Wix variant visibility is invalid")
+        fields["visible"] = variant["visible"]
+    if variant.get("physicalProperties") is not None:
+        if not isinstance(variant["physicalProperties"], dict):
+            raise ValueError("Wix variant physical properties are malformed")
+        fields["physicalProperties"] = variant["physicalProperties"]
     amount = _cents(actual.get("amount"))
     return {
         "external_id": f"{product_id}:{variant_id}",
@@ -101,6 +121,7 @@ def _snapshot(
         "product_id": product_id,
         "variant_id": variant_id,
         "revision": revision,
+        "variant_fields": fields,
     }
 
 
@@ -146,9 +167,7 @@ def update_wix_workspace_price(
                 "options": [],
                 "variantsInfo": {
                     "variants": [{
-                        "id": variant_id,
-                        "sku": sku,
-                        "choices": [],
+                        **before["variant_fields"],
                         "price": {"actualPrice": {"amount": desired}},
                     }],
                 },
