@@ -179,9 +179,16 @@ snapshot completed, not that every listed product is for sale.
   a failed audited remote close does not auto-retry, because the previous
   request may already have reached the marketplace. Existing manual and
   legacy untracked actions remain supported.
-- **Retries**: available only for failed sync, photo and verification
-  operations. A retry reuses the same audit record, queues a new
-  `BackgroundJob`, and leaves all historical attempt counts intact.
+- **Generic retries**: available only for failed **read-only hosted-marketplace
+  imports** with known importer jobs (eBay, Etsy, WooCommerce, Shopify,
+  BigCommerce, Squarespace, Wix and Depop). A retry reuses its audit record
+  and queues one new `BackgroundJob`. Custom job payloads, unknown handlers
+  and marketplace writes are not generically retryable.
+- **BIBLIO / photos**: an uncertain FTP upload cannot be replayed using the
+  generic activity-history Retry control. The operator must first inspect
+  BIBLIO's listing or seller export. Book photo recovery uses the dedicated
+  per-book inspection and selective resend controls, which validate the
+  current listing and source photos before creating a new job.
 - **Isolation**: operation IDs, listing targets, workspace IDs and retries
   are checked server-side. Payloads deliberately exclude connector secrets.
 
@@ -206,6 +213,29 @@ All existing background jobs created before this upgrade remain runnable
 without an operation ID. Existing jobs are not retroactively classified
 as verified. Migration adds an audit table without rewriting inventory.
 
+
+## Recovery UI hardening (after Phase 6)
+
+**Connections → Recent marketplace activity** groups unresolved outcomes first,
+with a filter for all history, reviews and work in progress. Every unresolved
+operation shows a next step and distinguishes transfer acceptance, imported
+dashboard data and independent remote verification.
+
+- A failed read-only import offers **Retry read-only import**. This does not
+  publish, edit stock, change prices or resend photographs.
+- A BIBLIO photo problem opens **Fix photos for one book**, where the user
+  checks per-file transfer receipts and explicitly selects recovery.
+- Other BIBLIO transfer uncertainty opens the **BIBLIO seller inventory
+  comparison**, a read-only file comparison. It never automatically repeats a
+  potentially accepted FTP upload.
+- An ambiguous publish, update or close remains **manual review**. The
+  dashboard does not infer remote success from a timeout or transport receipt.
+- Item-level marketplace history uses the same recovery guidance rather than
+  offering a conflicting shortcut to an unsafe retry.
+
+These UI pathways do not constitute live marketplace certification. All
+remote writes remain explicit and are verified only to the extent the
+underlying adapter supports readback.
 
 ## Phase 4: BIBLIO selective photo recovery and verified inventory boundary
 

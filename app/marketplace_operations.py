@@ -22,8 +22,13 @@ from app.product_models import BackgroundJob, MarketplaceOperation
 ACTIVE = frozenset({"queued", "running"})
 TERMINAL = frozenset({"succeeded", "needs_verification", "failed", "attention", "cancelled"})
 SUPPORTED_TYPES = frozenset({"sync", "publish", "update", "photos", "close", "verify"})
-RETRYABLE = frozenset({"sync", "photos", "verify"})
-READ_ONLY = frozenset({"verify"})
+# Replaying a remote write after a timeout can duplicate a listing or FTP
+# photograph. Only explicit read-only importer handlers are generically safe
+# to requeue; BIBLIO uploads and all photograph writes use targeted recovery.
+SAFE_IMPORT_CHANNELS = frozenset({
+    "ebay", "etsy", "woocommerce", "shopify", "bigcommerce",
+    "squarespace", "wix", "depop",
+})
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -300,12 +305,60 @@ def start_inline(
         return op.id
 
 
+def can_retry_operation(op: MarketplaceOperation) -> bool:
+    """Single source of truth for API affordances and actual retry permission."""
+    return (
+        op.operation_type == "sync"
+        and op.channel in SAFE_IMPORT_CHANNELS
+        and op.target_key == "all"
+        and op.job_type == f"{op.channel}_sync"
+        and not dict(op.job_payload or {})
+        and op.status in {"failed", "attention"}
+    )
+
+
+def recovery_instruction(op: MarketplaceOperation) -> dict[str, str] | None:
+    """One concrete, non-destructive next action for an unresolved result."""
+    if op.status not in {"failed", "attention", "needs_verification"}:
+        return None
+    if can_retry_operation(op):
+        return {
+            "kind": "retry_import", "label": "Retry data import",
+            "detail": "This reads marketplace data again. It does not publish, edit or close listings.",
+        }
+    if op.channel == "biblio" and op.operation_type == "photos":
+        return {
+            "kind": "biblio_photos", "label": "Inspect book photos",
+            "detail": "Check individual transfer results and the BIBLIO listing. "
+                      "Use the book's photo-repair controls rather than repeating an uncertain upload.",
+        }
+    if op.channel == "biblio":
+        return {
+            "kind": "biblio_compare", "label": "Compare BIBLIO inventory",
+            "detail": "Check BIBLIO's own inventory export and transfer results before sending anything again.",
+        }
+    if op.inventory_item_id:
+        return {
+            "kind": "inspect_item", "label": "Review linked item",
+            "detail": "Check the marketplace listing and recorded result before making another change.",
+        }
+    return {
+        "kind": "manual_review", "label": "Check marketplace result",
+        "detail": "The outcome is not independently verified. Review it on the marketplace first; "
+                  "another automatic write is blocked.",
+    }
+
+
 def retry_operation(session: Session, workspace_id: uuid.UUID, operation_id: uuid.UUID) -> MarketplaceOperation:
     op = session.get(MarketplaceOperation, operation_id)
     if op is None or op.workspace_id != workspace_id:
         raise ValueError("Marketplace operation not found")
-    if op.operation_type not in RETRYABLE or op.status not in {"failed", "attention"}:
-        raise ValueError("This operation cannot be retried automatically; verify its remote outcome first")
+    if not can_retry_operation(op):
+        raise ValueError(
+            "Automatic retry is only available for failed read-only imports. "
+            "This operation cannot be retried automatically; inspect BIBLIO "
+            "transfers or the remote listing before another upload."
+        )
     if not op.job_type:
         raise ValueError("Operation has no retry handler")
     key = _identity(op.channel, op.operation_type, op.target_key)
@@ -345,5 +398,6 @@ def serialize(op: MarketplaceOperation) -> dict[str, Any]:
         "created_at": iso(op.created_at),
         "started_at": iso(op.started_at),
         "completed_at": iso(op.completed_at),
-        "can_retry": op.operation_type in RETRYABLE and op.status in {"failed", "attention"},
+        "can_retry": can_retry_operation(op),
+        "next_step": recovery_instruction(op),
     }

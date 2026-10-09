@@ -1388,9 +1388,16 @@ function renderItemMarketplacePanel(data) {
     return '<div class="item-marketplace-history-row"><div><strong>' + esc(op.channel.toUpperCase())
       + ' · ' + esc(title) + '</strong><span>' + esc(itemMarketplaceOperationText(op))
       + (op.error ? ' · ' + esc(op.error) : '') + '</span></div>'
-      + (op.can_retry
+      + (op.next_step
+        ? '<span class="marketplace-next-step">' + esc(op.next_step.detail) + '</span>'
+        : '')
+      + (op.next_step && ["biblio_photos","biblio_compare","inspect_item"].includes(op.next_step.kind)
+        ? '<button class="btn item-marketplace-recovery" data-kind="' + esc(op.next_step.kind)
+          + '" type="button">' + esc(op.next_step.label) + '</button>'
+        : '')
+      + (op.can_retry && op.next_step?.kind === "retry_import"
         ? '<button class="btn item-marketplace-retry" data-id="' + esc(op.id)
-          + '" type="button">Retry this safe operation…</button>'
+          + '" type="button">Retry read-only import…</button>'
         : '') + '</div>';
   }).join("");
   $("#item-marketplaces-content").innerHTML =
@@ -1636,9 +1643,19 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
+  $$(".item-marketplace-recovery").forEach(button => {
+    button.onclick = async () => {
+      if (button.dataset.kind === "inspect_item") {
+        return openItemMarketplaces(itemId);
+      }
+      await selectView("connections");
+      await openMarketplaceRecovery(button.dataset.kind, itemId);
+    };
+  });
   $$(".item-marketplace-retry").forEach(button => {
     button.onclick = async () => {
-      if (!window.confirm("Retry this supported operation? Check any uncertain remote result before resending.")) return;
+      if (!window.confirm("Retry this read-only import? It does not publish listings, "
+        + "change stock or resend photographs.")) return;
       button.disabled = true;
       try {
         await api("/api/app/marketplace-operations/" + encodeURIComponent(button.dataset.id) + "/retry",
@@ -5132,70 +5149,134 @@ function renderMarketplaceDevelopment(definitions) {
   showSelected();
 }
 
+async function openMarketplaceRecovery(kind, inventoryItemId = null) {
+  if (kind === "biblio_photos") {
+    const panel = $(".biblio-photos-panel");
+    if (!panel) return flash("BIBLIO photo repair is not available. Check connection settings.", true);
+    panel.open = true;
+    state.biblioPhotoExpanded = true;
+    panel.scrollIntoView({behavior:"smooth",block:"center"});
+    const select = $("#biblio-photo-book-select");
+    if (select) select.focus();
+    return;
+  }
+  if (kind === "biblio_compare") {
+    const panel = $("#biblio-compare-panel");
+    if (!panel || panel.classList.contains("hidden")) {
+      return flash("Connect BIBLIO before comparing its inventory export.", true);
+    }
+    panel.open = true;
+    panel.scrollIntoView({behavior:"smooth",block:"center"});
+    $("#biblio-import-file")?.focus();
+    return;
+  }
+  if (kind === "inspect_item" && inventoryItemId) {
+    await selectView("inventory");
+    await openItemMarketplaces(inventoryItemId);
+  }
+}
+
 function renderMarketplaceOperations(data) {
   const root = $("#marketplace-operations-list");
   if (!root) return;
   const operations = data?.operations || [];
   if (!operations.length) {
-    root.innerHTML = '<p class="muted">No audited marketplace operations yet. New syncs, uploads and cross-market close jobs will appear here.</p>';
+    root.innerHTML = '<p class="muted">No marketplace activity yet. Imports, uploads and their results will appear here.</p>';
     return;
   }
+  const needsReview = op => ["failed", "attention", "needs_verification"].includes(op.status);
+  const openCount = operations.filter(needsReview).length;
+  const workingCount = operations.filter(op => ["queued", "running"].includes(op.status)).length;
+  // The filter survives an activity refresh, avoiding jarring jumps.
+  const selectedFilter = state.marketplaceActivityFilter || "all";
   const statuses = {
-    queued: "Waiting to start", running: "In progress",
-    succeeded: "Finished", needs_verification: "Sent; check the marketplace",
-    failed: "Did not finish", attention: "Needs your attention", cancelled: "Cancelled",
+    queued:"Waiting to start", running:"In progress",
+    succeeded:"Finished", needs_verification:"Sent; not verified on marketplace",
+    failed:"Could not complete", attention:"Needs review", cancelled:"Cancelled",
   };
   const verificationLabels = {
-    manual_required: "Check the result on the marketplace",
-    snapshot_imported: "Information imported into the dashboard",
-    no_remote_changes: "No new changes sent",
-    not_checked: "Not independently checked",
-    remote_verified: "Checked against the marketplace",
+    manual_required:"Remote result needs checking",
+    snapshot_imported:"Data imported into dashboard; publication not checked",
+    no_remote_changes:"No changed records sent",
+    not_checked:"Remote result not independently checked",
+    remote_verified:"Result checked on marketplace",
   };
-  root.innerHTML = '<div class="table-wrap"><table><thead><tr>'
-    + '<th>Marketplace / action</th><th>Target</th><th>Status</th><th>Created</th><th>Next step</th>'
-    + '</tr></thead><tbody>'
-    + operations.map(op => {
-      const requiresCheck = op.status === "needs_verification" || op.status === "attention";
-      const statusTone = op.status === "failed" ? "danger"
-        : requiresCheck ? "warning"
-        : ["queued", "running"].includes(op.status) ? "info"
-        : op.status === "succeeded" && op.verification === "remote_verified" ? "success"
-        : "neutral";
-      const result = Object.entries(op.result || {}).slice(0, 6)
-        .map(([key, value]) => esc(key.replaceAll("_", " ") + ": " + String(value))).join(" · ");
-      const next = op.can_retry
-        ? '<button class="btn marketplace-operation-retry" type="button" data-id="' + esc(op.id) + '">'
-          + (op.type === "photos" ? "Try sending photos again…" : "Try again…") + '</button>'
-        : requiresCheck ? '<span class="muted">Check the result on the marketplace first</span>'
-        : "";
-      const actionLabel = op.type === "sync"
-        ? (op.channel === "biblio" ? "Send listing changes" : "Import marketplace data")
-        : ({publish:"Add listing", update:"Update listing", photos:"Send photos",
-          close:"Close sold listing", verify:"Check listing"}[op.type] || op.type);
-      const targetLabel = op.target === "all" ? "All relevant listings"
-        : /^[0-9a-f-]{36}$/i.test(op.target || "") ? "One listing"
-        : op.target || "Single listing";
-      return '<tr><td><strong>' + esc(op.channel.toUpperCase()) + ' · ' + esc(actionLabel)
-        + '</strong><div class="sub">' + esc(verificationLabels[op.verification] || op.verification) + '</div></td>'
-        + '<td>' + esc(targetLabel) + '</td>'
-        + '<td><span class="operation-status operation-status-' + statusTone + '">'
-        + esc(statuses[op.status] || op.status) + '</span>'
-        + (op.error ? '<div class="error">' + esc(op.error) + '</div>' : "")
-        + (result ? '<details class="operation-technical"><summary>Transfer details</summary><p>' + result + '</p></details>' : "")
-        + '</td><td>' + esc(when(op.created_at)) + '</td><td>' + next + '</td></tr>';
-    }).join("")
-    + '</tbody></table></div>';
+  const priority = op => needsReview(op) ? 0 : ["queued","running"].includes(op.status) ? 1 : 2;
+  const sorted = operations.slice().sort((a,b) =>
+    priority(a)-priority(b) || String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  const visible = sorted.filter(op => selectedFilter === "all"
+    || selectedFilter === "review" && needsReview(op)
+    || selectedFilter === "working" && ["queued", "running"].includes(op.status));
+  const actionLabel = op => op.type === "sync"
+    ? op.channel === "biblio" ? "Send listing changes" : "Import listings and orders"
+    : ({publish:"Add listing",update:"Update listing",photos:"Send photos",
+      close:"Close sold listing",verify:"Check listing"}[op.type] || op.type);
+  const items = visible.map(op => {
+    const nextStep = op.next_step || null;
+    const statusTone = op.status === "failed" ? "danger"
+      : needsReview(op) ? "warning"
+      : ["queued","running"].includes(op.status) ? "info"
+      : op.status === "succeeded" && op.verification === "remote_verified" ? "success"
+      : "neutral";
+    const targetLabel = op.target === "all" ? "All linked listings"
+      : /^[0-9a-f-]{36}$/i.test(String(op.target || "")) ? "One listing"
+      : op.target || "One listing";
+    const result = Object.entries(op.result || {}).slice(0,8)
+      .map(([key,value]) => esc(key.replaceAll("_"," ") + ": " + String(value))).join(" · ");
+    const recovery = nextStep && ["biblio_photos","biblio_compare","inspect_item"].includes(nextStep.kind)
+      ? '<button class="btn marketplace-operation-next" type="button" data-kind="'
+        + esc(nextStep.kind) + '" data-item="' + esc(op.inventory_item_id || "") + '">'
+        + esc(nextStep.label) + '</button>' : "";
+    const retry = op.can_retry && nextStep?.kind === "retry_import"
+      ? '<button class="btn marketplace-operation-retry" type="button" data-id="'
+        + esc(op.id) + '">Retry read-only import…</button>' : "";
+    return '<article class="marketplace-activity-row">'
+      + '<div class="marketplace-activity-header"><div><strong>' + esc(op.channel.toUpperCase())
+      + ' · ' + esc(actionLabel(op)) + '</strong>'
+      + '<p>' + esc(targetLabel) + ' · ' + esc(when(op.created_at)) + '</p></div>'
+      + '<span class="operation-status operation-status-' + statusTone + '">'
+      + esc(statuses[op.status] || op.status) + '</span></div>'
+      + '<p class="marketplace-activity-verification">' + esc(verificationLabels[op.verification] || "Verification not recorded") + '</p>'
+      + (op.error ? '<p class="marketplace-activity-error">' + esc(op.error) + '</p>' : "")
+      + (nextStep ? '<p class="marketplace-activity-next">' + esc(nextStep.detail) + '</p>' : "")
+      + (recovery || retry ? '<div class="actions marketplace-activity-actions">' + recovery + retry + '</div>' : "")
+      + (result ? '<details class="operation-technical"><summary>Technical transfer details</summary><p>'
+          + result + '</p></details>' : '')
+      + '</article>';
+  }).join("");
+  root.innerHTML = '<div class="marketplace-activity-toolbar">'
+    + '<p><strong>' + openCount + '</strong> need review · <strong>' + workingCount
+    + '</strong> in progress · ' + operations.length + ' recent operations</p>'
+    + '<label for="marketplace-activity-filter">Show <select id="marketplace-activity-filter">'
+    + '<option value="all"' + (selectedFilter === "all" ? ' selected' : '') + '>All activity</option>'
+    + '<option value="review"' + (selectedFilter === "review" ? ' selected' : '')
+      + '>Needs review (' + openCount + ')</option>'
+    + '<option value="working"' + (selectedFilter === "working" ? ' selected' : '')
+      + '>In progress (' + workingCount + ')</option>'
+    + '</select></label></div>'
+    + '<div class="marketplace-activity-list" role="list">'
+    + (items || '<p class="muted">Nothing in this category. Choose All activity to see the history.</p>')
+    + '</div>';
+  const filter = $("#marketplace-activity-filter");
+  if (filter) filter.onchange = () => {
+    state.marketplaceActivityFilter = filter.value;
+    renderMarketplaceOperations(data);
+  };
+  $$(".marketplace-operation-next").forEach(button => {
+    button.onclick = () => openMarketplaceRecovery(button.dataset.kind, button.dataset.item || null);
+  });
   $$(".marketplace-operation-retry").forEach(button => {
     button.onclick = async () => {
-      if (!window.confirm("Try this operation again? The dashboard only allows automatic retries when repeating it is considered safe. If a marketplace may have accepted an earlier upload, check it first.")) return;
+      if (!window.confirm("Retry this marketplace data import? This fetches listings and orders only. "
+        + "It does not publish, update stock or send photos.")) return;
       button.disabled = true;
       try {
-        await api("/api/app/marketplace-operations/" + button.dataset.id + "/retry", {method:"POST"});
-        flash("Marketplace operation queued for retry.");
+        await api("/api/app/marketplace-operations/" + encodeURIComponent(button.dataset.id)
+          + "/retry", {method:"POST"});
+        flash("Read-only import queued. Check Recent marketplace activity for its result.");
         await refreshMarketplaceOperations();
       } catch (error) {
-        flash(error.message, true);
+        flash("Import could not be retried: " + error.message, true);
         button.disabled = false;
       }
     };
