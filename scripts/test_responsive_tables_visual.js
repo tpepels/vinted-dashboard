@@ -94,8 +94,11 @@ for(const width of widths){
   const value=dom.match(/<output id="responsive-table-metrics" data-state="([^"]+)"/);
   assert(value,"Browser did not run responsive table helpers at "+width);
   const data=JSON.parse(decodeURIComponent(value[1]));
-  assert.equal(data.shellWidth,width,"Fixture shell width incorrect");
-  assert(data.shellScroll<=width+2,
+  // Chromium may subtract the vertical scrollbar (about 15px) from the
+  // requested window width. Assert against the real content viewport.
+  assert(data.shellWidth<=width && data.shellWidth>=width-20,
+    "Unexpected Chromium viewport dimensions: "+JSON.stringify(data));
+  assert(data.shellScroll<=data.shellWidth+2,
     "Table must not expand the page at "+width+": "+JSON.stringify(data));
   assert.equal(data.buttonClicked,1,"Row action no longer clickable");
   assert(data.selected,"Mobile Select all did not select inventory rows");
