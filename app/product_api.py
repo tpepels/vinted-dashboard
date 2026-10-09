@@ -5076,7 +5076,10 @@ def connectors(context: RequestContext = Depends(require_context)):
                         (account.config or {}).get("connection_checked_at")
                         if account and configured else None
                     ),
-                    "scope": "read_only",
+                    "scope": (
+                        (account.config or {}).get("connection_check_scope", "ftp_login" if channel == Channel.BIBLIO else "read_only")
+                        if account and configured else None
+                    ),
                 },
                 "last_run": (
                     {
@@ -5682,6 +5685,7 @@ def save_connector_credentials(
             "credentials_stored": True,
             "integration_state": "configured" if operational else "authorization_required",
             "connection_check_status": "not_checked",
+            "connection_check_scope": None,
             "connection_checked_at": None,
         }
     return {
@@ -5884,6 +5888,7 @@ def complete_etsy_oauth(
             "credentials_stored": True,
             "integration_state": "configured",
             "connection_check_status": "not_checked",
+            "connection_check_scope": None,
             "connection_checked_at": None,
         }
 
@@ -5915,6 +5920,7 @@ def delete_connector_credentials(
             account.config = {
                 **dict(account.config or {}),
                 "connection_check_status": "not_checked",
+                "connection_check_scope": None,
                 "connection_checked_at": None,
                 "credentials_stored": False,
             }
@@ -5932,6 +5938,7 @@ def check_connector_read_access(
     channels are never dispatched through a generic protocol fallback.
     """
     tests = {
+        Channel.BIBLIO: test_biblio_workspace,
         Channel.ETSY: test_etsy_workspace,
         Channel.WOOCOMMERCE: test_woocommerce_workspace,
         Channel.SHOPIFY: test_shopify_workspace,
@@ -5968,17 +5975,24 @@ def check_connector_read_access(
             status_code=502,
             detail="Could not verify marketplace read access. Check credentials and permissions, then test again.",
         ) from exc
+    scope = "ftp_login" if channel == Channel.BIBLIO else "read_only"
     with db.session_scope() as session:
         account, _ = get_or_create_channel_account(session, context.workspace, channel, {})
         account.config = {
             **dict(account.config or {}),
             "connection_check_status": "passed",
+            "connection_check_scope": scope,
             "connection_checked_at": utcnow().isoformat(),
         }
     return {
-        "ok": True, "status": "passed", "scope": "read_only",
-        "detail": "Marketplace catalog and order read access confirmed. "
-                  "Publishing, stock edits and remote listing state were not tested.",
+        "ok": True, "status": "passed", "scope": scope,
+        "detail": (
+            "BIBLIO FTP login and directory access confirmed. "
+            "No file was uploaded; remote book and photo publication were not tested."
+            if channel == Channel.BIBLIO else
+            "Marketplace catalog and order read access confirmed. "
+            "Publishing, stock edits and remote listing state were not tested."
+        ),
     }
 
 
