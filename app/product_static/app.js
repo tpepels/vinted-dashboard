@@ -1652,7 +1652,7 @@ function renderItemMarketplacePanel(data) {
       await openMarketplaceRecovery(button.dataset.kind, itemId);
     };
   });
-  $(".item-marketplace-retry").forEach(button => {
+  $$(".item-marketplace-retry").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Retry this read-only import? It does not publish listings, "
         + "change stock or resend photographs.")) return;
