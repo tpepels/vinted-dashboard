@@ -1643,7 +1643,7 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-marketplace-recovery").forEach(button => {
+  $$(".item-marketplace-recovery").forEach(button => {
     button.onclick = async () => {
       if (button.dataset.kind === "inspect_item") {
         return openItemMarketplaces(itemId);
