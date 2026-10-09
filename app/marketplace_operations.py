@@ -356,7 +356,8 @@ def retry_operation(session: Session, workspace_id: uuid.UUID, operation_id: uui
     if not can_retry_operation(op):
         raise ValueError(
             "Automatic retry is only available for failed read-only imports. "
-            "Inspect BIBLIO transfers or the remote listing before another upload."
+            "This operation cannot be retried automatically; inspect BIBLIO "
+            "transfers or the remote listing before another upload."
         )
     if not op.job_type:
         raise ValueError("Operation has no retry handler")
