@@ -38,6 +38,7 @@ jobs:
       - run: node scripts/test_marketplace_operations_ui.js
       - run: node scripts/test_table_ui.js
       - run: node scripts/test_store_stock_audit_ui.js
+      - run: node scripts/test_marketplace_price_ui.js
       - run: node --check app/extension/background.js
       - run: node --check app/extension/vinted_age.js
       - run: node --check app/extension/content.js
