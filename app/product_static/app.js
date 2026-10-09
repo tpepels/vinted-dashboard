@@ -88,6 +88,7 @@ const connectorSchemas = {
   },
   ebay: {
     title: "eBay",
+    test: true,
     help: "Use either a current OAuth token, or refreshable OAuth credentials. Secrets are encrypted server-side.",
     fields: [
       ["oauth_token", "OAuth access token", "", "password"],
@@ -5256,7 +5257,9 @@ function connectorHealth(connector) {
       state:"verified",label:connector.channel === "biblio" ? "FTP login checked" : "Read access checked",
       message:connector.channel === "biblio"
         ? "FTP login and directory access were checked. Book and photo publication were not verified."
-        : "Catalog/order read access passed. Publishing and stock writes were not tested.",
+        : connector.channel === "ebay"
+          ? "Active-listing read access passed. Order imports and listing writes were not tested."
+          : "Catalog/order read access passed. Publishing and stock writes were not tested.",
       next:connector.channel === "biblio"
         ? "Send changed listings, then compare with a BIBLIO export to verify processing."
         : connector.last_synced_at
@@ -5284,7 +5287,9 @@ async function testMarketplaceConnection(channel, button) {
       + "/test-connection", {method:"POST"});
     const message = channel === "biblio"
       ? "BIBLIO: FTP login checked. Book and photo publication were not checked."
-      : title + ": read access confirmed. Publishing and stock edits were not tested.";
+      : channel === "ebay"
+        ? "eBay: seller listing access confirmed. Order import and listing edits were not tested."
+        : title + ": read access confirmed. Publishing and stock edits were not tested.";
     if (state.connectorChannel === channel) $("#connector-config-status").textContent = message;
     flash(message);
     await connections();
