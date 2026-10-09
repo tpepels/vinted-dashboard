@@ -2306,7 +2306,7 @@ def _shopify_price_link(session, workspace_id: uuid.UUID, item_id: uuid.UUID):
 def verify_shopify_item_price(
     item_id: uuid.UUID, context: RequestContext = Depends(require_write_context),
 ):
-    """Observe the linked store regular price, without changing it."""
+    """Observe the linked Shopify variant base price without changing it."""
     with db.session_scope() as session:
         item, listing, desired, currency = _shopify_price_link(
             session, context.workspace.id, item_id,
@@ -2320,7 +2320,7 @@ def verify_shopify_item_price(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not read Shopify regular price") from exc
+        raise HTTPException(status_code=502, detail="Could not read Shopify base price") from exc
     with db.session_scope() as session:
         _item, current, latest_desired, current_currency = _shopify_price_link(
             session, context.workspace.id, item_id,
@@ -2356,7 +2356,7 @@ def verify_shopify_item_price(
                 unresolved.status = "succeeded" if confirmed else "failed"
                 unresolved.verification = "remote_verified" if confirmed else "remote_mismatch"
                 unresolved.last_error = (
-                    None if confirmed else "Shopify regular price differs after uncertain update"
+                    None if confirmed else "Shopify base price differs after uncertain update"
                 )
                 unresolved.active_key = None
                 unresolved.completed_at = utcnow()
@@ -2403,8 +2403,8 @@ def update_shopify_item_price(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    # Preserve the desired price for safe reconciliation if the remote PUT
-    # succeeds but our response/readback becomes uncertain.
+    # Preserve the desired price for safe reconciliation if the GraphQL mutation
+    # succeeds but the response/readback becomes uncertain.
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, op_id)
         op.job_payload = {"scope": "price", "price_cents": desired,
