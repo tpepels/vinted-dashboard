@@ -1144,7 +1144,11 @@ function renderItemMarketplacePanel(data) {
           + (listing.price_verification === "price_mismatch" ? ' open' : '')
           + '><summary>' + (listing.channel === "shopify" ? 'Base price' : listing.channel === "wix" ? 'Actual price' : 'Regular price') + ' · '
           + esc(money(item.default_price_cents, item.currency)) + '</summary>'
-          + '<p class="muted">Compare the store price first. Promotions and regional prices are not changed.</p>'
+          + '<p class="muted">Compare the store price first. Promotions and regional prices are not changed.'
+          + (listing.channel === "wix"
+              ? ' Wix price updates support one default variant without product options or modifiers.'
+              : '')
+          + '</p>'
           + (listing.price_verification !== "not_checked"
             ? '<p class="item-price-state">'
               + (listing.price_verification === "price_checked" ? 'Price matches'
