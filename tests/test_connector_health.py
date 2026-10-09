@@ -50,7 +50,7 @@ def test_save_is_not_remote_verification_check_is_read_only_and_reset_on_edit(mo
     assert checked.status_code == 200, checked.text
     assert checked.json()["status"] == "passed"
     assert checked.json()["scope"] == "read_only"
-    assert "stock edits were not tested" in checked.json()["detail"]
+    assert "stock edits and remote listing state were not tested" in checked.json()["detail"]
     assert len(seen) == 1
     after = connector(client)
     assert after["connection_check"]["status"] == "passed"
