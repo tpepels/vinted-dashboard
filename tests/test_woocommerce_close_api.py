@@ -107,7 +107,7 @@ def test_uncertain_write_blocks_retry_until_another_remote_check(monkeypatch):
     with db.session_scope() as session:
         op = session.execute(select(MarketplaceOperation)).scalar_one()
         assert op.status == "attention"
-        assert session.execute(select(CrossChannelAction)).scalar_one().status == "error"
+        assert session.execute(select(CrossChannelAction)).scalar_one().status == "attention"
     assert client.post(path + "/check-close", headers=headers).status_code == 200
     with db.session_scope() as session:
         op = session.execute(select(MarketplaceOperation)).scalar_one()
