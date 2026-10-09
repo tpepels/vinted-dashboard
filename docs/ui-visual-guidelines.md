@@ -39,8 +39,8 @@ as a separate technical surface.
   columns into a narrow fixed minimum. Horizontal scrolling belongs to the
   table region, never the whole page.
 - When a table's own container is 860px wide or less, Inventory, Listings,
-  Sales and the four Vinted analytics tables become two-column labelled row
-  cards. Show every value and preserve the original buttons and checkboxes.
+  Sales and the four Vinted analytics tables become labelled row cards
+  with two, three or four fact columns depending on the available width. Show every value and preserve the original buttons and checkboxes.
   Keep compact mobile sort controls, plus Select all for inventory. Existing
   listing-specific sorting remains the authority for listings.
 - Keep dense editable stock scanning and reconciliation matrices as tables
