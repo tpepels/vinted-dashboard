@@ -123,3 +123,23 @@ def test_workspace_access_isolation_for_check_evidence(monkeypatch):
     assert connector(other)["connection_check"]["status"] == "not_checked"
     assert other.post("/api/app/connectors/shopify/test-connection",
                       headers=other_headers).status_code == 409
+
+
+def test_biblio_ftp_check_proves_login_only_and_writes_no_files(monkeypatch):
+    client, headers = registration("connection-biblio@example.test")
+    saved = client.put("/api/app/connectors/biblio/credentials", headers=headers,
+                       json={"values": {"username": "ftp-test", "password": "test-secret"}})
+    assert saved.status_code == 200, saved.text
+    calls = []
+    def test_ftp(workspace_id):
+        calls.append(workspace_id)
+        return {"ok": True, "detail": "FTP login accepted", "transport": "ftps"}
+    monkeypatch.setattr("app.product_api.test_biblio_workspace", test_ftp)
+    checked = client.post("/api/app/connectors/biblio/test-connection", headers=headers)
+    assert checked.status_code == 200, checked.text
+    assert checked.json()["scope"] == "ftp_login"
+    assert "No file was uploaded" in checked.json()["detail"]
+    assert len(calls) == 1
+    status = connector(client, "biblio")["connection_check"]
+    assert status["status"] == "passed"
+    assert status["scope"] == "ftp_login"
