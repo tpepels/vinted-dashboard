@@ -259,3 +259,38 @@ def test_cannot_inspect_publish_or_biblio_upload(monkeypatch):
         op.target_key=str(item_id)
     response=inspect_api(client,headers,op_id)
     assert response.status_code == 409
+
+
+def test_stock_intent_is_saved_before_an_uncertain_network_write(monkeypatch):
+    client,headers,wid,item_id,listing_id,old_op_id=fixture()
+    # The fixture creates an old uncertain history row. Remove it so this
+    # real API write can reserve its own operation.
+    with db.session_scope() as session:
+        session.delete(session.get(MarketplaceOperation,old_op_id))
+    seen=[]
+    def uncertain(workspace_id, *, external_id, expected_sku, quantity):
+        with db.session_scope() as session:
+            op = session.execute(select(MarketplaceOperation)).scalar_one()
+            assert op.status == "running"
+            assert op.job_payload == {
+                "scope":"stock","quantity":quantity,
+                "external_id":external_id,"sku":expected_sku,
+            }
+            seen.append(op.id)
+        raise RuntimeError("network dropped after request")
+    monkeypatch.setattr("app.product_api.update_woocommerce_workspace_stock",uncertain)
+    response=client.post(
+        f"/api/app/inventory/{item_id}/marketplaces/woocommerce/stock",
+        headers=headers,
+    )
+    assert response.status_code == 502, response.text
+    assert len(seen)==1
+    with db.session_scope() as session:
+        assert session.get(MarketplaceOperation,seen[0]).status == "attention"
+        assert session.get(models.InventoryItem,item_id).quantity==2
+    monkeypatch.setitem(rr.STOCK_READERS,"woocommerce",lambda *_args,**_kwargs:{
+        "quantity":2,"manage_stock":True,"stock_status":"instock",
+    })
+    inspected=inspect_api(client,headers,seen[0])
+    assert inspected.status_code==200, inspected.text
+    assert inspected.json()["resolved"] is True
