@@ -58,6 +58,14 @@ context.renderMarketplaceOperations({
       created_at:"2026-10-08", result:{}, error:"timeout",
     },
     {
+      id:"4", channel:"shopify", type:"update", target:"SKU-4:price",
+      status:"attention",verification:"not_checked",can_retry:false,
+      can_inspect_remote:true,
+      next_step:{kind:"inspect_remote",label:"Check live marketplace result",
+        detail:"Read the linked marketplace record without resending."},
+      created_at:"2026-10-09",result:{},error:"Response timed out",
+    },
+    {
       id:"3", channel:"shopify", type:"publish", target:"ITEM-1",
       status:"attention", verification:"manual_required", can_retry:false,
       next_step:{kind:"manual_review",label:"Check marketplace result",detail:"Inspect the remote listing."},
@@ -70,6 +78,10 @@ assert.match(root.innerHTML, /marketplace-activity-row/);
 assert.match(root.innerHTML, /Inspect book photos/);
 assert.match(root.innerHTML, /Check file receipts first/);
 assert.match(root.innerHTML, /Retry read-only import/);
+assert.match(root.innerHTML,/Check live result \(read only\)/);
+assert.match(root.innerHTML,/marketplace-operation-inspect/);
+assert.match(app,/\$\$\("\.item-marketplace-inspect"\)\.forEach/,
+  "Per-item remote inspections must use collection binding");
 assert.match(root.innerHTML, /Technical transfer details/);
 assert.doesNotMatch(root.innerHTML, /Try sending photos again/);
 assert.match(root.innerHTML, /marketplace-activity-filter/);
