@@ -82,6 +82,8 @@ assert.match(root.innerHTML,/Check live result \(read only\)/);
 assert.match(root.innerHTML,/marketplace-operation-inspect/);
 assert.match(app,/\$\$\("\.item-marketplace-inspect"\)\.forEach/,
   "Per-item remote inspections must use collection binding");
+assert.match(app,/\$\$\("\.marketplace-operation-inspect"\)\.forEach/,
+  "Activity remote inspections must bind all action buttons");
 assert.match(root.innerHTML, /Technical transfer details/);
 assert.doesNotMatch(root.innerHTML, /Try sending photos again/);
 assert.match(root.innerHTML, /marketplace-activity-filter/);
