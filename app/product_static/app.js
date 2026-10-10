@@ -1647,10 +1647,10 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-marketplace-inspect").forEach(button => {
+  $$(".item-marketplace-inspect").forEach(button => {
     button.onclick = () => inspectUncertainMarketplaceOperation(button.dataset.id, button, itemId);
   });
-  $(".item-marketplace-recovery").forEach(button => {
+  $$(".item-marketplace-recovery").forEach(button => {
     button.onclick = async () => {
       if (button.dataset.kind === "inspect_item") {
         return openItemMarketplaces(itemId);
@@ -5302,10 +5302,10 @@ function renderMarketplaceOperations(data) {
     state.marketplaceActivityFilter = filter.value;
     renderMarketplaceOperations(data);
   };
-  $(".marketplace-operation-inspect").forEach(button => {
+  $$(".marketplace-operation-inspect").forEach(button => {
     button.onclick = () => inspectUncertainMarketplaceOperation(button.dataset.id, button);
   });
-  $(".marketplace-operation-next").forEach(button => {
+  $$(".marketplace-operation-next").forEach(button => {
     button.onclick = () => openMarketplaceRecovery(button.dataset.kind, button.dataset.item || null);
   });
   $$(".marketplace-operation-retry").forEach(button => {
