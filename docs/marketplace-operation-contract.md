@@ -214,6 +214,46 @@ without an operation ID. Existing jobs are not retroactively classified
 as verified. Migration adds an audit table without rewriting inventory.
 
 
+## Read-only remote outcome reconciliation
+
+For an uncertain **WooCommerce / Shopify / Wix** stock or price write, a
+WooCommerce listing-content write, or a guarded **WooCommerce / Shopify**
+unpublish, use **Connections → Recent marketplace activity → Check live
+result (read only)**. The same action is available in the affected item's
+Marketplaces history when the exact original request is recorded.
+
+This operation reads the *linked record* through the existing exact-ID,
+SKU-checked marketplace adapter. It never publishes, uploads photos, repeats
+a timed-out write, changes physical stock, or updates a remote product.
+
+- **Requested state observed:** when original record ID/SKU, original requested
+  value, current physical stock (for stock/close) and operation order are
+  consistent, mark the *observed target state* verified. This does not prove
+  which API request caused it.
+- **Different now:** save the current remote quantity, price, publication
+  state, or mismatched field names as evidence, but **keep the historical
+  attempt unresolved**. A seller or another operation may have changed the
+  item after the original attempt; current differences do not prove a write
+  failed.
+- **Missing original intent, relinked SKU/ID, master-stock change, later
+  operation or inaccessible remote record:** preserve manual review. In-flight
+  link changes discard a stale readback rather than recording false proof.
+- Content observations store field names and match status, not remote
+  descriptions or personal data. All result reads are workspace-scoped,
+  rate-limited and never return raw API error bodies.
+
+The original requested stock count, currency/price, content fields or intended
+draft status, plus the exact target record identity, are now captured *before*
+supported remote writes. Older operations missing those immutable snapshots
+cannot be retroactively certified. Existing BIBLIO seller-export comparison
+remains the appropriate evidence for FTP processing. An FTP receipt alone
+cannot establish which books or photos BIBLIO has published.
+
+Reconciliation updates only the operation audit record. Physical stock,
+marketplace listing metadata, sale actions and remote listings are not silently
+changed; the item-specific checks and sale/closure workflows own those
+separate decisions.
+
 ## Recovery UI hardening (after Phase 6)
 
 **Connections → Recent marketplace activity** groups unresolved outcomes first,
