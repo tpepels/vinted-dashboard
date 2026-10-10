@@ -321,6 +321,16 @@ def recovery_instruction(op: MarketplaceOperation) -> dict[str, str] | None:
     """One concrete, non-destructive next action for an unresolved result."""
     if op.status not in {"failed", "attention", "needs_verification"}:
         return None
+    # Prefer a fresh exact-record read over vague advice to check manually.
+    # An unavailable original-write snapshot never enables remote inspection.
+    from app.remote_reconciliation import can_inspect
+    if can_inspect(op):
+        return {
+            "kind": "inspect_remote",
+            "label": "Check live marketplace result",
+            "detail": "Read the linked marketplace record and compare it with what was "
+                      "originally requested. Nothing will be resent or changed.",
+        }
     if can_retry_operation(op):
         return {
             "kind": "retry_import", "label": "Retry data import",
@@ -399,5 +409,8 @@ def serialize(op: MarketplaceOperation) -> dict[str, Any]:
         "started_at": iso(op.started_at),
         "completed_at": iso(op.completed_at),
         "can_retry": can_retry_operation(op),
+        "can_inspect_remote": __import__(
+            "app.remote_reconciliation", fromlist=["can_inspect"]
+        ).can_inspect(op),
         "next_step": recovery_instruction(op),
     }
