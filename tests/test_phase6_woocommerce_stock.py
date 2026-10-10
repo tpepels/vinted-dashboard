@@ -212,8 +212,10 @@ def test_woo_readback_releases_ambiguous_write_when_stock_is_observed(monkeypatc
     assert result.json()["matches"] is True
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, op_id)
-        assert op.status == "succeeded"
-        assert op.verification == "remote_verified"
+        # Old attempts without a stored original quantity may match today's
+        # stock but must not be attributed as a verified historical write.
+        assert op.status == "attention"
+        assert op.verification == "not_checked"
 
 
 def _variation_shop(monkeypatch, *, managed=True, parent_type="variable",

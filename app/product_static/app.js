@@ -1391,6 +1391,10 @@ function renderItemMarketplacePanel(data) {
       + (op.next_step
         ? '<span class="marketplace-next-step">' + esc(op.next_step.detail) + '</span>'
         : '')
+      + (op.can_inspect_remote && op.next_step?.kind === "inspect_remote"
+        ? '<button class="btn item-marketplace-inspect" data-id="' + esc(op.id)
+          + '" type="button">Check live result (read only)</button>'
+        : '')
       + (op.next_step && ["biblio_photos","biblio_compare","inspect_item"].includes(op.next_step.kind)
         ? '<button class="btn item-marketplace-recovery" data-kind="' + esc(op.next_step.kind)
           + '" type="button">' + esc(op.next_step.label) + '</button>'
@@ -1642,6 +1646,9 @@ function renderItemMarketplacePanel(data) {
         submit.disabled = false;
       }
     };
+  });
+  $$(".item-marketplace-inspect").forEach(button => {
+    button.onclick = () => inspectUncertainMarketplaceOperation(button.dataset.id, button, itemId);
   });
   $$(".item-marketplace-recovery").forEach(button => {
     button.onclick = async () => {
@@ -5149,6 +5156,27 @@ function renderMarketplaceDevelopment(definitions) {
   showSelected();
 }
 
+async function inspectUncertainMarketplaceOperation(operationId, button, itemId = null) {
+  if (button) button.disabled = true;
+  try {
+    const result = await api("/api/app/marketplace-operations/"
+      + encodeURIComponent(operationId) + "/inspect-remote", {method:"POST"});
+    const summary = result.resolved
+      ? "The originally requested marketplace state is present now. No change was sent."
+      : result.matched_now
+        ? "The current state matches, but this historical operation cannot be confirmed. Review the recorded reason."
+        : "The current marketplace state differs from the request. This does not prove the old write failed.";
+    flash(summary);
+    if (itemId) await openItemMarketplaces(itemId);
+    else await refreshMarketplaceOperations();
+    return result;
+  } catch (error) {
+    flash("Marketplace result was not verified: " + error.message, true);
+    if (button) button.disabled = false;
+    return null;
+  }
+}
+
 async function openMarketplaceRecovery(kind, inventoryItemId = null) {
   if (kind === "biblio_photos") {
     const panel = $(".biblio-photos-panel");
@@ -5200,6 +5228,7 @@ function renderMarketplaceOperations(data) {
     no_remote_changes:"No changed records sent",
     not_checked:"Remote result not independently checked",
     remote_verified:"Result checked on marketplace",
+    remote_mismatch:"Current state differs; the old request is still uncertain",
   };
   const priority = op => needsReview(op) ? 0 : ["queued","running"].includes(op.status) ? 1 : 2;
   const sorted = operations.slice().sort((a,b) =>
@@ -5213,6 +5242,13 @@ function renderMarketplaceOperations(data) {
       close:"Close sold listing",verify:"Check listing"}[op.type] || op.type);
   const items = visible.map(op => {
     const nextStep = op.next_step || null;
+    const lastInspection = op.result?.inspection;
+    const inspectionText = lastInspection?.checked_at
+      ? '<p class="marketplace-activity-verification">Last live comparison: '
+        + esc(lastInspection.outcome === "matched" ? "Requested state found" :
+          lastInspection.outcome === "different" ? "Current state differs" :
+          "Still requires review")
+        + ' · ' + esc(when(lastInspection.checked_at)) + '</p>' : "";
     const statusTone = op.status === "failed" ? "danger"
       : needsReview(op) ? "warning"
       : ["queued","running"].includes(op.status) ? "info"
@@ -5221,8 +5257,11 @@ function renderMarketplaceOperations(data) {
     const targetLabel = op.target === "all" ? "All linked listings"
       : /^[0-9a-f-]{36}$/i.test(String(op.target || "")) ? "One listing"
       : op.target || "One listing";
-    const result = Object.entries(op.result || {}).slice(0,8)
+    const result = Object.entries(op.result || {}).filter(([key])=>key!=="inspection").slice(0,8)
       .map(([key,value]) => esc(key.replaceAll("_"," ") + ": " + String(value))).join(" · ");
+    const inspect = op.can_inspect_remote && nextStep?.kind === "inspect_remote"
+      ? '<button class="btn marketplace-operation-inspect" type="button" data-id="'
+        + esc(op.id) + '">Check live result (read only)</button>' : "";
     const recovery = nextStep && ["biblio_photos","biblio_compare","inspect_item"].includes(nextStep.kind)
       ? '<button class="btn marketplace-operation-next" type="button" data-kind="'
         + esc(nextStep.kind) + '" data-item="' + esc(op.inventory_item_id || "") + '">'
@@ -5237,9 +5276,10 @@ function renderMarketplaceOperations(data) {
       + '<span class="operation-status operation-status-' + statusTone + '">'
       + esc(statuses[op.status] || op.status) + '</span></div>'
       + '<p class="marketplace-activity-verification">' + esc(verificationLabels[op.verification] || "Verification not recorded") + '</p>'
+      + inspectionText
       + (op.error ? '<p class="marketplace-activity-error">' + esc(op.error) + '</p>' : "")
       + (nextStep ? '<p class="marketplace-activity-next">' + esc(nextStep.detail) + '</p>' : "")
-      + (recovery || retry ? '<div class="actions marketplace-activity-actions">' + recovery + retry + '</div>' : "")
+      + (recovery || retry || inspect ? '<div class="actions marketplace-activity-actions">' + inspect + recovery + retry + '</div>' : "")
       + (result ? '<details class="operation-technical"><summary>Technical transfer details</summary><p>'
           + result + '</p></details>' : '')
       + '</article>';
@@ -5262,6 +5302,9 @@ function renderMarketplaceOperations(data) {
     state.marketplaceActivityFilter = filter.value;
     renderMarketplaceOperations(data);
   };
+  $$(".marketplace-operation-inspect").forEach(button => {
+    button.onclick = () => inspectUncertainMarketplaceOperation(button.dataset.id, button);
+  });
   $$(".marketplace-operation-next").forEach(button => {
     button.onclick = () => openMarketplaceRecovery(button.dataset.kind, button.dataset.item || null);
   });
