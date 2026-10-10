@@ -2011,7 +2011,10 @@ def update_woocommerce_item_content(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, op_id)
-        op.job_payload = {"scope": "content", "changes": changes}
+        op.job_payload = {
+            "scope": "content", "changes": changes,
+            "external_id": external_id, "sku": sku,
+        }
     try:
         outcome = update_woocommerce_workspace_content(
             context.workspace.id, external_id=external_id, expected_sku=sku,
@@ -2182,7 +2185,10 @@ def unpublish_woocommerce_item_after_sale(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, op_id)
-        op.job_payload = {"scope": "unpublish", "expected_status": "draft"}
+        op.job_payload = {
+            "scope": "unpublish", "expected_status": "draft",
+            "external_id": external_id, "sku": sku,
+        }
         action = session.get(CrossChannelAction, action_id)
         action.status = "running"
         action.mode = "remote"
@@ -2374,7 +2380,10 @@ def unpublish_shopify_item_after_sale(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, op_id)
-        op.job_payload = {"scope": "unpublish", "expected_status": "draft"}
+        op.job_payload = {
+            "scope": "unpublish", "expected_status": "draft",
+            "external_id": external_id, "sku": sku,
+        }
         action = session.get(CrossChannelAction, action_id)
         action.status = "running"
         action.mode = "remote"
@@ -2534,7 +2543,8 @@ def update_woocommerce_item_price(
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, op_id)
         op.job_payload = {"scope": "price", "price_cents": desired,
-                          "old_price_cents": observed}
+                          "old_price_cents": observed, "currency": currency,
+                          "external_id": external_id, "sku": sku}
     try:
         result = update_woocommerce_workspace_price(
             context.workspace.id, external_id=external_id,
@@ -2610,6 +2620,14 @@ def update_woocommerce_item_stock(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Persist what was actually requested BEFORE the remote write begins.
+    # Recovery must never infer an old request from today's stock count.
+    with db.session_scope() as session:
+        op = session.get(MarketplaceOperation, operation_id)
+        op.job_payload = {
+            "scope": "stock", "quantity": quantity,
+            "external_id": external_id, "sku": expected_sku,
+        }
     try:
         result = update_woocommerce_workspace_stock(
             context.workspace.id,
@@ -2791,6 +2809,14 @@ def update_shopify_item_stock(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Persist what was actually requested BEFORE the remote write begins.
+    # Recovery must never infer an old request from today's stock count.
+    with db.session_scope() as session:
+        op = session.get(MarketplaceOperation, operation_id)
+        op.job_payload = {
+            "scope": "stock", "quantity": quantity,
+            "external_id": external_id, "sku": expected_sku,
+        }
     try:
         result = update_shopify_workspace_stock(
             context.workspace.id,
@@ -3069,7 +3095,8 @@ def update_shopify_item_price(
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, op_id)
         op.job_payload = {"scope": "price", "price_cents": desired,
-                          "old_price_cents": observed}
+                          "old_price_cents": observed, "currency": currency,
+                          "external_id": external_id, "sku": sku}
     try:
         result = update_shopify_workspace_price(
             context.workspace.id, external_id=external_id,
@@ -3242,7 +3269,8 @@ def update_wix_item_price(
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, op_id)
         op.job_payload = {"scope": "price", "price_cents": desired,
-                          "old_price_cents": observed}
+                          "old_price_cents": observed, "currency": currency,
+                          "external_id": external_id, "sku": sku}
     try:
         result = update_wix_workspace_price(
             context.workspace.id, external_id=external_id,
@@ -3324,6 +3352,14 @@ def update_wix_item_stock(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Persist what was actually requested BEFORE the remote write begins.
+    # Recovery must never infer an old request from today's stock count.
+    with db.session_scope() as session:
+        op = session.get(MarketplaceOperation, operation_id)
+        op.job_payload = {
+            "scope": "stock", "quantity": quantity,
+            "external_id": external_id, "sku": expected_sku,
+        }
     try:
         result = update_wix_workspace_stock(
             context.workspace.id,
@@ -4863,6 +4899,39 @@ def marketplace_operation_detail(
         if row is None or row.workspace_id != context.workspace.id:
             raise HTTPException(status_code=404, detail="Marketplace operation not found")
         return serialize_marketplace_operation(row)
+
+
+@router.post("/api/app/marketplace-operations/{operation_id}/inspect-remote")
+def inspect_marketplace_operation_remote(
+    operation_id: uuid.UUID,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Read one exact linked remote target; never replay a marketplace write."""
+    from app.remote_reconciliation import InspectionUnavailable, inspect
+    rate_limiter.check(
+        f"remote-inspection:{context.workspace.id}:{operation_id}",
+        limit=12, window_seconds=900,
+    )
+    try:
+        return inspect(context.workspace.id, operation_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Marketplace operation not found") from exc
+    except InspectionUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        # Adapter identity/SKU/currency checks may refuse an unsafe record.
+        # No remote response body or credentials are returned.
+        raise HTTPException(
+            status_code=409,
+            detail="The marketplace identity or variant could not be verified. "
+                   "Check its link and review the listing manually.",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not inspect the live marketplace result. "
+                   "No changes were sent; the earlier outcome remains uncertain.",
+        ) from exc
 
 
 @router.post("/api/app/marketplace-operations/{operation_id}/retry")
