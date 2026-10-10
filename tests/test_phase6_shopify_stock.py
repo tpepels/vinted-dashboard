@@ -225,8 +225,10 @@ def test_shopify_check_resolves_attention_only_after_matching_remote_read(monkey
     assert result.json()["matches"] is True
     with db.session_scope() as session:
         op = session.get(MarketplaceOperation, operation_id)
-        assert op.status == "succeeded"
-        assert op.verification == "remote_verified"
+        # Old attempts without a stored original quantity may match today's
+        # stock but must not be attributed as a verified historical write.
+        assert op.status == "attention"
+        assert op.verification == "not_checked"
 
 
 def test_shopify_discrepancy_is_visible_without_changing_master_quantity(monkeypatch):
