@@ -1945,10 +1945,17 @@ def check_woocommerce_item_content(
         ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
         if previous:
             sent = (previous.job_payload or {}).get("changes")
-            if isinstance(sent, dict) and sent:
+            intent = dict(previous.job_payload or {})
+            if (
+                isinstance(sent, dict) and sent
+                and intent.get("scope") == "content"
+                and intent.get("external_id") == expected[1]
+                and intent.get("sku") == expected[2]
+                and all(master.get(key) == value for key, value in sent.items())
+            ):
                 matches = all(remote["fields"].get(key) == value
                               for key, value in sent.items())
-                previous.status = "succeeded" if matches else "failed"
+                previous.status = "succeeded" if matches else "attention"
                 previous.verification = "remote_verified" if matches else "remote_mismatch"
                 previous.last_error = None if matches else "Content still differs after remote inspection"
                 previous.completed_at = utcnow()
@@ -2123,12 +2130,20 @@ def check_woocommerce_item_closure(
             MarketplaceOperation.status.in_(["attention", "needs_verification"]),
         ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
         if unresolved is not None:
-            verified = remote["status"] == "draft"
-            unresolved.status = "succeeded" if verified else "failed"
-            unresolved.verification = "remote_verified" if verified else "remote_mismatch"
-            unresolved.last_error = None if verified else "Product is still published after uncertain write"
-            unresolved.active_key = None
-            unresolved.completed_at = checked
+            intent = dict(unresolved.job_payload or {})
+            if (intent.get("scope") == "unpublish"
+                    and intent.get("expected_status") == "draft"
+                    and intent.get("external_id") == expected[1]
+                    and intent.get("sku") == expected[2]):
+                verified = remote["status"] == "draft"
+                unresolved.status = "succeeded" if verified else "attention"
+                unresolved.verification = "remote_verified" if verified else "remote_mismatch"
+                unresolved.last_error = (
+                    None if verified else
+                    "Product remains published now; the earlier unpublish outcome is uncertain"
+                )
+                unresolved.active_key = None
+                unresolved.completed_at = checked
         if remote["status"] == "draft":
             listing.status = ListingStatus.ENDED
             listing.quantity = 0
@@ -2318,12 +2333,20 @@ def check_shopify_item_closure(
             MarketplaceOperation.status.in_(["attention", "needs_verification"]),
         ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
         if unresolved is not None:
-            verified = remote["status"] == "draft"
-            unresolved.status = "succeeded" if verified else "failed"
-            unresolved.verification = "remote_verified" if verified else "remote_mismatch"
-            unresolved.last_error = None if verified else "Product is still published after uncertain write"
-            unresolved.active_key = None
-            unresolved.completed_at = checked
+            intent = dict(unresolved.job_payload or {})
+            if (intent.get("scope") == "unpublish"
+                    and intent.get("expected_status") == "draft"
+                    and intent.get("external_id") == expected[1]
+                    and intent.get("sku") == expected[2]):
+                verified = remote["status"] == "draft"
+                unresolved.status = "succeeded" if verified else "attention"
+                unresolved.verification = "remote_verified" if verified else "remote_mismatch"
+                unresolved.last_error = (
+                    None if verified else
+                    "Product remains published now; the earlier unpublish outcome is uncertain"
+                )
+                unresolved.active_key = None
+                unresolved.completed_at = checked
         if remote["status"] == "draft":
             listing.status = ListingStatus.ENDED
             listing.quantity = 0
@@ -2486,9 +2509,17 @@ def verify_woocommerce_item_price(
         ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
         if unresolved is not None:
             was_sent = (unresolved.job_payload or {}).get("price_cents")
-            if type(was_sent) is int:
+            intent = dict(unresolved.job_payload or {})
+            if (
+                type(was_sent) is int
+                and intent.get("scope") == "price"
+                and intent.get("external_id") == external_id
+                and intent.get("sku") == sku
+                and intent.get("currency") == currency
+                and desired == was_sent
+            ):
                 confirmed = observed == was_sent
-                unresolved.status = "succeeded" if confirmed else "failed"
+                unresolved.status = "succeeded" if confirmed else "attention"
                 unresolved.verification = "remote_verified" if confirmed else "remote_mismatch"
                 unresolved.last_error = (
                     None if confirmed else "WooCommerce regular price differs after uncertain update"
@@ -2736,16 +2767,26 @@ def verify_woocommerce_item_stock(
             ).order_by(MarketplaceOperation.created_at.desc())
         ).scalars().first()
         if relevant is not None:
-            # Remote readback establishes what exists, releasing a previous
-            # ambiguous write without ever resending it automatically.
-            relevant.status = "succeeded" if matches else "failed"
-            relevant.verification = "remote_verified" if matches else "remote_mismatch"
-            relevant.last_error = (
-                None if matches else
-                "Remote quantity differs from confirmed physical stock after a read-only check"
+            # A normal Check stock compares against today's master quantity.
+            # Only reconcile the *old write* when its original intent and
+            # exact remote identity were recorded before that write.
+            intent = dict(relevant.job_payload or {})
+            proven = (
+                intent.get("scope") == "stock"
+                and intent.get("external_id") == external_id
+                and intent.get("sku") == expected_sku
+                and type(intent.get("quantity")) is int
+                and intent["quantity"] == desired
             )
-            relevant.active_key = None
-            relevant.completed_at = utcnow()
+            if proven:
+                relevant.status = "succeeded" if matches else "attention"
+                relevant.verification = "remote_verified" if matches else "remote_mismatch"
+                relevant.last_error = (
+                    None if matches else
+                    "Remote stock differs now. That does not prove the earlier update failed."
+                )
+                relevant.active_key = None
+                relevant.completed_at = utcnow()
         if matches:
             listing.quantity = desired
             listing.status = remote["status"]
@@ -2926,16 +2967,26 @@ def verify_shopify_item_stock(
             ).order_by(MarketplaceOperation.created_at.desc())
         ).scalars().first()
         if relevant is not None:
-            # Remote readback establishes what exists, releasing a previous
-            # ambiguous write without ever resending it automatically.
-            relevant.status = "succeeded" if matches else "failed"
-            relevant.verification = "remote_verified" if matches else "remote_mismatch"
-            relevant.last_error = (
-                None if matches else
-                "Remote quantity differs from confirmed physical stock after a read-only check"
+            # A normal Check stock compares against today's master quantity.
+            # Only reconcile the *old write* when its original intent and
+            # exact remote identity were recorded before that write.
+            intent = dict(relevant.job_payload or {})
+            proven = (
+                intent.get("scope") == "stock"
+                and intent.get("external_id") == external_id
+                and intent.get("sku") == expected_sku
+                and type(intent.get("quantity")) is int
+                and intent["quantity"] == desired
             )
-            relevant.active_key = None
-            relevant.completed_at = utcnow()
+            if proven:
+                relevant.status = "succeeded" if matches else "attention"
+                relevant.verification = "remote_verified" if matches else "remote_mismatch"
+                relevant.last_error = (
+                    None if matches else
+                    "Remote stock differs now. That does not prove the earlier update failed."
+                )
+                relevant.active_key = None
+                relevant.completed_at = utcnow()
         if matches:
             listing.quantity = desired
             listing.status = remote["status"]
@@ -3038,9 +3089,17 @@ def verify_shopify_item_price(
         ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
         if unresolved is not None:
             was_sent = (unresolved.job_payload or {}).get("price_cents")
-            if type(was_sent) is int:
+            intent = dict(unresolved.job_payload or {})
+            if (
+                type(was_sent) is int
+                and intent.get("scope") == "price"
+                and intent.get("external_id") == external_id
+                and intent.get("sku") == sku
+                and intent.get("currency") == currency
+                and desired == was_sent
+            ):
                 confirmed = observed == was_sent
-                unresolved.status = "succeeded" if confirmed else "failed"
+                unresolved.status = "succeeded" if confirmed else "attention"
                 unresolved.verification = "remote_verified" if confirmed else "remote_mismatch"
                 unresolved.last_error = (
                     None if confirmed else "Shopify base price differs after uncertain update"
@@ -3212,9 +3271,17 @@ def verify_wix_item_price(
         ).order_by(MarketplaceOperation.created_at.desc())).scalars().first()
         if unresolved is not None:
             was_sent = (unresolved.job_payload or {}).get("price_cents")
-            if type(was_sent) is int:
+            intent = dict(unresolved.job_payload or {})
+            if (
+                type(was_sent) is int
+                and intent.get("scope") == "price"
+                and intent.get("external_id") == external_id
+                and intent.get("sku") == sku
+                and intent.get("currency") == currency
+                and desired == was_sent
+            ):
                 confirmed = observed == was_sent
-                unresolved.status = "succeeded" if confirmed else "failed"
+                unresolved.status = "succeeded" if confirmed else "attention"
                 unresolved.verification = "remote_verified" if confirmed else "remote_mismatch"
                 unresolved.last_error = (
                     None if confirmed else "Wix actual price differs after uncertain update"
@@ -3468,16 +3535,26 @@ def verify_wix_item_stock(
             ).order_by(MarketplaceOperation.created_at.desc())
         ).scalars().first()
         if relevant is not None:
-            # Remote readback establishes what exists, releasing a previous
-            # ambiguous write without ever resending it automatically.
-            relevant.status = "succeeded" if matches else "failed"
-            relevant.verification = "remote_verified" if matches else "remote_mismatch"
-            relevant.last_error = (
-                None if matches else
-                "Remote quantity differs from confirmed physical stock after a read-only check"
+            # A normal Check stock compares against today's master quantity.
+            # Only reconcile the *old write* when its original intent and
+            # exact remote identity were recorded before that write.
+            intent = dict(relevant.job_payload or {})
+            proven = (
+                intent.get("scope") == "stock"
+                and intent.get("external_id") == external_id
+                and intent.get("sku") == expected_sku
+                and type(intent.get("quantity")) is int
+                and intent["quantity"] == desired
             )
-            relevant.active_key = None
-            relevant.completed_at = utcnow()
+            if proven:
+                relevant.status = "succeeded" if matches else "attention"
+                relevant.verification = "remote_verified" if matches else "remote_mismatch"
+                relevant.last_error = (
+                    None if matches else
+                    "Remote stock differs now. That does not prove the earlier update failed."
+                )
+                relevant.active_key = None
+                relevant.completed_at = utcnow()
         if matches:
             listing.quantity = desired
             listing.status = remote["status"]
