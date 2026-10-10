@@ -5228,6 +5228,7 @@ function renderMarketplaceOperations(data) {
     no_remote_changes:"No changed records sent",
     not_checked:"Remote result not independently checked",
     remote_verified:"Result checked on marketplace",
+    remote_mismatch:"Current state differs; the old request is still uncertain",
   };
   const priority = op => needsReview(op) ? 0 : ["queued","running"].includes(op.status) ? 1 : 2;
   const sorted = operations.slice().sort((a,b) =>
