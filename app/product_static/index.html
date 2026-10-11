@@ -114,11 +114,15 @@
             <div id="today-actions"></div>
           </div>
           <div class="card today-sources">
-            <div class="card-head inline-head">
-              <div><p class="eyebrow">SOURCES</p><h2>Data freshness</h2></div>
-              <button id="today-open-connections" class="btn" type="button">Manage</button>
-            </div>
-            <div id="today-source-status"></div>
+            <details id="today-sources-details" class="today-sources-details">
+              <summary><span><strong>Marketplace status</strong>
+                <small id="today-sources-overview">Checking data sources…</small></span></summary>
+              <div class="today-source-body">
+                <div class="today-source-actions"><span>Received data and connection status</span>
+                  <button id="today-open-connections" class="btn" type="button">Manage connections</button></div>
+                <div id="today-source-status"></div>
+              </div>
+            </details>
           </div>
         </div>
       </section>
