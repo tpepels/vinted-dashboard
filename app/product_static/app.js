@@ -1385,6 +1385,9 @@ function renderItemMarketplacePanel(data) {
         ? '<button class="btn item-marketplace-photos" type="button" data-book="'
           + esc(listing.external_id) + '">Check or resend book photos</button>' : "")
       + (listing.channel === "biblio"
+        ? '<button class="btn item-biblio-remove-local" type="button" data-book="'
+          + esc(listing.external_id) + '">Remove from dashboard…</button>' : "")
+      + (listing.channel === "biblio"
         ? '<button class="btn item-marketplace-verify" type="button">Compare with BIBLIO export</button>' : "")
       + ((listing.can_sync_woocommerce_stock || listing.can_sync_shopify_stock || listing.can_sync_wix_stock)
         ? '<div class="item-marketplace-tool-group"><strong>Stock</strong>'
@@ -1534,7 +1537,30 @@ function renderItemMarketplacePanel(data) {
     const original = state.inventoryItems.find(row => row.id === itemId);
     if (original) openItemForm(original);
   };
-  $$(".item-marketplace-photos").forEach(button => {
+  $(".item-biblio-remove-local").forEach(button => {
+    button.onclick = async () => {
+      const bookId = button.dataset.book;
+      if (!window.confirm("Remove BIBLIO " + bookId + " from this dashboard? "
+        + "This does NOT delete the listing on BIBLIO. It hides the dashboard record "
+        + "until you add it again from Inventory. Finish any pending transfers first.")) return;
+      button.disabled = true;
+      try {
+        await api("/api/app/inventory/" + encodeURIComponent(itemId)
+          + "/marketplaces/biblio/remove-local", {
+          method:"POST",body:JSON.stringify({book_id:bookId}),
+        });
+        flash("BIBLIO dashboard posting removed. The BIBLIO seller listing is unchanged. "
+          + "Use Publish to BIBLIO in Inventory to re-add this posting.");
+        state.biblioBookChoices = null;
+        await inventory();
+        await openItemMarketplaces(itemId);
+      } catch (error) {
+        flash("Could not remove dashboard posting: " + error.message,true);
+        button.disabled = false;
+      }
+    };
+  });
+  $(".item-marketplace-photos").forEach(button => {
     button.onclick = async () => {
       state.biblioPhotoTarget = button.dataset.book;
       state.biblioPhotoExpanded = true;
@@ -2449,6 +2475,22 @@ function biblioPhotoInspectionHtml() {
           + ' · ' + (file.sent_to_ftp ? 'Previously accepted by FTP' : 'No matching successful FTP receipt')
           + '</div>').join("") + '</details>'
       : '')
+    + ((info.file_progress || []).length
+      ? '<fieldset class="biblio-missing-photo-set"><legend>Which photos are missing on BIBLIO?</legend>'
+        + '<p class="muted">Check the book on BIBLIO, then select only the images it is missing.</p>'
+        + '<div class="biblio-photo-choice-grid">'
+        + (info.file_progress || []).map(file =>
+          '<label class="biblio-photo-choice"><input type="checkbox" name="biblio-missing-photo" value="'
+          + Number(file.index) + '">'
+          + (file.preview_url
+            ? '<img src="' + esc(file.preview_url) + '" alt="Source photo '
+              + (Number(file.index) + 1) + '" loading="lazy">'
+            : '<span class="biblio-photo-no-preview">No preview</span>')
+          + '<strong>Photo ' + (Number(file.index) + 1) + '</strong>'
+          + '<small>' + esc(file.filename) + '</small>'
+          + '<small>' + (file.sent_to_ftp ? 'Previously sent to FTP' : 'No FTP receipt') + '</small>'
+          + '</label>').join("")
+        + '</div></fieldset>' : '')
     + job
     + '<p class="muted">These counts describe the dashboard and its file transfers, not pictures visible to buyers. Check the book on BIBLIO to confirm the result.</p>'
     + '</div>';
@@ -2512,6 +2554,14 @@ async function inspectBiblioPhotoTarget() {
   const retry = $("#biblio-retry-listing-photos");
   if (retry) retry.disabled = !state.biblioPhotoInspection?.active
     || !(state.biblioPhotoInspection.biblio_source_photos || state.biblioPhotoInspection.vinted_source_photos);
+  const chooser = $("#biblio-send-selected-photos");
+  if (chooser) chooser.disabled = true;
+  $(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
+    input.onchange = () => {
+      if (chooser) chooser.disabled = !state.biblioPhotoInspection?.active
+        || !$(".biblio-missing-photo-set input:checked").length;
+    };
+  });
   const selective = $("#biblio-retry-failed-photos");
   if (selective) selective.disabled = !state.biblioPhotoInspection?.active
     || !state.biblioPhotoInspection?.photo_error
@@ -2561,9 +2611,10 @@ function renderBiblioActivity(activity, operational) {
       + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '"></details>'
       + '<div class="actions biblio-photo-recovery-controls">'
       + '<button id="biblio-inspect-photos" class="btn" type="button">Check this book’s photos</button>'
+      + '<button id="biblio-send-selected-photos" class="btn primary" type="button" disabled>Send selected missing photos…</button>'
       + '<button id="biblio-retry-failed-photos" class="btn" type="button" disabled>Retry failed photo files…</button>'
       + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend all photos for this book…</button>'
-      + '</div><p class="biblio-user-note">Retry failed files only when some individual transfers succeeded and others failed. To repair photos missing from BIBLIO even though FTP accepted them, resend the whole book’s photos.</p>'
+      + '</div><p class="biblio-user-note">Select the exact missing photos after checking BIBLIO. Retry failed files for partial FTP failures; resend all only as a last resort.</p>'
       + '<div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
       + '</div></details>'
     : '';
