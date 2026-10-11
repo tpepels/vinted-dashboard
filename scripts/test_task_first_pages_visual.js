@@ -17,7 +17,11 @@ const chrome = process.env.CHROME_BIN || execFileSync(
   {encoding:"utf8"}).trim();
 const fixture=[
   'const $=selector=>document.querySelector(selector);',
-  'const $$=selector=>Array.from(document.querySelectorAll(selector));'
+  'const $$=selector=>Array.from(document.querySelectorAll(selector));',
+  '// Production moves these single-instance panels to the connector page.',
+  '$("#connector-page-settings").appendChild($("#connector-config"));',
+  '$("#connector-page-biblio").appendChild($("#biblio-compare-panel"));',
+  '$("#connector-page-vinted").appendChild($("#paired-browsers-panel"));'
 ].join("\n");
 const assertions=[
   '(function(){try {',
