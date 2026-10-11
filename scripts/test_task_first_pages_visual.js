@@ -34,7 +34,7 @@ const assertions=[
   '  button.click();',
   '  if(button.getAttribute("aria-selected")!=="true")throw Error(group+": selection not announced");',
   '  for(const alt of labels){',
-  '   const panel=$("[data-workspace-panel="+group+":"+alt+"]");',
+  '   const panel=$$("[data-workspace-panel]").find(x=>x.dataset.workspacePanel===group+":"+alt);',
   '   const expected=alt===label;',
   '   if((getComputedStyle(panel).display!=="none")!==expected)',
   '      throw Error(group+": expected exactly "+label+" panel, failed "+alt);',
