@@ -279,7 +279,7 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
 
     versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.2.zip")
     assert versioned.status_code == 200
-    assert "v3.4.1.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.2.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
