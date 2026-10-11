@@ -2648,7 +2648,7 @@ function renderBiblioActivity(activity, operational) {
   }).join("");
   const history = '<details class="biblio-task-panel biblio-history-panel"'
     + (state.biblioActivityExpanded ? ' open' : '') + '><summary>'
-    + '<span><strong>What has the dashboard sent?</strong><small>Recent transfers and individual photo results</small></span>'
+    + '<span><strong>Past BIBLIO uploads</strong><small>Review previous transfers if something is missing</small></span>'
     + '</summary><div class="biblio-task-inner">'
     + '<p>“Sent” means that BIBLIO received the files. BIBLIO may need additional time to process and display the books and photos.</p>'
     + '<p>For a newly added book, BIBLIO may not recognize its photos immediately. The dashboard automatically attempts one later photo follow-up when needed; you normally do not need to resend all photos.</p>'
@@ -2657,7 +2657,7 @@ function renderBiblioActivity(activity, operational) {
   const advanced = operational
     ? '<details class="biblio-task-panel biblio-recovery-panel"'
       + (state.biblioRecoveryExpanded ? ' open' : '') + '><summary>'
-      + '<span><strong>Advanced recovery</strong><small>Resend everything only when normal uploads have not worked</small></span></summary>'
+      + '<span><strong>Other troubleshooting</strong><small>Only for unusual problems affecting many books</small></span></summary>'
       + '<div class="biblio-task-inner">'
       + '<div class="biblio-recovery-row"><div><strong>Resend all photos</strong><p>Reuploads pictures for every active BIBLIO book. Use the one-book tool above for a single missing image.</p></div>'
       + '<button class="btn biblio-retry-photos" type="button">Resend all photos…</button></div>'
@@ -2667,11 +2667,7 @@ function renderBiblioActivity(activity, operational) {
       + '</div></details>'
     : '';
   return '<div class="biblio-human-workflow">'
-    + overview + latest
-    + '<div class="biblio-next-actions">'
-    + '<button class="btn biblio-open-compare" type="button">Compare BIBLIO inventory</button>'
-    + '<span>Download a listing file from your BIBLIO seller account; checking it here does not alter your books.</span>'
-    + '</div>'
+    + '<div class="biblio-status-overview">' + overview + latest + '</div>'
     + photoHelp + history + advanced
     + '</div>';
 }
@@ -5506,6 +5502,29 @@ async function refreshMarketplaceOperations() {
   if (scoped) renderMarketplaceOperations(scoped, "#connector-operations-list");
 }
 
+const developerPanel = $("#marketplace-development-panel");
+if (developerPanel) developerPanel.addEventListener("toggle", async () => {
+  if (!developerPanel.open) return;
+  const root = $("#marketplace-development");
+  root.textContent = "Loading technical diagnostics…";
+  try {
+    const development = await api("/api/app/connectors/development");
+    if (developerPanel.open) {
+      state.marketplaceDevelopment = development;
+      renderMarketplaceDevelopment(development);
+    }
+  } catch (error) {
+    if (developerPanel.open) root.textContent = "Could not load diagnostics: " + error.message;
+  }
+});
+["#marketplace-operations-panel", "#connector-page-activity"].forEach(selector => {
+  const panel = $(selector);
+  if (panel) panel.addEventListener("toggle", () => {
+    if (panel.open) refreshMarketplaceOperations().catch(error =>
+      flash("Could not load marketplace activity: " + error.message, true));
+  });
+});
+
 $("#marketplace-operations-refresh").onclick = async () => {
   const button = $("#marketplace-operations-refresh");
   button.disabled = true;
@@ -5689,23 +5708,23 @@ async function connections() {
     clearTimeout(state.biblioActivityTimer);
     state.biblioActivityTimer = null;
   }
-  const [data, devices, biblioActivity, development] = await Promise.all([
+  const [data, devices, biblioActivity] = await Promise.all([
     api("/api/app/connectors"),
     api("/api/app/extension/devices"),
     api("/api/app/connectors/biblio/activity").catch(() => null),
-    api("/api/app/connectors/development").catch(() => null),
   ]);
   if (state.view !== requestedView) return data;
   state.connectors = data.connectors || [];
   state.biblioActivity = biblioActivity;
-  state.marketplaceDevelopment = development;
-  renderMarketplaceDevelopment(development);
-  try {
-    await refreshMarketplaceOperations();
-  } catch (error) {
-    const message = "Marketplace activity is unavailable. Refresh to try again.";
-    $("#marketplace-operations-list").textContent = message;
-    if (currentConnectorPage()) $("#connector-operations-list").textContent = message;
+  // Activity is requested only when the user opens it, not on every
+  // connection refresh. This keeps ordinary pages fast and quiet.
+  if ($("#marketplace-operations-panel")?.open || $("#connector-page-activity")?.open) {
+    try { await refreshMarketplaceOperations(); }
+    catch {
+      const message = "Activity is unavailable. Refresh to try again.";
+      if ($("#marketplace-operations-panel")?.open) $("#marketplace-operations-list").textContent = message;
+      if ($("#connector-page-activity")?.open) $("#connector-operations-list").textContent = message;
+    }
   }
   if (state.view !== requestedView) return data;
   if (requestedView === "connector-biblio" && $("#biblio-dashboard-postings-panel")?.open) {
@@ -5720,10 +5739,10 @@ async function connections() {
   const checkedCount = integrated.filter(connector =>
     connectorHealth(connector).state === "verified").length;
   $("#connection-health-summary").textContent = integrated.length
-    ? integrated.length + " marketplace account(s) configured · " + checkedCount
-      + " with recently checked read access"
+    ? integrated.length + " connected account" + (integrated.length === 1 ? "" : "s")
       + (attentionCount ? " · " + attentionCount + " need attention" : "")
-    : "No marketplace account configured yet. Set up one below, then test and import.";
+      + (checkedCount ? " · " + checkedCount + " recently checked" : "")
+    : "Start by choosing a marketplace below.";
   const featured = state.connectors.filter(connector =>
     connectorPageChannels.includes(connector.channel)
     && (connector.configured || connector.channel === "vinted" || connector.channel === "biblio")
@@ -5752,27 +5771,44 @@ async function connections() {
       const biblioStats = biblioActivity?.health || {};
       const pending = Number(biblioStats.inventory_changes_pending || 0)
         + Number(biblioStats.deletes_pending || 0);
+      const photoAttention = Number(biblioStats.photo_attention || 0);
       return '<section class="connector connector--biblio" data-connector-channel="biblio" aria-label="BIBLIO">'
-        + '<div class="connector-header"><div><h2>BIBLIO</h2><p>Send and maintain book listings in your BIBLIO seller account.</p></div>'
+        + '<div class="connector-header"><div><h2>Sell your books on BIBLIO</h2>'
+        + '<p>Choose a book, review its listing and send it to BIBLIO.</p></div>'
         + '<span class="connection-state ' + esc(health.state) + '">'
-        + esc(ready ? health.label : "Setup required") + '</span></div>'
-        + (ready
-          ? '<div class="biblio-primary-task"><div><strong>' + (pending > 0
-              ? pending + ' listing change' + (pending === 1 ? '' : 's') + ' waiting to be sent'
-              : 'No unsent listing changes reported') + '</strong>'
-            + '<p>To cross-post another book, choose it in Inventory, review its BIBLIO details, then send changes here. The dashboard cannot confirm live publication.</p></div>'
-            + '<div class="biblio-primary-buttons"><button class="btn biblio-go-inventory" type="button">Choose a book to publish</button>'
-            + '<button class="btn primary sync" data-c="biblio" type="button">Send pending changes</button></div></div>'
-          : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, choose a book from Inventory, review it, and send it to BIBLIO.</p>')
-        + '<p class="biblio-photo-setup-note"><strong>Before sending multiple photos:</strong> Ask BIBLIO support to enable your filename pattern (BookID.jpg, BookID_1.jpg, BookID_2.jpg). '
-        + 'Otherwise an FTP transfer can succeed while the extra photos never appear. '
-        + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" rel="noopener noreferrer">Photo setup instructions</a>.</p>'
-        + renderBiblioActivity(biblioActivity, ready)
-        + '<div class="connector-settings-row">' + configure
-        + (ready ? '<button class="btn test-marketplace" data-c="biblio" type="button">Check FTP login</button>' : '')
+        + esc(ready ? health.label : "Connect your account") + '</span></div>'
+        + '<div class="connector-task-grid" aria-label="BIBLIO tasks">'
+        + '<button class="connector-task-card biblio-go-inventory" type="button">'
+        + '<strong>Publish a book <span aria-hidden="true">→</span></strong>'
+        + '<span>Choose a book in Inventory and review its details.</span></button>'
+        + '<button class="connector-task-card biblio-fix-photos" type="button"' + (ready ? '' : ' disabled') + '>'
+        + '<strong>Fix missing photos <span aria-hidden="true">→</span></strong>'
+        + '<span>' + (photoAttention ? photoAttention + ' books may need attention.' : 'Check and repair photos for one book.') + '</span></button>'
+        + '<button class="connector-task-card biblio-verify" type="button"' + (ready ? '' : ' disabled') + '>'
+        + '<strong>Check my BIBLIO listings <span aria-hidden="true">→</span></strong>'
+        + '<span>Compare with a file exported from your seller account.</span></button>'
         + '</div>'
-        + '<p class="connector-next-step"><strong>Connection:</strong> ' + esc(health.message) + ' '
-          + esc(health.next) + '</p>'
+        + (ready
+          ? '<div class="connector-action-strip"><div><strong>'
+            + (pending ? pending + ' change' + (pending === 1 ? '' : 's') + ' ready to send'
+              : 'No pending changes') + '</strong>'
+            + '<p>' + (pending ? 'Send your prepared listing changes when ready.'
+              : 'To add a book, choose Publish a book above.') + '</p></div>'
+            + '<button class="btn primary sync" data-c="biblio" type="button"'
+            + (pending ? '' : ' disabled title="No changes waiting to be sent"')
+            + '>Send ' + (pending ? pending + ' pending change' + (pending === 1 ? '' : 's') : 'changes') + '</button></div>'
+          : '<div class="connector-action-strip"><div><strong>Account setup needed</strong>'
+            + '<p>Connect your BIBLIO seller account before sending books or photos.</p></div>'
+            + '<button class="btn primary configure" data-c="biblio" type="button">Connect BIBLIO</button></div>')
+        + renderBiblioActivity(biblioActivity, ready)
+        + '<details class="connection-technical-help connector-account-help"><summary>Account and photo setup</summary>'
+        + '<p>Photos use the BIBLIO filename pattern BookID.jpg, BookID_1.jpg, BookID_2.jpg. '
+        + 'Your seller account must support this pattern for multiple photos to appear. '
+        + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" rel="noopener noreferrer">BIBLIO photo setup guide</a>.</p>'
+        + '<p>' + esc(health.message) + ' ' + esc(health.next) + '</p></details>'
+        + '<div class="connector-settings-row">' + (ready ? configure : '')
+        + (ready ? '<button class="btn test-marketplace" data-c="biblio" type="button">Check account access</button>' : '')
+        + '</div>'
         + '</section>';
     }
     if (channel === "vinted") {
@@ -5781,13 +5817,19 @@ async function connections() {
         + '<div class="connector-header"><div><h2>Vinted</h2><p>Your Vinted data comes from the Chrome browser extension while you are signed in to Vinted.</p></div>'
         + '<span class="connection-state ' + (paired ? 'ready' : 'not-ready') + '">'
         + (paired ? paired + ' browser' + (paired === 1 ? '' : 's') + ' paired' : 'Browser not paired') + '</span></div>'
-        + '<div class="actions"><button class="btn pair" type="button">' + (paired ? 'Pair another browser' : 'Pair a Chrome browser') + '</button>'
-        + '<a class="btn" href="' + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
-        + '">Download Chrome extension</a></div>'
-        + '<p class="connector-version">Chrome extension version ' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</p>'
+        + '<div class="connector-action-strip"><div><strong>' + (paired ? 'Your browser is connected' : 'Connect your browser')
+        + '</strong><p>' + (paired ? 'Vinted sends saved listing data from your browser; no aggressive background scans.'
+          : 'Install the extension and pair it to receive listing updates.') + '</p></div>'
+        + '<button class="btn primary pair" type="button">' + (paired ? 'Connect another browser' : 'Connect Chrome') + '</button></div>'
+        + '<div class="connector-utility-actions"><a class="btn" href="'
+        + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
+        + '">Download extension v' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</a>'
+        + '<button class="btn vinted-open-browsers" type="button">Manage browsers</button></div>'
         + '<div class="pairing-inline hidden"><p>Enter this code in the Chrome extension within 10 minutes:</p>'
         + '<strong class="pair-code pair-code-inline"></strong></div>'
-        + '<p class="connector-workflow-hint">Pairing allows uploads; it does not start one. Open Vinted with the extension active to collect new listings and sales. If Vinted has not updated recently, check the extension.</p>'
+        + '<p class="connector-workflow-hint">Updates are deliberately limited to at most once every two hours. '
+        + 'The extension does not open or refresh Vinted tabs in the background. '
+        + 'If Vinted restricts access, syncing pauses for 24 hours.</p>'
         + '<p class="connector-last-sync">Latest Vinted data received: <strong>'
         + (connector.last_synced_at ? esc(when(connector.last_synced_at)) : 'not recorded yet')
         + '</strong></p>'
@@ -5795,17 +5837,21 @@ async function connections() {
     }
     const statusText = health.label;
     return '<section class="connector connector--other" data-connector-channel="' + name + '">'
-      + '<div class="connector-header"><div><h2>' + display + '</h2></div>'
+      + '<div class="connector-header"><div><h2>' + display + '</h2>'
+      + '<p>Bring marketplace listings and sales into your dashboard.</p></div>'
       + '<span class="connection-state ' + esc(health.state) + '">' + esc(statusText) + '</span></div>'
       + '<p class="connector-health-copy">' + esc(health.message) + '</p>'
-      + '<div class="actions">' + configure
+      + '<div class="connector-action-strip"><div><strong>'
+      + (connector.sync_available ? 'Bring in your latest listings' : 'Set up your account') + '</strong>'
+      + '<p>' + esc(health.next) + '</p></div><div class="connector-utility-actions">'
+      + (connector.sync_available
+        ? '<button class="btn primary sync" data-c="' + name + '" type="button">'
+          + (health.state === "attention" ? "Retry import…" : "Import listings") + '</button>'
+        : '')
+      + configure + '</div></div>'
       + (connector.operational && connectorSchemas[channel]?.test
         ? '<button class="btn test-marketplace" data-c="' + name
-          + '" type="button">Test read access</button>' : '')
-      + (connector.sync_available
-        ? '<button class="btn sync" data-c="' + name + '" type="button">'
-          + (health.state === "attention" ? "Retry import…" : "Import latest data") + '</button>'
-        : '') + '</div>'
+          + '" type="button">Check account access</button>' : '')
       + '<p class="connector-next-step"><strong>Next:</strong> ' + esc(health.next) + '</p>'
       + '<p class="connector-last-sync">' + lastSeen + '</p>'
       + latestAttempt
@@ -5825,8 +5871,8 @@ async function connections() {
     const detail = isVinted
       ? "Browser pairing, extension and received data"
       : channel === "biblio"
-        ? "Books, photos, FTP and seller inventory checks"
-        : "Credentials, read access, imports and activity";
+        ? "Publish books, fix photos and check listings"
+        : "Bring in listings, set up an account or troubleshoot";
     return '<button type="button" class="connector-overview-link" data-c="' + esc(channel)
       + '" data-connector-channel="' + esc(channel) + '"><span class="connector-overview-title">'
       + '<strong>' + esc(label) + '</strong><small>' + esc(status) + '</small></span>'
@@ -5844,12 +5890,22 @@ async function connections() {
   const current = state.connectors.find(connector => connector.channel === selectedChannel);
   $("#connector-page-heading").textContent = current?.display_name
     || (selectedChannel === "vinted" ? "Vinted" : connectorSchemas[selectedChannel]?.title || "Marketplace");
-  $("#connector-page-description").textContent = current?.description ||
-    (selectedChannel === "vinted"
-      ? "Review the Chrome extension and paired browsers."
-      : "Account details, imports and troubleshooting for this marketplace.");
+  $("#connector-page-description").textContent = selectedChannel === "biblio"
+    ? "Publish a book, correct photos or check what BIBLIO has listed."
+    : selectedChannel === "vinted"
+      ? "Connect your browser and review your latest Vinted updates."
+      : "Import listings, manage your account or check an issue.";
+  // Preserve panels the user has opened when refreshing, rather than making
+  // expanded instructions unexpectedly disappear on every repaint.
+  const openBiblioPanels = [".biblio-photos-panel", ".biblio-history-panel",
+    ".biblio-recovery-panel", ".biblio-photo-manual-id", ".biblio-photo-advanced"]
+    .filter(selector => $("#connector-page-card " + selector)?.open);
   $("#connector-page-card").innerHTML = current ? connectorHtml(current)
     : '<p class="muted">This marketplace is not available in the current workspace.</p>';
+  openBiblioPanels.forEach(selector => {
+    const panel = $("#connector-page-card " + selector);
+    if (panel) panel.open = true;
+  });
   $("#other-marketplaces-count").textContent = String(other.length);
   $("#other-marketplaces").classList.toggle("hidden", other.length === 0);
   $("#biblio-compare-panel").classList.toggle("hidden",
@@ -5888,6 +5944,19 @@ async function connections() {
   });
   $$(".biblio-go-inventory").forEach(button => {
     button.onclick = () => selectView("inventory");
+  });
+  $$(".biblio-fix-photos").forEach(button => {
+    button.onclick = () => openMarketplaceRecovery("biblio_photos");
+  });
+  $$(".biblio-verify").forEach(button => {
+    button.onclick = () => openMarketplaceRecovery("biblio_compare");
+  });
+  $$(".vinted-open-browsers").forEach(button => {
+    button.onclick = () => {
+      const panel = $("#paired-browsers-panel");
+      panel.open = true;
+      panel.scrollIntoView({behavior:"smooth",block:"start"});
+    };
   });
   $$(".sync").forEach((button) => {
     button.onclick = async () => {
@@ -6083,13 +6152,8 @@ async function connections() {
     };
   });
 
-  const currentStatus = String(biblioActivity?.current?.status || "");
-  if (["queued", "running"].includes(currentStatus) && state.view === "connector-biblio") {
-    if (state.biblioPhotoInspection) inspectBiblioPhotoTarget();
-    state.biblioActivityTimer = setTimeout(() => {
-      if (state.view === "connector-biblio") connections();
-    }, 2500);
-  }
+  // Never replace an open form every 2.5 seconds while the user is choosing
+  // photos or reviewing a book. Explicit Refresh status remains available.
   return data;
 }
 
