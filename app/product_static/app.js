@@ -823,6 +823,11 @@ function activateWorkspaceTab(group, tab) {
   const selected = bar.querySelector('[data-workspace-tab="' + tab + '"]');
   if (!selected) return false;
   workspaceTabState[group] = tab;
+  // The cost review has its own tab. Never hide it based on the order filter.
+  if (group === "sales") {
+    const card = $("#purchase-cost-card");
+    if (card) card.classList.toggle("hidden", tab !== "costs");
+  }
   bar.querySelectorAll("[data-workspace-tab]").forEach(button => {
     const active = button === selected;
     button.classList.toggle("active", active);
@@ -981,6 +986,7 @@ async function selectView(view, {historyMode = "push"} = {}) {
     clearInterval(state.diagnosticsTimer);
     state.diagnosticsTimer = null;
   }
+  if (channel && state.view !== view) activateWorkspaceTab("connector", "overview");
   state.view = view;
   $$(".nav").forEach((button) => {
     const exact = button.dataset.view === view;
@@ -1211,8 +1217,8 @@ function renderTodayWorkQueue(rows, total) {
       const view = button.dataset.view;
       await selectView(view);
       if (button.dataset.kind === "purchase_cost" && view === "sales") {
-        $("#sales-direction").value = "buy";
-        renderSales();
+        activateWorkspaceTab("sales", "costs");
+        renderPurchaseCostSuggestions();
         $("#purchase-cost-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     };
@@ -1295,11 +1301,15 @@ $$(".today-shortcut").forEach((button) => {
   button.onclick = async () => {
     await selectView(button.dataset.view);
     if (button.dataset.action === "add-stock") {
+      activateWorkspaceTab("inventory", "items");
       $("#add-stock")?.click();
     }
   };
 });
-$("#today-open-connections").onclick = () => selectView("connections");
+$("#today-open-connections").onclick = async () => {
+  await selectView("connections");
+  activateWorkspaceTab("connections", "marketplaces");
+};
 
 function crossChannelActionControls(row) {
   const open = row.listing?.url
@@ -4015,6 +4025,7 @@ $("#stock-choice-import").onclick = async () => {
   persistStockIntakeMode("import");
   closeStockIntake();
   await selectView("imports");
+  activateWorkspaceTab("imports", "import");
 };
 $("#stock-choice-connect").onclick = async () => {
   persistStockIntakeMode("connect");
@@ -4836,6 +4847,12 @@ $("#listing-stat-oldest").onclick = () => {
   renderListings();
 };
 
+
+["#listing-stat-youngest", "#listing-stat-oldest", "#listing-stat-duplicates"].forEach(selector => {
+  // Insights can change filters, but the resulting listings are in Browse.
+  $(selector).addEventListener("click", () => activateWorkspaceTab("listings", "browse"));
+});
+
 $("#listing-reset").onclick = () => {
   $("#listing-search").value = "";
   $("#listing-channel").value = "";
@@ -4867,7 +4884,7 @@ function renderPurchaseCostSuggestions() {
   const data = state.purchaseCostSuggestions || {};
   const rows = data.suggestions || [];
   const card = $("#purchase-cost-card");
-  const visible = $("#sales-direction").value === "buy" || $("#sales-direction").value === "";
+  const visible = workspaceTabState.sales === "costs";
   card.classList.toggle("hidden", !visible);
 
   const parts = [];
@@ -5517,6 +5534,7 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
     if (currentConnectorPage() !== "biblio") await selectView("connector-biblio");
   }
   if (kind === "biblio_photos") {
+    activateWorkspaceTab("connector", "overview");
     const panel = $(".biblio-photos-panel");
     if (!panel) return flash("BIBLIO photo repair is not available. Check connection settings.", true);
     panel.open = true;
@@ -5527,6 +5545,7 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
     return;
   }
   if (kind === "biblio_compare") {
+    activateWorkspaceTab("connector", "manage");
     const panel = $("#biblio-compare-panel");
     if (!panel || panel.classList.contains("hidden")) {
       return flash("Connect BIBLIO before comparing its inventory export.", true);
@@ -5538,6 +5557,7 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
   }
   if (kind === "inspect_item" && inventoryItemId) {
     await selectView("inventory");
+    activateWorkspaceTab("inventory", "items");
     await openItemMarketplaces(inventoryItemId);
   }
 }
@@ -6132,6 +6152,7 @@ async function connections() {
   $$(".vinted-open-browsers").forEach(button => {
     button.onclick = () => {
       const panel = $("#paired-browsers-panel");
+      activateWorkspaceTab("connector", "manage");
       panel.open = true;
       panel.scrollIntoView({behavior:"smooth",block:"start"});
     };
@@ -6442,6 +6463,7 @@ function openConnectorConfig(channel, connector) {
     });
   }
   state.connectorChannel = channel;
+  activateWorkspaceTab("connector", "manage");
   $("#connector-config-title").textContent = schema.title;
   $("#connector-config-help").textContent = schema.help;
   const savedValues = connector?.saved_values || {};

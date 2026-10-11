@@ -104,7 +104,12 @@
             <button class="btn today-shortcut" type="button" data-view="connections">Check sources</button>
           </div>
         </div>
-        <div id="today-metrics" class="metrics"></div>
+        
+<div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Today" data-workspace-tabs="today">
+<button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="today-tasks-panel" data-workspace-tab="tasks">What needs doing</button>
+<button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="today-overview-panel" data-workspace-tab="overview">Numbers & sources</button>
+</div>
+        <div id="today-tasks-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="today:tasks">
         <div class="today-layout">
           <div class="card today-work">
             <div class="card-head inline-head">
@@ -113,6 +118,10 @@
             </div>
             <div id="today-actions"></div>
           </div>
+        </div>
+        </div>
+        <div id="today-overview-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="today:overview">
+          <div id="today-metrics" class="metrics"></div>
           <div class="card today-sources">
             <details id="today-sources-details" class="today-sources-details">
               <summary><span><strong>Marketplace status</strong>
@@ -124,10 +133,16 @@
               </div>
             </details>
           </div>
+
         </div>
       </section>
 
       <section id="inventory" class="view">
+        <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Inventory" data-workspace-tabs="inventory">
+        <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="inventory-items-panel" data-workspace-tab="items">My stock</button>
+        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="inventory-checks-panel" data-workspace-tab="checks">Stock checks</button>
+        </div>
+        <div id="inventory-items-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="inventory:items">
         <div class="toolbar standard-toolbar dashboard-primary-toolbar">
           <input id="inventory-q" class="search" placeholder="Find a book by title or SKU" aria-label="Find inventory">
           <select id="inventory-status" aria-label="Inventory status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select>
@@ -143,6 +158,9 @@
             <button id="inventory-reset" class="btn" type="button">Reset filters</button>
           </div>
         </details>
+                <div id="inventory-table" class="card table-wrap"></div>
+        </div>
+        <div id="inventory-checks-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="inventory:checks">
         <details class="dashboard-task-disclosure" id="inventory-relationship-tools">
           <summary>Check stock links and possible duplicates</summary>
           <div class="inventory-relation-audit">
@@ -162,6 +180,7 @@
             <div id="store-stock-audit-results" role="region" aria-label="Store stock check results"></div>
           </div>
         </details>
+        </div>
         <div id="stock-intake-panel" class="card form stock-intake hidden">
           <div class="card-head inline-head">
             <div><p class="eyebrow">ADD STOCK</p><h2>How is this stock available?</h2></div>
@@ -382,7 +401,7 @@
           <label>Notes<textarea name="notes" rows="3"></textarea></label>
           <div class="actions"><button id="save-item" class="btn primary">Save</button><button class="btn" type="button" id="cancel-item">Cancel</button></div>
         </form>
-        <div id="inventory-table" class="card table-wrap"></div>
+
       </section>
 
       <section id="reconcile" class="view">
@@ -439,6 +458,11 @@
       </section>
 
       <section id="listings" class="view">
+        <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Listings" data-workspace-tabs="listings">
+        <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="listings-browse-panel" data-workspace-tab="browse">Browse listings</button>
+        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="listings-insights-panel" data-workspace-tab="insights">Listing insights</button>
+        </div>
+        <div id="listings-insights-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="listings:insights">
         <div class="listing-stats-primary">
           <article class="card mini-metric"><span>Shown</span><strong id="listing-stat-count">0</strong></article>
           <button class="card mini-metric age-stat" id="listing-stat-youngest" type="button" title="Show Vinted listings with the youngest real posting first">
@@ -462,6 +486,8 @@
           </div>
         </details>
 
+        </div>
+        <div id="listings-browse-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="listings:browse">
         <div class="toolbar listing-toolbar dashboard-primary-toolbar">
           <input id="listing-search" class="search" placeholder="Search title or SKU">
           <select id="listing-channel" aria-label="Marketplace">
@@ -508,9 +534,15 @@
         </details>
 
         <div id="listings-table" class="card table-wrap"></div>
+        </div>
       </section>
 
       <section id="sales" class="view">
+        <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Sales" data-workspace-tabs="sales">
+        <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="sales-orders-panel" data-workspace-tab="orders">Orders</button>
+        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="sales-costs-panel" data-workspace-tab="costs">Record purchase costs</button>
+        </div>
+        <div id="sales-costs-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="sales:costs">
         <div id="purchase-cost-card" class="card form hidden">
           <div class="card-head inline-head">
             <div><p class="eyebrow">PURCHASE COSTS</p><h2>Fill acquisition costs from Vinted purchases</h2></div>
@@ -519,6 +551,8 @@
           <p class="muted">Unique exact-title purchase matches are suggested only. The order amount is prefilled as a cost candidate, but edit it before applying if Vinted's amount includes shipping, buyer protection or anything else you do not want in stock cost.</p>
           <div id="purchase-cost-suggestions" class="table-wrap" role="region" aria-label="Purchase cost suggestions"></div>
         </div>
+        </div>
+        <div id="sales-orders-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="sales:orders">
         <div class="toolbar standard-toolbar dashboard-primary-toolbar">
           <select id="sales-direction" aria-label="Order direction">
             <option value="sell" selected>Sales</option>
@@ -540,6 +574,7 @@
             <option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option><option value="shopify">Shopify</option><option value="bigcommerce">BigCommerce</option><option value="squarespace">Squarespace</option><option value="wix">Wix</option><option value="depop">Depop</option>
           </select></label></div></details>
         <div id="sales-table" class="card table-wrap"></div>
+        </div>
       </section>
 
       <section id="analytics" class="view">
@@ -601,6 +636,11 @@
       </section>
 
       <section id="connections" class="view">
+        <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Marketplaces" data-workspace-tabs="connections">
+        <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="connections-marketplaces-panel" data-workspace-tab="marketplaces">My marketplaces</button>
+        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="connections-activity-panel" data-workspace-tab="activity">Recent activity</button>
+        </div>
+        <div id="connections-marketplaces-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="connections:marketplaces">
         <div class="card">
           <div class="card-head inline-head">
             <div><p class="eyebrow">YOUR SALES CHANNELS</p><h2>Your marketplaces</h2><p class="muted connections-intro-copy">Choose a marketplace to publish books, bring in listings, or resolve a problem. Account settings and technical information stay out of the way.</p></div>
@@ -650,6 +690,8 @@
           <div class="actions"><button class="btn primary">Save connection</button><button id="test-connector" class="btn hidden" type="button">Test read access</button><button id="remove-connector" class="btn danger hidden" type="button">Remove credentials</button></div>
           <p id="connector-config-status" class="muted"></p>
         </form>
+        </div>
+        <div id="connections-activity-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="connections:activity">
         <details id="marketplace-operations-panel" class="card connection-task-panel">
           <summary><span><strong>Recent activity</strong><small>See completed actions and anything that needs your attention</small></span></summary>
           <div class="connection-task-content">
@@ -658,6 +700,7 @@
             <div id="marketplace-operations-list"><p class="muted">Loading activity…</p></div>
           </div>
         </details>
+        </div>
         <details id="paired-browsers-panel" class="card connection-task-panel">
           <summary><span><strong>My connected browsers</strong><small>See and disconnect devices paired with Vinted</small></span></summary>
           <div id="devices" class="connection-task-content"></div>
@@ -675,7 +718,15 @@
           </div>
           <button id="connector-page-refresh" class="btn" type="button">Refresh status</button>
         </div>
+        <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Marketplace tasks" data-workspace-tabs="connector">
+        <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="connector-overview-panel" data-workspace-tab="overview">Get started</button>
+        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-manage-panel" data-workspace-tab="manage">Listings & account</button>
+        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-activity-panel" data-workspace-tab="activity">Activity</button>
+        </div>
+        <div id="connector-overview-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="connector:overview">
         <div id="connector-page-card" class="connector-page-content" role="region" aria-label="Marketplace connection and actions"></div>
+        </div>
+        <div id="connector-manage-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="connector:manage">
         <div id="connector-page-settings" class="connector-page-secondary"></div>
         <div id="connector-page-biblio" class="connector-page-secondary">
           <details id="biblio-dashboard-postings-panel" class="card connection-task-panel">
@@ -691,6 +742,8 @@
           </details>
         </div>
         <div id="connector-page-vinted" class="connector-page-secondary"></div>
+        </div>
+        <div id="connector-activity-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="connector:activity">
         <details id="connector-page-activity" class="card connection-task-panel">
           <summary><span><strong>What happened recently?</strong><small>See imports, uploads, and actions that may need your attention</small></span></summary>
           <div class="connection-task-content">
@@ -698,14 +751,23 @@
             <div id="connector-operations-list" role="status"><p class="muted">Loading marketplace activity…</p></div>
           </div>
         </details>
+        </div>
       </section>
 
       <section id="settings" class="view">
+        <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Settings" data-workspace-tabs="settings">
+        <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="settings-account-panel" data-workspace-tab="account">Account</button>
+        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="settings-support-panel" data-workspace-tab="support">Help & diagnostics</button>
+        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="settings-advanced-panel" data-workspace-tab="advanced">Advanced</button>
+        </div>
+        <div id="settings-account-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="settings:account">
         <div class="two">
           <form id="settings-form" class="card form"><h2>Workspace</h2><label>Name<input id="settings-name"></label><button class="btn primary">Save</button></form>
           <div class="card form"><h2>Billing</h2><div id="billing"></div></div>
         </div>
         <div class="card form"><h2>Your data</h2><a class="btn" href="/api/app/account/export">Download account data</a><p class="muted">Your inventory, listings and sales remain exportable.</p></div>
+        </div>
+        <div id="settings-support-tab-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="settings:support">
         <details id="marketplace-development-panel" class="card marketplace-development-panel">
           <summary><strong>Developer diagnostics</strong> · technical capabilities and code coverage</summary>
           <p class="muted">For troubleshooting only: implementation coverage, not a marketplace account status. A completed transfer does not prove that a book or photo is publicly visible.</p>
@@ -738,9 +800,12 @@
           </div>
         </div>
         </details>
+        </div>
+        <div id="settings-advanced-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="settings:advanced">
         <details class="dashboard-task-disclosure dashboard-danger-details"><summary>Delete workspace</summary>
         <div class="card form"><h2>Delete workspace</h2><p class="muted">This permanently deletes this workspace and its marketplace data. Download an export first.</p><label>Type <code id="delete-workspace-slug"></code> to confirm<input id="delete-workspace-confirm" autocomplete="off"></label><button id="delete-workspace" class="btn danger" type="button">Delete workspace permanently</button></div>
         </details>
+        </div>
       </section>
     </main>
   </div>

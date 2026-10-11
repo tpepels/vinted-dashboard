@@ -105,12 +105,16 @@ function runBrowserAssertions(){
     if(byId("connector-config").classList.contains("hidden")
         ||!byId("connector-page-settings").contains(byId("connector-config")))
       throw Error("BIBLIO credential form did not open in its page");
+    if(getComputedStyle(byId("connector-manage-panel")).display==="none")
+      throw Error("BIBLIO account form opened in a hidden tab");
     await selectView("connector-shopify");
     if(!byId("connector-config").classList.contains("hidden"))
       throw Error("Old connector settings leaked into Shopify");
     if(!byId("connector-page-card").querySelector(".sync[data-c=shopify]"))
       throw Error("Shopify importer absent");
     await selectView("connector-vinted");
+    if(getComputedStyle(byId("connector-overview-panel")).display==="none")
+      throw Error("Changing marketplaces must reopen the overview tab");
     if(!byId("connector-page-vinted").contains(byId("paired-browsers-panel"))||
        !byId("connector-page-card").querySelector(".pair"))
       throw Error("Vinted browser controls absent");
