@@ -828,6 +828,18 @@ function activateWorkspaceTab(group, tab) {
     const card = $("#purchase-cost-card");
     if (card) card.classList.toggle("hidden", tab !== "costs");
   }
+  if (group === "connector" && tab === "photos") {
+    const photos = $("#connector-page-photos .biblio-photos-panel");
+    if (photos) {
+      photos.open = true;
+      state.biblioPhotoExpanded = true;
+      loadBiblioPhotoChoices().catch(() => {});
+    }
+  }
+  if (group === "connector" && tab === "activity") {
+    const activity = $("#connector-page-activity");
+    if (activity) activity.open = true;
+  }
   bar.querySelectorAll("[data-workspace-tab]").forEach(button => {
     const active = button === selected;
     button.classList.toggle("active", active);
@@ -848,10 +860,12 @@ $$("[data-workspace-tabs]").forEach(bar => {
     button.onkeydown = event => {
       if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
       event.preventDefault();
+      const visibleTabs = tabs.filter(tab => !tab.classList.contains("hidden"));
+      const position = visibleTabs.indexOf(button);
       const indexNext = event.key === "Home" ? 0
-        : event.key === "End" ? tabs.length - 1
-        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-      const next = tabs[indexNext];
+        : event.key === "End" ? visibleTabs.length - 1
+        : (position + (event.key === "ArrowRight" ? 1 : -1) + visibleTabs.length) % visibleTabs.length;
+      const next = visibleTabs[indexNext];
       activateWorkspaceTab(group, next.dataset.workspaceTab);
       next.focus();
     };
@@ -5534,7 +5548,7 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
     if (currentConnectorPage() !== "biblio") await selectView("connector-biblio");
   }
   if (kind === "biblio_photos") {
-    activateWorkspaceTab("connector", "overview");
+    activateWorkspaceTab("connector", "photos");
     const panel = $(".biblio-photos-panel");
     if (!panel) return flash("BIBLIO photo repair is not available. Check connection settings.", true);
     panel.open = true;
@@ -5545,7 +5559,7 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
     return;
   }
   if (kind === "biblio_compare") {
-    activateWorkspaceTab("connector", "manage");
+    activateWorkspaceTab("connector", "listings");
     const panel = $("#biblio-compare-panel");
     if (!panel || panel.classList.contains("hidden")) {
       return flash("Connect BIBLIO before comparing its inventory export.", true);
@@ -6097,13 +6111,56 @@ async function connections() {
   // expanded instructions unexpectedly disappear on every repaint.
   const openBiblioPanels = [".biblio-photos-panel", ".biblio-history-panel",
     ".biblio-recovery-panel", ".biblio-photo-manual-id", ".biblio-photo-advanced"]
-    .filter(selector => $("#connector-page-card " + selector)?.open);
+    .filter(selector => $(selector)?.open);
   $("#connector-page-card").innerHTML = current ? connectorHtml(current)
     : '<p class="muted">This marketplace is not available in the current workspace.</p>';
+
+  // Keep technical recovery and the multi-step wizard out of the overview.
+  // Moving actual DOM nodes (instead of duplicating them) preserves the same
+  // IDs, inputs, event handlers and single source of truth.
+  ["#connector-page-photos", "#connector-page-biblio-activity"].forEach(selector => {
+    $(selector).replaceChildren();
+  });
+  if (selectedChannel === "biblio") {
+    const photoWizard = $("#connector-page-card .biblio-photos-panel");
+    if (photoWizard) $("#connector-page-photos").appendChild(photoWizard);
+    for (const selector of [".biblio-history-panel", ".biblio-recovery-panel"]) {
+      const panel = $("#connector-page-card " + selector);
+      if (panel) $("#connector-page-biblio-activity").appendChild(panel);
+    }
+  }
   openBiblioPanels.forEach(selector => {
-    const panel = $("#connector-page-card " + selector);
+    const panel = $(selector);
     if (panel) panel.open = true;
   });
+  if (selectedChannel === "biblio" && workspaceTabState.connector === "photos") {
+    const wizard = $("#connector-page-photos .biblio-photos-panel");
+    if (wizard) wizard.open = true;
+  }
+
+  // Hide irrelevant tabs; these are tasks, not arbitrary account internals.
+  const isBiblio = selectedChannel === "biblio";
+  const isVinted = selectedChannel === "vinted";
+  const canRepairPhotos = isBiblio && Boolean($("#connector-page-photos .biblio-photos-panel"));
+  $(".connector-photos-tab").classList.toggle("hidden", !canRepairPhotos);
+  $(".connector-listings-tab").classList.toggle("hidden", !isBiblio);
+  const accountTab = $(".connector-account-tab");
+  accountTab.textContent = isVinted ? "My browsers" : "Account";
+  $("#connector-account-title").textContent = isVinted ? "Connected Chrome browsers" : "Account connection";
+  $("#connector-account-help").textContent = isVinted
+    ? "Manage devices that send Vinted updates to the dashboard."
+    : "Review access and change how this marketplace is connected.";
+  const accountHealth = current ? connectorHealth(current) : null;
+  $("#connector-account-status").textContent = isVinted
+    ? (devices.devices || []).filter(device => !device.revoked).length + " paired browser(s)"
+    : accountHealth?.label || "Not connected";
+  $("#connector-account-status-description").textContent = isVinted
+    ? "The Chrome extension updates saved data without constant Vinted background scans."
+    : accountHealth?.message || "Connect an account to get started.";
+  $("#connector-account-configure").classList.toggle("hidden", isVinted || !connectorSchemas[selectedChannel]);
+  if (selectedChannel !== "biblio" && ["photos","listings"].includes(workspaceTabState.connector)) {
+    activateWorkspaceTab("connector", "overview");
+  }
   $("#other-marketplaces-count").textContent = String(other.length);
   $("#other-marketplaces").classList.toggle("hidden", other.length === 0);
   $("#biblio-compare-panel").classList.toggle("hidden",
@@ -6111,6 +6168,7 @@ async function connections() {
   );
   const openCompare = $(".biblio-open-compare");
   if (openCompare) openCompare.onclick = () => {
+    activateWorkspaceTab("connector", "listings");
     const panel = $("#biblio-compare-panel");
     panel.open = true;
     panel.scrollIntoView({behavior:"smooth", block:"start"});
@@ -6134,6 +6192,11 @@ async function connections() {
   $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
+  // The account shortcut keeps credentials separate from daily actions.
+  $("#connector-account-configure").onclick = () => {
+    if (!selectedChannel || !connectorSchemas[selectedChannel]) return;
+    openConnectorConfig(selectedChannel, current);
+  };
   // The actual connector controls exist on one dedicated page at a time.
   // Navigation cards on the overview never duplicate mutation buttons.
 
@@ -6152,7 +6215,7 @@ async function connections() {
   $$(".vinted-open-browsers").forEach(button => {
     button.onclick = () => {
       const panel = $("#paired-browsers-panel");
-      activateWorkspaceTab("connector", "manage");
+      activateWorkspaceTab("connector", "account");
       panel.open = true;
       panel.scrollIntoView({behavior:"smooth",block:"start"});
     };
@@ -6463,7 +6526,7 @@ function openConnectorConfig(channel, connector) {
     });
   }
   state.connectorChannel = channel;
-  activateWorkspaceTab("connector", "manage");
+  activateWorkspaceTab("connector", "account");
   $("#connector-config-title").textContent = schema.title;
   $("#connector-config-help").textContent = schema.help;
   const savedValues = connector?.saved_values || {};

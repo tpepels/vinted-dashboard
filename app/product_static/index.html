@@ -718,17 +718,23 @@
           </div>
           <button id="connector-page-refresh" class="btn" type="button">Refresh status</button>
         </div>
-        <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Marketplace tasks" data-workspace-tabs="connector">
-        <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="connector-overview-panel" data-workspace-tab="overview">Get started</button>
-        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-manage-panel" data-workspace-tab="manage">Listings & account</button>
-        <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-activity-panel" data-workspace-tab="activity">Activity</button>
+        <div class="dashboard-tabbar dashboard-section-tabs connector-workflow-tabs" role="tablist" aria-label="Marketplace tasks" data-workspace-tabs="connector">
+          <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="connector-overview-panel" data-workspace-tab="overview">Overview</button>
+          <button class="dashboard-tab connector-photos-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-photos-panel" data-workspace-tab="photos">Fix photos</button>
+          <button class="dashboard-tab connector-listings-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-listings-panel" data-workspace-tab="listings">My listings</button>
+          <button class="dashboard-tab connector-account-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-account-panel" data-workspace-tab="account">Account</button>
+          <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-activity-panel" data-workspace-tab="activity">Activity</button>
         </div>
         <div id="connector-overview-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="connector:overview">
         <div id="connector-page-card" class="connector-page-content" role="region" aria-label="Marketplace connection and actions"></div>
         </div>
-        <div id="connector-manage-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="connector:manage">
-        <div id="connector-page-settings" class="connector-page-secondary"></div>
-        <div id="connector-page-biblio" class="connector-page-secondary">
+        <div id="connector-photos-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:photos">
+          <div class="connector-task-page-heading"><h3>Fix missing photos</h3><p>Choose one book, check its pictures and send only the missing ones.</p></div>
+          <div id="connector-page-photos"></div>
+        </div>
+        <div id="connector-listings-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:listings">
+          <div class="connector-task-page-heading"><h3>My BIBLIO listings</h3><p>Review books already sent or compare them with your seller inventory.</p></div>
+          <div id="connector-page-biblio" class="connector-page-secondary">
           <details id="biblio-dashboard-postings-panel" class="card connection-task-panel">
             <summary><span><strong>Manage books already sent</strong><small>Find a book, correct its dashboard record, or prepare to send it again</small></span></summary>
             <div class="connection-task-content">
@@ -741,9 +747,19 @@
             </div>
           </details>
         </div>
-        <div id="connector-page-vinted" class="connector-page-secondary"></div>
         </div>
-        <div id="connector-activity-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="connector:activity">
+        <div id="connector-account-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:account">
+          <div class="connector-task-page-heading"><h3 id="connector-account-title">Account connection</h3><p id="connector-account-help">Review your account connection and settings.</p></div>
+          <div class="connector-account-start card">
+            <div><strong id="connector-account-status">Connection status</strong><p id="connector-account-status-description" class="muted"></p></div>
+            <button id="connector-account-configure" class="btn primary" type="button">Edit connection</button>
+          </div>
+          <div id="connector-page-settings" class="connector-page-secondary"></div>
+          <div id="connector-page-vinted" class="connector-page-secondary"></div>
+        </div>
+        <div id="connector-activity-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:activity">
+        <div class="connector-task-page-heading"><h3>Recent activity</h3><p>See uploads, imports and items that may need your attention.</p></div>
+        <div id="connector-page-biblio-activity"></div>
         <details id="connector-page-activity" class="card connection-task-panel">
           <summary><span><strong>What happened recently?</strong><small>See imports, uploads, and actions that may need your attention</small></span></summary>
           <div class="connection-task-content">
