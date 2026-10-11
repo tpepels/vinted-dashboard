@@ -389,13 +389,9 @@ async function runSync(reason="manual"){
   const statusData=await chrome.storage.local.get(["syncStatus","lastSyncAttemptAt"]);
   const previousStatus=statusData?.syncStatus||{};
   const lastAttempt=Number(statusData?.lastSyncAttemptAt||0);
-  const recentAttempt=lastAttempt>0&&Date.now()-lastAttempt<SYNC_INTERVAL_MS;
-  if(recentAttempt)return{
-    ...previousStatus,ok:true,reason,
-    sync_skipped_for_interval:true,
-    next_sync_at:lastAttempt+SYNC_INTERVAL_MS,
-  };
   const apiCooldownUntil=Number(previousStatus.api_cooldown_until||0);
+  // An access-denial cooldown takes precedence over the ordinary interval,
+  // including for a manual request. Never mask a 24h pause as a 2h wait.
   if(apiCooldownUntil>Date.now()){
     return{
       ...previousStatus,
@@ -405,6 +401,12 @@ async function runSync(reason="manual"){
       api_cooldown_until:apiCooldownUntil,
     };
   }
+  const recentAttempt=lastAttempt>0&&Date.now()-lastAttempt<SYNC_INTERVAL_MS;
+  if(recentAttempt)return{
+    ...previousStatus,ok:true,reason,
+    sync_skipped_for_interval:true,
+    next_sync_at:lastAttempt+SYNC_INTERVAL_MS,
+  };
   syncInFlight=(async()=>{
     let temporary=null;
     try{
