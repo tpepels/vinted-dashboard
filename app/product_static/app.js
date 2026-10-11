@@ -2492,7 +2492,14 @@ function biblioPhotoInspectionHtml() {
           + '</label>').join("")
         + '</div></fieldset>' : '')
     + job
-    + '<p class="muted">These counts describe the dashboard and its file transfers, not pictures visible to buyers. Check the book on BIBLIO to confirm the result.</p>'
+    + '<p class="biblio-photo-alert"><strong>Multiple-photo setup:</strong> BIBLIO requires sellers to have the '
+    + 'BookID.jpg, BookID_1.jpg, BookID_2.jpg naming convention enabled on their account. '
+    + 'Contact bookseller-support@biblio.com if additional photos never appear. '
+    + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" '
+    + 'rel="noopener noreferrer">BIBLIO photo naming instructions ↗</a></p>'
+    + '<p class="muted">FTP confirmation is not proof the image is attached to the listing. '
+    + 'Allow BIBLIO processing time before sending missing photos again; '
+    + 'the image may take hours to appear in search.</p>'
     + '</div>';
 }
 
@@ -2614,7 +2621,7 @@ function renderBiblioActivity(activity, operational) {
       + '<button id="biblio-send-selected-photos" class="btn primary" type="button" disabled>Send selected missing photos…</button>'
       + '<button id="biblio-retry-failed-photos" class="btn" type="button" disabled>Retry failed photo files…</button>'
       + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend all photos for this book…</button>'
-      + '</div><p class="biblio-user-note">Select the exact missing photos after checking BIBLIO. Retry failed files for partial FTP failures; resend all only as a last resort.</p>'
+      + '</div><p class="biblio-user-note">Select the exact missing photos after checking BIBLIO. Its seller account must recognize the BookID_1.jpg multiple-photo naming convention. Allow processing time; retry only missing files, not the entire book.</p>'
       + '<div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
       + '</div></details>'
     : '';
