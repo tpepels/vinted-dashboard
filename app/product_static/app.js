@@ -2302,7 +2302,7 @@ function renderBiblioPublish(data) {
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
     ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - automatic BIBLIO upload" : "No Vinted photos available", source.photo_count ? "vinted" : null, false, false],
   ];
-  $("#biblio-publish-fields").innerHTML = rows.map(([key, label, value, sourceName, editable, required]) => {
+  const renderedFields = rows.map(([key, label, value, sourceName, editable, required]) => {
     const missing = required && (value == null || String(value).trim() === "");
     let valueHtml;
     if (editable) {
@@ -2336,7 +2336,21 @@ function renderBiblioPublish(data) {
       + valueHtml
       + (sourceName ? biblioSourceBadge(sourceName) : "")
       + '</div>';
-  }).join("");
+  });
+  // Put core listing fields up front. The extended BIBLIO catalogue format has
+  // many useful but optional fields; rendering all of them at once obscures
+  // the actual publication decision.
+  const essentials = new Set(["title","author","description","isbn","condition",
+    "price_cents","book_id","quantity","photos"]);
+  const standardRows = renderedFields.filter((_, index) => essentials.has(rows[index][0]));
+  const extraRows = renderedFields.filter((_, index) => !essentials.has(rows[index][0]));
+  $("#biblio-publish-fields").innerHTML =
+    '<div class="biblio-review-main"><h3>Check this listing</h3>'
+    + '<p class="muted">These are the details that matter before publishing.</p>'
+    + standardRows.join("") + '</div>'
+    + '<details class="biblio-optional-book-fields"><summary>Edition, publication and catalogue details ('
+    + extraRows.length + ' optional fields)</summary>'
+    + '<div class="biblio-review-extra">' + extraRows.join("") + '</div></details>';
 
   const missing = data.missing || [];
   let warning = "";
