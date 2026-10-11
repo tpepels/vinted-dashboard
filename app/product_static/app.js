@@ -902,7 +902,7 @@ async function selectView(view, {historyMode = "push"} = {}) {
     state.diagnosticsTimer = null;
   }
   state.view = view;
-  $(".nav").forEach((button) => {
+  $$(".nav").forEach((button) => {
     const exact = button.dataset.view === view;
     const parentActive = Boolean(channel)
       && $("#shell").classList.contains("sidebar-collapsed")
