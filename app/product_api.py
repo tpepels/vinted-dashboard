@@ -3710,6 +3710,34 @@ def cross_list_publish(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/api/app/connectors/biblio/dashboard-postings")
+def biblio_dashboard_postings(context: RequestContext = Depends(require_context)):
+    """List local BIBLIO records, including intentionally removed copies."""
+    with db.session_scope() as session:
+        rows = session.execute(select(
+            models.ChannelListing, models.InventoryItem,
+        ).join(
+            models.InventoryItem, models.InventoryItem.id == models.ChannelListing.inventory_item_id,
+        ).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.channel == Channel.BIBLIO,
+            models.InventoryItem.workspace_id == context.workspace.id,
+        ).order_by(
+            models.ChannelListing.last_seen_at.desc(),
+        ).limit(2000)).all()
+        return {
+            "postings": [{
+                "book_id": listing.external_id,
+                "inventory_item_id": str(item.id),
+                "title": listing.title or item.title,
+                "dashboard_removed": bool(dict(listing.extra or {}).get("dashboard_removed")),
+                "dashboard_status": listing.status,
+                "photo_count": len((listing.extra or {}).get("image_urls") or []),
+                "photo_state": (listing.extra or {}).get("photo_sync_state"),
+            } for listing, item in rows],
+        }
+
+
 class BiblioLocalRemoveRequest(BaseModel):
     book_id: str = Field(min_length=1, max_length=200)
 
