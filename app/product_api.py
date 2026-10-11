@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, StrictInt
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, update
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake, store_stock_audit
 from app.stock_relations import record_physical_quantity, confirm_physical_relation, is_physical, is_provisional
@@ -3770,22 +3770,65 @@ def remove_biblio_listing_locally(
         listing = matches[0]
         if dict(listing.extra or {}).get("dashboard_removed"):
             return {"ok": True, "already_removed": True, "book_id": listing.external_id}
-        jobs_active = session.execute(select(BackgroundJob.id).where(
+        # A newly added book normally has one delayed photo-only pickup
+        # queued for the next day. Cancelling that *specific future job* is
+        # safe; a queued immediate/full or already-running FTP job is not.
+        now = utcnow()
+        jobs_active = session.execute(select(BackgroundJob).where(
             BackgroundJob.workspace_id == context.workspace.id,
             BackgroundJob.job_type == "biblio_sync",
             BackgroundJob.status.in_(["queued", "running"]),
-        ).limit(1)).first()
+        )).scalars().all()
+        for job in jobs_active:
+            job_payload = dict(job.payload or {})
+            is_future_follow_up = (
+                job.status == "queued"
+                and job.available_at is not None
+                and job.available_at > now
+                and job_payload.get("automatic_photo_retry") is True
+                and str(job_payload.get("listing_id") or "") == str(listing.id)
+                and job_payload.get("photos_only") is True
+            )
+            if not is_future_follow_up:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A BIBLIO transfer is queued or running. Wait for it to finish before removing the local listing.",
+                )
+        # All outstanding jobs are now known to be future pickups of this
+        # listing. Conditional status update fails closed if a worker won
+        # the claim concurrently.
+        for job in jobs_active:
+            updated = session.execute(update(BackgroundJob).where(
+                BackgroundJob.id == job.id,
+                BackgroundJob.workspace_id == context.workspace.id,
+                BackgroundJob.status == "queued",
+                BackgroundJob.available_at > now,
+            ).values(status="cancelled", completed_at=now)).rowcount
+            if updated != 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A scheduled photo job just started. Refresh after it finishes.",
+                )
+            operation = session.execute(select(MarketplaceOperation).where(
+                MarketplaceOperation.workspace_id == context.workspace.id,
+                MarketplaceOperation.job_id == job.id,
+                MarketplaceOperation.status == "queued",
+            )).scalar_one_or_none()
+            if operation is not None:
+                operation.status = "cancelled"
+                operation.verification = "no_remote_changes"
+                operation.active_key = None
+                operation.completed_at = now
         ops_active = session.execute(select(MarketplaceOperation.id).where(
             MarketplaceOperation.workspace_id == context.workspace.id,
             MarketplaceOperation.channel == Channel.BIBLIO,
             MarketplaceOperation.status.in_(["queued", "running"]),
         ).limit(1)).first()
-        if jobs_active or ops_active:
+        if ops_active:
             raise HTTPException(
                 status_code=409,
-                detail="A BIBLIO transfer is queued or running. Wait for it to finish before removing the local listing.",
+                detail="Another BIBLIO transfer is queued or running. Wait for it before removing the dashboard listing.",
             )
-        now = utcnow()
         extra = dict(listing.extra or {})
         extra["dashboard_removed"] = True
         extra["dashboard_removed_at"] = now.isoformat()
