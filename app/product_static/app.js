@@ -2637,6 +2637,14 @@ function biblioPhotoSelectedIndices() {
 function setBiblioPhotoStep(step) {
   if (!["choose", "review", "confirm"].includes(step)) return;
   state.biblioPhotoStep = step;
+  const progress = ["choose", "review", "confirm"];
+  $$(".biblio-progress-item").forEach(item => {
+    const current = item.dataset.biblioProgress === step;
+    item.classList.toggle("is-complete",
+      progress.indexOf(item.dataset.biblioProgress) < progress.indexOf(step));
+    if (current) item.setAttribute("aria-current", "step");
+    else item.removeAttribute("aria-current");
+  });
   const stages = {choose:"#biblio-photo-choose-step",review:"#biblio-photo-review-step",
     confirm:"#biblio-photo-confirm-step"};
   Object.entries(stages).forEach(([name, selector]) => {
@@ -2780,7 +2788,11 @@ function renderBiblioActivity(activity, operational) {
       + (state.biblioPhotoExpanded ? ' open' : '') + '>'
       + '<summary><span><strong>Fix photos for one book</strong><small>A guided, three-step check</small></span></summary>'
       + '<div class="biblio-task-inner biblio-photo-wizard">'
-      + '<div class="biblio-photo-progress" aria-label="Repair progress">Choose book → Select photos → Confirm</div>'
+      + '<div class="biblio-photo-progress" role="list" aria-label="Photo repair progress">'
+      + '<span role="listitem" class="biblio-progress-item" data-biblio-progress="choose"><span class="biblio-progress-number" aria-hidden="true">1</span>Choose book</span>'
+      + '<span role="listitem" class="biblio-progress-item" data-biblio-progress="review"><span class="biblio-progress-number" aria-hidden="true">2</span>Select photos</span>'
+      + '<span role="listitem" class="biblio-progress-item" data-biblio-progress="confirm"><span class="biblio-progress-number" aria-hidden="true">3</span>Confirm</span>'
+      + '</div>'
       + '<div id="biblio-photo-choose-step" class="biblio-photo-stage'
       + (state.biblioPhotoStep !== "choose" ? ' hidden' : '') + '">'
       + '<p class="biblio-photo-step-count">Step 1 of 3</p><h3>Which book needs photos?</h3>'
