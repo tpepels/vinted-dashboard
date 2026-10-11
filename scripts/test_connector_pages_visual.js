@@ -59,6 +59,7 @@ const mocks=[
   'async function refreshMarketplaceOperations(){',
   '$("#marketplace-operations-list").textContent="Activity available";',
   '$("#connector-operations-list").textContent="Channel activity available";}',
+  'function setBiblioPhotoStep(){}',
   'function renderBiblioActivity(){return "<details class=\\\"biblio-task-panel biblio-photos-panel\\\"><summary>Fix photos for one book</summary></details>";}',
   'function connectorHealth(row){return {state:row.configured?"verified":"setup",',
   'label:row.configured?"Read access checked":"Not set up",',
