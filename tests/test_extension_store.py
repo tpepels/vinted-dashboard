@@ -125,7 +125,7 @@ def test_dev_build_can_use_local_http_and_replaces_homepage(tmp_path):
 
 def test_publish_inspection_rejects_invalid_package_and_reads_version(tmp_path):
     output = tmp_path / "store.zip"
-    build_extension.build("store", "https://dashboard.example", output, "3.4.1")
+    build_extension.build("store", "https://dashboard.example", output, "3.4.2")
     manifest = publish_store.inspect_package(output)
     assert manifest["manifest_version"] == 3
     assert manifest["version"] == "3.4.2"
@@ -273,11 +273,11 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.1.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.2.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.1"
+    assert response.headers["x-bridge-version"] == "3.4.2"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.1.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.2.zip")
     assert versioned.status_code == 200
     assert "v3.4.1.zip" in versioned.headers["content-disposition"]
 
@@ -328,7 +328,7 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert "error.vintedRateLimited=true" in content
     assert 'if(status==="active")throw error;' in content
     assert "secondaryRateLimited=true" in content
-    assert "const queue=missing;" in content
+    assert "const queue=missing.slice(0,3);" in content
     assert "if(!detailSync.rate_limited)" in content
 
 
