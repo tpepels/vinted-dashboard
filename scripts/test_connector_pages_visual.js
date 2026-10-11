@@ -87,6 +87,12 @@ function runBrowserAssertions(){
       if(routeFromHash()!=="connector-"+channel)throw Error("Bad URL route "+channel);
       if(!document.querySelector("#connector-detail").classList.contains("active"))
         throw Error("Page is not visible "+channel);
+      if(document.querySelector("#connector-page-biblio").classList.contains("hidden")
+          !==(channel!=="biblio"))
+        throw Error("BIBLIO tools leaked into "+channel);
+      if(document.querySelector("#connector-page-vinted").classList.contains("hidden")
+          !==(channel!=="vinted"))
+        throw Error("Vinted browser controls leaked into "+channel);
     }
     await selectView("connector-biblio");
     const byId=id=>document.getElementById(id);
