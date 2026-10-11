@@ -41,6 +41,9 @@ const state = {
   biblioPhotoTarget: "",
   biblioPhotoInspection: null,
   biblioPhotoError: "",
+  biblioPhotoStep: "choose",
+  biblioPhotoSelection: [],
+  biblioPhotoConnectionChecked: false,
   biblioActivityTimer: null,
   biblioInventoryTimer: null,
   storeStockAuditTimer: null,
@@ -2440,67 +2443,100 @@ function biblioActivityDetail(row) {
   return parts.join(" · ") || "BIBLIO transfer recorded.";
 }
 
+function biblioPhotoAccessProblem(info) {
+  const errors = [info?.photo_error, info?.job?.error].filter(Boolean).join(" ");
+  // Server/login errors require a fresh read-only connection check. Merely
+  // having missing FTP receipts is not proof that a photo is absent online.
+  return /BDB0004|fop_read_meta|vsftpd|FTP sync failed|login failed|authentication|permission denied|connection refused|cannot connect/i.test(errors);
+}
+
 function biblioPhotoInspectionHtml() {
   const info = state.biblioPhotoInspection;
-  if (state.biblioPhotoError) return '<p class="error">' + esc(state.biblioPhotoError) + '</p>';
-  if (!info) return '<p class="muted">Choose a book, or enter its BIBLIO Book ID, to see what photos the dashboard has and what was last sent.</p>';
+  if (state.biblioPhotoError) return '<p class="biblio-photo-error" role="alert">' + esc(state.biblioPhotoError) + '</p>';
+  if (!info) return '';
+  const files = Array.isArray(info.file_progress) ? info.file_progress : [];
   const known = Number(info.biblio_source_photos || 0);
   const vinted = info.vinted_source_photos;
-  const difference = vinted != null && Number(vinted) !== known
-    ? '<p class="biblio-photo-alert">Vinted and staged BIBLIO photo counts differ. Resending this book will refresh the source first.</p>'
-    : "";
-  const job = info.job
-    ? '<p class="muted">Most recent targeted job: ' + esc(info.job.status)
-      + (info.job.available_at ? ' · ' + esc(when(info.job.available_at)) : '')
-      + (info.job.error ? ' · ' + esc(info.job.error) : '') + '</p>'
-    : "";
-  return '<div class="biblio-photo-inspection-details">'
-    + '<strong>' + esc(info.title || info.book_id) + '</strong>'
-    + '<div class="diagnostics-pills">'
-    + '<span>Saved in dashboard <strong>' + known + '</strong></span>'
-    + '<span>Available on Vinted <strong>' + esc(vinted == null ? "unknown" : vinted) + '</strong></span>'
-    + '<span>Last sent count <strong>' + esc(info.last_ftp_photo_count ?? "unrecorded") + '</strong></span>'
-    + '</div>'
-    + difference
-    + '<details class="biblio-photo-files"><summary>Technical file names</summary><p>' + esc((info.filenames || []).join(", ") || "None") + '</p></details>'
-    + '<p class="muted">Dashboard transfer status: ' + esc(info.photo_state || "not sent")
-    + (info.last_ftp_photo_at ? ' · last FTP ' + esc(when(info.last_ftp_photo_at)) : '') + '</p>'
-    + (info.photo_error ? '<p class="error">' + esc(info.photo_error) + '</p>' : '')
-    + ((info.file_progress || []).length
-      ? '<details class="biblio-photo-files"><summary>File transfer evidence (' + Number(info.successful_file_transfers || 0)
-        + ' previously accepted by FTP; ' + Number(info.unconfirmed_file_transfers || 0)
-        + ' without a recorded receipt)</summary>'
-        + (info.file_progress || []).map(file =>
-          '<div class="' + (file.sent_to_ftp ? 'muted' : 'error') + '">' + esc(file.filename)
-          + ' · ' + (file.sent_to_ftp ? 'Previously accepted by FTP' : 'No matching successful FTP receipt')
-          + '</div>').join("") + '</details>'
+  const mismatch = vinted != null && Number(vinted) !== known;
+  const problem = biblioPhotoAccessProblem(info);
+  return '<div class="biblio-photo-review">'
+    + (problem
+      ? '<div class="biblio-wizard-warning" role="alert"><strong>The last BIBLIO upload failed.</strong>'
+        + '<p>You can review your photos now, but check the BIBLIO connection before sending any again.</p></div>'
+      : info.photo_error
+        ? '<div class="biblio-wizard-warning"><strong>Some photos may not have transferred.</strong>'
+          + '<p>Review what is actually displayed on BIBLIO before choosing photos to resend.</p></div>'
+        : '')
+    + '<p class="biblio-photo-source-title">' + esc(info.title || info.book_id) + '</p>'
+    + (mismatch
+      ? '<p class="biblio-wizard-warning">Vinted and staged BIBLIO photo counts differ. You can refresh prepared photos below.</p>'
       : '')
-    + ((info.file_progress || []).length
-      ? '<fieldset class="biblio-missing-photo-set"><legend>Which photos are missing on BIBLIO?</legend>'
-        + '<p class="muted">Check the book on BIBLIO, then select only the images it is missing.</p>'
+    + (files.length
+      ? '<fieldset class="biblio-missing-photo-set"><legend>Select photos missing on BIBLIO</legend>'
         + '<div class="biblio-photo-choice-grid">'
-        + (info.file_progress || []).map(file =>
+        + files.map(file =>
           '<label class="biblio-photo-choice"><input type="checkbox" name="biblio-missing-photo" value="'
-          + Number(file.index) + '">'
+          + Number(file.index) + '"'
+          + (state.biblioPhotoSelection.includes(Number(file.index)) ? ' checked' : '') + '>'
           + (file.preview_url
             ? '<img src="' + esc(file.preview_url) + '" alt="Source photo '
               + (Number(file.index) + 1) + '" loading="lazy">'
-            : '<span class="biblio-photo-no-preview">No preview</span>')
+            : '<span class="biblio-photo-no-preview">Photo preview unavailable</span>')
           + '<strong>Photo ' + (Number(file.index) + 1) + '</strong>'
-          + '<small>' + esc(file.filename) + '</small>'
-          + '<small>' + (file.sent_to_ftp ? 'Previously sent to FTP' : 'No FTP receipt') + '</small>'
-          + '</label>').join("")
-        + '</div></fieldset>' : '')
-    + job
-    + '<p class="biblio-photo-alert"><strong>Multiple-photo setup:</strong> BIBLIO requires sellers to have the '
-    + 'BookID.jpg, BookID_1.jpg, BookID_2.jpg naming convention enabled on their account. '
-    + 'Contact bookseller-support@biblio.com if additional photos never appear. '
-    + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" '
-    + 'rel="noopener noreferrer">BIBLIO photo naming instructions ↗</a></p>'
-    + '<p class="muted">FTP confirmation is not proof the image is attached to the listing. '
-    + 'Allow BIBLIO processing time before sending missing photos again; '
-    + 'the image may take hours to appear in search.</p>'
-    + '</div>';
+          + '</label>').join('')
+        + '</div></fieldset>'
+      : '<p class="biblio-wizard-warning">No prepared photos found for this book. Update prepared photos below before continuing.</p>')
+    + '<details class="biblio-photo-files biblio-photo-diagnostics"><summary>Technical transfer details</summary>'
+    + '<p>Saved in dashboard: ' + known
+    + ' · Available on Vinted: ' + esc(vinted == null ? "unknown" : vinted)
+    + ' · Last sent count: ' + esc(info.last_ftp_photo_count ?? "unrecorded") + '</p>'
+    + '<p>Dashboard transfer status: ' + esc(info.photo_state || "not sent")
+    + (info.last_ftp_photo_at ? ' · last FTP ' + esc(when(info.last_ftp_photo_at)) : '') + '</p>'
+    + (info.photo_error ? '<p class="error">' + esc(info.photo_error) + '</p>' : '')
+    + (info.job?.error ? '<p class="error">' + esc(info.job.error) + '</p>' : '')
+    + '<p>' + Number(info.successful_file_transfers || 0) + ' FTP receipts · '
+    + Number(info.unconfirmed_file_transfers || 0) + ' files without a receipt</p>'
+    + files.map(file => '<p>' + esc(file.filename) + ': '
+      + (file.sent_to_ftp ? 'Previously accepted by FTP' : 'No matching successful FTP receipt') + '</p>').join('')
+    + '</details></div>';
+}
+
+function biblioPhotoSelectedIndices() {
+  return $$(".biblio-missing-photo-set input:checked").map(input => Number(input.value))
+    .filter(Number.isInteger);
+}
+
+function setBiblioPhotoStep(step) {
+  if (!["choose", "review", "confirm"].includes(step)) return;
+  state.biblioPhotoStep = step;
+  const stages = {choose:"#biblio-photo-choose-step",review:"#biblio-photo-review-step",
+    confirm:"#biblio-photo-confirm-step"};
+  Object.entries(stages).forEach(([name, selector]) => {
+    const element = $(selector);
+    if (element) element.classList.toggle("hidden", name !== step);
+  });
+  if (step === "review") {
+    const count = biblioPhotoSelectedIndices().length;
+    const countLabel = $("#biblio-photo-selected-count");
+    if (countLabel) countLabel.textContent = count
+      ? count + " photo" + (count === 1 ? "" : "s") + " selected"
+      : "Select the photos you want to send";
+    const next = $("#biblio-send-selected-photos");
+    if (next) next.disabled = !state.biblioPhotoInspection?.active || !count;
+  }
+  if (step === "confirm") {
+    const selected = state.biblioPhotoSelection;
+    const summary = $("#biblio-photo-confirm-summary");
+    if (summary) summary.textContent = selected.length + " photo"
+      + (selected.length === 1 ? "" : "s") + " for "
+      + (state.biblioPhotoInspection?.title || state.biblioPhotoTarget);
+    const check = biblioPhotoAccessProblem(state.biblioPhotoInspection);
+    const gate = $("#biblio-photo-connection-gate");
+    if (gate) gate.classList.toggle("hidden", !check);
+    const send = $("#biblio-confirm-selected-photos");
+    if (send) send.disabled = !state.biblioPhotoInspection?.active || !selected.length
+      || (check && !state.biblioPhotoConnectionChecked);
+  }
 }
 
 async function loadBiblioPhotoChoices() {
@@ -2531,12 +2567,9 @@ function resetBiblioPhotoInspection(value) {
   if (value !== state.biblioPhotoInspection?.book_id) {
     state.biblioPhotoInspection = null;
     state.biblioPhotoError = "";
-    const retry = $("#biblio-retry-listing-photos");
-    if (retry) retry.disabled = true;
-    const selective = $("#biblio-retry-failed-photos");
-    if (selective) selective.disabled = true;
-    const report = $("#biblio-photo-inspection");
-    if (report) report.innerHTML = biblioPhotoInspectionHtml();
+    state.biblioPhotoSelection = [];
+    state.biblioPhotoConnectionChecked = false;
+    setBiblioPhotoStep("choose");
   }
 }
 
@@ -2546,34 +2579,41 @@ async function inspectBiblioPhotoTarget() {
   state.biblioPhotoTarget = target;
   state.biblioPhotoError = "";
   state.biblioPhotoInspection = null;
+  state.biblioPhotoConnectionChecked = false;
   if (!target) {
-    state.biblioPhotoError = "Enter a BIBLIO Book ID.";
+    state.biblioPhotoError = "Choose a book to continue.";
   } else {
     try {
       state.biblioPhotoInspection = await api(
         "/api/app/connectors/biblio/photo-status?book_id=" + encodeURIComponent(target)
       );
     } catch (error) {
-      state.biblioPhotoError = error.message;
+      state.biblioPhotoError = "Could not load photos: " + error.message;
     }
   }
-  $("#biblio-photo-inspection").innerHTML = biblioPhotoInspectionHtml();
+  const report = $("#biblio-photo-inspection");
+  if (report) report.innerHTML = biblioPhotoInspectionHtml();
+  state.biblioPhotoSelection = [];
+  $$(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
+    input.onchange = () => {
+      state.biblioPhotoSelection = biblioPhotoSelectedIndices();
+      setBiblioPhotoStep("review");
+    };
+  });
   const retry = $("#biblio-retry-listing-photos");
   if (retry) retry.disabled = !state.biblioPhotoInspection?.active
     || !(state.biblioPhotoInspection.biblio_source_photos || state.biblioPhotoInspection.vinted_source_photos);
-  const chooser = $("#biblio-send-selected-photos");
-  if (chooser) chooser.disabled = true;
-  $$(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
-    input.onchange = () => {
-      if (chooser) chooser.disabled = !state.biblioPhotoInspection?.active
-        || !$$(".biblio-missing-photo-set input:checked").length;
-    };
-  });
   const selective = $("#biblio-retry-failed-photos");
   if (selective) selective.disabled = !state.biblioPhotoInspection?.active
     || !state.biblioPhotoInspection?.photo_error
     || !(state.biblioPhotoInspection?.successful_file_transfers > 0)
     || !(state.biblioPhotoInspection?.unconfirmed_file_transfers > 0);
+  if (state.biblioPhotoInspection) setBiblioPhotoStep("review");
+  else {
+    setBiblioPhotoStep("choose");
+    const error = $("#biblio-photo-choose-error");
+    if (error) error.textContent = state.biblioPhotoError;
+  }
 }
 
 function renderBiblioActivity(activity, operational) {
@@ -2610,29 +2650,62 @@ function renderBiblioActivity(activity, operational) {
   const photoHelp = operational
     ? '<details class="biblio-task-panel biblio-photos-panel"'
       + (state.biblioPhotoExpanded ? ' open' : '') + '>'
-      + '<summary><span><strong>Fix photos for one book</strong><small>Compare the source images and send only what is missing on BIBLIO</small></span></summary>'
-      + '<div class="biblio-task-inner">'
+      + '<summary><span><strong>Fix photos for one book</strong><small>A guided, three-step check</small></span></summary>'
+      + '<div class="biblio-task-inner biblio-photo-wizard">'
+      + '<div class="biblio-photo-progress" aria-label="Repair progress">Choose book → Select photos → Confirm</div>'
+      + '<div id="biblio-photo-choose-step" class="biblio-photo-stage'
+      + (state.biblioPhotoStep !== "choose" ? ' hidden' : '') + '">'
+      + '<p class="biblio-photo-step-count">Step 1 of 3</p><h3>Which book needs photos?</h3>'
       + '<label class="biblio-field-label" for="biblio-photo-book-select">Choose a BIBLIO book</label>'
       + '<select id="biblio-photo-book-select"><option value="">Loading books when opened…</option></select>'
       + '<details class="biblio-photo-manual-id"><summary>Enter a book ID instead</summary>'
-      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '"></details>'
-      + '<p class="biblio-user-note"><strong>1. Choose a book.</strong> Compare its published photos on BIBLIO with the source photos here. The dashboard cannot read BIBLIO’s live images.</p>'
-      + '<div class="actions biblio-photo-recovery-controls">'
-      + '<button id="biblio-inspect-photos" class="btn" type="button">2. Show source photos</button>'
+      + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="'
+      + esc(state.biblioPhotoTarget) + '"></details>'
+      + '<p id="biblio-photo-choose-error" class="error" role="alert"></p>'
+      + '<button id="biblio-inspect-photos" class="btn primary" type="button">Continue →</button>'
       + '</div>'
-      + '<p class="biblio-user-note">Source photos wrong or outdated? The next action replaces the dashboard’s prepared images from your <em>last saved</em> Vinted listing. It does not browse Vinted or send anything to BIBLIO.</p>'
-      + '<button id="biblio-refresh-photo-sources" class="btn" type="button">Update prepared photos from saved Vinted listing</button>'
+      + '<div id="biblio-photo-review-step" class="biblio-photo-stage'
+      + (state.biblioPhotoStep !== "review" ? ' hidden' : '') + '">'
+      + '<p class="biblio-photo-step-count">Step 2 of 3</p><h3>Which photos are missing?</h3>'
+      + '<p class="muted">Compare with the book on BIBLIO, then select only photos that need to be sent. '
+      + 'This dashboard cannot see BIBLIO’s published photos.</p>'
       + '<div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
-      + '<div class="actions biblio-photo-recovery-controls">'
-      + '<button id="biblio-send-selected-photos" class="btn primary" type="button" disabled>3. Send only selected missing photos…</button>'
+      + '<div class="biblio-wizard-actions">'
+      + '<button id="biblio-photo-back-to-book" class="btn" type="button">← Change book</button>'
+      + '<span id="biblio-photo-selected-count" class="muted">Select photos to continue</span>'
+      + '<button id="biblio-send-selected-photos" class="btn primary" type="button" disabled>Review selection →</button>'
       + '</div>'
+      + '<details class="biblio-photo-source-tools"><summary>Are these the wrong source photos?</summary>'
+      + '<p>Replace prepared photos from the last saved Vinted listing. No Vinted scan or BIBLIO upload.</p>'
+      + '<button id="biblio-refresh-photo-sources" class="btn" type="button">Use saved Vinted photos</button>'
+      + '</details>'
       + '<details class="biblio-photo-advanced"><summary>Other photo recovery options</summary>'
-      + '<p class="muted">Use these only when the individual-photo repair cannot help. They may resend photos already received.</p>'
+      + '<p class="muted">These can resend images already transferred. Use only if selecting individual photos does not help.</p>'
       + '<div class="actions biblio-photo-recovery-controls">'
       + '<button id="biblio-retry-failed-photos" class="btn" type="button" disabled>Retry files without an FTP receipt…</button>'
       + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend every photo for this book…</button>'
       + '</div></details>'
-      + '</div></details>'
+      + '</div>'
+      + '<div id="biblio-photo-confirm-step" class="biblio-photo-stage'
+      + (state.biblioPhotoStep !== "confirm" ? ' hidden' : '') + '">'
+      + '<p class="biblio-photo-step-count">Step 3 of 3</p><h3>Ready to resend?</h3>'
+      + '<p id="biblio-photo-confirm-summary" class="biblio-photo-confirm-summary"></p>'
+      + '<p>Only the selected photos will be queued. The book listing and all other photos will stay unchanged.</p>'
+      + '<div id="biblio-photo-connection-gate" class="biblio-wizard-warning hidden">'
+      + '<strong>Previous upload failed. Check access first.</strong>'
+      + '<p>Even a successful login check does not guarantee BIBLIO will process these photos.</p>'
+      + '<button id="biblio-photo-check-connection" class="btn" type="button">Check BIBLIO connection</button>'
+      + '<p id="biblio-photo-connection-result" role="status" aria-live="polite"></p>'
+      + '</div>'
+      + '<details class="biblio-photo-source-tools"><summary>How BIBLIO handles multiple photos</summary>'
+      + '<p>Additional images require your BIBLIO seller account to support BookID.jpg, BookID_1.jpg naming. '
+      + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" rel="noopener noreferrer">BIBLIO instructions</a>.</p>'
+      + '<p>Transferring a file does not confirm publication; allow processing time before repeating uploads.</p>'
+      + '</details>'
+      + '<div class="biblio-wizard-actions">'
+      + '<button id="biblio-photo-back-to-review" class="btn" type="button">← Change selection</button>'
+      + '<button id="biblio-confirm-selected-photos" class="btn primary" type="button" disabled>Send selected photos</button>'
+      + '</div></div></div></details>'
     : '';
   const fileHistory = runs.map((run) => {
     const state = biblioActivityStatus(run);
