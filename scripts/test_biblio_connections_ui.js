@@ -55,6 +55,19 @@ assert.match(html, /Some photos could not be sent/);
 assert.match(html, /Fix photos for one book/);
 assert.match(html, /Choose a BIBLIO book/);
 assert.match(html, /biblio-photo-book-select/);
+assert.match(html, /biblio-refresh-photo-sources/);
+assert.match(html, /biblio-send-selected-photos/);
+assert.match(html, /biblio-photo-advanced/);
+assert.ok(html.indexOf('biblio-send-selected-photos') > html.indexOf('biblio-photo-inspection'),
+  "Send selected photos must follow the photo inspection");
+for (const selector of [
+  '.item-biblio-remove-local', '.item-marketplace-photos',
+  '.biblio-missing-photo-set input:checked',
+  '.biblio-posting-action',
+]) {
+  assert.ok(source.includes('$$("' + selector + '")'),
+    "Collection selector must return all matching controls: " + selector);
+}
 assert.match(html, /What has the dashboard sent/);
 assert.match(html, /Advanced recovery/);
 assert.match(html, /Resend all listings/);
