@@ -68,8 +68,8 @@ for (const selector of [
   assert.ok(source.includes('$$("' + selector + '")'),
     "Collection selector must return all matching controls: " + selector);
 }
-assert.match(html, /What has the dashboard sent/);
-assert.match(html, /Advanced recovery/);
+assert.match(html, /Past BIBLIO uploads/);
+assert.match(html, /Other troubleshooting/);
 assert.match(html, /Resend all listings/);
 assert.doesNotMatch(html, /class="biblio-task-panel biblio-recovery-panel" open/);
 assert.match(html, /Prepared does not mean published/);

@@ -972,3 +972,131 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
 @media(max-width:380px){
   .biblio-photo-choice-grid{grid-template-columns:1fr}
 }
+
+
+/* Connector workspace v2: tasks first, legible text, no collapsing columns. */
+#connector-detail,#connections,.connector-page-content,.connector-page-secondary,
+#connector-detail .connector,#connector-detail .biblio-human-workflow,
+#connector-detail .biblio-task-panel,#connector-detail .connection-task-panel,
+#connector-detail .connector-action-strip,#connector-detail .connector-task-grid{min-width:0;max-width:100%}
+#connector-detail .connector-page-title h2{font-size:clamp(24px,3vw,30px);line-height:1.2}
+#connector-detail .connector-page-title p,#connections .connections-intro-copy{font-size:14px;line-height:1.55}
+#connections .connector-overview-title strong{font-size:16px}
+#connections .connector-overview-title small,
+#connections .connector-overview-detail{font-size:13px;line-height:1.5;overflow-wrap:break-word}
+#connections .connector-overview-link{min-height:122px;align-content:center}
+#connections .connections-workflow{font-size:13px;line-height:1.55}
+#connections .connections-health-summary{margin-bottom:10px}
+#connector-detail .connector-header h2{font-size:21px;line-height:1.3}
+#connector-detail .connector-header p,
+#connector-detail .connector-health-copy,
+#connector-detail .connector-workflow-hint,
+#connector-detail .connector-next-step,
+#connector-detail .connector-last-sync{font-size:14px;line-height:1.55;color:var(--muted)}
+#connector-detail .connector .connector-header{align-items:center}
+#connector-detail .connector-task-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:20px 0}
+#connector-detail .connector-task-card{display:flex;min-width:0;min-height:140px;flex-direction:column;
+  gap:10px;justify-content:flex-start;text-align:left;padding:18px;border:1px solid var(--line);
+  border-radius:13px;background:#fbfdfc;color:var(--ink);cursor:pointer;white-space:normal}
+#connector-detail .connector-task-card strong{display:flex;align-items:flex-start;justify-content:space-between;
+  gap:12px;font-size:17px;line-height:1.35;overflow-wrap:break-word}
+#connector-detail .connector-task-card strong span{color:var(--accent);font-size:20px;flex:0 0 auto}
+#connector-detail .connector-task-card>span{font-size:14px;line-height:1.5;color:var(--muted);overflow-wrap:break-word}
+#connector-detail .connector-task-card:hover{border-color:var(--accent);background:var(--soft)}
+#connector-detail .connector-task-card:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+#connector-detail .connector-task-card:disabled{cursor:not-allowed;opacity:.55;background:#f3f4f3}
+#connector-detail .connector-action-strip{display:flex;align-items:center;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;padding:18px 20px;margin:16px 0 20px;border:1px solid #c8ded8;
+  border-radius:13px;background:var(--soft)}
+#connector-detail .connector-action-strip>div:first-child{flex:1 1 235px;min-width:0}
+#connector-detail .connector-action-strip strong{display:block;font-size:16px;line-height:1.4}
+#connector-detail .connector-action-strip p{margin:5px 0 0;color:var(--muted);font-size:14px;line-height:1.55}
+#connector-detail .connector-action-strip>.btn{flex:0 1 auto;min-height:44px;white-space:normal}
+#connector-detail .connector-utility-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+#connector-detail .connector-utility-actions>.btn{min-height:42px;white-space:normal}
+#connector-detail .connector-settings-row{margin-top:18px}
+#connector-detail .connector-account-help{margin:14px 0 6px}
+#connector-detail .connector-account-help p,
+#connector-detail .connection-technical-help p{font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+#connector-detail .biblio-human-workflow{display:grid;gap:12px}
+#connector-detail .biblio-status-overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:14px;margin:0 0 6px}
+#connector-detail .biblio-status-overview>.biblio-summary,
+#connector-detail .biblio-status-overview>.biblio-latest{margin:0;min-width:0;
+  padding:16px;background:#f8faf9;border:1px solid var(--line);border-radius:11px}
+#connector-detail .biblio-status-overview .biblio-summary p,
+#connector-detail .biblio-status-overview .biblio-latest p{font-size:14px;line-height:1.55;margin:4px 0}
+#connector-detail .biblio-status-overview .biblio-latest strong{font-size:15px}
+#connector-detail .biblio-task-panel,
+#connector-detail .connection-task-panel{border:1px solid var(--line);border-radius:12px;
+  background:#fff;overflow:visible}
+#connector-detail .biblio-task-panel>summary,
+#connector-detail .connection-task-panel>summary{display:flex;align-items:center;gap:14px;
+  padding:17px 19px;min-width:0;list-style:none;cursor:pointer}
+#connector-detail .biblio-task-panel>summary::-webkit-details-marker,
+#connector-detail .connection-task-panel>summary::-webkit-details-marker{display:none}
+#connector-detail .biblio-task-panel>summary>span,
+#connector-detail .connection-task-panel>summary>span{flex:1 1 auto;min-width:0;overflow-wrap:break-word}
+#connector-detail .biblio-task-panel>summary::after,
+#connector-detail .connection-task-panel>summary::after{content:"+";font-size:23px;
+  font-weight:400;line-height:1;color:var(--muted);flex:0 0 20px;text-align:center}
+#connector-detail .biblio-task-panel[open]>summary::after,
+#connector-detail .connection-task-panel[open]>summary::after{content:"−"}
+#connector-detail .biblio-task-panel>summary strong,
+#connector-detail .connection-task-panel>summary strong{display:block;font-size:16px;line-height:1.4}
+#connector-detail .biblio-task-panel>summary small,
+#connector-detail .connection-task-panel>summary small{display:block;font-size:13px;
+  line-height:1.55;margin-top:4px;max-width:65ch;color:var(--muted)}
+#connector-detail .biblio-task-panel>.biblio-task-inner,
+#connector-detail .connection-task-panel>.connection-task-content{padding:0 19px 20px;min-width:0}
+#connector-detail .biblio-task-inner p,
+#connector-detail .connection-task-content p{font-size:14px;line-height:1.6;overflow-wrap:break-word}
+#connector-detail .biblio-field-label{font-size:14px}
+#connector-detail .biblio-photo-recovery-controls input,
+#connector-detail .biblio-photo-recovery-controls select{min-width:0;max-width:100%}
+#connector-detail .biblio-photo-manual-id input{width:min(100%,500px);display:block;margin:9px 0}
+#connector-detail .biblio-photo-manual-id summary,
+#connector-detail .biblio-photo-advanced summary{font-size:14px;line-height:1.5;cursor:pointer}
+#connector-detail .biblio-activity-current strong,
+#connector-detail .biblio-activity-run strong{font-size:14px;line-height:1.45}
+#connector-detail .biblio-activity-current span:not(.biblio-activity-dot),
+#connector-detail .biblio-activity-run span,
+#connector-detail .biblio-activity-run time,
+#connector-detail .biblio-activity-run small,
+#connector-detail .biblio-activity-run p,
+#connector-detail .biblio-activity-note,
+#connector-detail .biblio-activity-errors{font-size:13px;line-height:1.5}
+#connector-detail .biblio-activity-run>div{flex-wrap:wrap}
+#connector-detail .biblio-photo-inspection-details p,
+#connector-detail .biblio-photo-files,
+#connector-detail .biblio-photo-files summary{font-size:13px;line-height:1.6}
+#connector-detail .biblio-photo-inspection-details,
+#connector-detail .biblio-recovery-row,
+#connector-detail .biblio-posting-row{overflow-wrap:anywhere;min-width:0}
+#connector-detail .biblio-posting-copy span,
+#connector-detail .biblio-posting-copy small{font-size:13px}
+#connector-detail .connection-task-content input,
+#connector-detail .connection-task-content select,
+#connector-detail .biblio-task-inner input,
+#connector-detail .biblio-task-inner select{max-width:100%}
+#connector-detail details>summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+#connector-detail .marketplace-activity-header p,
+#connector-detail .marketplace-activity-verification,
+#connector-detail .marketplace-activity-next{font-size:13px}
+@media(max-width:980px){
+  #connector-detail .connector-task-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #connector-detail .biblio-status-overview{grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  #connector-detail .connector-task-grid{grid-template-columns:1fr}
+  #connector-detail .connector-task-card{min-height:0;padding:16px}
+  #connector-detail .connector-action-strip{align-items:stretch;padding:15px;flex-direction:column}
+  #connector-detail .connector-action-strip>.btn,
+  #connector-detail .connector-utility-actions>.btn{width:100%;flex:1 1 100%}
+  #connector-detail .connector-utility-actions{width:100%}
+  #connector-detail .biblio-task-panel>summary,
+  #connector-detail .connection-task-panel>summary{padding:15px}
+  #connector-detail .biblio-task-panel>.biblio-task-inner,
+  #connector-detail .connection-task-panel>.connection-task-content{padding:0 15px 16px}
+  #connector-detail .connector-header .connection-state{white-space:normal;text-align:center}
+}

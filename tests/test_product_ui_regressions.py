@@ -369,7 +369,7 @@ def test_dashboard_always_shows_bridge_version_and_versioned_download():
     assert '$("#bridge-version-page").textContent = "Bridge v" + (state.me.bridge_version || "unknown");' in APP_JS
     assert "devices.download_url" in APP_JS
     assert "Download Chrome extension" in APP_JS
-    assert "Chrome extension version " in APP_JS
+    assert "Download Chrome extension v" in APP_JS
 
 
 
@@ -516,10 +516,12 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
 def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert 'api("/api/app/connectors/biblio/activity")' in APP_JS
     assert "function renderBiblioActivity(activity, operational)" in APP_JS
-    assert "Send pending changes" in APP_JS
+    assert "biblio-go-inventory" in APP_JS
+    assert "biblio-fix-photos" in APP_JS
+    assert "biblio-verify" in APP_JS
     assert "Fix photos for one book" in APP_JS
     assert "Resend every photo for this book" in APP_JS
-    assert "Advanced recovery" in APP_JS
+    assert "Other troubleshooting" in APP_JS
     assert "Resend all photos" in APP_JS
     assert "Resend all listings" in APP_JS
     assert "Prepared does not mean published" in APP_JS
@@ -771,7 +773,9 @@ def test_connections_prioritizes_actions_and_keeps_dev_matrix_collapsed():
     assert 'id="connector-detail"' in index
     assert 'id="connector-page-card"' in index
     assert 'id="sidebar-toggle"' in index
-    assert 'api("/api/app/connectors/development").catch(() => null)' in APP_JS
+    assert 'const development = await api("/api/app/connectors/development");' in APP_JS
+    assert index.index('id="settings"') < index.index('id="marketplace-development"')
+    assert "biblioActivityTimer = setTimeout" not in APP_JS
 
 
 def test_connections_uses_multi_element_queries_for_action_handlers():
@@ -881,7 +885,7 @@ def test_store_stock_controls_are_minimal_check_first_and_shared():
 
 def test_connections_shows_tasks_and_keeps_verbose_help_collapsed():
     html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text()
-    assert "Choose a marketplace to open its own page" in html
+    assert "Choose a marketplace to publish books" in html
     assert "Manage individual books in Inventory." not in html
     assert 'details class="connection-technical-help"' in APP_JS
     assert 'class="biblio-photo-manual-id"' in APP_JS
