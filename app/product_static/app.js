@@ -5823,7 +5823,7 @@ async function connections() {
         + '<button class="btn primary pair" type="button">' + (paired ? 'Connect another browser' : 'Connect Chrome') + '</button></div>'
         + '<div class="connector-utility-actions"><a class="btn" href="'
         + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
-        + '">Download extension v' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</a>'
+        + '">Download Chrome extension v' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</a>'
         + '<button class="btn vinted-open-browsers" type="button">Manage browsers</button></div>'
         + '<div class="pairing-inline hidden"><p>Enter this code in the Chrome extension within 10 minutes:</p>'
         + '<strong class="pair-code pair-code-inline"></strong></div>'
