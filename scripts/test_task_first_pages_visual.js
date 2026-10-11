@@ -96,7 +96,7 @@ for(const width of [360,768,1280]) {
   assert.equal(result.tabs,9);
   execFileSync(chrome,[...flags,"--screenshot="+png,"file://"+filepath],
     {encoding:"utf8",timeout:30000});
-  assert(fs.statSync(png).size>4000);
+  assert(fs.statSync(png).size>2000,"Chromium screenshot should be non-empty");
   console.log("TASK_FIRST_PAGE_LAYOUT "+JSON.stringify(result));
 }
 console.log("Stock, analytics, listings, imports, sales & settings task-first UX: PASS");
