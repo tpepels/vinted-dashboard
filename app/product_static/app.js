@@ -5588,6 +5588,83 @@ async function testMarketplaceConnection(channel, button) {
   }
 }
 
+function renderBiblioDashboardPostings(rows) {
+  const root = $("#biblio-postings-content");
+  if (!root) return;
+  const query = ($("#biblio-postings-search")?.value || "").trim().toLowerCase();
+  const items = (rows || []).filter(item =>
+    [item.title, item.book_id].some(value => String(value || "").toLowerCase().includes(query)));
+  const shown = items.slice(0, 100);
+  root.innerHTML = '<p class="muted">' + items.length + ' matching dashboard postings'
+    + (items.length > shown.length ? ' · showing first ' + shown.length + '; narrow the search' : '')
+    + '</p><div class="biblio-postings-list">'
+    + (shown.map(item => {
+      const removed = Boolean(item.dashboard_removed);
+      return '<article class="biblio-posting-row"><div class="biblio-posting-copy">'
+        + '<strong>' + esc(item.title || "Untitled") + '</strong>'
+        + '<span>Book ID ' + esc(item.book_id)
+        + ' · ' + (removed ? 'Removed from dashboard' : 'In dashboard') + '</span>'
+        + '<small>Source photos: ' + Number(item.photo_count || 0)
+        + ' · Last FTP photo state: ' + esc(item.photo_state || "Not sent") + '</small></div>'
+        + '<button class="btn ' + (removed ? 'primary ' : 'danger ')
+        + 'biblio-posting-action" type="button" data-item="' + esc(item.inventory_item_id)
+        + '" data-book="' + esc(item.book_id) + '" data-action="'
+        + (removed ? "readd" : "remove") + '">'
+        + (removed ? 'Review & re-add…' : 'Remove from dashboard…') + '</button></article>';
+    }).join("") || '<p class="muted">No matching BIBLIO postings in this dashboard.</p>')
+    + '</div>';
+  $(".biblio-posting-action").forEach(button => {
+    button.onclick = async () => {
+      if (button.dataset.action === "readd") {
+        await selectView("inventory");
+        await openBiblioPublish(button.dataset.item);
+        return;
+      }
+      const bookId = button.dataset.book;
+      if (!window.confirm("Remove " + bookId + " only from this dashboard? "
+        + "The book will remain on BIBLIO. No delete file will be sent. "
+        + "You can review and re-add it later using its original Book ID.")) return;
+      button.disabled = true;
+      try {
+        await api("/api/app/inventory/" + encodeURIComponent(button.dataset.item)
+          + "/marketplaces/biblio/remove-local", {
+            method:"POST", body:JSON.stringify({book_id:bookId}),
+          });
+        state.biblioBookChoices = null;
+        flash("Posting removed from dashboard. Nothing was deleted from BIBLIO.");
+        await loadBiblioDashboardPostings();
+      } catch (error) {
+        button.disabled = false;
+        flash("Could not remove dashboard posting: " + error.message,true);
+      }
+    };
+  });
+}
+
+async function loadBiblioDashboardPostings() {
+  if (currentConnectorPage() !== "biblio") return;
+  const data = await api("/api/app/connectors/biblio/dashboard-postings");
+  if (currentConnectorPage() !== "biblio") return;
+  state.biblioDashboardPostings = data.postings || [];
+  renderBiblioDashboardPostings(state.biblioDashboardPostings);
+}
+const biblioPostingsPanel = $("#biblio-dashboard-postings-panel");
+if (biblioPostingsPanel) biblioPostingsPanel.addEventListener("toggle", () => {
+  if (biblioPostingsPanel.open && currentConnectorPage() === "biblio")
+    loadBiblioDashboardPostings().catch(error =>
+      $("#biblio-postings-content").textContent = "Could not load postings: " + error.message);
+});
+const biblioPostingsSearch = $("#biblio-postings-search");
+if (biblioPostingsSearch) biblioPostingsSearch.oninput =
+  () => renderBiblioDashboardPostings(state.biblioDashboardPostings || []);
+const biblioPostingsRefresh = $("#biblio-postings-refresh");
+if (biblioPostingsRefresh) biblioPostingsRefresh.onclick = async () => {
+  biblioPostingsRefresh.disabled = true;
+  try { await loadBiblioDashboardPostings(); }
+  catch (error) { flash("Could not refresh postings: " + error.message,true); }
+  finally { biblioPostingsRefresh.disabled = false; }
+};
+
 async function connections() {
   // A connector load may finish after the user has switched pages. Do not
   // render a stale account into the currently selected connector screen.
@@ -5615,6 +5692,10 @@ async function connections() {
     if (currentConnectorPage()) $("#connector-operations-list").textContent = message;
   }
   if (state.view !== requestedView) return data;
+  if (requestedView === "connector-biblio" && $("#biblio-dashboard-postings-panel")?.open) {
+    loadBiblioDashboardPostings().catch(error =>
+      flash("Could not load BIBLIO dashboard postings: " + error.message, true));
+  }
   const integrated = state.connectors.filter(connector =>
     !["csv", "excel", "vinted"].includes(connector.channel)
     && connector.configured);
