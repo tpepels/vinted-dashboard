@@ -21,6 +21,8 @@ const fixture=[
 ].join("\n");
 const assertions=[
   '(function(){try {',
+  '$("#auth").classList.add("hidden");$("#shell").classList.remove("hidden");',
+  '["reconcile","analytics","imports"].forEach(id=>$("#"+id).classList.add("active"));',
   'const groups={reconcile:["suggestions","manual","sales","history"],',
   ' analytics:["overview","demand","detail"],imports:["import","export"]};',
   'for(const [group,labels] of Object.entries(groups)){',
