@@ -3865,6 +3865,10 @@ def _biblio_rows(
         for listing, item in listings:
             attrs = dict(item.attributes or {})
             extra = dict(listing.extra or {})
+            # Local removal must never be interpreted as an instruction to
+            # delete a live BIBLIO seller record in a subsequent FTP sync.
+            if extra.get("dashboard_removed"):
+                continue
             bibliographic = (
                 dict(extra.get("bibliographic_enrichment") or {})
                 if isinstance(extra.get("bibliographic_enrichment"), dict)
