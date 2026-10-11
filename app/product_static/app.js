@@ -5585,9 +5585,9 @@ async function connections() {
       ? '<button class="btn configure" data-c="' + name + '" type="button">'
         + (connector.configured ? 'Connection settings' : 'Set up connection') + '</button>' : '';
     if (channel === "biblio") {
-      const health = biblioActivity?.health || {};
-      const pending = Number(health.inventory_changes_pending || 0)
-        + Number(health.deletes_pending || 0);
+      const biblioStats = biblioActivity?.health || {};
+      const pending = Number(biblioStats.inventory_changes_pending || 0)
+        + Number(biblioStats.deletes_pending || 0);
       return '<section class="connector connector--biblio" data-connector-channel="biblio" aria-label="BIBLIO">'
         + '<div class="connector-header"><div><h2>BIBLIO</h2><p>Send and maintain book listings in your BIBLIO seller account.</p></div>'
         + '<span class="connection-state ' + esc(health.state) + '">'
