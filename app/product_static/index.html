@@ -606,7 +606,19 @@
         </div>
         <div id="connector-page-card" class="connector-page-content" role="region" aria-label="Marketplace connection and actions"></div>
         <div id="connector-page-settings" class="connector-page-secondary"></div>
-        <div id="connector-page-biblio" class="connector-page-secondary"></div>
+        <div id="connector-page-biblio" class="connector-page-secondary">
+          <details id="biblio-dashboard-postings-panel" class="card connection-task-panel">
+            <summary><span><strong>BIBLIO dashboard postings</strong><small>Find a book, remove its local posting or re-add it for testing</small></span></summary>
+            <div class="connection-task-content">
+              <p class="muted">Removing a posting here affects only this dashboard. It does not delete the book on BIBLIO. Re-adding reuses the same Book ID and requires reviewing the publish form.</p>
+              <div class="biblio-postings-toolbar">
+                <label>Find a book<input id="biblio-postings-search" type="search" placeholder="Title or BIBLIO Book ID"></label>
+                <button id="biblio-postings-refresh" class="btn" type="button">Refresh list</button>
+              </div>
+              <div id="biblio-postings-content" role="status" aria-live="polite">Open this section to load your postings.</div>
+            </div>
+          </details>
+        </div>
         <div id="connector-page-vinted" class="connector-page-secondary"></div>
         <details id="connector-page-activity" class="card connection-task-panel">
           <summary><span><strong>Recent activity on this marketplace</strong><small>Imports, transfers and results that may still need verification</small></span></summary>
