@@ -53,9 +53,9 @@ const button={disabled:false};
   assert(flashes.length>0);
   for (const part of [
     "id=\"connection-health-summary\"",
-    "Test read access",
-    "Save account details",
-    "Import listings",
+    "Choose a book to sell",
+    "Choose a marketplace",
+    "Your books live in Inventory",
   ]) assert(html.includes(part),"Missing workflow guidance: "+part);
   assert(js.includes('button.onclick = () => testMarketplaceConnection(button.dataset.c, button)'),
     "Account card must offer a working read test");
