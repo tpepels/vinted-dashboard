@@ -931,3 +931,17 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   .biblio-photo-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .biblio-photo-choice img{height:96px}
 }
+
+/* BIBLIO local posting controls never imply a remote seller deletion. */
+.biblio-postings-toolbar{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.biblio-postings-toolbar label{display:grid;gap:5px;flex:1 1 240px;min-width:0;
+  font-size:12px;font-weight:650}
+.biblio-postings-toolbar input{width:100%;min-width:0}
+.biblio-postings-list{display:grid;gap:8px;margin-top:10px}
+.biblio-posting-row{display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;min-width:0}
+.biblio-posting-copy{display:grid;gap:3px;min-width:0;flex:1 1 200px;overflow-wrap:anywhere}
+.biblio-posting-copy strong{font-size:12px}
+.biblio-posting-copy span,.biblio-posting-copy small{font-size:11px;color:var(--muted)}
+.biblio-posting-row .btn{flex:0 1 auto;font-size:11px;white-space:normal}
+@media(max-width:560px){.biblio-posting-row .btn{width:100%;flex:1 1 100%}}
