@@ -124,12 +124,29 @@
       </section>
 
       <section id="inventory" class="view">
-        <div class="toolbar standard-toolbar"><input id="inventory-q" class="search" placeholder="Search title or SKU"><select id="inventory-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select><select id="inventory-cost" aria-label="Acquisition cost"><option value="">All costs</option><option value="missing">Missing cost</option><option value="recorded">Cost recorded</option></select><span id="inventory-count" class="toolbar-count"></span><button id="inventory-reset" class="btn" type="button">Reset</button><span id="inventory-selected" class="toolbar-count">0 selected</span><button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button><button id="add-stock" class="btn primary" type="button">Add stock</button></div>
-        <div class="inventory-relation-audit">
+        <div class="toolbar standard-toolbar dashboard-primary-toolbar">
+          <input id="inventory-q" class="search" placeholder="Find a book by title or SKU" aria-label="Find inventory">
+          <select id="inventory-status" aria-label="Inventory status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select>
+          <span id="inventory-count" class="toolbar-count"></span>
+          <span id="inventory-selected" class="toolbar-count">0 selected</span>
+          <button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button>
+          <button id="add-stock" class="btn primary" type="button">Add stock</button>
+        </div>
+        <details id="inventory-more-filters" class="dashboard-filter-details">
+          <summary>More filters</summary>
+          <div class="dashboard-filter-grid">
+            <label>Purchase cost<select id="inventory-cost" aria-label="Acquisition cost"><option value="">All costs</option><option value="missing">Missing cost</option><option value="recorded">Cost recorded</option></select></label>
+            <button id="inventory-reset" class="btn" type="button">Reset filters</button>
+          </div>
+        </details>
+        <details class="dashboard-task-disclosure" id="inventory-relationship-tools">
+          <summary>Check stock links and possible duplicates</summary>
+          <div class="inventory-relation-audit">
           <button id="inventory-check-relations" class="btn" type="button">Check marketplace relationships</button>
           <span class="muted">Review provisional stock, same-SKU candidates, and listings requiring reconciliation. Nothing is merged automatically.</span>
           <div id="inventory-relation-report" class="hidden" role="status"></div>
-        </div>
+          </div>
+        </details>
         <details id="store-stock-audit-panel" class="card store-stock-audit">
           <summary><strong>Store stock check</strong><span class="muted">WooCommerce, Shopify and Wix · read-only</span></summary>
           <div class="store-stock-audit-body">
@@ -355,6 +372,14 @@
       </section>
 
       <section id="reconcile" class="view">
+        <p class="dashboard-page-intro">Choose the kind of stock problem you want to resolve. No records are merged without confirmation.</p>
+        <div class="dashboard-tabbar" role="tablist" aria-label="Stock reconciliation tasks" data-workspace-tabs="reconcile">
+          <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="reconcile-suggestions-panel" data-workspace-tab="suggestions">Suggested matches</button>
+          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="reconcile-manual-panel" data-workspace-tab="manual">Link a listing</button>
+          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="reconcile-sales-panel" data-workspace-tab="sales">Match a sale</button>
+          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="reconcile-history-panel" data-workspace-tab="history">Activity history</button>
+        </div>
+        <div id="reconcile-suggestions-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="reconcile:suggestions">
         <div class="card form">
           <div class="card-head inline-head">
             <div><p class="eyebrow">PHYSICAL STOCK</p><h2>Reconcile marketplace records</h2></div>
@@ -368,6 +393,8 @@
           </div>
         </div>
         <div id="reconcile-suggestions" class="card table-wrap"></div>
+        </div>
+        <div id="reconcile-manual-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="reconcile:manual">
         <div class="card form">
           <div class="card-head inline-head"><div><p class="eyebrow">MANUAL</p><h2>Link a listing to master stock</h2></div></div>
           <p class="muted">Choose a marketplace listing and the physical inventory item it belongs to. If the listing already has its own generated stock record, that record is explicitly merged into the selected master item.</p>
@@ -377,6 +404,8 @@
           </div>
           <div class="actions"><button id="reconcile-manual" class="btn primary" type="button">Link to master item</button></div>
         </div>
+        </div>
+        <div id="reconcile-sales-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="reconcile:sales">
         <div class="card form">
           <div class="card-head inline-head"><div><p class="eyebrow">SOLD STOCK</p><h2>Resolve ambiguous sales</h2></div><span id="unlinked-sale-count" class="muted"></span></div>
           <p class="muted">Exact marketplace-item matches and unique exact-title matches are linked automatically. Only duplicate-title ambiguity requires a choice here. Historical sales with no retained stock record are counted for reference but need no action.</p>
@@ -386,14 +415,17 @@
           </div>
           <div class="actions"><button id="reconcile-sale-link" class="btn primary" type="button">Link sale and reconcile channels</button></div>
         </div>
+        </div>
+        <div id="reconcile-history-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="reconcile:history">
         <div class="card table-wrap">
           <div class="card-head"><h2>Cross-channel action log</h2></div>
           <div id="cross-channel-log"></div>
         </div>
+        </div>
       </section>
 
       <section id="listings" class="view">
-        <div class="listing-stats">
+        <div class="listing-stats-primary">
           <article class="card mini-metric"><span>Shown</span><strong id="listing-stat-count">0</strong></article>
           <button class="card mini-metric age-stat" id="listing-stat-youngest" type="button" title="Show Vinted listings with the youngest real posting first">
             <span>Youngest Vinted</span><strong id="listing-stat-youngest-age">—</strong><small id="listing-stat-youngest-detail">No exact date</small>
@@ -401,6 +433,9 @@
           <button class="card mini-metric age-stat" id="listing-stat-oldest" type="button" title="Show Vinted listings with the oldest real posting first">
             <span>Oldest Vinted</span><strong id="listing-stat-oldest-age">—</strong><small id="listing-stat-oldest-detail">No exact date</small>
           </button>
+        </div>
+        <details class="dashboard-filter-details dashboard-stat-details" id="listing-more-stats"><summary>More listing statistics</summary>
+          <div class="listing-stats">
           <article class="card mini-metric"><span>Vinted age known</span><strong id="listing-stat-age-known">0/0</strong><small id="listing-stat-age-unknown">Actual Vinted timestamps only</small></article>
           <article class="card mini-metric"><span>Inventory value</span><strong id="listing-stat-value">€0</strong></article>
           <article class="card mini-metric"><span>Average price</span><strong id="listing-stat-average">€0</strong></article>
@@ -410,9 +445,10 @@
           <button class="card mini-metric duplicate-stat" id="listing-stat-duplicates" type="button" title="Show only potential duplicate listings">
             <span>Duplicate groups</span><strong id="listing-stat-duplicate-groups">0</strong>
           </button>
-        </div>
+          </div>
+        </details>
 
-        <div class="toolbar listing-toolbar">
+        <div class="toolbar listing-toolbar dashboard-primary-toolbar">
           <input id="listing-search" class="search" placeholder="Search title or SKU">
           <select id="listing-channel" aria-label="Marketplace">
             <option value="">All marketplaces</option>
@@ -430,18 +466,6 @@
             <option value="inactive">Inactive</option>
             <option value="ended">Ended</option>
           </select>
-          <select id="listing-interest" aria-label="Favourite filter">
-            <option value="">All interest</option>
-            <option value="liked">Has favourites</option>
-            <option value="unliked">No favourites</option>
-          </select>
-          <select id="listing-duplicate" aria-label="Duplicate filter">
-            <option value="">All listings</option>
-            <option value="duplicates">Potential duplicates</option>
-            <option value="unique">Unique titles</option>
-          </select>
-          <input id="listing-price-min" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Min €" aria-label="Minimum price">
-          <input id="listing-price-max" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Max €" aria-label="Maximum price">
           <select id="listing-sort" aria-label="Sort listings">
             <option value="newest">Youngest posting first</option>
             <option value="oldest">Oldest posting first</option>
@@ -454,6 +478,20 @@
           <button id="listing-reset" class="btn" type="button">Reset</button>
           <span id="listing-count" class="toolbar-count"></span>
         </div>
+        <details class="dashboard-filter-details" id="listing-more-filters"><summary>More filters: favourites, duplicates and price</summary>
+          <div class="dashboard-filter-grid"><label>Favourite activity<select id="listing-interest" aria-label="Favourite filter">
+            <option value="">All interest</option>
+            <option value="liked">Has favourites</option>
+            <option value="unliked">No favourites</option>
+          </select></label>
+            <label>Duplicates<select id="listing-duplicate" aria-label="Duplicate filter">
+            <option value="">All listings</option>
+            <option value="duplicates">Potential duplicates</option>
+            <option value="unique">Unique titles</option>
+          </select></label>
+            <label>Minimum price<input id="listing-price-min" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Min €" aria-label="Minimum price"></label>
+            <label>Maximum price<input id="listing-price-max" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Max €" aria-label="Maximum price"></label></div>
+        </details>
 
         <div id="listings-table" class="card table-wrap"></div>
       </section>
@@ -467,39 +505,48 @@
           <p class="muted">Unique exact-title purchase matches are suggested only. The order amount is prefilled as a cost candidate, but edit it before applying if Vinted's amount includes shipping, buyer protection or anything else you do not want in stock cost.</p>
           <div id="purchase-cost-suggestions" class="table-wrap" role="region" aria-label="Purchase cost suggestions"></div>
         </div>
-        <div class="toolbar standard-toolbar">
+        <div class="toolbar standard-toolbar dashboard-primary-toolbar">
           <select id="sales-direction" aria-label="Order direction">
             <option value="sell" selected>Sales</option>
             <option value="buy">Purchases</option>
             <option value="">Sales + purchases</option>
           </select>
-          <select id="sales-state" aria-label="Order state">
-            <option value="">All states</option>
-            <option value="open">Open</option>
-            <option value="closed">Closed</option>
-          </select>
-          <select id="sales-channel" aria-label="Marketplace">
-            <option value="">All marketplaces</option>
-            <option value="vinted">Vinted</option>
-            <option value="ebay">eBay</option>
-            <option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option><option value="shopify">Shopify</option><option value="bigcommerce">BigCommerce</option><option value="squarespace">Squarespace</option><option value="wix">Wix</option><option value="depop">Depop</option>
-          </select>
           <input id="sales-search" class="search" placeholder="Search order or person">
           <span id="sales-count" class="toolbar-count"></span>
           <button id="sales-reset" class="btn" type="button">Reset</button>
         </div>
+        <details class="dashboard-filter-details" id="sales-more-filters"><summary>More filters</summary><div class="dashboard-filter-grid"><label>Order status<select id="sales-state" aria-label="Order state">
+            <option value="">All states</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select></label><label>Marketplace<select id="sales-channel" aria-label="Marketplace">
+            <option value="">All marketplaces</option>
+            <option value="vinted">Vinted</option>
+            <option value="ebay">eBay</option>
+            <option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option><option value="shopify">Shopify</option><option value="bigcommerce">BigCommerce</option><option value="squarespace">Squarespace</option><option value="wix">Wix</option><option value="depop">Depop</option>
+          </select></label></div></details>
         <div id="sales-table" class="card table-wrap"></div>
       </section>
 
       <section id="analytics" class="view">
         <div class="toolbar analytics-toolbar"><select id="analytics-days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">1 year</option></select></div>
-        <div id="analytics-metrics" class="metrics"></div>
+        <details class="dashboard-filter-details dashboard-summary-details"><summary>Inventory, sales and margin figures</summary>
+          <div id="analytics-metrics" class="metrics"></div>
+        </details>
+        <div class="dashboard-tabbar" role="tablist" aria-label="Analytics sections" data-workspace-tabs="analytics">
+          <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="analytics-overview-panel" data-workspace-tab="overview">Trends</button>
+          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="analytics-demand-panel" data-workspace-tab="demand">Vinted activity</button>
+          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="analytics-detail-panel" data-workspace-tab="detail">Detailed reports</button>
+        </div>
+        <div id="analytics-overview-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="analytics:overview">
         <div class="two analytics-grid">
           <div class="card chart-card"><div class="card-head"><h2>Vinted views gained</h2></div><div id="views-chart" class="chart"></div></div>
           <div class="card chart-card"><div class="card-head"><h2>Vinted favourites gained</h2></div><div id="favourites-chart" class="chart"></div></div>
           <div class="card chart-card"><div class="card-head"><h2>Followers</h2></div><div id="followers-chart" class="chart"></div></div>
           <div class="card chart-card"><div class="card-head"><h2>Sales revenue</h2></div><div id="sales-chart" class="chart"></div></div>
         </div>
+        </div>
+        <div id="analytics-demand-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="analytics:demand">
         <div class="card analytics-behavior">
           <div class="card-head inline-head"><div><p class="eyebrow">VINTED BEHAVIOR</p><h2>Listing efficiency</h2></div><span id="vinted-coverage" class="muted"></span></div>
           <div id="vinted-metrics" class="metrics vinted-metrics"></div>
@@ -509,20 +556,34 @@
           <div class="card chart-card"><div class="card-head"><h2>Age of active stock</h2></div><div id="vinted-age-bars" class="analytics-bars"></div></div>
           <div class="card chart-card"><div class="card-head"><h2>Demand signals</h2></div><div id="vinted-segment-bars" class="analytics-bars"></div></div>
         </div>
+        </div>
+        <div id="analytics-detail-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="analytics:detail">
         <div class="card table-wrap"><div class="card-head"><h2>Category performance</h2></div><div id="vinted-categories"></div></div>
         <div class="card table-wrap"><div class="card-head"><h2>Sold stock - time online before sale</h2></div><div id="vinted-sold-stock"></div></div>
         <div class="card table-wrap"><div class="card-head"><h2>Vinted listing efficiency</h2></div><div id="vinted-efficiency"></div></div>
         <div class="card table-wrap"><div class="card-head"><h2>Listings gaining attention</h2></div><div id="analytics-listings"></div></div>
+        </div>
         <div id="listing-history-card" class="card chart-card hidden"><div class="card-head inline-head"><div><p class="eyebrow">LISTING HISTORY</p><h2 id="listing-history-title"></h2></div><a id="listing-history-link" class="btn hidden" target="_blank" rel="noreferrer">Open listing</a></div><div class="two"><div><h3>Views</h3><div id="listing-views-chart" class="chart"></div></div><div><h3>Favourites</h3><div id="listing-favourites-chart" class="chart"></div></div></div></div>
       </section>
 
       <section id="imports" class="view">
+        <p class="dashboard-page-intro">Choose whether you want to bring in inventory or download a copy.</p>
+        <div class="dashboard-tabbar" role="tablist" aria-label="Import or export" data-workspace-tabs="imports">
+          <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="imports-import-panel" data-workspace-tab="import">Import a file</button>
+          <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="imports-export-panel" data-workspace-tab="export">Export inventory</button>
+        </div>
+        <div class="dashboard-import-panels">
+        <div id="imports-import-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="imports:import">
         <div class="two">
           <div class="card form"><h2>Import inventory</h2><p class="muted">CSV, TSV and XLSX. Preview first; nothing is written until you apply it.</p><label>Saved mapping<select id="mapping-preset"><option value="">Automatic mapping</option></select></label><label>Default category<select id="import-default-category"><option value="general">General</option><option value="clothing">Clothing</option><option value="book">Book</option><option value="electronics">Electronics</option><option value="home">Home</option><option value="collectibles">Collectibles</option><option value="toys_games">Toys & games</option><option value="media">Media</option><option value="sports">Sports</option><option value="beauty">Beauty</option><option value="art_crafts">Art & crafts</option></select></label><input id="import-file" type="file" accept=".csv,.tsv,.txt,.xlsx"><label class="check"><input id="full-snapshot" type="checkbox"> Archive active items missing from this file</label><button id="preview-import" class="btn primary" type="button">Preview</button><p id="import-status" class="muted"></p></div>
-          <div class="card form"><h2>Export inventory</h2><p class="muted">Export master inventory or one marketplace view without losing ownership of your data.</p><label>Status<select id="export-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select></label><label>Marketplace<select id="export-channel"><option value="">Master inventory</option><option value="vinted">Vinted</option><option value="ebay">eBay</option><option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option><option value="shopify">Shopify</option><option value="bigcommerce">BigCommerce</option><option value="squarespace">Squarespace</option><option value="wix">Wix</option><option value="depop">Depop</option></select></label><div class="actions"><button id="export-csv" class="btn" type="button">CSV</button><button id="export-xlsx" class="btn" type="button">Excel</button></div></div>
         </div>
         <div id="mapping" class="card form hidden"><h2>Column mapping</h2><div id="mapping-grid"></div><label>Save mapping as<input id="preset-name" placeholder="Optional"></label><button id="apply-import" class="btn primary" type="button">Apply import</button></div>
         <div id="preview" class="card hidden"></div>
+        </div>
+        <div id="imports-export-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="imports:export">
+          <div class="card form"><h2>Export inventory</h2><p class="muted">Export master inventory or one marketplace view without losing ownership of your data.</p><label>Status<select id="export-status"><option value="">All statuses</option><option value="active">Active</option><option value="sold">Sold</option><option value="archived">Archived</option></select></label><label>Marketplace<select id="export-channel"><option value="">Master inventory</option><option value="vinted">Vinted</option><option value="ebay">eBay</option><option value="biblio">BIBLIO</option><option value="etsy">Etsy</option><option value="woocommerce">WooCommerce</option><option value="shopify">Shopify</option><option value="bigcommerce">BigCommerce</option><option value="squarespace">Squarespace</option><option value="wix">Wix</option><option value="depop">Depop</option></select></label><div class="actions"><button id="export-csv" class="btn" type="button">CSV</button><button id="export-xlsx" class="btn" type="button">Excel</button></div></div>
+        </div>
+        </div>
       </section>
 
       <section id="connections" class="view">
@@ -636,6 +697,7 @@
           <p class="muted">For troubleshooting only: implementation coverage, not a marketplace account status. A completed transfer does not prove that a book or photo is publicly visible.</p>
           <div id="marketplace-development">Loading technical operation status…</div>
         </details>
+        <details class="dashboard-task-disclosure" id="settings-support-panel"><summary>Support and diagnostics</summary>
         <div id="diagnostics-card" class="card form">
           <div class="card-head inline-head">
             <div><p class="eyebrow">SUPPORT</p><h2>Diagnostics</h2></div>
@@ -661,7 +723,10 @@
             <div id="diagnostics-log-window" class="diagnostics-log-window" role="log" aria-live="polite"></div>
           </div>
         </div>
+        </details>
+        <details class="dashboard-task-disclosure dashboard-danger-details"><summary>Delete workspace</summary>
         <div class="card form"><h2>Delete workspace</h2><p class="muted">This permanently deletes this workspace and its marketplace data. Download an export first.</p><label>Type <code id="delete-workspace-slug"></code> to confirm<input id="delete-workspace-confirm" autocomplete="off"></label><button id="delete-workspace" class="btn danger" type="button">Delete workspace permanently</button></div>
+        </details>
       </section>
     </main>
   </div>
