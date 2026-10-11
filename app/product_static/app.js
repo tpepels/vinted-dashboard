@@ -803,6 +803,13 @@ const connectorPageChannels = [
   "shopify", "bigcommerce", "squarespace", "wix", "depop",
 ];
 const connectorPageViews = new Set(connectorPageChannels.map(channel => "connector-" + channel));
+function relocateConnectorPanels() {
+  // Keep the one existing form and its event listeners; don't duplicate IDs.
+  $("#connector-page-settings").appendChild($("#connector-config"));
+  $("#connector-page-biblio").appendChild($("#biblio-compare-panel"));
+  $("#connector-page-vinted").appendChild($("#paired-browsers-panel"));
+}
+relocateConnectorPanels();
 const commonPageViews = new Set([
   "today", "inventory", "listings", "sales", "analytics",
   "reconcile", "imports", "connections", "settings",
@@ -2071,7 +2078,7 @@ async function publishReviewedCrossList() {
 
 async function openCrossListConnection(channel) {
   if (state.crossList) state.crossList.connectChannel = channel;
-  await selectView("connections");
+  await selectView("connector-" + channel);
   const connector = (state.connectors || []).find((row) => row.channel === channel);
   if (!connector || !connectorSchemas[channel]) {
     return flash("This destination has no connection form yet.", true);
@@ -5220,13 +5227,7 @@ function renderMarketplaceDevelopment(definitions) {
     const selected = markets.find(row => row.channel === state.marketplaceSelected);
     $("#marketplace-detail").innerHTML = marketplaceRuntimeDetails(selected, definitions);
     const jump = $(".marketplace-open-connection");
-    if (jump) jump.onclick = () => {
-      const target = document.querySelector('[data-connector-channel="' + selected.channel + '"]');
-      if (!target) return;
-      if ($("#connector-other-grid").contains(target)) $("#other-marketplaces").open = true;
-      target.scrollIntoView({behavior: "smooth", block: "center"});
-      target.classList.add("connector-focused");
-    };
+    if (jump) jump.onclick = () => selectView("connector-" + selected.channel);
     $$(".market-select").forEach(button => {
       button.classList.toggle("active", button.dataset.marketChannel === state.marketplaceSelected);
       button.setAttribute("aria-pressed", String(button.dataset.marketChannel === state.marketplaceSelected));
@@ -5263,6 +5264,9 @@ async function inspectUncertainMarketplaceOperation(operationId, button, itemId 
 }
 
 async function openMarketplaceRecovery(kind, inventoryItemId = null) {
+  if (kind === "biblio_photos" || kind === "biblio_compare") {
+    if (currentConnectorPage() !== "biblio") await selectView("connector-biblio");
+  }
   if (kind === "biblio_photos") {
     const panel = $(".biblio-photos-panel");
     if (!panel) return flash("BIBLIO photo repair is not available. Check connection settings.", true);
@@ -5632,8 +5636,39 @@ async function connections() {
       + '<p class="muted">Import reads marketplace data; it does not edit remote listings.</p></details>'
       + '</section>';
   };
-  $("#connector-grid").innerHTML = featured.map(connectorHtml).join("");
-  $("#connector-other-grid").innerHTML = other.map(connectorHtml).join("");
+  const overviewHtml = connector => {
+    const channel = connector.channel;
+    const isVinted = channel === "vinted";
+    const label = connector.display_name || connectorSchemas[channel]?.title || channel;
+    const status = isVinted
+      ? connector.last_synced_at ? "Browser data received" : "Pair a Chrome browser"
+      : connectorHealth(connector).label;
+    const detail = isVinted
+      ? "Browser pairing, extension and received data"
+      : channel === "biblio"
+        ? "Books, photos, FTP and seller inventory checks"
+        : "Credentials, read access, imports and activity";
+    return '<button type="button" class="connector-overview-link" data-c="' + esc(channel)
+      + '" data-connector-channel="' + esc(channel) + '"><span class="connector-overview-title">'
+      + '<strong>' + esc(label) + '</strong><small>' + esc(status) + '</small></span>'
+      + '<span class="connector-overview-detail">' + esc(detail) + '</span>'
+      + '<span class="connector-overview-arrow" aria-hidden="true">→</span></button>';
+  };
+  $("#connector-grid").innerHTML = featured.map(overviewHtml).join("");
+  $("#connector-other-grid").innerHTML = other.map(overviewHtml).join("");
+  $(".connector-overview-link").forEach(button => {
+    button.onclick = () => selectView("connector-" + button.dataset.c);
+  });
+  const selectedChannel = currentConnectorPage();
+  const current = state.connectors.find(connector => connector.channel === selectedChannel);
+  $("#connector-page-heading").textContent = current?.display_name
+    || (selectedChannel === "vinted" ? "Vinted" : connectorSchemas[selectedChannel]?.title || "Marketplace");
+  $("#connector-page-description").textContent = current?.description ||
+    (selectedChannel === "vinted"
+      ? "Review the Chrome extension and paired browsers."
+      : "Account details, imports and troubleshooting for this marketplace.");
+  $("#connector-page-card").innerHTML = current ? connectorHtml(current)
+    : '<p class="muted">This marketplace is not available in the current workspace.</p>';
   $("#other-marketplaces-count").textContent = String(other.length);
   $("#other-marketplaces").classList.toggle("hidden", other.length === 0);
   $("#biblio-compare-panel").classList.toggle("hidden",
@@ -5661,9 +5696,12 @@ async function connections() {
   if (state.biblioPhotoExpanded) loadBiblioPhotoChoices();
 
   document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
-  $$(".configure").forEach((button) => {
+  $(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
+  // The actual connector controls exist on one dedicated page at a time.
+  // Navigation cards on the overview never duplicate mutation buttons.
+
   $$(".test-marketplace").forEach(button => {
     button.onclick = () => testMarketplaceConnection(button.dataset.c, button);
   });
@@ -5811,10 +5849,10 @@ async function connections() {
   });
 
   const currentStatus = String(biblioActivity?.current?.status || "");
-  if (["queued", "running"].includes(currentStatus) && state.view === "connections") {
+  if (["queued", "running"].includes(currentStatus) && state.view === "connector-biblio") {
     if (state.biblioPhotoInspection) inspectBiblioPhotoTarget();
     state.biblioActivityTimer = setTimeout(() => {
-      if (state.view === "connections") connections();
+      if (state.view === "connector-biblio") connections();
     }, 2500);
   }
   return data;
@@ -5846,12 +5884,31 @@ $("#connections-refresh").onclick = async () => {
     button.disabled = false;
   }
 };
+$("#connector-page-back").onclick = () => selectView("connections");
+$("#connector-page-refresh").onclick = async () => {
+  const button = $("#connector-page-refresh");
+  button.disabled = true;
+  try { await connections(); flash("Marketplace information refreshed."); }
+  catch (error) { flash(error.message, true); }
+  finally { button.disabled = false; }
+};
+$("#connector-page-activity-refresh").onclick = async () => {
+  const button = $("#connector-page-activity-refresh");
+  button.disabled = true;
+  try { await refreshMarketplaceOperations(); }
+  catch (error) { flash(error.message, true); }
+  finally { button.disabled = false; }
+};
 $("#connections-inventory").onclick = () => selectView("inventory");
 $("#connections-reconcile").onclick = () => selectView("reconcile");
 
 function openConnectorConfig(channel, connector) {
   const schema = connectorSchemas[channel];
   if (!schema) return;
+  if (currentConnectorPage() !== channel) {
+    return selectView("connector-" + channel).then(() =>
+      openConnectorConfig(channel, (state.connectors || []).find(row => row.channel === channel)));
+  }
   state.connectorChannel = channel;
   $("#connector-config-title").textContent = schema.title;
   $("#connector-config-help").textContent = schema.help;
