@@ -1530,7 +1530,7 @@ function renderItemMarketplacePanel(data) {
     button.onclick = async () => {
       state.biblioPhotoTarget = button.dataset.book;
       state.biblioPhotoExpanded = true;
-      await selectView("connections");
+      await selectView("connector-biblio");
       const target = $(".biblio-photos-panel");
       if (target) {
         target.open = true;
@@ -1543,7 +1543,7 @@ function renderItemMarketplacePanel(data) {
   });
   $$(".item-marketplace-verify").forEach(button => {
     button.onclick = async () => {
-      await selectView("connections");
+      await selectView("connector-biblio");
       const target = $("#biblio-compare-panel");
       if (target) {
         target.open = true;
@@ -1747,7 +1747,7 @@ function renderItemMarketplacePanel(data) {
       if (button.dataset.kind === "inspect_item") {
         return openItemMarketplaces(itemId);
       }
-      await selectView("connections");
+      await selectView("connector-biblio");
       await openMarketplaceRecovery(button.dataset.kind, itemId);
     };
   });
@@ -2838,7 +2838,7 @@ $("#close-biblio-publish").onclick = () => {
   state.biblioPublish = null;
   $("#biblio-publish-panel").classList.add("hidden");
 };
-$("#biblio-open-connections").onclick = () => selectView("connections");
+$("#biblio-open-connections").onclick = () => selectView("connector-biblio");
 $("#biblio-edit-stock").onclick = () => {
   const itemId = state.biblioPublish?.itemId;
   const item = state.inventoryItems.find((row) => row.id === itemId);
@@ -5293,9 +5293,12 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
   }
 }
 
-function renderMarketplaceOperations(data) {
-  const root = $("#marketplace-operations-list");
+function renderMarketplaceOperations(data, rootSelector = "#marketplace-operations-list") {
+  const root = $(rootSelector);
   if (!root) return;
+  const scoped = rootSelector === "#connector-operations-list";
+  const filterId = scoped ? "connector-activity-filter" : "marketplace-activity-filter";
+  const filterKey = scoped ? "connectorActivityFilter" : "marketplaceActivityFilter";
   const operations = data?.operations || [];
   if (!operations.length) {
     root.innerHTML = '<p class="muted">No marketplace activity yet. Imports, uploads and their results will appear here.</p>';
@@ -5305,7 +5308,7 @@ function renderMarketplaceOperations(data) {
   const openCount = operations.filter(needsReview).length;
   const workingCount = operations.filter(op => ["queued", "running"].includes(op.status)).length;
   // The filter survives an activity refresh, avoiding jarring jumps.
-  const selectedFilter = state.marketplaceActivityFilter || "all";
+  const selectedFilter = state[filterKey] || "all";
   const statuses = {
     queued:"Waiting to start", running:"In progress",
     succeeded:"Finished", needs_verification:"Sent; not verified on marketplace",
@@ -5376,7 +5379,7 @@ function renderMarketplaceOperations(data) {
   root.innerHTML = '<div class="marketplace-activity-toolbar">'
     + '<p><strong>' + openCount + '</strong> need review · <strong>' + workingCount
     + '</strong> in progress · ' + operations.length + ' recent operations</p>'
-    + '<label for="marketplace-activity-filter">Show <select id="marketplace-activity-filter">'
+    + '<label for="' + filterId + '">Show <select id="' + filterId + '">'
     + '<option value="all"' + (selectedFilter === "all" ? ' selected' : '') + '>All activity</option>'
     + '<option value="review"' + (selectedFilter === "review" ? ' selected' : '')
       + '>Needs review (' + openCount + ')</option>'
@@ -5386,10 +5389,10 @@ function renderMarketplaceOperations(data) {
     + '<div class="marketplace-activity-list" role="list">'
     + (items || '<p class="muted">Nothing in this category. Choose All activity to see the history.</p>')
     + '</div>';
-  const filter = $("#marketplace-activity-filter");
+  const filter = $("#" + filterId);
   if (filter) filter.onchange = () => {
-    state.marketplaceActivityFilter = filter.value;
-    renderMarketplaceOperations(data);
+    state[filterKey] = filter.value;
+    renderMarketplaceOperations(data, rootSelector);
   };
   $$(".marketplace-operation-inspect").forEach(button => {
     button.onclick = () => inspectUncertainMarketplaceOperation(button.dataset.id, button);
@@ -5416,8 +5419,14 @@ function renderMarketplaceOperations(data) {
 }
 
 async function refreshMarketplaceOperations() {
-  const data = await api("/api/app/marketplace-operations?limit=60");
+  const channel = currentConnectorPage();
+  const [data, scoped] = await Promise.all([
+    api("/api/app/marketplace-operations?limit=60"),
+    channel ? api("/api/app/marketplace-operations?channel="
+      + encodeURIComponent(channel) + "&limit=60") : Promise.resolve(null),
+  ]);
   renderMarketplaceOperations(data);
+  if (scoped) renderMarketplaceOperations(scoped, "#connector-operations-list");
 }
 
 $("#marketplace-operations-refresh").onclick = async () => {
