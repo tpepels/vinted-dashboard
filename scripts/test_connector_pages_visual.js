@@ -50,6 +50,7 @@ const mocks=[
   'const $$=selector=>Array.from(document.querySelectorAll(selector));',
   'const esc=value=>String(value??"").replace(/[&<>"]/g,char=>',
   '({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[char]||char));',
+  'function when(value){return String(value||"unknown");}',
   'function flash(){} function stopBarcodeCamera(){}',
   'async function today(){} async function inventory(){} async function reconcile(){}',
   'async function listings(){} async function sales(){} async function analytics(){}',
