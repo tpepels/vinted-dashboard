@@ -2610,19 +2610,26 @@ function renderBiblioActivity(activity, operational) {
   const photoHelp = operational
     ? '<details class="biblio-task-panel biblio-photos-panel"'
       + (state.biblioPhotoExpanded ? ' open' : '') + '>'
-      + '<summary><span><strong>Fix photos for one book</strong><small>Check the pictures available locally, then resend that book’s photos if needed</small></span></summary>'
+      + '<summary><span><strong>Fix photos for one book</strong><small>Compare the source images and send only what is missing on BIBLIO</small></span></summary>'
       + '<div class="biblio-task-inner">'
       + '<label class="biblio-field-label" for="biblio-photo-book-select">Choose a BIBLIO book</label>'
       + '<select id="biblio-photo-book-select"><option value="">Loading books when opened…</option></select>'
       + '<details class="biblio-photo-manual-id"><summary>Enter a book ID instead</summary>'
       + '<input id="biblio-photo-book-id" aria-label="BIBLIO Book ID" placeholder="BIBLIO Book ID" value="' + esc(state.biblioPhotoTarget) + '"></details>'
+      + '<p class="biblio-user-note"><strong>1. Choose a book.</strong> Compare its published photos on BIBLIO with the source photos here. The dashboard cannot read BIBLIO’s live images.</p>'
       + '<div class="actions biblio-photo-recovery-controls">'
-      + '<button id="biblio-inspect-photos" class="btn" type="button">Check this book’s photos</button>'
-      + '<button id="biblio-send-selected-photos" class="btn primary" type="button" disabled>Send selected missing photos…</button>'
-      + '<button id="biblio-retry-failed-photos" class="btn" type="button" disabled>Retry failed photo files…</button>'
-      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend all photos for this book…</button>'
-      + '</div><p class="biblio-user-note">Select the exact missing photos after checking BIBLIO. Its seller account must recognize the BookID_1.jpg multiple-photo naming convention. Allow processing time; retry only missing files, not the entire book.</p>'
+      + '<button id="biblio-inspect-photos" class="btn" type="button">2. Show source photos</button>'
+      + '</div>'
       + '<div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
+      + '<div class="actions biblio-photo-recovery-controls">'
+      + '<button id="biblio-send-selected-photos" class="btn primary" type="button" disabled>3. Send only selected missing photos…</button>'
+      + '</div>'
+      + '<details class="biblio-photo-advanced"><summary>Other photo recovery options</summary>'
+      + '<p class="muted">Use these only when the individual-photo repair cannot help. They may resend photos already received.</p>'
+      + '<div class="actions biblio-photo-recovery-controls">'
+      + '<button id="biblio-retry-failed-photos" class="btn" type="button" disabled>Retry files without an FTP receipt…</button>'
+      + '<button id="biblio-retry-listing-photos" class="btn" type="button" disabled>Resend every photo for this book…</button>'
+      + '</div></details>'
       + '</div></details>'
     : '';
   const fileHistory = runs.map((run) => {
@@ -5750,11 +5757,14 @@ async function connections() {
         + (ready
           ? '<div class="biblio-primary-task"><div><strong>' + (pending > 0
               ? pending + ' listing change' + (pending === 1 ? '' : 's') + ' waiting to be sent'
-              : 'Send new changes when ready') + '</strong>'
-            + '<p>Sends changed listings and photos. ' 
-            + 'It does not resend unchanged listings or confirm they are visible to buyers.</p></div>'
-            + '<button class="btn primary sync" data-c="biblio" type="button">Send changes to BIBLIO</button></div>'
-          : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, you can send changed books and review what was transferred.</p>')
+              : 'No unsent listing changes reported') + '</strong>'
+            + '<p>To cross-post another book, choose it in Inventory, review its BIBLIO details, then send changes here. The dashboard cannot confirm live publication.</p></div>'
+            + '<div class="biblio-primary-buttons"><button class="btn biblio-go-inventory" type="button">Choose a book to publish</button>'
+            + '<button class="btn primary sync" data-c="biblio" type="button">Send pending changes</button></div></div>'
+          : '<p class="biblio-setup-help">First enter your BIBLIO seller FTP credentials. After setup, choose a book from Inventory, review it, and send it to BIBLIO.</p>')
+        + '<p class="biblio-photo-setup-note"><strong>Before sending multiple photos:</strong> Ask BIBLIO support to enable your filename pattern (BookID.jpg, BookID_1.jpg, BookID_2.jpg). '
+        + 'Otherwise an FTP transfer can succeed while the extra photos never appear. '
+        + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" rel="noopener noreferrer">Photo setup instructions</a>.</p>'
         + renderBiblioActivity(biblioActivity, ready)
         + '<div class="connector-settings-row">' + configure
         + (ready ? '<button class="btn test-marketplace" data-c="biblio" type="button">Check FTP login</button>' : '')
@@ -5873,6 +5883,9 @@ async function connections() {
 
   $$(".test-marketplace").forEach(button => {
     button.onclick = () => testMarketplaceConnection(button.dataset.c, button);
+  });
+  $$(".biblio-go-inventory").forEach(button => {
+    button.onclick = () => selectView("inventory");
   });
   $$(".sync").forEach((button) => {
     button.onclick = async () => {
