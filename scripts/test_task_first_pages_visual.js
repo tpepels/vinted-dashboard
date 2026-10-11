@@ -84,11 +84,11 @@ const assertions=[
   ' ["#purchase-cost-card","#sales-costs-panel"],',
   ' ["#connector-config","#connector-page-settings"],',
   ' ["#biblio-dashboard-postings-panel","#connector-listings-panel"],',
-  ' ["#connector-page-photos","#connector-photos-panel"]]){
+  ' ["#connector-page-photos","#connector-photos-panel"]]){',
   ' if(!$(parent).contains($(control)))throw Error(control+" not in "+parent);',
   '}',
   'const colored=[["inventory","items"],["listings","browse"],',
-  ' ["sales","orders"],["analytics","overview"]].map(([group,tab])=>{
+  ' ["sales","orders"],["analytics","overview"]].map(([group,tab])=>{',
   ' const section=$("#"+group);section.classList.add("active");',
   ' const color=getComputedStyle(section.querySelector("[data-workspace-tab="+tab+"]")).color;',
   ' section.classList.remove("active");return color;',
