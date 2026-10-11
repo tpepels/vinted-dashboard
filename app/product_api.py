@@ -3699,6 +3699,81 @@ def cross_list_publish(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class BiblioLocalRemoveRequest(BaseModel):
+    book_id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/biblio/remove-local")
+def remove_biblio_listing_locally(
+    item_id: uuid.UUID,
+    payload: BiblioLocalRemoveRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Hide one dashboard listing without touching BIBLIO or master stock.
+
+    The original listing record and remote ID remain available for a safe
+    re-add. A running/pending FTP worker cannot race this local operation.
+    """
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        if item is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        matches = session.execute(select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.inventory_item_id == item_id,
+            models.ChannelListing.channel == Channel.BIBLIO,
+            models.ChannelListing.external_id == payload.book_id,
+        )).scalars().all()
+        if not matches:
+            raise HTTPException(status_code=404, detail="BIBLIO dashboard listing not found")
+        if len(matches) != 1:
+            raise HTTPException(status_code=409, detail="BIBLIO Book ID is ambiguous")
+        listing = matches[0]
+        if dict(listing.extra or {}).get("dashboard_removed"):
+            return {"ok": True, "already_removed": True, "book_id": listing.external_id}
+        jobs_active = session.execute(select(BackgroundJob.id).where(
+            BackgroundJob.workspace_id == context.workspace.id,
+            BackgroundJob.job_type == "biblio_sync",
+            BackgroundJob.status.in_(["queued", "running"]),
+        ).limit(1)).first()
+        ops_active = session.execute(select(MarketplaceOperation.id).where(
+            MarketplaceOperation.workspace_id == context.workspace.id,
+            MarketplaceOperation.channel == Channel.BIBLIO,
+            MarketplaceOperation.status.in_(["queued", "running"]),
+        ).limit(1)).first()
+        if jobs_active or ops_active:
+            raise HTTPException(
+                status_code=409,
+                detail="A BIBLIO transfer is queued or running. Wait for it to finish before removing the local listing.",
+            )
+        now = utcnow()
+        extra = dict(listing.extra or {})
+        extra["dashboard_removed"] = True
+        extra["dashboard_removed_at"] = now.isoformat()
+        extra["dashboard_removed_by"] = str(context.user.id)
+        listing.extra = extra
+        listing.status = ListingStatus.INACTIVE
+        listing.quantity = 0
+        session.add(MarketplaceOperation(
+            workspace_id=context.workspace.id,
+            inventory_item_id=item_id,
+            channel_listing_id=listing.id,
+            channel=Channel.BIBLIO,
+            operation_type="local_remove",
+            target_key=f"{listing.id}:local_remove",
+            status="succeeded",
+            verification="no_remote_changes",
+            result={"book_id": listing.external_id, "action": "dashboard_only",
+                    "no_remote_changes": True},
+            completed_at=now,
+        ))
+        return {
+            "ok": True, "already_removed": False, "book_id": listing.external_id,
+            "remote_changed": False,
+            "note": "Hidden from dashboard views. The existing BIBLIO seller listing was not deleted.",
+        }
+
+
 @router.get("/api/app/inventory/{item_id}/publish/biblio")
 def biblio_publish_preview(
     item_id: uuid.UUID,
