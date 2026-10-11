@@ -1537,7 +1537,7 @@ function renderItemMarketplacePanel(data) {
     const original = state.inventoryItems.find(row => row.id === itemId);
     if (original) openItemForm(original);
   };
-  $(".item-biblio-remove-local").forEach(button => {
+  $$(".item-biblio-remove-local").forEach(button => {
     button.onclick = async () => {
       const bookId = button.dataset.book;
       if (!window.confirm("Remove BIBLIO " + bookId + " from this dashboard? "
@@ -1560,7 +1560,7 @@ function renderItemMarketplacePanel(data) {
       }
     };
   });
-  $(".item-marketplace-photos").forEach(button => {
+  $$(".item-marketplace-photos").forEach(button => {
     button.onclick = async () => {
       state.biblioPhotoTarget = button.dataset.book;
       state.biblioPhotoExpanded = true;
@@ -2563,10 +2563,10 @@ async function inspectBiblioPhotoTarget() {
     || !(state.biblioPhotoInspection.biblio_source_photos || state.biblioPhotoInspection.vinted_source_photos);
   const chooser = $("#biblio-send-selected-photos");
   if (chooser) chooser.disabled = true;
-  $(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
+  $$(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
     input.onchange = () => {
       if (chooser) chooser.disabled = !state.biblioPhotoInspection?.active
-        || !$(".biblio-missing-photo-set input:checked").length;
+        || !$$(".biblio-missing-photo-set input:checked").length;
     };
   });
   const selective = $("#biblio-retry-failed-photos");
@@ -5620,7 +5620,7 @@ function renderBiblioDashboardPostings(rows) {
         + (removed ? 'Review & re-add…' : 'Remove from dashboard…') + '</button></article>';
     }).join("") || '<p class="muted">No matching BIBLIO postings in this dashboard.</p>')
     + '</div>';
-  $(".biblio-posting-action").forEach(button => {
+  $$(".biblio-posting-action").forEach(button => {
     button.onclick = async () => {
       if (button.dataset.action === "readd") {
         await selectView("inventory");
@@ -5946,7 +5946,7 @@ async function connections() {
     sendSelectedPhotos.onclick = async () => {
       const info = state.biblioPhotoInspection;
       if (!info || $("#biblio-photo-book-id").value.trim() !== info.book_id) return;
-      const photoIndices = $(".biblio-missing-photo-set input:checked")
+      const photoIndices = $$(".biblio-missing-photo-set input:checked")
         .map(input => Number(input.value));
       if (!photoIndices.length) return flash("Select the missing photos first.",true);
       if (!window.confirm("Send only photo "
