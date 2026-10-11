@@ -2620,6 +2620,8 @@ function renderBiblioActivity(activity, operational) {
       + '<div class="actions biblio-photo-recovery-controls">'
       + '<button id="biblio-inspect-photos" class="btn" type="button">2. Show source photos</button>'
       + '</div>'
+      + '<p class="biblio-user-note">Source photos wrong or outdated? The next action replaces the dashboard’s prepared images from your <em>last saved</em> Vinted listing. It does not browse Vinted or send anything to BIBLIO.</p>'
+      + '<button id="biblio-refresh-photo-sources" class="btn" type="button">Update prepared photos from saved Vinted listing</button>'
       + '<div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
       + '<div class="actions biblio-photo-recovery-controls">'
       + '<button id="biblio-send-selected-photos" class="btn primary" type="button" disabled>3. Send only selected missing photos…</button>'
@@ -5950,6 +5952,29 @@ async function connections() {
       if (event.key === "Enter") {
         event.preventDefault();
         inspectBiblioPhotoTarget();
+      }
+    };
+  }
+  const refreshPhotoSources = $("#biblio-refresh-photo-sources");
+  if (refreshPhotoSources) {
+    refreshPhotoSources.onclick = async () => {
+      const bookId = ($("#biblio-photo-book-id")?.value || "").trim();
+      if (!bookId) return flash("Choose a BIBLIO book first.", true);
+      if (!window.confirm("Replace this book’s prepared BIBLIO photos with the photos from the last saved Vinted listing? No new Vinted request or BIBLIO upload will occur.")) return;
+      refreshPhotoSources.disabled = true;
+      try {
+        const result = await api("/api/app/connectors/biblio/refresh-photo-sources", {
+          method: "POST", body: JSON.stringify({book_id:bookId}),
+        });
+        flash(result.changed
+          ? "Updated prepared photos for " + bookId + ": " + result.staged_count
+            + " source photo(s). Review them before sending."
+          : "Prepared photos already match the saved Vinted listing. Check BIBLIO before retrying.");
+        await inspectBiblioPhotoTarget();
+      } catch (error) {
+        flash("Could not update prepared source photos: " + error.message, true);
+      } finally {
+        refreshPhotoSources.disabled = false;
       }
     };
   }
