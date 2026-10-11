@@ -6090,64 +6090,116 @@ async function connections() {
       field.value = chooser.value;
       resetBiblioPhotoInspection(chooser.value);
     };
-    field.onkeydown = (event) => {
+    field.onkeydown = event => {
       if (event.key === "Enter") {
         event.preventDefault();
         inspectBiblioPhotoTarget();
       }
     };
   }
+  const backToBook = $("#biblio-photo-back-to-book");
+  if (backToBook) backToBook.onclick = () => setBiblioPhotoStep("choose");
+  const backToReview = $("#biblio-photo-back-to-review");
+  if (backToReview) backToReview.onclick = () => setBiblioPhotoStep("review");
+
   const refreshPhotoSources = $("#biblio-refresh-photo-sources");
   if (refreshPhotoSources) {
     refreshPhotoSources.onclick = async () => {
-      const bookId = ($("#biblio-photo-book-id")?.value || "").trim();
+      const bookId = state.biblioPhotoInspection?.book_id;
       if (!bookId) return flash("Choose a BIBLIO book first.", true);
-      if (!window.confirm("Replace this book’s prepared BIBLIO photos with the photos from the last saved Vinted listing? No new Vinted request or BIBLIO upload will occur.")) return;
+      if (!window.confirm("Replace prepared photos for this book with its last saved Vinted photos? "
+        + "This does not browse Vinted or send anything to BIBLIO.")) return;
       refreshPhotoSources.disabled = true;
       try {
         const result = await api("/api/app/connectors/biblio/refresh-photo-sources", {
           method: "POST", body: JSON.stringify({book_id:bookId}),
         });
         flash(result.changed
-          ? "Updated prepared photos for " + bookId + ": " + result.staged_count
-            + " source photo(s). Review them before sending."
-          : "Prepared photos already match the saved Vinted listing. Check BIBLIO before retrying.");
+          ? "Updated " + result.staged_count + " prepared photos. Review them before sending."
+          : "Prepared photos already match the saved Vinted listing.");
+        // A source change invalidates all previously selected photo indices.
+        state.biblioPhotoSelection = [];
         await inspectBiblioPhotoTarget();
       } catch (error) {
-        flash("Could not update prepared source photos: " + error.message, true);
+        flash("Could not update prepared photos: " + error.message, true);
       } finally {
         refreshPhotoSources.disabled = false;
       }
     };
   }
+
   const sendSelectedPhotos = $("#biblio-send-selected-photos");
   if (sendSelectedPhotos) {
-    sendSelectedPhotos.disabled = true;
-    sendSelectedPhotos.onclick = async () => {
+    sendSelectedPhotos.onclick = () => {
       const info = state.biblioPhotoInspection;
-      if (!info || $("#biblio-photo-book-id").value.trim() !== info.book_id) return;
-      const photoIndices = $$(".biblio-missing-photo-set input:checked")
-        .map(input => Number(input.value));
-      if (!photoIndices.length) return flash("Select the missing photos first.",true);
-      if (!window.confirm("Send only photo "
-        + photoIndices.map(index => index + 1).join(", ")
-        + " to BIBLIO for " + info.book_id + "? The other photos and book details will not "
-        + "be reuploaded. Check BIBLIO afterwards to confirm publication.")) return;
-      sendSelectedPhotos.disabled = true;
+      if (!info || state.biblioPhotoTarget !== info.book_id || !info.active) return;
+      state.biblioPhotoSelection = biblioPhotoSelectedIndices();
+      if (!state.biblioPhotoSelection.length) return flash("Choose at least one photo.", true);
+      // This only opens the review stage. No upload occurs until the final button.
+      setBiblioPhotoStep("confirm");
+    };
+  }
+
+  const checkPhotoConnection = $("#biblio-photo-check-connection");
+  if (checkPhotoConnection) checkPhotoConnection.onclick = async () => {
+    checkPhotoConnection.disabled = true;
+    const status = $("#biblio-photo-connection-result");
+    if (status) status.textContent = "Checking BIBLIO access…";
+    try {
+      // Read-only login/directory check, never queues a photo or a Vinted request.
+      await api("/api/app/connectors/biblio/test-connection", {method:"POST"});
+      state.biblioPhotoConnectionChecked = true;
+      if (status) status.textContent = "Connection check passed. Publication is not guaranteed.";
+    } catch (error) {
+      state.biblioPhotoConnectionChecked = false;
+      if (status) status.textContent = "Connection still fails. No photos were sent. "
+        + "Check account settings before retrying.";
+      flash("BIBLIO connection check failed: " + error.message, true);
+    } finally {
+      checkPhotoConnection.disabled = false;
+      setBiblioPhotoStep("confirm");
+    }
+  };
+
+  const confirmSelectedPhotos = $("#biblio-confirm-selected-photos");
+  if (confirmSelectedPhotos) {
+    confirmSelectedPhotos.onclick = async () => {
+      const info = state.biblioPhotoInspection;
+      const indices = state.biblioPhotoSelection;
+      if (!info?.active || info.book_id !== state.biblioPhotoTarget
+          || !indices?.length) return;
+      if (biblioPhotoAccessProblem(info) && !state.biblioPhotoConnectionChecked)
+        return flash("Check your BIBLIO connection before resending photos.", true);
+      confirmSelectedPhotos.disabled = true;
       try {
-        await api("/api/app/connectors/biblio/retry-listing-photos",{
-          method:"POST",body:JSON.stringify({book_id:info.book_id,photo_indices:photoIndices}),
+        await api("/api/app/connectors/biblio/retry-listing-photos", {
+          method:"POST", body:JSON.stringify({book_id:info.book_id,photo_indices:indices}),
         });
-        flash("Queued " + photoIndices.length + " selected photos only for " + info.book_id
-          + ". No other JPG files or book details will be resent.");
+        flash("Queued " + indices.length + " selected photos for BIBLIO. "
+          + "Check the seller listing after BIBLIO processes them.");
+        state.biblioPhotoSelection = [];
+        state.biblioPhotoStep = "review";
         await inspectBiblioPhotoTarget();
-        await connections();
+        // Avoid tearing down the wizard after queueing. A normal explicit
+        // connection refresh remains available for checking later results.
       } catch (error) {
-        flash("Could not send the selected photos: " + error.message,true);
-        sendSelectedPhotos.disabled = false;
+        flash("Could not queue the selected photos: " + error.message, true);
+        setBiblioPhotoStep("confirm");
+      } finally {
+        confirmSelectedPhotos.disabled = false;
+        setBiblioPhotoStep(state.biblioPhotoStep);
       }
     };
   }
+  // Restore the stage and selection on an ordinary status refresh.
+  $$(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
+    input.onchange = () => {
+      state.biblioPhotoSelection = biblioPhotoSelectedIndices();
+      setBiblioPhotoStep("review");
+    };
+  });
+  setBiblioPhotoStep(state.biblioPhotoStep);
+
   const retryPhotosButton = $("#biblio-retry-listing-photos");
   if (retryPhotosButton) {
     retryPhotosButton.disabled = !state.biblioPhotoInspection?.active
