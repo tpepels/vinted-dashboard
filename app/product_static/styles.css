@@ -910,3 +910,24 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   #connector-detail .connector-settings-row>.btn{flex:1 1 100%}
   #connector-detail .connector-header{flex-direction:column}
 }
+
+/* Selective BIBLIO photo repair: show source images at small widths without clipping. */
+.biblio-missing-photo-set{min-width:0;border:1px solid var(--line);border-radius:11px;
+  padding:12px;margin:12px 0}
+.biblio-missing-photo-set legend{font-size:12px;font-weight:800;padding:0 5px}
+.biblio-missing-photo-set>p{font-size:11px;line-height:1.6;margin:4px 0 12px}
+.biblio-photo-choice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(128px,100%),1fr));gap:10px}
+.biblio-photo-choice{display:grid;min-width:0;gap:4px;padding:9px;border:1px solid var(--line);
+  background:var(--card);border-radius:10px;cursor:pointer;font-size:11px}
+.biblio-photo-choice:has(input:checked){border-color:var(--accent);background:var(--soft)}
+.biblio-photo-choice input{justify-self:start;width:17px;height:17px;accent-color:var(--accent)}
+.biblio-photo-choice img,.biblio-photo-no-preview{display:block;width:100%;height:120px;
+  border-radius:7px;object-fit:contain;background:#f0f3f2}
+.biblio-photo-no-preview{display:grid;place-items:center;color:var(--muted);font-size:11px}
+.biblio-photo-choice small{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+.biblio-photo-choice:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+#connector-page-biblio .biblio-missing-photo-set{max-width:100%}
+@media(max-width:540px){
+  .biblio-photo-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .biblio-photo-choice img{height:96px}
+}
