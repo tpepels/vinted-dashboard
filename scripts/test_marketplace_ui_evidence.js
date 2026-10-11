@@ -113,8 +113,10 @@ const before=render(oldSource),after=render(newSource);
 const beforeStats=measure(before),afterStats=measure(after);
 assert(beforeStats.visibleButtons>afterStats.visibleButtons,
   "Initial screen must expose fewer competing buttons");
-assert.equal(afterStats.totalButtons,beforeStats.totalButtons,
-  "Existing marketplace actions must all remain available");
+assert.equal(afterStats.totalButtons,beforeStats.totalButtons+1,
+  "Existing actions must remain, plus one new dashboard-only BIBLIO removal action");
+assert(after.includes('class="btn item-biblio-remove-local"'),
+  "The new BIBLIO dashboard-only removal action must be available");
 assert(after.includes("Dashboard 2 · Store 5"),
   "Stock discrepancy must show both actual quantities");
 assert(after.includes("Dashboard EUR 11.25 · Store EUR 8.50"),
@@ -139,7 +141,7 @@ const result={
   after:afterStats,
   change:{
     initialVisibleButtons:afterStats.visibleButtons-beforeStats.visibleButtons,
-    retainedActions:afterStats.totalButtons===beforeStats.totalButtons,
+    retainedActions:afterStats.totalButtons===beforeStats.totalButtons+1,
     quantifiedStockComparisons:channels.length,
     quantifiedPriceComparisons:channels.length,
   },
