@@ -849,6 +849,10 @@ $$(".nav").forEach((button) => {
 function setSidebarCollapsed(collapsed, persist = true) {
   const shell = $("#shell");
   shell.classList.toggle("sidebar-collapsed", Boolean(collapsed));
+  const connectionsNav = $('.nav[data-view="connections"]');
+  if (connectionsNav && currentConnectorPage()) {
+    connectionsNav.classList.toggle("active", Boolean(collapsed));
+  }
   const toggle = $("#sidebar-toggle");
   toggle.setAttribute("aria-expanded", String(!collapsed));
   toggle.setAttribute("aria-label", collapsed ? "Expand navigation" : "Collapse navigation");
@@ -898,10 +902,13 @@ async function selectView(view, {historyMode = "push"} = {}) {
     state.diagnosticsTimer = null;
   }
   state.view = view;
-  $$(".nav").forEach((button) => {
-    const active = button.dataset.view === view;
-    button.classList.toggle("active", active);
-    if (active) button.setAttribute("aria-current", "page");
+  $(".nav").forEach((button) => {
+    const exact = button.dataset.view === view;
+    const parentActive = Boolean(channel)
+      && $("#shell").classList.contains("sidebar-collapsed")
+      && button.dataset.view === "connections";
+    button.classList.toggle("active", exact || parentActive);
+    if (exact) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   });
   $$(".view").forEach((section) => section.classList.toggle(
