@@ -14,6 +14,9 @@ const ctx = {
   state: {
     biblioPhotoInspection: null,
     biblioPhotoError: "",
+    biblioPhotoStep: "choose",
+    biblioPhotoSelection: [],
+    biblioPhotoConnectionChecked: false,
     biblioPhotoTarget: "",
     biblioPhotoExpanded: false,
     biblioActivityExpanded: false,
@@ -79,5 +82,23 @@ assert.match(empty, /counts are temporarily unavailable/);
 assert.doesNotMatch(empty, /biblio-retry-photos/);
 assert.doesNotMatch(empty, /biblio-full-sync/);
 const safePhoto = ctx.biblioPhotoInspectionHtml();
-assert.match(safePhoto, /Choose a book/);
+assert.equal(safePhoto, "", "No photo diagnostics should appear before choosing a book");
+assert.match(html, /Step 1 of 3/);
+assert.match(html, /Step 2 of 3/);
+assert.match(html, /Step 3 of 3/);
+assert.match(html, /biblio-photo-confirm-step" class="biblio-photo-stage hidden/);
+assert.match(html, /biblio-confirm-selected-photos/);
+const sample = {book_id:"example",title:"Example Book",active:true,
+  photo_state:"error",photo_error:"BDB0004 fop_read_meta: vsftpd_passwd.db unexpected file type or format",
+  biblio_source_photos:9,vinted_source_photos:9,last_ftp_photo_count:9,
+  successful_file_transfers:0,unconfirmed_file_transfers:9,
+  file_progress:Array.from({length:9},(_,index)=>({index,filename:"book_"+index+".jpg",
+    preview_url:"/photo/"+index,sent_to_ftp:false}))};
+ctx.state.biblioPhotoInspection=sample;
+const preview=ctx.biblioPhotoInspectionHtml();
+assert.match(preview, /The last BIBLIO upload failed/);
+assert.equal((preview.match(/class="biblio-photo-choice"/g)||[]).length,9);
+assert.match(preview, /<details class="biblio-photo-files biblio-photo-diagnostics"/);
+assert.match(preview, /No matching successful FTP receipt/);
+assert(ctx.biblioPhotoAccessProblem(sample));
 console.log("BIBLIO task-based Connections UI smoke test passed");
