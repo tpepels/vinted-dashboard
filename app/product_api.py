@@ -5542,8 +5542,12 @@ def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any
             filename = book_id + (f"_{index}" if index else "") + ".jpg"
             known = receipts.get(filename) == biblio_photo_file_signature(book_id, index, url)
             file_progress.append({
+                "index": index,
                 "filename": filename,
                 "sent_to_ftp": bool(known),
+                # Public HTTPS Vinted image URL for a human comparing each
+                # file against the BIBLIO seller page; never accept new URLs.
+                "preview_url": url if _trusted_vinted_image_url(url) else None,
             })
         successful_transfers = sum(row["sent_to_ftp"] for row in file_progress)
         jobs_found = session.execute(
@@ -5568,6 +5572,9 @@ def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any
                 for index in range(len(urls))
             ],
             "file_progress": file_progress,
+            # Private to server-side endpoint use; do not include signed URL
+            # copies in history or logs. The public preview is above.
+            "photo_source_urls": urls,
             "successful_file_transfers": successful_transfers,
             "unconfirmed_file_transfers": len(urls) - successful_transfers,
             "last_ftp_photo_count": extra.get("photo_count"),
@@ -5587,12 +5594,17 @@ def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any
 
 @router.get("/api/app/connectors/biblio/photo-status")
 def biblio_photo_status(book_id: str, context: RequestContext = Depends(require_context)):
-    return _biblio_photo_status(context.workspace.id, book_id)
+    info = _biblio_photo_status(context.workspace.id, book_id)
+    info.pop("photo_source_urls", None)
+    return info
 
 
 class BiblioTargetedPhotoRetry(BaseModel):
     book_id: str = Field(min_length=1, max_length=200)
     failed_only: bool = False
+    # Positions from the current staged photo set, chosen by the seller after
+    # checking which pictures are actually missing from BIBLIO.
+    photo_indices: list[int] | None = None
 
 
 @router.post("/api/app/connectors/biblio/retry-listing-photos")
@@ -5607,6 +5619,16 @@ def biblio_retry_listing_photos(
         raise HTTPException(status_code=409, detail="Listing is not active with stock available")
     if not info["biblio_source_photos"] and not info["vinted_source_photos"]:
         raise HTTPException(status_code=409, detail="No source photographs available; refresh Vinted first")
+    if payload.photo_indices is not None:
+        chosen = payload.photo_indices
+        if (payload.failed_only or not chosen or len(chosen) > 12
+                or len(set(chosen)) != len(chosen)
+                or any(type(index) is not int or index < 0
+                       or index >= len(info["file_progress"]) for index in chosen)):
+            raise HTTPException(
+                status_code=422,
+                detail="Select one or more valid photo positions from the latest inspection.",
+            )
     if payload.failed_only and (
         not info["photo_error"]
         or not info["successful_file_transfers"]
@@ -5624,14 +5646,25 @@ def biblio_retry_listing_photos(
                 payload={
                     "listing_id": info["listing_id"],
                     "photos_only": True,
-                    "force_photos": not payload.failed_only,
+                    "force_photos": not payload.failed_only and payload.photo_indices is None,
                     **({"failed_photos_only": True} if payload.failed_only else {}),
+                    **({
+                        "photo_indices": payload.photo_indices,
+                        "photo_expected_signatures": {
+                            str(index): biblio_photo_file_signature(
+                                info["book_id"], index,
+                                info["photo_source_urls"][index],
+                            )
+                            for index in payload.photo_indices
+                        },
+                    } if payload.photo_indices is not None else {}),
                 },
                 channel_listing_id=uuid.UUID(str(info["listing_id"])),
             )
             job_id, operation_id = operation.job_id, operation.id
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    info.pop("photo_source_urls", None)
     return {"ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
             "already_queued": not created, **info}
 
