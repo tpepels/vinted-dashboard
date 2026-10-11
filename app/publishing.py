@@ -291,7 +291,10 @@ def build_biblio_candidate(
     vextra = dict(vinted.extra or {}) if vinted else {}
     vmeta = dict(vextra.get("metadata") or {}) if isinstance(vextra.get("metadata"), dict) else {}
     existing = _existing_biblio(session, workspace_id, item.id)
-    existing_extra = dict(existing.extra or {}) if existing is not None else {}
+    existing_extra = (
+        {} if existing is not None and dict(existing.extra or {}).get("dashboard_removed")
+        else dict(existing.extra or {}) if existing is not None else {}
+    )
     existing_field_sources = (
         dict(existing_extra.get("field_sources") or {})
         if isinstance(existing_extra.get("field_sources"), dict)
@@ -571,7 +574,10 @@ def build_biblio_candidate(
         "missing": [],
         "ready": False,
         "existing_biblio_listing_id": str(existing.id) if existing else None,
-        "already_listed": bool(existing and existing.status == ListingStatus.ACTIVE),
+        "already_listed": bool(
+            existing and existing.status == ListingStatus.ACTIVE
+            and not dict(existing.extra or {}).get("dashboard_removed")
+        ),
         "book_id_locked": bool(
             existing
             and (
@@ -755,6 +761,10 @@ def upsert_biblio_listing(
     existing.quantity = max(1, int(fields.get("quantity") or 1))
     existing.last_seen_at = now
     previous_extra = dict(existing.extra or {})
+    if previous_extra.get("dashboard_removed"):
+        # Re-add the same local record/Book ID with fresh transfer evidence.
+        # A previous FTP upload is NOT remote publication proof.
+        previous_extra = {}
     image_urls = list(source.get("image_urls") or [])[:12]
     previous_images = list(previous_extra.get("image_urls") or [])
     if image_urls:
