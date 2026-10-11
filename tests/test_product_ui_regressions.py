@@ -764,8 +764,13 @@ def test_connections_prioritizes_actions_and_keeps_dev_matrix_collapsed():
     assert 'id="connections-inventory"' in index
     assert 'id="connections-reconcile"' in index
     assert 'id="connector-other-grid"' in index
-    assert 'featured.map(connectorHtml)' in APP_JS
-    assert 'other.map(connectorHtml)' in APP_JS
+    assert 'featured.map(overviewHtml)' in APP_JS
+    assert 'other.map(overviewHtml)' in APP_JS
+    assert 'current ? connectorHtml(current)' in APP_JS
+    assert 'data-connector-channel="' in APP_JS
+    assert 'id="connector-detail"' in index
+    assert 'id="connector-page-card"' in index
+    assert 'id="sidebar-toggle"' in index
     assert 'api("/api/app/connectors/development").catch(() => null)' in APP_JS
 
 
@@ -873,10 +878,30 @@ def test_store_stock_controls_are_minimal_check_first_and_shared():
 
 def test_connections_shows_tasks_and_keeps_verbose_help_collapsed():
     html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text()
-    assert "Connect accounts and import listings." in html
+    assert "Choose a marketplace to open its own page" in html
+    assert "Manage individual books in Inventory." not in html
     assert 'details class="connection-technical-help"' in APP_JS
     assert 'class="biblio-photo-manual-id"' in APP_JS
     assert "Refresh this overview" not in APP_JS
+
+
+def test_connector_pages_have_accessible_navigation_and_one_shared_configuration_form():
+    html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text()
+    for channel in ("vinted", "biblio", "ebay", "etsy", "woocommerce", "shopify",
+                    "bigcommerce", "squarespace", "wix", "depop"):
+        assert f'data-view="connector-{channel}"' in html
+    assert html.count('id="connector-config"') == 1
+    assert html.count('id="biblio-compare-panel"') == 1
+    assert html.count('id="paired-browsers-panel"') == 1
+    assert 'id="connector-page-activity"' in html
+    assert 'aria-controls="workspace-navigation"' in html
+    assert 'relocateConnectorPanels()' in APP_JS
+    assert 'window.history[historyMode === "replace" ? "replaceState" : "pushState"]' in APP_JS
+    assert 'window.addEventListener("popstate"' in APP_JS
+    assert '$(".nav").forEach' in APP_JS
+    assert '$(".view").forEach' in APP_JS
+    assert '$(".connector-overview-link").forEach' in APP_JS
+    assert '$(".configure").forEach' in APP_JS
 
 
 def test_inventory_and_connection_click_collections_are_real_collections():
