@@ -48,6 +48,7 @@ jobs:
       - run: node scripts/test_marketplace_operations_ui.js
       - run: node scripts/test_marketplace_activity_visual.js
       - run: node scripts/test_connector_pages_visual.js
+      - run: node scripts/test_task_first_pages_visual.js
       - run: node scripts/test_table_ui.js
       - run: node scripts/test_responsive_tables_visual.js
       - run: node scripts/test_store_stock_audit_ui.js
