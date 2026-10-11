@@ -813,6 +813,47 @@ function relocateConnectorPanels() {
   $("#connector-page-vinted").appendChild($("#paired-browsers-panel"));
 }
 relocateConnectorPanels();
+
+// Small, reusable task navigation. All forms, controls, and charts retain their
+// original DOM nodes; switching sections never rebuilds or resets user input.
+const workspaceTabState = {};
+function activateWorkspaceTab(group, tab) {
+  const bar = $('[data-workspace-tabs="' + group + '"]');
+  if (!bar) return false;
+  const selected = bar.querySelector('[data-workspace-tab="' + tab + '"]');
+  if (!selected) return false;
+  workspaceTabState[group] = tab;
+  bar.querySelectorAll("[data-workspace-tab]").forEach(button => {
+    const active = button === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+  });
+  $$("[data-workspace-panel]").forEach(panel => {
+    if (!panel.dataset.workspacePanel.startsWith(group + ":")) return;
+    panel.classList.toggle("hidden", panel.dataset.workspacePanel !== group + ":" + tab);
+  });
+  return true;
+}
+$$("[data-workspace-tabs]").forEach(bar => {
+  const group = bar.dataset.workspaceTabs;
+  const tabs = Array.from(bar.querySelectorAll("[data-workspace-tab]"));
+  tabs.forEach((button, index) => {
+    button.onclick = () => activateWorkspaceTab(group, button.dataset.workspaceTab);
+    button.onkeydown = event => {
+      if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const indexNext = event.key === "Home" ? 0
+        : event.key === "End" ? tabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      const next = tabs[indexNext];
+      activateWorkspaceTab(group, next.dataset.workspaceTab);
+      next.focus();
+    };
+  });
+  activateWorkspaceTab(group, workspaceTabState[group] || tabs[0]?.dataset.workspaceTab);
+});
+
 const commonPageViews = new Set([
   "today", "inventory", "listings", "sales", "analytics",
   "reconcile", "imports", "connections", "settings",
