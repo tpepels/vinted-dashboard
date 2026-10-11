@@ -1121,6 +1121,19 @@ function renderTodaySourceStatus(connectors) {
     .filter((row) => row.configured || row.operational)
     .sort((a, b) => String(a.display_name || a.channel).localeCompare(String(b.display_name || b.channel)));
 
+  const needsAttention = rows.filter(row => {
+    if (!row.operational) return true;
+    if (!row.last_synced_at) return false;
+    const age = Date.now() - Date.parse(row.last_synced_at);
+    return Number.isFinite(age) && age > 7 * 86400000;
+  }).length;
+  const overview = $("#today-sources-overview");
+  if (overview) overview.textContent = rows.length
+    ? needsAttention
+      ? needsAttention + " source" + (needsAttention === 1 ? "" : "s") + " need attention"
+      : rows.length + " connected source" + (rows.length === 1 ? "" : "s")
+    : "No marketplace connected";
+
   $("#today-source-status").innerHTML = rows.length
     ? rows.map((row) => {
       const synced = relativeTimestamp(row.last_synced_at);
@@ -1162,7 +1175,7 @@ function todayWorkRow(row) {
 
 function renderTodayWorkQueue(rows, total) {
   const queue = Array.isArray(rows) ? rows : [];
-  const visible = state.todayShowAll ? queue : queue.slice(0, 12);
+  const visible = state.todayShowAll ? queue : queue.slice(0, 5);
   $("#today-work-count").textContent = total
     ? total + " task" + (total === 1 ? "" : "s")
     : "Clear";
@@ -1187,8 +1200,8 @@ function renderTodayWorkQueue(rows, total) {
     if (!state.todayShowAll && queue.length > visible.length) {
       html += '<div class="work-more"><button id="today-show-all" class="btn" type="button">Show all '
         + queue.length + " tasks</button></div>";
-    } else if (state.todayShowAll && queue.length > 12) {
-      html += '<div class="work-more"><button id="today-show-less" class="btn" type="button">Show top 12</button></div>';
+    } else if (state.todayShowAll && queue.length > 5) {
+      html += '<div class="work-more"><button id="today-show-less" class="btn" type="button">Show top 5</button></div>';
     }
     $("#today-actions").innerHTML = html;
   }
