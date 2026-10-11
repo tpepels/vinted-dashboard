@@ -61,12 +61,16 @@ $("#pair-btn").onclick=async()=>{
 };
 
 $("#sync").onclick=async()=>{
-  show("Syncing Vinted inventory and API details…");
+  show("Collecting a limited Vinted update (never reloads your tab)…");
   const r=await send({type:"sync-now"});
   const remaining=Number(r?.age_scan_remaining||0);
   const pending=Number(r?.detail_pending??r?.detail_deferred??0);
   const enriched=Number(r?.detail_enriched||0);
 
+  if(r?.sync_skipped_for_interval){
+    return show("Sync limited to every 2 hours. Next attempt after "
+      + new Date(r.next_sync_at).toLocaleTimeString() + ". Your Vinted tabs are untouched.");
+  }
   if(r?.sync_skipped_for_api_cooldown){
     return show("Vinted API sync is cooling down"+apiCooldownText(r)+".");
   }
@@ -80,7 +84,7 @@ $("#sync").onclick=async()=>{
   if(pending)text+=" "+pending+" API details pending.";
   if(r?.detail_rate_limited)text+=" Detail enrichment stopped after an API 429"+apiCooldownText(r)+".";
   else if(r?.api_rate_limited)text+=" A Vinted API request was rate limited"+apiCooldownText(r)+".";
-  if(remaining)text+=" Scanning "+remaining+" posting ages in the minimized worker window"+pageCooldownText(r)+".";
+  if(remaining)text+=" Some historical posting ages are not refreshed in quiet mode.";
   show(text);
 };
 
