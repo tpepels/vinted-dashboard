@@ -36,6 +36,7 @@ const assertions=[
   ' const pageHeader=$(".connector-task-page-heading").getBoundingClientRect();',
   ' $("#mount").innerHTML=renderBiblioActivity(activity,true);',
   ' $(".biblio-photos-panel").open=true;',
+  ' setBiblioPhotoStep("choose");',
   ' const wizard=$(".biblio-photo-wizard");',
   ' const card=wizard.getBoundingClientRect();',
   ' const pad=parseFloat(getComputedStyle(wizard).paddingLeft);',
