@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy import and_, func, select
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake, store_stock_audit
@@ -5691,7 +5691,7 @@ class BiblioTargetedPhotoRetry(BaseModel):
     failed_only: bool = False
     # Positions from the current staged photo set, chosen by the seller after
     # checking which pictures are actually missing from BIBLIO.
-    photo_indices: list[int] | None = None
+    photo_indices: list[StrictInt] | None = None
 
 
 @router.post("/api/app/connectors/biblio/retry-listing-photos")
