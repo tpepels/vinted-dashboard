@@ -1313,3 +1313,25 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   #biblio-publish-panel .biblio-field .biblio-source{justify-self:start}
   .dashboard-optional-fields>.form-grid{grid-template-columns:1fr}
 }
+
+
+/* Today: a short priority queue, with expandable marketplace health details. */
+#today .today-sources{overflow:hidden}
+#today .today-sources-details>summary{display:flex;align-items:center;gap:10px;
+  list-style:none;cursor:pointer;padding:18px 20px;min-height:74px}
+#today .today-sources-details>summary::-webkit-details-marker{display:none}
+#today .today-sources-details>summary>span{flex:1 1 auto;min-width:0;display:grid;gap:5px}
+#today .today-sources-details>summary strong{font-size:15px;line-height:1.4}
+#today .today-sources-details>summary small{font-size:13px;line-height:1.45;color:var(--muted)}
+#today .today-sources-details>summary::after{content:"+";flex:0 0 20px;
+  text-align:center;font-size:23px;color:var(--accent);font-weight:450}
+#today .today-sources-details[open]>summary::after{content:"−"}
+#today .today-sources-details>summary:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
+#today .today-source-actions{display:flex;align-items:center;justify-content:space-between;
+  gap:12px;flex-wrap:wrap;padding:12px 17px;border-top:1px solid var(--line)}
+#today .today-source-actions>span{font-size:13px;line-height:1.5;color:var(--muted)}
+#today #today-source-status{border-top:1px solid var(--line)}
+@media(max-width:560px){
+  #today .today-source-actions{align-items:stretch;flex-direction:column}
+  #today .today-source-actions>.btn{width:100%}
+}
