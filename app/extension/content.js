@@ -43,12 +43,12 @@ function rateLimitDelay(response,attempt){
   if(Number.isFinite(seconds)&&seconds>0)return Math.min(30000,seconds*1000);
   return Math.min(12000,1500*(2**attempt));
 }
-function isRateLimitError(error){return Boolean(error?.vintedRateLimited)}
+function isRateLimitError(error){return Boolean(error?.vintedRateLimited||error?.vintedForbidden||error?.vintedChallenged)}
 async function fetchJson(path,params={},options={}){
   const url=new URL(path,location.origin);
   for(const[k,v]of Object.entries(params))url.searchParams.set(k,String(v));
-  const minDelayMs=Math.max(0,Number(options.minDelayMs??750));
-  const maxRetries=Math.max(0,Number(options.maxRetries??2));
+  const minDelayMs=Math.max(3000,Number(options.minDelayMs??6000));
+  const maxRetries=0; // Never retry a Vinted denial in the same sync.
   for(let attempt=0;attempt<=maxRetries;attempt++){
     const spacing=minDelayMs-(Date.now()-lastVintedFetchAt);
     if(spacing>0)await wait(spacing);
@@ -70,7 +70,7 @@ async function fetchJson(path,params={},options={}){
       error.vintedRateLimited=true;
       throw error;
     }
-    if(r.status===403){
+    if(r.status===401||r.status===403){
       const challenged=String(r.headers?.get?.("cf-mitigated")||"").toLowerCase()==="challenge";
       const error=new Error(
         challenged
@@ -188,14 +188,16 @@ async function enrichListingDetails(listings,reason="periodic"){
     missing.push(row);
   }
 
-  const queue=missing;
+  // Incremental enrichment, capped per sync. Never walk the entire
+  // wardrobe's detail endpoints in one session.
+  const queue=missing.slice(0,3);
   let enriched=0,rateLimited=false;
   for(const row of queue){
     try{
       const payload=await fetchJson(
         `/api/v2/items/${row.id}`,
         {localize:"false"},
-        {minDelayMs:1500,maxRetries:1},
+        {minDelayMs:6000,maxRetries:0},
       );
       if(payload===null)continue;
       const raw=payload?.item||payload?.data?.item||payload?.data||payload||{};
@@ -278,7 +280,9 @@ async function collectVintedData(reason="periodic"){
   const detailSync=secondaryRateLimited
     ? {enriched:0,attempted:0,pending:detailEligible,deferred:detailEligible,rate_limited:true}
     : await enrichListingDetails(listings,reason);
-  const ageScanItems=await enrichListingDates(listings);
+  // Historical multi-tab page-age scans are disabled; cached values may
+  // still be used locally without opening Vinted pages.
+  const ageScanItems=[];
 
   let notifications=[];
   const orders=[];

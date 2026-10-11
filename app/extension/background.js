@@ -1,6 +1,8 @@
 const API_ORIGIN="__API_ORIGIN__";
 const VINTED_PATTERNS=chrome.runtime.getManifest().content_scripts[0].matches.slice();
 const SYNC_ALARM="reseller-vinted-sync";
+const SYNC_INTERVAL_MS=2*60*60*1000;
+const VINTED_ACCESS_COOLDOWN_MS=24*60*60*1000;
 const AGE_JOB_ALARM="reseller-vinted-age-job";
 const AGE_CACHE_KEY="vintedListingPageAgeCacheV2";
 const AGE_FAILURES_KEY="vintedAgeScanFailuresV1";
@@ -25,21 +27,38 @@ async function authHeaders(){const data=await stored();if(!data.bridgeToken)thro
 async function api(path,options={}){const headers=Object.assign({},await authHeaders(),options.headers||{});const response=await fetch(API_ORIGIN+path,Object.assign({},options,{headers}));let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||("Dashboard returned HTTP "+response.status));return body}
 async function waitForTab(tabId,timeout=20000){const start=Date.now();while(Date.now()-start<timeout){const tab=await chrome.tabs.get(tabId);if(tab.status==="complete")return tab;await sleep(300)}throw new Error("Vinted tab did not finish loading.")}
 async function message(tabId,payload){try{return await chrome.tabs.sendMessage(tabId,payload)}catch(error){if(!String(error?.message||error).includes("Receiving end does not exist"))throw error;await chrome.scripting.executeScript({target:{tabId},files:["vinted_age.js","content.js"]});await sleep(250);return await chrome.tabs.sendMessage(tabId,payload)}}
-async function vintedTab(){const tabs=await chrome.tabs.query({url:VINTED_PATTERNS});if(tabs.length)return{tab:tabs[0],temporary:false};const data=await stored();if(!data.vintedOrigin)throw new Error("Open your signed-in Vinted website once, then press Sync now.");const tab=await chrome.tabs.create({url:data.vintedOrigin+"/",active:false});await waitForTab(tab.id);return{tab,temporary:true}}
+// Quiet mode: never open a tab or reload a user's Vinted page for a sync.
+async function vintedTab(reason="periodic"){
+  const tabs=await chrome.tabs.query({url:VINTED_PATTERNS});
+  const complete=tabs.filter(tab=>tab?.id!=null&&tab.status==="complete");
+  if(!complete.length)throw new Error("Open Vinted in a browser tab when you want to sync. The extension does not open or reload Vinted automatically.");
+  if(reason==="periodic"){
+    // Do not run background API requests while someone is using Vinted.
+    const windows=await chrome.windows.getAll({populate:false});
+    const focusedIds=new Set(windows.filter(win=>win.focused).map(win=>win.id));
+    const inactive=complete.find(tab=>!tab.active||!focusedIds.has(tab.windowId));
+    if(!inactive)throw new Error("Vinted is in use; automatic sync postponed.");
+    return{tab:inactive,temporary:false};
+  }
+  return{tab:complete.find(tab=>tab.active)||complete[0],temporary:false};
+}
 async function ensureCurrentContentScript(tab){
-  let protocol=null;
   try{
     const result=await chrome.tabs.sendMessage(tab.id,{type:"bridge-content-protocol"});
-    protocol=Number(result?.protocol);
+    if(Number(result?.protocol)===CONTENT_PROTOCOL)return tab;
   }catch{}
-  if(protocol===CONTENT_PROTOCOL)return await chrome.tabs.get(tab.id);
-  await chrome.tabs.reload(tab.id);
-  const reloaded=await waitForTab(tab.id,30000);
-  const result=await message(tab.id,{type:"bridge-content-protocol"});
-  if(Number(result?.protocol)!==CONTENT_PROTOCOL){
-    throw new Error("Vinted tab did not load the current bridge content script.");
-  }
-  return reloaded;
+  throw new Error("Vinted tab is using an older extension script. Reload it yourself when convenient; the bridge will not reload your page.");
+}
+async function stopLegacyAgeScan(){
+  // Older versions may have stored an aggressive multi-tab scan. Cancel it
+  // permanently, including any already-open minimized worker window.
+  try{
+    const data=await chrome.storage.local.get([AGE_JOB_KEY]);
+    const job=data?.[AGE_JOB_KEY];
+    if(job?.window_id!=null)await closeAgeWorkerWindow(job);
+    await chrome.storage.local.remove([AGE_JOB_KEY]);
+    await chrome.alarms.clear(AGE_JOB_ALARM);
+  }catch{}
 }
 async function waitForAgeNavigationSlot(){
   const task=ageNavigationChain.then(async()=>{
@@ -363,13 +382,16 @@ async function processAgeJobWave(){
 }
 
 async function pair(code){const response=await fetch(API_ORIGIN+"/api/extension/pair",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:String(code||"").trim().toUpperCase(),extension_version:chrome.runtime.getManifest().version,device_name:"Chrome"})});let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||"Pairing failed");await chrome.storage.local.set({bridgeToken:body.token,bridgeWorkspace:body.workspace});return body}
-async function unpair(){const data=await chrome.storage.local.get([AGE_JOB_KEY]);await closeAgeWorkerWindow(data?.[AGE_JOB_KEY]);await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
+async function unpair(){await stopLegacyAgeScan();await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin","lastSyncAttemptAt",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
 async function connectionStatus(){const data=await stored();if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN};try{const remote=await api("/api/extension/status");return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN}}catch(error){return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN}}}
 async function runSync(reason="manual"){
   if(syncInFlight)return syncInFlight;
-  const statusData=await chrome.storage.local.get(["syncStatus"]);
+  const statusData=await chrome.storage.local.get(["syncStatus","lastSyncAttemptAt"]);
   const previousStatus=statusData?.syncStatus||{};
+  const lastAttempt=Number(statusData?.lastSyncAttemptAt||0);
   const apiCooldownUntil=Number(previousStatus.api_cooldown_until||0);
+  // An access-denial cooldown takes precedence over the ordinary interval,
+  // including for a manual request. Never mask a 24h pause as a 2h wait.
   if(apiCooldownUntil>Date.now()){
     return{
       ...previousStatus,
@@ -379,20 +401,27 @@ async function runSync(reason="manual"){
       api_cooldown_until:apiCooldownUntil,
     };
   }
+  const recentAttempt=lastAttempt>0&&Date.now()-lastAttempt<SYNC_INTERVAL_MS;
+  if(recentAttempt)return{
+    ...previousStatus,ok:true,reason,
+    sync_skipped_for_interval:true,
+    next_sync_at:lastAttempt+SYNC_INTERVAL_MS,
+  };
   syncInFlight=(async()=>{
     let temporary=null;
     try{
-      const found=await vintedTab();
+      const found=await vintedTab(reason);
       temporary=found.temporary?found.tab.id:null;
-      let tab=await waitForTab(found.tab.id);
+      let tab=found.tab;
       tab=await ensureCurrentContentScript(tab);
+      await chrome.storage.local.set({lastSyncAttemptAt:Date.now()});
       const tabUrl=new URL(String(tab.url||""));
       if(!tabUrl.hostname.startsWith("www.vinted."))throw new Error("Open and sign in to Vinted first.");
       await chrome.storage.local.set({vintedOrigin:tabUrl.origin});
       const response=await message(tab.id,{type:"collect-vinted-data",reason});
       if(!response?.ok){
         if(response?.rate_limited){
-          const cooldownUntil=Date.now()+API_RATE_LIMIT_COOLDOWN_MS;
+          const cooldownUntil=Date.now()+VINTED_ACCESS_COOLDOWN_MS;
           const status={
             ok:false,
             at:new Date().toISOString(),
@@ -417,7 +446,9 @@ async function runSync(reason="manual"){
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
       const apiRateLimited=Boolean(detailSync.api_rate_limited??detailSync.rate_limited);
       const detailRateLimited=Boolean(detailSync.detail_endpoint_rate_limited??detailSync.rate_limited);
-      const ageJob=await startAgeJob(ageScanItems,reason);
+      // Disabled: mass page-age navigation previously spawned multiple
+      // minimized tabs and interfered with regular Vinted browsing.
+      const ageJob={remaining:0,scanned:0,updated:0,failed:0,skipped:ageScanItems.length};
       const status={
         ok:true,
         at:new Date().toISOString(),
@@ -429,7 +460,7 @@ async function runSync(reason="manual"){
         detail_deferred:Number(detailSync.pending??detailSync.deferred??0),
         detail_rate_limited:detailRateLimited,
         api_rate_limited:apiRateLimited,
-        api_cooldown_until:apiRateLimited?Date.now()+API_RATE_LIMIT_COOLDOWN_MS:0,
+        api_cooldown_until:apiRateLimited?Date.now()+VINTED_ACCESS_COOLDOWN_MS:0,
         vinted_cooldown_until:0,
         age_scan_running:ageJob.remaining>0,
         age_scan_remaining:ageJob.remaining,
@@ -441,7 +472,15 @@ async function runSync(reason="manual"){
       await chrome.storage.local.set({syncStatus:status});
       return status;
     }catch(error){
-      const status={ok:false,at:new Date().toISOString(),reason,error:error instanceof Error?error.message:String(error)};
+      const message=error instanceof Error?error.message:String(error);
+      const blocked=/rate limit|too many requests|HTTP 403|challenge|access denied|not signed in/i.test(message);
+      const status={
+        ok:false,at:new Date().toISOString(),reason,error:message,
+        api_rate_limited:blocked,
+        api_cooldown_until:blocked?Date.now()+VINTED_ACCESS_COOLDOWN_MS:0,
+      };
+      // A deferred automatic sync should not consume the two-hour quota;
+      // only a sync that was actually attempted is counted.
       await chrome.storage.local.set({syncStatus:status});
       return status;
     }finally{
@@ -452,22 +491,17 @@ async function runSync(reason="manual"){
   return syncInFlight;
 }
 function alarms(){
-  chrome.alarms.create(SYNC_ALARM,{periodInMinutes:10});
-  chrome.storage.local.get([AGE_JOB_KEY]).then(data=>{
-    const job=data?.[AGE_JOB_KEY];
-    if(job&&Array.isArray(job.remaining)&&job.remaining.length){
-      chrome.alarms.create(AGE_JOB_ALARM,{when:Date.now()+1000});
-    }
-  }).catch(()=>{});
+  // No catch-up sync on browser launch or extension installation.
+  chrome.alarms.create(SYNC_ALARM,{
+    delayInMinutes:120,periodInMinutes:120,
+  });
+  stopLegacyAgeScan();
 }
 chrome.runtime.onInstalled.addListener(alarms);
 chrome.runtime.onStartup.addListener(alarms);
 chrome.alarms.onAlarm.addListener(async a=>{
-  if(a.name===AGE_JOB_ALARM)return processAgeJobWave();
+  if(a.name===AGE_JOB_ALARM)return stopLegacyAgeScan();
   if(a.name===SYNC_ALARM){
-    const data=await chrome.storage.local.get([AGE_JOB_KEY]);
-    const job=data?.[AGE_JOB_KEY];
-    if(job&&Array.isArray(job.remaining)&&job.remaining.length)return;
     return runSync("periodic");
   }
 });
@@ -477,7 +511,7 @@ chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
     if(msg?.type==="unpair"){await unpair();return sendResponse({ok:true})}
     if(msg?.type==="sync-now")return sendResponse(await runSync("manual"));
     if(msg?.type==="status")return sendResponse(await connectionStatus());
-    if(msg?.type==="age-job-step")return sendResponse(await processAgeJobWave());
+    if(msg?.type==="age-job-step")return sendResponse({ok:false,error:"Page-age scans are disabled to protect normal Vinted browsing."});
     sendResponse({ok:false,error:"Unknown message"});
   })().catch(error=>sendResponse({ok:false,error:error instanceof Error?error.message:String(error)}));
   return true;
