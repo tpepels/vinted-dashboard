@@ -5561,12 +5561,14 @@ async function connections() {
       + (attentionCount ? " · " + attentionCount + " need attention" : "")
     : "No marketplace account configured yet. Set up one below, then test and import.";
   const featured = state.connectors.filter(connector =>
-    connector.configured || connector.channel === "vinted" || connector.channel === "biblio"
+    connectorPageChannels.includes(connector.channel)
+    && (connector.configured || connector.channel === "vinted" || connector.channel === "biblio")
   ).sort((a, b) => {
     const priority = {vinted: 0, biblio: 1};
     return (priority[a.channel] ?? 5) - (priority[b.channel] ?? 5);
   });
-  const other = state.connectors.filter(connector => !featured.includes(connector));
+  const other = state.connectors.filter(connector =>
+    connectorPageChannels.includes(connector.channel) && !featured.includes(connector));
   const connectorHtml = (connector) => {
     const channel = connector.channel;
     const ready = Boolean(connector.operational);
@@ -5706,7 +5708,7 @@ async function connections() {
   if (state.biblioPhotoExpanded) loadBiblioPhotoChoices();
 
   document.querySelectorAll(".pair").forEach((button) => { button.onclick = () => pair(button); });
-  $(".configure").forEach((button) => {
+  $$(".configure").forEach((button) => {
     button.onclick = () => openConnectorConfig(button.dataset.c, data.connectors.find((row) => row.channel === button.dataset.c));
   });
   // The actual connector controls exist on one dedicated page at a time.
