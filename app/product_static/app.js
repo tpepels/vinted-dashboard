@@ -6141,8 +6141,9 @@ async function connections() {
   // Hide irrelevant tabs; these are tasks, not arbitrary account internals.
   const isBiblio = selectedChannel === "biblio";
   const isVinted = selectedChannel === "vinted";
-  $$(".connector-photos-tab, .connector-listings-tab").forEach(button =>
-    button.classList.toggle("hidden", !isBiblio));
+  const canRepairPhotos = isBiblio && Boolean($("#connector-page-photos .biblio-photos-panel"));
+  $(".connector-photos-tab").classList.toggle("hidden", !canRepairPhotos);
+  $(".connector-listings-tab").classList.toggle("hidden", !isBiblio);
   const accountTab = $(".connector-account-tab");
   accountTab.textContent = isVinted ? "My browsers" : "Account";
   $("#connector-account-title").textContent = isVinted ? "Connected Chrome browsers" : "Account connection";
