@@ -516,10 +516,12 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
 def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert 'api("/api/app/connectors/biblio/activity")' in APP_JS
     assert "function renderBiblioActivity(activity, operational)" in APP_JS
-    assert "Send pending changes" in APP_JS
+    assert "biblio-go-inventory" in APP_JS
+    assert "biblio-fix-photos" in APP_JS
+    assert "biblio-verify" in APP_JS
     assert "Fix photos for one book" in APP_JS
     assert "Resend every photo for this book" in APP_JS
-    assert "Advanced recovery" in APP_JS
+    assert "Other troubleshooting" in APP_JS
     assert "Resend all photos" in APP_JS
     assert "Resend all listings" in APP_JS
     assert "Prepared does not mean published" in APP_JS
@@ -771,7 +773,9 @@ def test_connections_prioritizes_actions_and_keeps_dev_matrix_collapsed():
     assert 'id="connector-detail"' in index
     assert 'id="connector-page-card"' in index
     assert 'id="sidebar-toggle"' in index
-    assert 'api("/api/app/connectors/development").catch(() => null)' in APP_JS
+    assert 'const development = await api("/api/app/connectors/development");' in APP_JS
+    assert index.index('id="settings"') < index.index('id="marketplace-development"')
+    assert "biblioActivityTimer = setTimeout" not in APP_JS
 
 
 def test_connections_uses_multi_element_queries_for_action_handlers():
