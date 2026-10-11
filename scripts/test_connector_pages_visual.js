@@ -150,6 +150,23 @@ function runBrowserAssertions(){
       throw Error("Stale connector response modified the page after navigation");
     await selectView("connector-biblio");
 
+    // The ordinary BIBLIO tasks must remain readable without tiny or
+    // overflowing cards, including at the narrow screenshot widths.
+    const taskCards=[...document.querySelectorAll("#connector-page-card .connector-task-card")];
+    if(taskCards.length!==3)throw Error("BIBLIO task shortcuts missing");
+    for(const card of taskCards){
+      const label=card.querySelector("strong");
+      if(!label || parseFloat(getComputedStyle(label).fontSize)<15)
+        throw Error("BIBLIO task heading is too small");
+      if(card.scrollWidth>card.clientWidth+3)
+        throw Error("BIBLIO task text is clipped");
+    }
+    const photos=document.querySelector(".biblio-photos-panel");
+    photos.open=true;
+    await connections();
+    if(!document.querySelector(".biblio-photos-panel")?.open)
+      throw Error("Open BIBLIO photo repair collapsed during refresh");
+
     const toggle=byId("sidebar-toggle");
     const before=toggle.getAttribute("aria-expanded");
     toggle.click();
