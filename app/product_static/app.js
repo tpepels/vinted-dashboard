@@ -854,6 +854,42 @@ $$("[data-workspace-tabs]").forEach(bar => {
   activateWorkspaceTab(group, workspaceTabState[group] || tabs[0]?.dataset.workspaceTab);
 });
 
+// Advanced filters must advertise when a hidden filter is active; otherwise
+// a listing can disappear with no visible explanation.
+const optionalFilterGroups = [
+  ["#inventory-more-filters", ["#inventory-cost"], "More filters", "#inventory-reset"],
+  ["#listing-more-filters",
+    ["#listing-interest","#listing-duplicate","#listing-price-min","#listing-price-max"],
+    "More filters: favourites, duplicates and price", "#listing-reset"],
+  ["#sales-more-filters", ["#sales-state","#sales-channel"], "More filters", "#sales-reset"],
+];
+function updateOptionalFilterSummaries() {
+  optionalFilterGroups.forEach(([selector, fields, title]) => {
+    const panel = $(selector);
+    if (!panel) return;
+    const active = fields.filter(id => String($(id)?.value || "").trim() !== "").length;
+    const summary = panel.querySelector("summary");
+    if (summary) summary.textContent = title + (active
+      ? " · " + active + " active" : "");
+    panel.classList.toggle("has-active-filter", active > 0);
+  });
+}
+optionalFilterGroups.forEach(([selector, fields, , reset]) => {
+  const panel = $(selector);
+  if (panel) {
+    fields.forEach(id => {
+      const field = $(id);
+      if (!field) return;
+      field.addEventListener("input", updateOptionalFilterSummaries);
+      field.addEventListener("change", updateOptionalFilterSummaries);
+    });
+  }
+  const resetButton = $(reset);
+  if (resetButton) resetButton.addEventListener("click", () =>
+    queueMicrotask(updateOptionalFilterSummaries));
+});
+updateOptionalFilterSummaries();
+
 const commonPageViews = new Set([
   "today", "inventory", "listings", "sales", "analytics",
   "reconcile", "imports", "connections", "settings",
@@ -4656,6 +4692,7 @@ function renderListingStats(rows, duplicates) {
 }
 
 function renderListings() {
+  updateOptionalFilterSummaries();
   const rows = (state.listings || []).map((row, _index) => ({ ...row, _index }));
   const query = $("#listing-search").value.trim().toLowerCase();
   const channel = $("#listing-channel").value;
