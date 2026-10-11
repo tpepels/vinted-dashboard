@@ -1100,3 +1100,76 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   #connector-detail .connection-task-panel>.connection-task-content{padding:0 15px 16px}
   #connector-detail .connector-header .connection-state{white-space:normal;text-align:center}
 }
+
+
+/* Photo repair is one decision per stage, not a diagnostics dashboard. */
+#connector-detail .biblio-photo-wizard{max-width:900px;margin-inline:auto;padding-top:4px}
+#connector-detail .biblio-photo-progress{font-size:12px;color:var(--muted);font-weight:650;
+  padding:10px 0 15px;border-bottom:1px solid var(--line);margin-bottom:21px}
+#connector-detail .biblio-photo-stage{min-width:0}
+#connector-detail .biblio-photo-stage.hidden{display:none!important}
+#connector-detail .biblio-photo-step-count{font-size:12px;font-weight:800;
+  letter-spacing:.04em;color:var(--accent);margin:0 0 7px}
+#connector-detail .biblio-photo-stage h3{font-size:23px;line-height:1.3;
+  letter-spacing:-.02em;margin:0 0 15px}
+#connector-detail .biblio-photo-stage>p{max-width:64ch;line-height:1.55}
+#connector-detail #biblio-photo-book-select{display:block;width:100%;max-width:650px;
+  min-height:46px;font-size:15px;margin:10px 0 17px}
+#connector-detail .biblio-photo-manual-id{max-width:650px;margin:0 0 20px}
+#connector-detail .biblio-photo-manual-id summary{padding:6px 0;font-size:13px;color:var(--muted)}
+#connector-detail #biblio-inspect-photos{margin-top:5px;min-width:170px;min-height:44px}
+#connector-detail .biblio-photo-source-title{font-size:15px;font-weight:750;margin:16px 0 8px}
+#connector-detail .biblio-missing-photo-set{padding:0;margin:15px 0 18px;
+  border:0;border-radius:0}
+#connector-detail .biblio-missing-photo-set legend{font-size:14px;font-weight:750;margin-bottom:8px;padding:0}
+#connector-detail .biblio-photo-choice-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+#connector-detail .biblio-photo-choice{position:relative;min-width:0;min-height:205px;
+  display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:12px;
+  border-radius:12px;cursor:pointer;background:#fff;font-size:14px}
+#connector-detail .biblio-photo-choice input{position:absolute;top:15px;left:15px;
+  width:19px;height:19px;z-index:1}
+#connector-detail .biblio-photo-choice img,
+#connector-detail .biblio-photo-no-preview{width:100%;height:165px;object-fit:contain;
+  border-radius:8px;background:#f3f5f4}
+#connector-detail .biblio-photo-choice strong{font-size:14px;line-height:1.35;margin:0}
+#connector-detail .biblio-photo-choice:has(input:checked){background:var(--soft);border-color:var(--accent)}
+#connector-detail .biblio-wizard-warning{display:block;margin:16px 0;
+  padding:14px 16px;border:1px solid #e7cfaa;border-radius:10px;
+  background:#fff8ea;color:#705328;overflow-wrap:break-word}
+#connector-detail .biblio-wizard-warning strong{font-size:14px}
+#connector-detail .biblio-wizard-warning p{font-size:14px;margin:5px 0 0;line-height:1.55;color:inherit}
+#connector-detail .biblio-wizard-warning.hidden{display:none!important}
+#connector-detail .biblio-wizard-actions{display:flex;align-items:center;flex-wrap:wrap;
+  justify-content:flex-end;gap:12px;margin:18px 0 12px;padding:16px 0 0;
+  border-top:1px solid var(--line)}
+#connector-detail .biblio-wizard-actions .btn{min-height:44px;font-size:14px}
+#connector-detail .biblio-wizard-actions .btn:first-child{margin-right:auto}
+#connector-detail #biblio-photo-selected-count{font-size:13px;margin-right:auto}
+#connector-detail .biblio-photo-confirm-summary{padding:15px 18px;
+  background:var(--soft);border-radius:11px;font-size:18px;font-weight:750}
+#connector-detail .biblio-photo-source-tools,
+#connector-detail .biblio-photo-advanced,
+#connector-detail .biblio-photo-diagnostics{margin-top:14px;
+  padding:10px 0;border-top:1px solid var(--line);color:var(--muted)}
+#connector-detail .biblio-photo-source-tools summary,
+#connector-detail .biblio-photo-advanced summary,
+#connector-detail .biblio-photo-diagnostics summary{font-size:13px;font-weight:650;
+  line-height:1.5;cursor:pointer}
+#connector-detail .biblio-photo-source-tools p,
+#connector-detail .biblio-photo-advanced p,
+#connector-detail .biblio-photo-diagnostics p{font-size:13px;line-height:1.6;
+  overflow-wrap:anywhere;white-space:normal}
+#connector-detail .biblio-photo-error{color:var(--danger);font-size:14px}
+@media(max-width:650px){
+  #connector-detail .biblio-photo-stage h3{font-size:20px}
+  #connector-detail .biblio-photo-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+  #connector-detail .biblio-photo-choice{min-height:0;padding:8px}
+  #connector-detail .biblio-photo-choice img{height:130px}
+  #connector-detail .biblio-wizard-actions{flex-direction:column;align-items:stretch}
+  #connector-detail .biblio-wizard-actions>.btn{width:100%;margin:0}
+  #connector-detail #biblio-photo-selected-count{margin-right:0;text-align:center}
+}
+@media(max-width:380px){
+  #connector-detail .biblio-photo-choice-grid{grid-template-columns:1fr}
+  #connector-detail .biblio-photo-choice img{height:180px}
+}
