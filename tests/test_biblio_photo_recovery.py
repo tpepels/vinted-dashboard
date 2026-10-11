@@ -252,6 +252,12 @@ def test_operator_selects_only_missing_photos_and_queues_original_file_slots():
     assert [row["index"] for row in rows]==[0,1,2,3]
     assert all(row["preview_url"].startswith("https://images1.vinted.net/") for row in rows)
     assert "photo_source_urls" not in inspected.json()
+    for indices in ([],[0,0],[-1],[12],[True],[0,1,2,3,4,5,6,7,8,9,10,11,12]):
+        bad=client.post("/api/app/connectors/biblio/retry-listing-photos",
+                        headers={"X-CSRF-Token":csrf},
+                        json={"book_id":"MISSING-3","photo_indices":indices})
+        assert bad.status_code==422
+
     response=client.post("/api/app/connectors/biblio/retry-listing-photos",
                          headers={"X-CSRF-Token":csrf},
                          json={"book_id":"MISSING-3","photo_indices":[1,3]})
@@ -263,11 +269,6 @@ def test_operator_selects_only_missing_photos_and_queues_original_file_slots():
         assert job.payload["photo_indices"]==[1,3]
         assert set(job.payload["photo_expected_signatures"])=={"1","3"}
         assert job.payload.get("force_photos") is False
-    for indices in ([],[0,0],[-1],[12],[True],[0,1,2,3,4,5,6,7,8,9,10,11,12]):
-        bad=client.post("/api/app/connectors/biblio/retry-listing-photos",
-                        headers={"X-CSRF-Token":csrf},
-                        json={"book_id":"MISSING-3","photo_indices":indices})
-        assert bad.status_code==422
 
 
 def test_remove_local_biblio_listing_hides_it_without_remote_writes_then_readds(monkeypatch):
