@@ -85,7 +85,7 @@ async function scenario(mode) {
       }
       if (/^\/api\/v2\/items\/\d+$/.test(pathname)) {
         detailRequests += 1;
-        if (mode === "detail429" && detailRequests > 3) {
+        if (mode === "detail429" && detailRequests > 1) {
           return response(429, {});
         }
         const id = pathname.split("/").pop();
@@ -126,12 +126,12 @@ function assert(condition, message) {
 (async () => {
   const unlimited = await scenario("normal");
   assert(unlimited.result.ok === true, "Normal API detail enrichment should succeed");
-  assert(unlimited.detailRequests === 50,
-    "Rich-detail enrichment still has an artificial per-sync request budget");
-  assert(unlimited.result.snapshot.detail_sync.enriched === 50,
+  assert(unlimited.detailRequests === 3,
+    "Vinted detail enrichment must never walk the entire inventory in one sync");
+  assert(unlimited.result.snapshot.detail_sync.enriched === 3,
     "Normal API detail enrichment did not drain the full queue");
-  assert(unlimited.result.snapshot.detail_sync.pending === 0,
-    "Normal API detail enrichment left records pending");
+  assert(unlimited.result.snapshot.detail_sync.pending === 47,
+    "Unfinished enrichment must remain queued for future two-hour syncs");
   assert(unlimited.result.snapshot.detail_sync.api_rate_limited === false,
     "Normal detail enrichment was incorrectly marked rate limited");
 
@@ -148,9 +148,9 @@ function assert(condition, message) {
     "Detail 429 caused a partial core inventory snapshot");
   assert(detailLimited.result.snapshot.detail_sync.rate_limited === true,
     "Detail rate limit was not reported");
-  assert(detailLimited.result.snapshot.detail_sync.enriched === 3,
+  assert(detailLimited.result.snapshot.detail_sync.enriched === 1,
     "Unexpected number of detail enrichments before 429");
-  assert(detailLimited.result.snapshot.detail_sync.pending === 47,
+  assert(detailLimited.result.snapshot.detail_sync.pending === 49,
     "Pending API-detail count should reflect only records left after the real 429");
   assert(detailLimited.result.snapshot.detail_sync.detail_endpoint_rate_limited === true,
     "Detail endpoint 429 was not distinguished from page rate limiting");
