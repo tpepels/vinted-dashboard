@@ -5760,6 +5760,77 @@ def biblio_photo_status(book_id: str, context: RequestContext = Depends(require_
     return info
 
 
+class BiblioRefreshPhotoSources(BaseModel):
+    book_id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/api/app/connectors/biblio/refresh-photo-sources")
+def refresh_biblio_photo_sources(
+    payload: BiblioRefreshPhotoSources,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Refresh staged photos from the linked local Vinted snapshot only.
+
+    No FTP request, image download, seller-account mutation, or stock change.
+    Require exact linked Vinted identity; do not guess among multiple posts.
+    """
+    from app.connectors.hosted import BIBLIO_MAX_PHOTOS
+    with db.session_scope() as session:
+        matches = session.execute(select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.channel == Channel.BIBLIO,
+            models.ChannelListing.external_id == payload.book_id.strip(),
+        )).scalars().all()
+        if len(matches) != 1:
+            raise HTTPException(status_code=404 if not matches else 409,
+                                detail="Choose an unambiguous BIBLIO book in this workspace")
+        target = matches[0]
+        extra = dict(target.extra or {})
+        if extra.get("dashboard_removed") or target.status != ListingStatus.ACTIVE:
+            raise HTTPException(status_code=409, detail="BIBLIO dashboard posting is not active")
+        linked = session.execute(select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.channel == Channel.VINTED,
+            models.ChannelListing.inventory_item_id == target.inventory_item_id,
+        )).scalars().all()
+        expected_source = str(extra.get("source_listing_id") or "").strip()
+        if expected_source:
+            sources = [row for row in linked if str(row.id) == expected_source]
+        else:
+            sources = linked
+        if len(sources) != 1:
+            raise HTTPException(
+                status_code=409,
+                detail="Choose the exact linked Vinted listing before refreshing BIBLIO photos.",
+            )
+        source_urls = (sources[0].extra or {}).get("image_urls") or []
+        if not isinstance(source_urls, list):
+            raise HTTPException(status_code=409, detail="Vinted source photos are unavailable")
+        urls = [
+            str(url).strip() for url in source_urls
+            if str(url or "").strip() and _trusted_vinted_image_url(str(url))
+        ][:BIBLIO_MAX_PHOTOS]
+        if not urls:
+            raise HTTPException(status_code=409, detail="No trusted Vinted photos available in the dashboard")
+        earlier = list(extra.get("image_urls") or [])
+        changed = earlier != urls
+        if changed:
+            extra["image_urls"] = urls
+            extra["image_source"] = Channel.VINTED
+            extra["source_channel"] = Channel.VINTED
+            extra["source_listing_id"] = str(sources[0].id)
+            extra["photo_sync_state"] = "queued"
+            # Old per-file receipts remain valid *only* for the exact same
+            # filename/source pair. Do not erase proof for unchanged images.
+            target.extra = extra
+        return {
+            "ok": True, "changed": changed,
+            "previous_count": len(earlier), "staged_count": len(urls),
+            "remote_changed": False,
+            "note": "Updated dashboard source images only. No FTP files were sent.",
+        }
+
+
 class BiblioTargetedPhotoRetry(BaseModel):
     book_id: str = Field(min_length=1, max_length=200)
     failed_only: bool = False
