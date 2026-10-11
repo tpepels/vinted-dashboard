@@ -20,8 +20,8 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select
+from pydantic import BaseModel, Field, StrictInt
+from sqlalchemy import and_, func, select, update
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake, store_stock_audit
 from app.stock_relations import record_physical_quantity, confirm_physical_relation, is_physical, is_provisional
@@ -64,6 +64,7 @@ from app.connectors.hosted import (
     biblio_configured,
     biblio_pending_changes,
     biblio_photo_file_signature,
+    _trusted_vinted_image_url,
     biblio_upload_profile,
     exchange_etsy_authorization_code,
     ebay_configured,
@@ -449,7 +450,11 @@ def _effective_item_ask(
 
 
 def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelListing] | None = None) -> dict[str, Any]:
-    rows = list(listings or [])
+    rows = [
+        row for row in list(listings or [])
+        if not (row.channel == Channel.BIBLIO
+                and dict(row.extra or {}).get("dashboard_removed"))
+    ]
     attributes = dict(item.attributes or {})
     default_price = attributes.get("default_price_cents")
     effective_ask, effective_ask_source = _effective_item_ask(item, rows)
@@ -844,6 +849,8 @@ def listings(
     now = datetime.now(timezone.utc)
     for listing, snapshot in rows:
         extra = dict(listing.extra or {})
+        if listing.channel == Channel.BIBLIO and extra.get("dashboard_removed"):
+            continue
         linked_item = item_by_id.get(listing.inventory_item_id)
         linked_attrs = dict(linked_item.attributes or {}) if linked_item is not None else {}
         biblio_enrichment = (
@@ -1588,6 +1595,11 @@ def item_marketplace_status(
                 models.ChannelListing.inventory_item_id == item_id,
             ).order_by(models.ChannelListing.channel, models.ChannelListing.external_id)
         ).scalars().all()
+        listings = [
+            row for row in listings
+            if not (row.channel == Channel.BIBLIO
+                    and dict(row.extra or {}).get("dashboard_removed"))
+        ]
         listing_ids = [row.id for row in listings]
         operation_filter = MarketplaceOperation.inventory_item_id == item_id
         if listing_ids:
@@ -3698,6 +3710,155 @@ def cross_list_publish(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/api/app/connectors/biblio/dashboard-postings")
+def biblio_dashboard_postings(context: RequestContext = Depends(require_context)):
+    """List local BIBLIO records, including intentionally removed copies."""
+    with db.session_scope() as session:
+        rows = session.execute(select(
+            models.ChannelListing, models.InventoryItem,
+        ).join(
+            models.InventoryItem, models.InventoryItem.id == models.ChannelListing.inventory_item_id,
+        ).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.channel == Channel.BIBLIO,
+            models.InventoryItem.workspace_id == context.workspace.id,
+        ).order_by(
+            models.ChannelListing.last_seen_at.desc(),
+        ).limit(2000)).all()
+        return {
+            "postings": [{
+                "book_id": listing.external_id,
+                "inventory_item_id": str(item.id),
+                "title": listing.title or item.title,
+                "dashboard_removed": bool(dict(listing.extra or {}).get("dashboard_removed")),
+                "dashboard_status": listing.status,
+                "photo_count": len((listing.extra or {}).get("image_urls") or []),
+                "photo_state": (listing.extra or {}).get("photo_sync_state"),
+            } for listing, item in rows],
+        }
+
+
+class BiblioLocalRemoveRequest(BaseModel):
+    book_id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/api/app/inventory/{item_id}/marketplaces/biblio/remove-local")
+def remove_biblio_listing_locally(
+    item_id: uuid.UUID,
+    payload: BiblioLocalRemoveRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Hide one dashboard listing without touching BIBLIO or master stock.
+
+    The original listing record and remote ID remain available for a safe
+    re-add. A running/pending FTP worker cannot race this local operation.
+    """
+    with db.session_scope() as session:
+        item = session.get(models.InventoryItem, item_id)
+        if item is None or item.workspace_id != context.workspace.id:
+            raise HTTPException(status_code=404, detail="Inventory item not found")
+        matches = session.execute(select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.inventory_item_id == item_id,
+            models.ChannelListing.channel == Channel.BIBLIO,
+            models.ChannelListing.external_id == payload.book_id,
+        )).scalars().all()
+        if not matches:
+            raise HTTPException(status_code=404, detail="BIBLIO dashboard listing not found")
+        if len(matches) != 1:
+            raise HTTPException(status_code=409, detail="BIBLIO Book ID is ambiguous")
+        listing = matches[0]
+        if dict(listing.extra or {}).get("dashboard_removed"):
+            return {"ok": True, "already_removed": True, "book_id": listing.external_id}
+        # A newly added book normally has one delayed photo-only pickup
+        # queued for the next day. Cancelling that *specific future job* is
+        # safe; a queued immediate/full or already-running FTP job is not.
+        now = utcnow()
+        jobs_active = session.execute(select(BackgroundJob).where(
+            BackgroundJob.workspace_id == context.workspace.id,
+            BackgroundJob.job_type == "biblio_sync",
+            BackgroundJob.status.in_(["queued", "running"]),
+        )).scalars().all()
+        for job in jobs_active:
+            job_payload = dict(job.payload or {})
+            is_future_follow_up = (
+                job.status == "queued"
+                and job.available_at is not None
+                and job.available_at > now
+                and job_payload.get("automatic_photo_retry") is True
+                and str(job_payload.get("listing_id") or "") == str(listing.id)
+                and job_payload.get("photos_only") is True
+            )
+            if not is_future_follow_up:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A BIBLIO transfer is queued or running. Wait for it to finish before removing the local listing.",
+                )
+        # All outstanding jobs are now known to be future pickups of this
+        # listing. Conditional status update fails closed if a worker won
+        # the claim concurrently.
+        for job in jobs_active:
+            updated = session.execute(update(BackgroundJob).where(
+                BackgroundJob.id == job.id,
+                BackgroundJob.workspace_id == context.workspace.id,
+                BackgroundJob.status == "queued",
+                BackgroundJob.available_at > now,
+            ).values(status="cancelled", completed_at=now)).rowcount
+            if updated != 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A scheduled photo job just started. Refresh after it finishes.",
+                )
+            operation = session.execute(select(MarketplaceOperation).where(
+                MarketplaceOperation.workspace_id == context.workspace.id,
+                MarketplaceOperation.job_id == job.id,
+                MarketplaceOperation.status == "queued",
+            )).scalar_one_or_none()
+            if operation is not None:
+                operation.status = "cancelled"
+                operation.verification = "no_remote_changes"
+                operation.active_key = None
+                operation.completed_at = now
+        # Session autoflush may be disabled: the following active-operation
+        # check must see the cancellation we just recorded.
+        session.flush()
+        ops_active = session.execute(select(MarketplaceOperation.id).where(
+            MarketplaceOperation.workspace_id == context.workspace.id,
+            MarketplaceOperation.channel == Channel.BIBLIO,
+            MarketplaceOperation.status.in_(["queued", "running"]),
+        ).limit(1)).first()
+        if ops_active:
+            raise HTTPException(
+                status_code=409,
+                detail="Another BIBLIO transfer is queued or running. Wait for it before removing the dashboard listing.",
+            )
+        extra = dict(listing.extra or {})
+        extra["dashboard_removed"] = True
+        extra["dashboard_removed_at"] = now.isoformat()
+        extra["dashboard_removed_by"] = str(context.user.id)
+        listing.extra = extra
+        listing.status = ListingStatus.INACTIVE
+        listing.quantity = 0
+        session.add(MarketplaceOperation(
+            workspace_id=context.workspace.id,
+            inventory_item_id=item_id,
+            channel_listing_id=listing.id,
+            channel=Channel.BIBLIO,
+            operation_type="local_remove",
+            target_key=f"{listing.id}:local_remove",
+            status="succeeded",
+            verification="no_remote_changes",
+            result={"book_id": listing.external_id, "action": "dashboard_only",
+                    "no_remote_changes": True},
+            completed_at=now,
+        ))
+        return {
+            "ok": True, "already_removed": False, "book_id": listing.external_id,
+            "remote_changed": False,
+            "note": "Hidden from dashboard views. The existing BIBLIO seller listing was not deleted.",
+        }
+
+
 @router.get("/api/app/inventory/{item_id}/publish/biblio")
 def biblio_publish_preview(
     item_id: uuid.UUID,
@@ -5542,8 +5703,12 @@ def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any
             filename = book_id + (f"_{index}" if index else "") + ".jpg"
             known = receipts.get(filename) == biblio_photo_file_signature(book_id, index, url)
             file_progress.append({
+                "index": index,
                 "filename": filename,
                 "sent_to_ftp": bool(known),
+                # Public HTTPS Vinted image URL for a human comparing each
+                # file against the BIBLIO seller page; never accept new URLs.
+                "preview_url": url if _trusted_vinted_image_url(url) else None,
             })
         successful_transfers = sum(row["sent_to_ftp"] for row in file_progress)
         jobs_found = session.execute(
@@ -5568,6 +5733,9 @@ def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any
                 for index in range(len(urls))
             ],
             "file_progress": file_progress,
+            # Private to server-side endpoint use; do not include signed URL
+            # copies in history or logs. The public preview is above.
+            "photo_source_urls": urls,
             "successful_file_transfers": successful_transfers,
             "unconfirmed_file_transfers": len(urls) - successful_transfers,
             "last_ftp_photo_count": extra.get("photo_count"),
@@ -5587,12 +5755,88 @@ def _biblio_photo_status(workspace_id: uuid.UUID, book_id: str) -> dict[str, Any
 
 @router.get("/api/app/connectors/biblio/photo-status")
 def biblio_photo_status(book_id: str, context: RequestContext = Depends(require_context)):
-    return _biblio_photo_status(context.workspace.id, book_id)
+    info = _biblio_photo_status(context.workspace.id, book_id)
+    info.pop("photo_source_urls", None)
+    return info
+
+
+class BiblioRefreshPhotoSources(BaseModel):
+    book_id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/api/app/connectors/biblio/refresh-photo-sources")
+def refresh_biblio_photo_sources(
+    payload: BiblioRefreshPhotoSources,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Refresh staged photos from the linked local Vinted snapshot only.
+
+    No FTP request, image download, seller-account mutation, or stock change.
+    Require exact linked Vinted identity; do not guess among multiple posts.
+    """
+    from app.connectors.hosted import BIBLIO_MAX_PHOTOS
+    with db.session_scope() as session:
+        matches = session.execute(select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.channel == Channel.BIBLIO,
+            models.ChannelListing.external_id == payload.book_id.strip(),
+        )).scalars().all()
+        if len(matches) != 1:
+            raise HTTPException(status_code=404 if not matches else 409,
+                                detail="Choose an unambiguous BIBLIO book in this workspace")
+        target = matches[0]
+        extra = dict(target.extra or {})
+        if extra.get("dashboard_removed") or target.status != ListingStatus.ACTIVE:
+            raise HTTPException(status_code=409, detail="BIBLIO dashboard posting is not active")
+        linked = session.execute(select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.channel == Channel.VINTED,
+            models.ChannelListing.inventory_item_id == target.inventory_item_id,
+        )).scalars().all()
+        expected_source = str(extra.get("source_listing_id") or "").strip()
+        if expected_source:
+            sources = [row for row in linked if str(row.id) == expected_source]
+        else:
+            sources = linked
+        if len(sources) != 1:
+            raise HTTPException(
+                status_code=409,
+                detail="Choose the exact linked Vinted listing before refreshing BIBLIO photos.",
+            )
+        source_urls = (sources[0].extra or {}).get("image_urls") or []
+        if not isinstance(source_urls, list):
+            raise HTTPException(status_code=409, detail="Vinted source photos are unavailable")
+        urls = [
+            str(url).strip() for url in source_urls
+            if str(url or "").strip() and _trusted_vinted_image_url(str(url))
+        ][:BIBLIO_MAX_PHOTOS]
+        if not urls:
+            raise HTTPException(status_code=409, detail="No trusted Vinted photos available in the dashboard")
+        earlier = list(extra.get("image_urls") or [])
+        changed = earlier != urls
+        if changed:
+            extra["image_urls"] = urls
+            extra["image_source"] = Channel.VINTED
+            extra["source_channel"] = Channel.VINTED
+            extra["source_listing_id"] = str(sources[0].id)
+            extra["photo_sync_state"] = "queued"
+            # Old per-file receipts remain valid *only* for the exact same
+            # filename/source pair. Do not erase proof for unchanged images.
+            target.extra = extra
+        return {
+            "ok": True, "changed": changed,
+            "previous_count": len(earlier), "staged_count": len(urls),
+            "remote_changed": False,
+            "note": "Updated dashboard source images only. No FTP files were sent.",
+        }
 
 
 class BiblioTargetedPhotoRetry(BaseModel):
     book_id: str = Field(min_length=1, max_length=200)
     failed_only: bool = False
+    # Positions from the current staged photo set, chosen by the seller after
+    # checking which pictures are actually missing from BIBLIO.
+    photo_indices: list[StrictInt] | None = None
 
 
 @router.post("/api/app/connectors/biblio/retry-listing-photos")
@@ -5607,6 +5851,16 @@ def biblio_retry_listing_photos(
         raise HTTPException(status_code=409, detail="Listing is not active with stock available")
     if not info["biblio_source_photos"] and not info["vinted_source_photos"]:
         raise HTTPException(status_code=409, detail="No source photographs available; refresh Vinted first")
+    if payload.photo_indices is not None:
+        chosen = payload.photo_indices
+        if (payload.failed_only or not chosen or len(chosen) > 12
+                or len(set(chosen)) != len(chosen)
+                or any(type(index) is not int or index < 0
+                       or index >= len(info["file_progress"]) for index in chosen)):
+            raise HTTPException(
+                status_code=422,
+                detail="Select one or more valid photo positions from the latest inspection.",
+            )
     if payload.failed_only and (
         not info["photo_error"]
         or not info["successful_file_transfers"]
@@ -5624,14 +5878,25 @@ def biblio_retry_listing_photos(
                 payload={
                     "listing_id": info["listing_id"],
                     "photos_only": True,
-                    "force_photos": not payload.failed_only,
+                    "force_photos": not payload.failed_only and payload.photo_indices is None,
                     **({"failed_photos_only": True} if payload.failed_only else {}),
+                    **({
+                        "photo_indices": payload.photo_indices,
+                        "photo_expected_signatures": {
+                            str(index): biblio_photo_file_signature(
+                                info["book_id"], index,
+                                info["photo_source_urls"][index],
+                            )
+                            for index in payload.photo_indices
+                        },
+                    } if payload.photo_indices is not None else {}),
                 },
                 channel_listing_id=uuid.UUID(str(info["listing_id"])),
             )
             job_id, operation_id = operation.job_id, operation.id
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    info.pop("photo_source_urls", None)
     return {"ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
             "already_queued": not created, **info}
 

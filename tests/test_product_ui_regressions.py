@@ -516,9 +516,9 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
 def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert 'api("/api/app/connectors/biblio/activity")' in APP_JS
     assert "function renderBiblioActivity(activity, operational)" in APP_JS
-    assert "Send changes to BIBLIO" in APP_JS
+    assert "Send pending changes" in APP_JS
     assert "Fix photos for one book" in APP_JS
-    assert "Resend all photos for this book" in APP_JS
+    assert "Resend every photo for this book" in APP_JS
     assert "Advanced recovery" in APP_JS
     assert "Resend all photos" in APP_JS
     assert "Resend all listings" in APP_JS
@@ -789,8 +789,11 @@ def test_biblio_photo_repair_has_title_picker_and_confirmation():
     assert 'api("/api/app/listings?channel=biblio")' in APP_JS
     assert "Choose a book by title" in APP_JS
     assert "The book details will not be resent" in APP_JS
-    assert "Resend all photos for this book" in APP_JS
+    assert "Resend every photo for this book" in APP_JS
     assert "loadBiblioPhotoChoices()" in APP_JS
+    assert "Update prepared photos from saved Vinted listing" in APP_JS
+    assert '"/api/app/connectors/biblio/refresh-photo-sources"' in APP_JS
+    assert "biblio-photo-advanced" in APP_JS
 
 
 def test_connections_hides_advanced_tools_and_separates_comparison_from_settings():
@@ -838,8 +841,8 @@ def test_item_marketplace_panel_exposes_safe_real_actions():
 def test_biblio_selective_photo_repair_keeps_safe_full_resend_choice():
     assert 'id="biblio-retry-failed-photos"' in APP_JS
     assert 'id="biblio-retry-listing-photos"' in APP_JS
-    assert "Retry failed photo files" in APP_JS
-    assert "Resend all photos for this book" in APP_JS
+    assert "Retry files without an FTP receipt" in APP_JS
+    assert "Resend every photo for this book" in APP_JS
     assert "body: JSON.stringify({book_id: selected.book_id, failed_only: true})" in APP_JS
     assert "unconfirmed_file_transfers" in APP_JS
     assert "successful_file_transfers" in APP_JS

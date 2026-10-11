@@ -823,3 +823,97 @@ def test_biblio_first_upload_does_not_cache_files_until_listing_has_had_time_to_
     result = hosted.sync_biblio_workspace(uuid.uuid4())
     assert result["deferred_photo_retry_listing_ids"] == [listing_id]
     assert receipts == []
+
+
+def test_incremental_ftp_photo_sync_sends_only_missing_receipts(monkeypatch):
+    book_id="BK-MISSING"
+    listing_id=str(uuid.uuid4())
+    urls=[f"https://images1.vinted.net/t/photo-{i}.jpg" for i in range(4)]
+    receipts={
+        hosted._biblio_photo_filename(book_id,i):
+            hosted.biblio_photo_file_signature(book_id,i,urls[i])
+        for i in (0,2,3)
+    }
+    active=[{
+        "sku":book_id,"source_id":book_id,"listing_id":listing_id,
+        "title":"Partially uploaded","image_urls":urls,
+        "photo_file_receipts":receipts,"photo_sync_signature":None,
+        "photo_sync_state":"error",
+        "inventory_dirty":False,
+        "inventory_synced_at":"2026-10-01T10:00:00+00:00",
+    }]
+    monkeypatch.setattr(hosted,"_workspace_or_env_biblio_values",
+        lambda _:{"host":"ftp.biblio.com","username":"u","password":"p"})
+    monkeypatch.setattr(hosted,"_biblio_rows",lambda *_args,**_kw:(active,[]))
+    monkeypatch.setattr(hosted,"_download_biblio_jpeg",lambda _:b"jpeg")
+    monkeypatch.setattr(hosted,"_refresh_biblio_linked_sources",lambda *_args,**_kw:None)
+    monkeypatch.setattr(hosted,"_remember_biblio_photo_file_receipts",
+                        lambda _,__,new:receipts.update(new))
+    synced=[]
+    monkeypatch.setattr(hosted,"_mark_biblio_photo_sync",
+                        lambda _ws,rows:synced.extend(rows))
+    _stub_progress(monkeypatch)
+    sends=[]
+    class FTP:
+        def storbinary(self,command,data):
+            sends.append(command);data.read()
+        def quit(self):pass
+        def close(self):pass
+    monkeypatch.setattr(hosted,"_connect_biblio_ftp",lambda _:FTP())
+    result=hosted.sync_biblio_workspace(uuid.uuid4())
+    assert sends==["STOR BK-MISSING_1.jpg"]
+    assert result["photos_uploaded"]==1
+    assert result["photos_skipped"]==3
+    assert len(receipts)==4
+    assert synced[-1][1]==hosted._biblio_photo_signature(urls,book_id=book_id)
+
+
+def test_selected_biblio_photo_repair_preserves_original_filenames_and_refuses_drift(monkeypatch):
+    book_id="BK-SELECT"
+    listing_id=str(uuid.uuid4())
+    urls=[f"https://images1.vinted.net/t/p{i}.jpg" for i in range(4)]
+    row={"sku":book_id,"source_id":book_id,"listing_id":listing_id,
+         "image_urls":urls,"photo_sync_signature":"old","inventory_dirty":False,
+         "inventory_synced_at":"2026-10-01T10:00:00+00:00"}
+    monkeypatch.setattr(hosted,"_workspace_or_env_biblio_values",
+        lambda _:{"host":"ftp.biblio.com","username":"u","password":"p"})
+    monkeypatch.setattr(hosted,"_biblio_rows",lambda *_args,**_kw:([row],[]))
+    monkeypatch.setattr(hosted,"_refresh_biblio_linked_sources",lambda *_args,**_kw:None)
+    monkeypatch.setattr(hosted,"_download_biblio_jpeg",lambda _:b"jpeg")
+    monkeypatch.setattr(hosted,"_remember_biblio_photo_file_receipts",lambda *_:None)
+    monkeypatch.setattr(hosted,"_mark_biblio_photo_sync",lambda *_:None)
+    _stub_progress(monkeypatch)
+    sends=[]
+    class FTP:
+        def storbinary(self,command,data): sends.append(command);data.read()
+        def quit(self):pass
+        def close(self):pass
+    monkeypatch.setattr(hosted,"_connect_biblio_ftp",lambda _:FTP())
+    signatures={str(i):hosted.biblio_photo_file_signature(book_id,i,urls[i])
+                for i in (1,3)}
+    result=hosted.sync_biblio_workspace(
+        uuid.uuid4(),listing_id=uuid.UUID(listing_id),
+        photos_only=True,photo_indices=[1,3],
+        photo_expected_signatures=signatures,
+    )
+    assert result["photos_uploaded"]==2
+    assert sends==["STOR BK-SELECT_1.jpg","STOR BK-SELECT_3.jpg"]
+    row["image_urls"][3]="https://images1.vinted.net/t/changed.jpg"
+    sends.clear()
+    try:
+        hosted.sync_biblio_workspace(
+            uuid.uuid4(),listing_id=uuid.UUID(listing_id),photos_only=True,
+            photo_indices=[1,3],photo_expected_signatures=signatures)
+    except ValueError as exc:
+        assert "Source photos changed" in str(exc)
+    else:
+        raise AssertionError("Stale source image fingerprint was accepted")
+    assert sends==[]
+
+
+def test_pending_post_listing_photo_followup_does_not_trigger_repeated_incremental_sync():
+    urls=["https://images1.vinted.net/t/photo.jpg"]
+    row={"sku":"NEW-BOOK","image_urls":urls,"photo_sync_signature":None,
+         "photo_sync_state":"retry_scheduled"}
+    assert hosted._pending_biblio_photo_rows([row])==[]
+    assert len(hosted._pending_biblio_photo_rows([row],force=True))==1

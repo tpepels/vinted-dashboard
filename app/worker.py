@@ -54,6 +54,12 @@ def _sync_biblio(payload: dict, workspace_id: uuid.UUID | None) -> dict:
         force_photos=bool(payload.get("force_photos")),
         photos_only=bool(payload.get("photos_only")),
         failed_photos_only=bool(payload.get("failed_photos_only")),
+        **({
+            "photo_indices": payload["photo_indices"],
+            "photo_expected_signatures": payload.get("photo_expected_signatures"),
+        } if "photo_indices" in payload else {}),
+        **({"automatic_photo_follow_up": True}
+           if payload.get("automatic_photo_retry") else {}),
     )
 
     # BIBLIO explicitly ignores an image if it is picked up before the

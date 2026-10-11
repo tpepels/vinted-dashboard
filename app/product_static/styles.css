@@ -910,3 +910,65 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   #connector-detail .connector-settings-row>.btn{flex:1 1 100%}
   #connector-detail .connector-header{flex-direction:column}
 }
+
+/* Selective BIBLIO photo repair: show source images at small widths without clipping. */
+.biblio-missing-photo-set{min-width:0;border:1px solid var(--line);border-radius:11px;
+  padding:12px;margin:12px 0}
+.biblio-missing-photo-set legend{font-size:12px;font-weight:800;padding:0 5px}
+.biblio-missing-photo-set>p{font-size:11px;line-height:1.6;margin:4px 0 12px}
+.biblio-photo-choice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(128px,100%),1fr));gap:10px}
+.biblio-photo-choice{display:grid;min-width:0;gap:4px;padding:9px;border:1px solid var(--line);
+  background:var(--card);border-radius:10px;cursor:pointer;font-size:11px}
+.biblio-photo-choice:has(input:checked){border-color:var(--accent);background:var(--soft)}
+.biblio-photo-choice input{justify-self:start;width:17px;height:17px;accent-color:var(--accent)}
+.biblio-photo-choice img,.biblio-photo-no-preview{display:block;width:100%;height:120px;
+  border-radius:7px;object-fit:contain;background:#f0f3f2}
+.biblio-photo-no-preview{display:grid;place-items:center;color:var(--muted);font-size:11px}
+.biblio-photo-choice small{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+.biblio-photo-choice:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+#connector-page-biblio .biblio-missing-photo-set{max-width:100%}
+@media(max-width:540px){
+  .biblio-photo-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .biblio-photo-choice img{height:96px}
+}
+
+/* BIBLIO local posting controls never imply a remote seller deletion. */
+.biblio-postings-toolbar{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.biblio-postings-toolbar label{display:grid;gap:5px;flex:1 1 240px;min-width:0;
+  font-size:12px;font-weight:650}
+.biblio-postings-toolbar input{width:100%;min-width:0}
+.biblio-postings-list{display:grid;gap:8px;margin-top:10px}
+.biblio-posting-row{display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;min-width:0}
+.biblio-posting-copy{display:grid;gap:3px;min-width:0;flex:1 1 200px;overflow-wrap:anywhere}
+.biblio-posting-copy strong{font-size:12px}
+.biblio-posting-copy span,.biblio-posting-copy small{font-size:11px;color:var(--muted)}
+.biblio-posting-row .btn{flex:0 1 auto;font-size:11px;white-space:normal}
+@media(max-width:560px){.biblio-posting-row .btn{width:100%;flex:1 1 100%}}
+
+/* Keep BIBLIO's ordinary workflow readable, including narrow layouts. */
+.connector--biblio .biblio-primary-task{min-width:0;flex-wrap:wrap;gap:14px}
+.biblio-primary-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.biblio-primary-buttons>.btn{white-space:normal;max-width:100%;min-height:40px}
+.biblio-photo-setup-note{font-size:13px;line-height:1.55;margin:12px 0;padding:12px 14px;
+  border:1px solid var(--line);border-radius:9px;overflow-wrap:anywhere}
+.biblio-photo-setup-note a{overflow-wrap:anywhere}
+.biblio-photo-advanced{margin:14px 0;border-top:1px solid var(--line);padding-top:10px}
+.biblio-photo-advanced summary{cursor:pointer;font-size:13px;font-weight:650;line-height:1.5}
+.biblio-photo-recovery-controls{align-items:center;flex-wrap:wrap}
+.biblio-photo-recovery-controls>.btn{white-space:normal;min-height:40px}
+.biblio-missing-photo-set legend{font-size:14px}
+.biblio-missing-photo-set>p{font-size:13px}
+.biblio-photo-choice{font-size:13px;line-height:1.4}
+.biblio-photo-choice small,.biblio-posting-copy span,.biblio-posting-copy small{font-size:12px}
+.biblio-posting-copy strong{font-size:14px}
+.biblio-posting-row .btn{font-size:13px;min-height:40px}
+@media(max-width:600px){
+  .biblio-primary-buttons{width:100%}
+  .biblio-primary-buttons>.btn{flex:1 1 100%;width:100%}
+  .biblio-photo-recovery-controls>.btn{flex:1 1 100%;width:100%}
+  .biblio-photo-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:380px){
+  .biblio-photo-choice-grid{grid-template-columns:1fr}
+}

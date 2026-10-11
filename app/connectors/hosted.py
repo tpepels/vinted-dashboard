@@ -3865,6 +3865,10 @@ def _biblio_rows(
         for listing, item in listings:
             attrs = dict(item.attributes or {})
             extra = dict(listing.extra or {})
+            # Local removal must never be interpreted as an instruction to
+            # delete a live BIBLIO seller record in a subsequent FTP sync.
+            if extra.get("dashboard_removed"):
+                continue
             bibliographic = (
                 dict(extra.get("bibliographic_enrichment") or {})
                 if isinstance(extra.get("bibliographic_enrichment"), dict)
@@ -4194,6 +4198,11 @@ def _pending_biblio_photo_rows(
         if not signature:
             continue
         if not force and signature == row.get("photo_sync_signature"):
+            continue
+        # The first FTP photo attempt may precede BIBLIO indexing a new
+        # listing. During its one scheduled follow-up, incremental syncs must
+        # not repeatedly send the same complete photo set.
+        if not force and row.get("photo_sync_state") == "retry_scheduled":
             continue
         pending.append({**row, "image_urls": urls, "photo_signature": signature})
     return pending
@@ -4686,7 +4695,21 @@ def sync_biblio_workspace(
     force_photos: bool = False,
     photos_only: bool = False,
     failed_photos_only: bool = False,
+    photo_indices: list[int] | None = None,
+    photo_expected_signatures: dict[str, str] | None = None,
+    automatic_photo_follow_up: bool = False,
 ) -> dict[str, Any]:
+    if photo_indices is not None:
+        if (listing_id is None or not photos_only or full_sync or failed_photos_only
+                or len(photo_indices) < 1 or len(photo_indices) > BIBLIO_MAX_PHOTOS
+                or any(type(index) is not int or index < 0 or index >= BIBLIO_MAX_PHOTOS
+                       for index in photo_indices)
+                or len(set(photo_indices)) != len(photo_indices)):
+            raise ValueError("Select valid distinct photo positions for exactly one book")
+        if set((photo_expected_signatures or {}).keys()) != {str(index) for index in photo_indices}:
+            raise ValueError("Photo selections must include the original image fingerprints")
+    if automatic_photo_follow_up and (not photos_only or listing_id is None):
+        raise ValueError("An automatic photo follow-up must target one book")
     values = _workspace_or_env_biblio_values(workspace_id)
     upload_profile = biblio_upload_profile(workspace_id)
     _refresh_biblio_linked_sources(workspace_id, listing_id=listing_id)
@@ -4707,10 +4730,31 @@ def sync_biblio_workspace(
     )
     photo_rows = _pending_biblio_photo_rows(
         active,
-        force=bool(force_photos or full_sync),
+        force=bool(force_photos or full_sync or photo_indices is not None
+                   or automatic_photo_follow_up),
     )
+    if automatic_photo_follow_up:
+        photo_rows = [row for row in photo_rows
+                      if row.get("photo_sync_state") == "retry_scheduled"]
     photo_skipped = 0
-    if failed_photos_only:
+    if photo_indices is not None:
+        selected = []
+        for row in photo_rows:
+            book_id = str(row.get("sku") or row.get("source_id") or "").strip()
+            urls = row.get("image_urls") or []
+            if any(index >= len(urls) for index in photo_indices):
+                raise ValueError("Photo count changed. Inspect the book again before selecting files")
+            attempts = []
+            for index in photo_indices:
+                url = urls[index]
+                signature = biblio_photo_file_signature(book_id, index, url)
+                if signature != photo_expected_signatures[str(index)]:
+                    raise ValueError("Source photos changed. Inspect the book again before sending")
+                attempts.append((index, url))
+            selected.append({**row, "photo_attempts": attempts,
+                             "photo_skipped": 0, "photo_selected_count": len(attempts)})
+        photo_rows = selected
+    elif failed_photos_only:
         # Only skip files whose filename and exact source URL were previously
         # accepted by FTP. Unknown transfers remain eligible for recovery.
         selected: list[dict[str, Any]] = []
@@ -4731,10 +4775,53 @@ def sync_biblio_workspace(
                 selected.append({**row, "photo_attempts": attempts, "photo_skipped": skipped})
         photo_rows = selected
     else:
-        photo_rows = [
-            {**row, "photo_attempts": list(enumerate(row.get("image_urls") or [])), "photo_skipped": 0}
-            for row in photo_rows
+        photo_rows = []
+        for row in _pending_biblio_photo_rows(
+            active,
+            force=bool(force_photos or full_sync or automatic_photo_follow_up),
+        ):
+            if automatic_photo_follow_up and row.get("photo_sync_state") != "retry_scheduled":
+                continue
+            urls = row.get("image_urls") or []
+            book_id = str(row.get("sku") or row.get("source_id") or "").strip()
+            receipts = dict(row.get("photo_file_receipts") or {})
+            if force_photos or full_sync or automatic_photo_follow_up:
+                attempts = list(enumerate(urls))
+                skipped = 0
+            else:
+                attempts = [
+                    (index, url) for index, url in enumerate(urls)
+                    if receipts.get(_biblio_photo_filename(book_id, index))
+                    != biblio_photo_file_signature(book_id, index, url)
+                ]
+                skipped = len(urls) - len(attempts)
+            photo_skipped += skipped
+            # A complete set of successful individual FTP receipts can close
+            # old partial state without another network upload. The receipts
+            # mean accepted by FTP, never publicly visible on BIBLIO.
+            if attempts or skipped:
+                photo_rows.append({**row, "photo_attempts": attempts,
+                                   "photo_skipped": skipped})
+    # A complete receipt set should be recognized without opening an FTP
+    # connection or replaying previously accepted photographs.
+    if photo_indices is None and not automatic_photo_follow_up:
+        complete_without_upload = [
+            row for row in photo_rows
+            if not row.get("photo_attempts")
+            and int(row.get("photo_skipped") or 0) == len(row.get("image_urls") or [])
         ]
+        if complete_without_upload:
+            _mark_biblio_photo_sync(workspace_id, [
+                (str(row["listing_id"]), str(row["photo_signature"]),
+                 len(row.get("image_urls") or []))
+                for row in complete_without_upload if row.get("listing_id")
+            ])
+            _set_biblio_listing_states(
+                workspace_id, [str(row["listing_id"]) for row in complete_without_upload
+                               if row.get("listing_id")],
+                photo_state="ftp_uploaded",
+            )
+            photo_rows = [row for row in photo_rows if row not in complete_without_upload]
     first_upload_photo_ids = {
         str(row.get("listing_id") or "")
         for row in photo_rows
@@ -4982,6 +5069,10 @@ def sync_biblio_workspace(
                         [listing_key],
                         photo_state="ftp_uploaded",
                     )
+            elif listing_key and photo_indices is not None:
+                _set_biblio_listing_states(
+                    workspace_id, [listing_key], photo_state="partial",
+                )
 
         try:
             ftp.quit()
