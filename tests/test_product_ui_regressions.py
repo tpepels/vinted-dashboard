@@ -369,7 +369,7 @@ def test_dashboard_always_shows_bridge_version_and_versioned_download():
     assert '$("#bridge-version-page").textContent = "Bridge v" + (state.me.bridge_version || "unknown");' in APP_JS
     assert "devices.download_url" in APP_JS
     assert "Download Chrome extension" in APP_JS
-    assert "Chrome extension version " in APP_JS
+    assert "Download Chrome extension v" in APP_JS
 
 
 
