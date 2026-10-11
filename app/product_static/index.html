@@ -528,18 +528,18 @@
       <section id="connections" class="view">
         <div class="card">
           <div class="card-head inline-head">
-            <div><p class="eyebrow">YOUR SALES CHANNELS</p><h2>Your marketplaces</h2><p class="muted connections-intro-copy">Choose a marketplace to open its own page for account settings, imports and troubleshooting. Your stock stays in Inventory.</p></div>
+            <div><p class="eyebrow">YOUR SALES CHANNELS</p><h2>Your marketplaces</h2><p class="muted connections-intro-copy">Choose a marketplace to publish books, bring in listings, or resolve a problem. Account settings and technical information stay out of the way.</p></div>
             <button id="connections-refresh" class="btn" type="button">Refresh</button>
           </div>
           <div class="connections-shortcuts">
-            <button id="connections-inventory" class="btn primary" type="button">Open Inventory</button>
-            <button id="connections-reconcile" class="btn" type="button">Review stock links</button>
+            <button id="connections-inventory" class="btn primary" type="button">Choose a book to sell</button>
+            <button id="connections-reconcile" class="btn" type="button">Check stock across marketplaces</button>
           </div>
           <p id="connection-health-summary" class="connections-health-summary" role="status" aria-live="polite">Checking marketplace connections…</p>
-          <p class="connections-workflow">How it works: <strong>1.</strong> Save account details · <strong>2.</strong> Test read access · <strong>3.</strong> Import listings · <strong>4.</strong> Review and manage individual listings in Inventory. Importing never publishes or edits marketplace items.</p>
+          <p class="connections-workflow">Your books live in Inventory. Connecting a marketplace does not automatically list your books there.</p>
           <div id="connector-grid" class="connector-grid"></div>
           <details id="other-marketplaces" class="connections-other-markets">
-            <summary>Other marketplaces (<span id="other-marketplaces-count">0</span>) · connect another service</summary>
+            <summary>Connect another marketplace (<span id="other-marketplaces-count">0</span> available)</summary>
             <div id="connector-other-grid" class="connector-grid"></div>
           </details>
         </div>
@@ -576,7 +576,7 @@
           <p id="connector-config-status" class="muted"></p>
         </form>
         <details id="marketplace-operations-panel" class="card connection-task-panel">
-          <summary><span><strong>Recent marketplace activity</strong><small>Uploads, imports, problems and actions that still need checking</small></span></summary>
+          <summary><span><strong>Recent activity</strong><small>See completed actions and anything that needs your attention</small></span></summary>
           <div class="connection-task-content">
             <p class="muted">A completed BIBLIO transfer does not confirm publication.</p>
             <button class="btn" id="marketplace-operations-refresh" type="button">Refresh history</button>
@@ -584,14 +584,10 @@
           </div>
         </details>
         <details id="paired-browsers-panel" class="card connection-task-panel">
-          <summary><span><strong>Connected Chrome browsers</strong><small>Devices that can send Vinted updates to your dashboard</small></span></summary>
+          <summary><span><strong>My connected browsers</strong><small>See and disconnect devices paired with Vinted</small></span></summary>
           <div id="devices" class="connection-task-content"></div>
         </details>
-        <details id="marketplace-development-panel" class="card marketplace-development-panel">
-          <summary><strong>Developer information</strong> · implementation details, not required for daily use</summary>
-          <p class="muted">This tracks which operations have code. It is not a remote-account control panel. Successful API or FTP transfer does not prove that a listing or image is published.</p>
-          <div id="marketplace-development">Loading technical operation status…</div>
-        </details>
+
       </section>
 
       <section id="connector-detail" class="view" aria-labelledby="connector-page-heading">
@@ -600,7 +596,7 @@
           <div class="connector-page-title">
             <p class="eyebrow">MARKETPLACE</p>
             <h2 id="connector-page-heading">Marketplace</h2>
-            <p id="connector-page-description" class="muted">Manage this marketplace connection.</p>
+            <p id="connector-page-description" class="muted">Choose what you want to do with this marketplace.</p>
           </div>
           <button id="connector-page-refresh" class="btn" type="button">Refresh status</button>
         </div>
@@ -608,7 +604,7 @@
         <div id="connector-page-settings" class="connector-page-secondary"></div>
         <div id="connector-page-biblio" class="connector-page-secondary">
           <details id="biblio-dashboard-postings-panel" class="card connection-task-panel">
-            <summary><span><strong>BIBLIO dashboard postings</strong><small>Find a book, remove its local posting or re-add it for testing</small></span></summary>
+            <summary><span><strong>Manage books already sent</strong><small>Find a book, correct its dashboard record, or prepare to send it again</small></span></summary>
             <div class="connection-task-content">
               <p class="muted">Removing a posting here affects only this dashboard. It does not delete the book on BIBLIO. Re-adding reuses the same Book ID and requires reviewing the publish form.</p>
               <div class="biblio-postings-toolbar">
@@ -621,7 +617,7 @@
         </div>
         <div id="connector-page-vinted" class="connector-page-secondary"></div>
         <details id="connector-page-activity" class="card connection-task-panel">
-          <summary><span><strong>Recent activity on this marketplace</strong><small>Imports, transfers and results that may still need verification</small></span></summary>
+          <summary><span><strong>What happened recently?</strong><small>See imports, uploads, and actions that may need your attention</small></span></summary>
           <div class="connection-task-content">
             <button id="connector-page-activity-refresh" class="btn" type="button">Refresh activity</button>
             <div id="connector-operations-list" role="status"><p class="muted">Loading marketplace activity…</p></div>
@@ -635,6 +631,11 @@
           <div class="card form"><h2>Billing</h2><div id="billing"></div></div>
         </div>
         <div class="card form"><h2>Your data</h2><a class="btn" href="/api/app/account/export">Download account data</a><p class="muted">Your inventory, listings and sales remain exportable.</p></div>
+        <details id="marketplace-development-panel" class="card marketplace-development-panel">
+          <summary><strong>Developer diagnostics</strong> · technical capabilities and code coverage</summary>
+          <p class="muted">For troubleshooting only: implementation coverage, not a marketplace account status. A completed transfer does not prove that a book or photo is publicly visible.</p>
+          <div id="marketplace-development">Loading technical operation status…</div>
+        </details>
         <div id="diagnostics-card" class="card form">
           <div class="card-head inline-head">
             <div><p class="eyebrow">SUPPORT</p><h2>Diagnostics</h2></div>
