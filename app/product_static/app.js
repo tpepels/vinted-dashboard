@@ -818,7 +818,8 @@ function currentConnectorPage(view = state.view) {
   return connectorPageViews.has(view) ? view.slice("connector-".length) : null;
 }
 function routeFromHash() {
-  const path = decodeURIComponent((window.location.hash || "").replace(/^#\\/?/, ""));
+  const raw = (window.location.hash || "").slice(1);
+  const path = raw.startsWith("/") ? raw.slice(1) : raw;
   if (path.startsWith("connectors/")) {
     const view = "connector-" + path.slice("connectors/".length);
     return connectorPageViews.has(view) ? view : "connections";
@@ -833,7 +834,7 @@ const navShortNames = {
   today:"T", inventory:"I", listings:"L", sales:"S", analytics:"A",
   reconcile:"R", imports:"↕", connections:"C", settings:"⚙",
 };
-$(".nav").forEach((button) => {
+$$(".nav").forEach((button) => {
   const view = button.dataset.view;
   const label = button.textContent.trim();
   const short = button.dataset.short || navShortNames[view] || label.slice(0,2);
@@ -897,13 +898,13 @@ async function selectView(view, {historyMode = "push"} = {}) {
     state.diagnosticsTimer = null;
   }
   state.view = view;
-  $(".nav").forEach((button) => {
+  $$(".nav").forEach((button) => {
     const active = button.dataset.view === view;
     button.classList.toggle("active", active);
     if (active) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   });
-  $(".view").forEach((section) => section.classList.toggle(
+  $$(".view").forEach((section) => section.classList.toggle(
     "active", section.id === (channel ? "connector-detail" : view)));
   $("#page-title").textContent = channel
     ? (channel === "vinted" ? "Vinted" : connectorSchemas[channel]?.title || channel)
@@ -5665,7 +5666,7 @@ async function connections() {
   };
   $("#connector-grid").innerHTML = featured.map(overviewHtml).join("");
   $("#connector-other-grid").innerHTML = other.map(overviewHtml).join("");
-  $(".connector-overview-link").forEach(button => {
+  $$(".connector-overview-link").forEach(button => {
     button.onclick = () => selectView("connector-" + button.dataset.c);
   });
   const selectedChannel = currentConnectorPage();
