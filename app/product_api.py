@@ -3819,6 +3819,9 @@ def remove_biblio_listing_locally(
                 operation.verification = "no_remote_changes"
                 operation.active_key = None
                 operation.completed_at = now
+        # Session autoflush may be disabled: the following active-operation
+        # check must see the cancellation we just recorded.
+        session.flush()
         ops_active = session.execute(select(MarketplaceOperation.id).where(
             MarketplaceOperation.workspace_id == context.workspace.id,
             MarketplaceOperation.channel == Channel.BIBLIO,
