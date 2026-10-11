@@ -747,12 +747,12 @@ async function init() {
     renderBillingLock(state.me.billing);
     const params = new URLSearchParams(window.location.search);
     if (params.get("connector") === "etsy" && params.get("oauth")) {
-      await selectView("connections");
+      await selectView("connector-etsy", {historyMode:"replace"});
       if (params.get("oauth") === "connected") flash("Etsy authorization completed.");
       else if (params.get("oauth") === "denied") flash("Etsy authorization was not granted.", true);
-      window.history.replaceState({}, "", window.location.pathname);
+      window.history.replaceState({}, "", window.location.pathname + "#/connectors/etsy");
     } else {
-      await load("today");
+      await selectView(routeFromHash(), {historyMode:"none"});
     }
   } catch {
     authScreen("login");
@@ -798,11 +798,88 @@ $("#logout").onclick = async () => {
   authScreen("login");
 };
 
-$$(".nav").forEach((button) => {
-  button.onclick = () => selectView(button.dataset.view);
+const connectorPageChannels = [
+  "vinted", "biblio", "ebay", "etsy", "woocommerce",
+  "shopify", "bigcommerce", "squarespace", "wix", "depop",
+];
+const connectorPageViews = new Set(connectorPageChannels.map(channel => "connector-" + channel));
+const commonPageViews = new Set([
+  "today", "inventory", "listings", "sales", "analytics",
+  "reconcile", "imports", "connections", "settings",
+]);
+function currentConnectorPage(view = state.view) {
+  return connectorPageViews.has(view) ? view.slice("connector-".length) : null;
+}
+function routeFromHash() {
+  const path = decodeURIComponent((window.location.hash || "").replace(/^#\\/?/, ""));
+  if (path.startsWith("connectors/")) {
+    const view = "connector-" + path.slice("connectors/".length);
+    return connectorPageViews.has(view) ? view : "connections";
+  }
+  return commonPageViews.has(path) ? path : "today";
+}
+function hashForView(view) {
+  const connector = currentConnectorPage(view);
+  return connector ? "#/connectors/" + connector : "#/" + view;
+}
+const navShortNames = {
+  today:"T", inventory:"I", listings:"L", sales:"S", analytics:"A",
+  reconcile:"R", imports:"↕", connections:"C", settings:"⚙",
+};
+$(".nav").forEach((button) => {
+  const view = button.dataset.view;
+  const label = button.textContent.trim();
+  const short = button.dataset.short || navShortNames[view] || label.slice(0,2);
+  button.dataset.short = short;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = '<span class="nav-short" aria-hidden="true">' + esc(short)
+    + '</span><span class="nav-text">' + esc(label) + '</span>';
+  button.onclick = () => selectView(view);
 });
 
-async function selectView(view) {
+function setSidebarCollapsed(collapsed, persist = true) {
+  const shell = $("#shell");
+  shell.classList.toggle("sidebar-collapsed", Boolean(collapsed));
+  const toggle = $("#sidebar-toggle");
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  toggle.setAttribute("aria-label", collapsed ? "Expand navigation" : "Collapse navigation");
+  toggle.title = collapsed ? "Expand navigation" : "Collapse navigation";
+  if (persist) {
+    try { window.localStorage.setItem("reseller-sidebar-collapsed", collapsed ? "1" : "0"); }
+    catch { /* Private browsing may restrict storage. */ }
+  }
+}
+try {
+  const remembered = window.localStorage.getItem("reseller-sidebar-collapsed");
+  setSidebarCollapsed(remembered === null
+    ? window.matchMedia("(max-width: 900px)").matches
+    : remembered === "1", false);
+} catch {
+  setSidebarCollapsed(window.matchMedia("(max-width: 900px)").matches, false);
+}
+$("#sidebar-toggle").onclick = () =>
+  setSidebarCollapsed(!$("#shell").classList.contains("sidebar-collapsed"));
+window.addEventListener("popstate", () => {
+  const view = routeFromHash();
+  if (state.me && state.view !== view) selectView(view, {historyMode:"none"});
+});
+
+async function selectView(view, {historyMode = "push"} = {}) {
+  if (!commonPageViews.has(view) && !connectorPageViews.has(view)) view = "today";
+  const channel = currentConnectorPage(view);
+  if (state.connectorChannel && state.connectorChannel !== channel) {
+    state.connectorChannel = null;
+    $("#connector-config").classList.add("hidden");
+  }
+  if (window.matchMedia("(max-width: 900px)").matches
+      && !$("#shell").classList.contains("sidebar-collapsed")) {
+    setSidebarCollapsed(true, false);
+  }
+  if (historyMode !== "none" && window.location.hash !== hashForView(view)) {
+    window.history[historyMode === "replace" ? "replaceState" : "pushState"](
+      {}, "", window.location.pathname + window.location.search + hashForView(view));
+  }
   if (view !== "inventory" && state.storeStockAuditTimer) {
     clearTimeout(state.storeStockAuditTimer);
     state.storeStockAuditTimer = null;
@@ -813,9 +890,17 @@ async function selectView(view) {
     state.diagnosticsTimer = null;
   }
   state.view = view;
-  $$(".nav").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
-  $$(".view").forEach((section) => section.classList.toggle("active", section.id === view));
-  $("#page-title").textContent = $('.nav[data-view="' + view + '"]').textContent.trim();
+  $(".nav").forEach((button) => {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  $(".view").forEach((section) => section.classList.toggle(
+    "active", section.id === (channel ? "connector-detail" : view)));
+  $("#page-title").textContent = channel
+    ? (channel === "vinted" ? "Vinted" : connectorSchemas[channel]?.title || channel)
+    : $('.nav[data-view="' + view + '"]').getAttribute("aria-label");
   await load(view);
 }
 
@@ -828,7 +913,7 @@ async function load(view) {
     else if (view === "sales") await sales();
     else if (view === "analytics") await analytics();
     else if (view === "imports") await imports();
-    else if (view === "connections") await connections();
+    else if (view === "connections" || currentConnectorPage(view)) await connections();
     else if (view === "settings") await settings();
   } catch (error) {
     flash(error.message, true);
