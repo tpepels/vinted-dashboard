@@ -450,7 +450,11 @@ def _effective_item_ask(
 
 
 def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelListing] | None = None) -> dict[str, Any]:
-    rows = list(listings or [])
+    rows = [
+        row for row in list(listings or [])
+        if not (row.channel == Channel.BIBLIO
+                and dict(row.extra or {}).get("dashboard_removed"))
+    ]
     attributes = dict(item.attributes or {})
     default_price = attributes.get("default_price_cents")
     effective_ask, effective_ask_source = _effective_item_ask(item, rows)
@@ -845,6 +849,8 @@ def listings(
     now = datetime.now(timezone.utc)
     for listing, snapshot in rows:
         extra = dict(listing.extra or {})
+        if listing.channel == Channel.BIBLIO and extra.get("dashboard_removed"):
+            continue
         linked_item = item_by_id.get(listing.inventory_item_id)
         linked_attrs = dict(linked_item.attributes or {}) if linked_item is not None else {}
         biblio_enrichment = (
@@ -1589,6 +1595,11 @@ def item_marketplace_status(
                 models.ChannelListing.inventory_item_id == item_id,
             ).order_by(models.ChannelListing.channel, models.ChannelListing.external_id)
         ).scalars().all()
+        listings = [
+            row for row in listings
+            if not (row.channel == Channel.BIBLIO
+                    and dict(row.extra or {}).get("dashboard_removed"))
+        ]
         listing_ids = [row.id for row in listings]
         operation_filter = MarketplaceOperation.inventory_item_id == item_id
         if listing_ids:
