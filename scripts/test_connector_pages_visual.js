@@ -173,7 +173,34 @@ for(const width of [360,768,1280])for(const mode of ["expanded","collapsed"]){
   const fixtureSource = "(function connectorFixture(){\n"+mocks+"\n"+schema
     +"\n"+nav+"\n"+connections+"\n"+config
     +"\n"+init+"\n("+runBrowserAssertions.toString()+")();\n})();";
-  fs.writeFileSync(filepath,base.replace("</body>",browserErrorReporter+
+  // Use a replacement callback: String.replace(string, string) collapses
+  // JavaScript's '$' selectors to '
+  const flags=["--headless=new","--no-sandbox","--disable-gpu",
+    "--disable-dev-shm-usage","--virtual-time-budget=1600",
+    "--window-size="+width+",1100"];
+  const dom=execFileSync(browser,[...flags,"--dump-dom","file://"+filepath],
+    {encoding:"utf8",maxBuffer:16*1024*1024,timeout:30000});
+  const failure=dom.match(/<output id="connector-route-error">([^<]+)<\/output>/);
+  assert(!failure,"Browser failed "+width+"/"+mode+": "+(failure?.[1]||""));
+  const observed=dom.match(/<output id="connector-route-metrics" data-state="([^"]+)"/);
+  if(!observed) console.error("Rendered page tail: "+dom.slice(-3500));
+  assert(observed,"Browser navigation script did not finish "+width+"/"+mode);
+  const measurement=JSON.parse(decodeURIComponent(observed[1]));
+  assert(measurement.bodyScroll<=measurement.viewport+2,
+    "Horizontal page overflow at "+width+"/"+mode+": "+JSON.stringify(measurement));
+  assert(measurement.formCopies===1 && measurement.biblioPanelMoved &&
+    measurement.vintedPanelMoved,"Connector controls were lost or duplicated");
+  assert(measurement.navCount===19 && measurement.view==="connector-biblio");
+  execFileSync(browser,[...flags,"--screenshot="+png,"file://"+filepath],
+    {encoding:"utf8",timeout:30000});
+  assert(fs.statSync(png).size>4000);
+  results.push({requestedWidth:width,mode,...measurement,screenshot:path.relative(".",png)});
+}
+fs.writeFileSync("ui-evidence/connector-page-viewport-results.json",JSON.stringify(results,null,2)+"\n");
+console.log("CONNECTOR_PAGE_LAYOUT "+JSON.stringify(results));
+console.log("Ten dedicated connector pages, sidebar toggle and responsive layout: PASS");
+, invalidating the browser fixture.
+  fs.writeFileSync(filepath,base.replace("</body>",() => browserErrorReporter+
     "<script>"+fixtureSource+"</script></body>"));
   const flags=["--headless=new","--no-sandbox","--disable-gpu",
     "--disable-dev-shm-usage","--virtual-time-budget=1600",
