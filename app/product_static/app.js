@@ -5852,6 +5852,34 @@ async function connections() {
       }
     };
   }
+  const sendSelectedPhotos = $("#biblio-send-selected-photos");
+  if (sendSelectedPhotos) {
+    sendSelectedPhotos.disabled = true;
+    sendSelectedPhotos.onclick = async () => {
+      const info = state.biblioPhotoInspection;
+      if (!info || $("#biblio-photo-book-id").value.trim() !== info.book_id) return;
+      const photoIndices = $(".biblio-missing-photo-set input:checked")
+        .map(input => Number(input.value));
+      if (!photoIndices.length) return flash("Select the missing photos first.",true);
+      if (!window.confirm("Send only photo "
+        + photoIndices.map(index => index + 1).join(", ")
+        + " to BIBLIO for " + info.book_id + "? The other photos and book details will not "
+        + "be reuploaded. Check BIBLIO afterwards to confirm publication.")) return;
+      sendSelectedPhotos.disabled = true;
+      try {
+        await api("/api/app/connectors/biblio/retry-listing-photos",{
+          method:"POST",body:JSON.stringify({book_id:info.book_id,photo_indices:photoIndices}),
+        });
+        flash("Queued " + photoIndices.length + " selected photos only for " + info.book_id
+          + ". No other JPG files or book details will be resent.");
+        await inspectBiblioPhotoTarget();
+        await connections();
+      } catch (error) {
+        flash("Could not send the selected photos: " + error.message,true);
+        sendSelectedPhotos.disabled = false;
+      }
+    };
+  }
   const retryPhotosButton = $("#biblio-retry-listing-photos");
   if (retryPhotosButton) {
     retryPhotosButton.disabled = !state.biblioPhotoInspection?.active
