@@ -795,7 +795,7 @@ def test_biblio_photo_repair_has_title_picker_and_confirmation():
     assert "The book details will not be resent" in APP_JS
     assert "Resend every photo for this book" in APP_JS
     assert "loadBiblioPhotoChoices()" in APP_JS
-    assert "Update prepared photos from saved Vinted listing" in APP_JS
+    assert "Use saved Vinted photos" in APP_JS
     assert '"/api/app/connectors/biblio/refresh-photo-sources"' in APP_JS
     assert "biblio-photo-advanced" in APP_JS
 
@@ -855,6 +855,12 @@ def test_biblio_selective_photo_repair_keeps_safe_full_resend_choice():
     assert "photos_skipped" in APP_JS
     assert "does not prove BIBLIO displays" in APP_JS
     assert "info.file_progress" in APP_JS
+    assert "Step 1 of 3" in APP_JS
+    assert "Step 2 of 3" in APP_JS
+    assert "Step 3 of 3" in APP_JS
+    assert 'id="biblio-confirm-selected-photos"' in APP_JS
+    assert 'biblioPhotoConnectionChecked' in APP_JS
+    assert 'function biblioPhotoAccessProblem(info)' in APP_JS
 
 
 def test_cross_channel_refunds_warn_about_already_closed_marketplace_listings():
