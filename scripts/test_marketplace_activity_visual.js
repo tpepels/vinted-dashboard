@@ -10,7 +10,7 @@ const {execFileSync} = require("node:child_process");
 
 const app = fs.readFileSync("app/product_static/app.js","utf8");
 const styles = fs.readFileSync("app/product_static/styles.css","utf8");
-const start = app.indexOf("function renderMarketplaceOperations(data) {");
+const start = app.indexOf("function renderMarketplaceOperations(");
 const end = app.indexOf("async function refreshMarketplaceOperations()", start);
 assert(start>=0 && end>start);
 const root = {innerHTML:""};
