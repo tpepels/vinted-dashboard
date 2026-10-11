@@ -343,3 +343,63 @@ def test_local_removal_rejects_pending_ftp_work():
     with db.session_scope() as session:
         listing=session.get(models.ChannelListing,__import__("uuid").UUID(listing_id))
         assert not listing.extra.get("dashboard_removed")
+
+
+def test_removal_cancels_only_safe_future_automatic_photo_pickup():
+    from datetime import timedelta
+    from app.auth import utcnow
+    import uuid
+    client,csrf=register("biblio-remove-delayed@example.test")
+    with db.session_scope() as session:
+        wid=session.execute(select(models.Membership)).scalar_one().workspace_id
+    listing_id=make_book(wid,book_id="DEFERRED-REMOVE")
+    with db.session_scope() as session:
+        listing=session.get(models.ChannelListing,uuid.UUID(listing_id))
+        item_id=listing.inventory_item_id
+        job=BackgroundJob(
+            workspace_id=wid,job_type="biblio_sync",status="queued",
+            payload={"listing_id":listing_id,"photos_only":True,
+                     "automatic_photo_retry":True},
+            available_at=utcnow()+timedelta(hours=24),
+        )
+        session.add(job)
+        session.flush()
+        operation=MarketplaceOperation(
+            workspace_id=wid,inventory_item_id=item_id,
+            channel_listing_id=listing.id,channel="biblio",
+            operation_type="photos",target_key=listing_id,status="queued",
+            active_key="biblio:photos:"+listing_id,job_id=job.id,
+            job_type="biblio_sync",job_payload=dict(job.payload),
+        )
+        session.add(operation)
+        session.flush()
+        job_id,operation_id=job.id,operation.id
+    response=client.post(
+        f"/api/app/inventory/{item_id}/marketplaces/biblio/remove-local",
+        headers={"X-CSRF-Token":csrf},json={"book_id":"DEFERRED-REMOVE"},
+    )
+    assert response.status_code==200,response.text
+    with db.session_scope() as session:
+        assert session.get(BackgroundJob,job_id).status=="cancelled"
+        op=session.get(MarketplaceOperation,operation_id)
+        assert op.status=="cancelled" and op.active_key is None
+        assert session.get(models.ChannelListing,uuid.UUID(listing_id)).extra["dashboard_removed"]
+
+
+def test_biblio_dashboard_posting_list_includes_removed_for_readd():
+    client,csrf=register("biblio-dashboard-postings@example.test")
+    with db.session_scope() as session:
+        wid=session.execute(select(models.Membership)).scalar_one().workspace_id
+    listing_id=make_book(wid,book_id="LIST-REMOVE")
+    with db.session_scope() as session:
+        item_id=session.get(models.ChannelListing,__import__("uuid").UUID(listing_id)).inventory_item_id
+    rows=client.get("/api/app/connectors/biblio/dashboard-postings").json()["postings"]
+    assert len(rows)==1 and rows[0]["book_id"]=="LIST-REMOVE"
+    assert rows[0]["dashboard_removed"] is False
+    assert rows[0]["inventory_item_id"]==str(item_id)
+    assert client.post(
+        f"/api/app/inventory/{item_id}/marketplaces/biblio/remove-local",
+        headers={"X-CSRF-Token":csrf},json={"book_id":"LIST-REMOVE"},
+    ).status_code==200
+    changed=client.get("/api/app/connectors/biblio/dashboard-postings").json()["postings"]
+    assert len(changed)==1 and changed[0]["dashboard_removed"] is True
