@@ -1580,11 +1580,18 @@ main > header .eyebrow{color:#436e65}
 #connector-detail #connector-page-photos .biblio-photos-panel{
   border:none;box-shadow:none;padding:0;margin:0;background:transparent}
 #connector-detail #connector-page-photos .biblio-photos-panel>summary{display:none!important}
-#connector-detail #connector-page-photos .biblio-photos-panel>.biblio-task-inner{
-  margin:0;padding:0}
-#connector-detail #connector-page-photos .biblio-photo-wizard{margin:0;
-  max-width:900px;background:var(--layout-panel);border:1px solid var(--line);
-  border-radius:14px;padding:22px}
+/* The wizard itself IS .biblio-task-inner. Never cancel its padding:
+   the old zero-padding selector was more specific than the card padding. */
+#connector-detail #connector-page-photos .biblio-photos-panel>.biblio-task-inner.biblio-photo-wizard{
+  box-sizing:border-box;
+  width:100%;max-width:860px;min-width:0;
+  margin:0 auto;
+  padding:24px 28px 28px;
+  background:var(--layout-panel);
+  border:1px solid var(--line);
+  border-radius:14px;
+  box-shadow:0 7px 23px rgba(38,67,58,.045);
+}
 #connector-detail #connector-listings-panel .connection-task-panel,
 #connector-detail #connector-activity-panel .connection-task-panel{
   margin:0 0 15px;border-radius:12px}
@@ -1611,5 +1618,155 @@ main > header .eyebrow{color:#436e65}
   #connector-detail .connector-page-content>.connector{padding:15px}
   #connector-detail .connector-account-start{flex-direction:column;align-items:stretch;padding:15px}
   #connector-detail .connector-account-start>.btn{width:100%}
-  #connector-detail #connector-page-photos .biblio-photo-wizard{padding:13px}
+  #connector-detail #connector-page-photos .biblio-photos-panel>.biblio-task-inner.biblio-photo-wizard{
+    padding:18px 16px 20px;
+  }
+}
+
+
+/* Photo wizard alignment in the real connector tab, not just the isolated
+   DOM fixture. Header, card and controls share one comfortable reading width. */
+#connector-detail #connector-photos-panel{
+  width:100%;
+  max-width:920px;
+  margin-inline:auto;
+  min-width:0;
+}
+#connector-detail #connector-photos-panel>.connector-task-page-heading{
+  max-width:860px;
+  margin:0 auto 14px;
+  padding:19px 25px;
+}
+#connector-detail #connector-page-photos{
+  max-width:860px;
+  margin-inline:auto;
+  min-width:0;
+}
+#connector-detail #connector-page-photos .biblio-photos-panel{
+  width:100%;
+  min-width:0;
+}
+#connector-detail #connector-page-photos .biblio-photo-wizard .biblio-photo-progress{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  padding:0 0 18px;
+  margin:0 0 23px;
+  border-bottom:1px solid var(--line);
+}
+#connector-detail #connector-page-photos .biblio-photo-progress .biblio-progress-item{
+  display:flex;
+  gap:9px;
+  align-items:center;
+  min-width:0;
+  color:#63736d;
+  font-size:13px;
+  line-height:1.35;
+  font-weight:650;
+}
+#connector-detail #connector-page-photos .biblio-progress-item .biblio-progress-number{
+  display:grid;
+  place-items:center;
+  width:27px;height:27px;
+  flex:0 0 27px;
+  border:1px solid #d1e0d8;
+  border-radius:50%;
+  background:#f3f6f3;
+  font-variant-numeric:tabular-nums;
+  font-weight:800;
+}
+#connector-detail #connector-page-photos .biblio-progress-item[aria-current="step"]{
+  color:var(--accent-strong);
+  font-weight:800;
+}
+#connector-detail #connector-page-photos .biblio-progress-item[aria-current="step"] .biblio-progress-number{
+  color:#fff;
+  background:var(--accent);
+  border-color:var(--accent);
+}
+#connector-detail #connector-page-photos .biblio-progress-item.is-complete .biblio-progress-number{
+  background:#e6f1e8;
+  color:#256446;
+  border-color:#c6dfd0;
+}
+#connector-detail #connector-page-photos .biblio-photo-step-count{
+  margin-bottom:4px;
+  font-size:12px;
+}
+#connector-detail #connector-page-photos .biblio-photo-stage h3{
+  font-size:clamp(20px,2vw,24px);
+  margin:0 0 17px;
+  line-height:1.35;
+}
+#connector-detail #connector-page-photos .biblio-photo-stage>p{
+  max-width:64ch;
+}
+#connector-detail #connector-page-photos .biblio-photo-stage .biblio-field-label{
+  display:block;
+  margin:0 0 7px;
+  color:#485b55;
+  font-size:13px;
+  letter-spacing:.01em;
+  text-transform:none;
+}
+#connector-detail #biblio-photo-book-select{
+  width:min(100%,620px);
+  max-width:100%;
+  margin:0 0 11px;
+  min-height:48px;
+}
+#connector-detail #connector-page-photos .biblio-photo-manual-id{
+  max-width:620px;
+  margin:0 0 14px;
+  padding:0;
+}
+#connector-detail #connector-page-photos .biblio-photo-manual-id>summary{
+  display:inline-block;
+  font-size:13px;
+  line-height:1.45;
+  padding:7px 0;
+}
+#connector-detail #connector-page-photos #biblio-photo-choose-error:empty{
+  display:none;
+}
+#connector-detail #connector-page-photos #biblio-photo-choose-error:not(:empty){
+  margin:8px 0;
+}
+#connector-detail #connector-page-photos #biblio-inspect-photos{
+  margin:8px 0 0;
+  min-width:150px;
+  min-height:44px;
+}
+#connector-detail #connector-page-photos .biblio-photo-stage .biblio-wizard-actions{
+  gap:10px;
+}
+#connector-detail #connector-page-photos .biblio-photo-choice-grid{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+}
+@media(max-width:620px){
+  #connector-detail #connector-photos-panel>.connector-task-page-heading{
+    padding:15px 16px;
+  }
+  #connector-detail #connector-page-photos .biblio-photo-wizard .biblio-photo-progress{
+    gap:5px;
+    margin-bottom:17px;
+  }
+  #connector-detail #connector-page-photos .biblio-photo-progress .biblio-progress-item{
+    flex-direction:column;
+    gap:5px;
+    justify-content:flex-start;
+    text-align:center;
+    font-size:11px;
+  }
+  #connector-detail #connector-page-photos .biblio-progress-item .biblio-progress-number{
+    width:24px;height:24px;flex-basis:24px;
+  }
+  #connector-detail #connector-page-photos .biblio-photo-choice-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+@media(max-width:390px){
+  #connector-detail #connector-page-photos .biblio-photo-progress .biblio-progress-item{
+    font-size:10px;
+  }
 }
