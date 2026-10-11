@@ -168,9 +168,13 @@ for(const width of [360,768,1280])for(const mode of ["expanded","collapsed"]){
     + 'var out=document.createElement("output");out.id="connector-route-error";'
     + 'out.textContent=String(message)+" at "+line+":"+col;document.body.appendChild(out);'
     + '};</script>';
+  // Keep fixture bindings lexical to this test, not the browser global scope.
+  // This also prevents collisions with browser-created globals in headless mode.
+  const fixtureSource = "(function connectorFixture(){\n"+mocks+"\n"+schema
+    +"\n"+nav+"\n"+connections+"\n"+config
+    +"\n"+init+"\n("+runBrowserAssertions.toString()+")();\n})();";
   fs.writeFileSync(filepath,base.replace("</body>",browserErrorReporter+
-    "<script>"+mocks+"\n"+schema+"\n"+nav+"\n"+connections+"\n"+config+
-    "\n"+init+"\n("+runBrowserAssertions.toString()+")();</script></body>"));
+    "<script>"+fixtureSource+"</script></body>"));
   const flags=["--headless=new","--no-sandbox","--disable-gpu",
     "--disable-dev-shm-usage","--virtual-time-budget=1600",
     "--window-size="+width+",1100"];
