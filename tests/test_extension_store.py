@@ -128,7 +128,7 @@ def test_publish_inspection_rejects_invalid_package_and_reads_version(tmp_path):
     build_extension.build("store", "https://dashboard.example", output, "3.4.1")
     manifest = publish_store.inspect_package(output)
     assert manifest["manifest_version"] == 3
-    assert manifest["version"] == "3.4.1"
+    assert manifest["version"] == "3.4.2"
 
     bad = tmp_path / "bad.zip"
     with zipfile.ZipFile(bad, "w") as archive:
@@ -183,58 +183,27 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "3.4.1"
+    assert manifest["version"] == "3.4.2"
 
 
 
-def test_content_script_uses_resumable_finite_rendered_uploaded_age_job():
-    content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
-    age = (ROOT / "app" / "extension" / "vinted_age.js").read_text(encoding="utf-8")
-    background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
-    manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-
-    assert manifest["content_scripts"][0]["js"][:2] == ["vinted_age.js", "content.js"]
-    assert 'LISTED_AT_CACHE_KEY="vintedListedAtCacheV3"' in content
-    assert 'LISTING_PAGE_AGE_CACHE_KEY="vintedListingPageAgeCacheV2"' in content
-    assert "globalThis.VintedAge" in age
-    assert "function fromUploadedText(value)" in age
-    assert "function fromRenderedDocument(doc = document)" in age
-    assert "VintedAge.fromRenderedDocument(document)" in content
-    assert "VintedAge.advanceCached(cached)" in content
-    assert "function relativeAgeFromPageHtml" not in content
-    assert "age_scan_items:ageScanItems" in content
-    assert 'message?.type==="read-vinted-uploaded-age"' in content
-    assert 'AGE_JOB_KEY="vintedAgeBurstJobV2"' in background
-    assert "const AGE_WORKERS=4;" in background
-    assert "const AGE_WAVES_PER_EVENT=8;" in background
-    assert 'AGE_FAILURES_KEY="vintedAgeScanFailuresV1"' in background
-    assert 'api("/api/extension/listing-ages"' in background
-    assert "async function startAgeJob(items,reason)" in background
-    assert "async function processAgeJobWave()" in background
-    assert "async function renderedUploadedAgeWave(job,batch)" in background
-    assert "const AGE_NAVIGATION_MIN_INTERVAL_MS=1800;" in background
-    assert "const AGE_RATE_LIMIT_BASE_COOLDOWN_MS=30*60*1000;" in background
-    assert "async function waitForAgeNavigationSlot()" in background
-    assert "let ageNavigationChain=Promise.resolve();" in background
-    assert 'url:Array.from({length:batch.length},()=>"about:blank")' in background
-    assert "chrome.windows.create({" in background
-    assert 'state:"minimized"' in background
-    assert "await chrome.tabs.update(tab.id,{url:target.href,active:false})" in background
-    assert "await closeAgeWorkerWindow(job)" in background
-    assert "AGE_SWEEP_ALARM" not in background
-    assert 'files:["vinted_age.js","content.js"]' in background
-    assert "const ageScanItems=await enrichListingDates(listings);" in content
-
-
-def test_bridge_reloads_stale_content_script_before_sync():
+def test_vinted_quiet_bridge_does_not_scan_pages_or_reload_browser():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
+    assert "const SYNC_INTERVAL_MS=2*60*60*1000;" in background
+    assert "const VINTED_ACCESS_COOLDOWN_MS=24*60*60*1000;" in background
+    assert "delayInMinutes:120,periodInMinutes:120" in background
+    assert "async function stopLegacyAgeScan()" in background
+    assert "await stopLegacyAgeScan()" in background or "stopLegacyAgeScan();" in background
+    assert "await startAgeJob(ageScanItems,reason)" not in background
+    assert 'if(a.name===AGE_JOB_ALARM)return stopLegacyAgeScan();' in background
+    assert "chrome.tabs.reload(" not in background
+    assert "chrome.tabs.create(" not in background
+    assert "const ageScanItems=[];" in content
+    assert "const queue=missing.slice(0,3);" in content
+    assert "const maxRetries=0;" in content
     assert "const BRIDGE_CONTENT_PROTOCOL=10;" in content
-    assert 'message?.type==="bridge-content-protocol"' in content
     assert "const CONTENT_PROTOCOL=10;" in background
-    assert "async function ensureCurrentContentScript(tab)" in background
-    assert "await chrome.tabs.reload(tab.id)" in background
-    assert "tab=await ensureCurrentContentScript(tab);" in background
 
 
 def test_content_script_has_reinjection_guard():
@@ -260,8 +229,8 @@ def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
     assert 'function enrichListingDetails(listings,reason="periodic")' in content
     assert "image_urls:images" in content
     assert ": await enrichListingDetails(listings,reason);" in content
-    assert "const queue=missing;" in content
-    assert '{minDelayMs:1500,maxRetries:1}' in content
+    assert "const queue=missing.slice(0,3);" in content
+    assert '{minDelayMs:6000,maxRetries:0}' in content
     assert '["active","reserved","hidden","draft"]' in content
 
 
@@ -337,18 +306,14 @@ def test_vinted_detail_parser_prefers_direct_category_and_description_fields():
     assert 'category:metaText(first(raw,"catalog_title","category_title","category_name","catalog","category","catalogs"))' in content
 
 
-def test_bridge_age_scan_is_finite_resumable_and_failures_have_cooldown():
+def test_vinted_cooldown_and_dormant_age_job_are_not_reenabled():
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
-    assert "const AGE_WORKERS=4;" in background
-    assert "const AGE_WAVES_PER_EVENT=8;" in background
-    assert "const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;" in background
-    assert 'if(reason==="manual")return clean;' in background
-    assert "job.remaining=job.remaining.slice(batch.length);" in background
-    assert "await chrome.storage.local.set({[AGE_JOB_KEY]:job});" in background
-    assert "chrome.alarms.create(AGE_JOB_ALARM" in background
-    assert "sync_skipped_for_age_job:true" not in background
     assert "sync_skipped_for_api_cooldown:true" in background
-    assert "AGE_SWEEP_ALARM" not in background
+    assert "sync_skipped_for_interval:true" in background
+    assert "lastSyncAttemptAt" in background
+    assert 'if(a.name===AGE_JOB_ALARM)return stopLegacyAgeScan();' in background
+    assert 'reason==="periodic"' in background
+    assert "Vinted is in use; automatic sync postponed." in background
 
 
 def test_vinted_fetches_are_paced_and_rate_limit_safe():
@@ -357,7 +322,7 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert 'credentials:"include"' in content
     assert '"X-Requested-With":"XMLHttpRequest"' in content
     assert '"X-Platform":"web"' not in content
-    assert "r.status===403" in content
+    assert "r.status===401||r.status===403" in content
     assert "function rateLimitDelay(response,attempt)" in content
     assert "Vinted rate limited the API sync." in content
     assert "error.vintedRateLimited=true" in content
