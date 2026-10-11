@@ -67,6 +67,8 @@ const mocks=[
   'function renderEtsyOAuthTools(){} async function loadBiblioPhotoChoices(){}',
   'const fixtureConnectors='+JSON.stringify(fixtures)+';',
   'async function api(url){',
+  'if(url==="/api/app/connectors" && window.holdConnectorReads)',
+  ' await new Promise(resolve=>{window.finishHeldConnectorRead=resolve});',
   'if(url==="/api/app/connectors")return {connectors:fixtureConnectors};',
   'if(url==="/api/app/extension/devices")return {devices:[],latest_version:"2.4",download_url:"/bridge.zip"};',
   'if(url==="/api/app/connectors/biblio/activity")return {',
@@ -117,7 +119,37 @@ function runBrowserAssertions(){
     document.querySelector('.connector-overview-link[data-c="etsy"]').click();
     await new Promise(resolve=>setTimeout(resolve,50));
     if(state.view!=="connector-etsy")throw Error("Overview link did not navigate");
+    // Exercise deep-link routing and history restoration using the same
+    // popstate event emitted by Back/Forward; neither reloads the page.
+    await selectView("connector-shopify");
+    history.replaceState({}, "", location.pathname + "#/connectors/biblio");
+    dispatchEvent(new PopStateEvent("popstate"));
+    await new Promise(resolve=>setTimeout(resolve,50));
+    if(state.view!=="connector-biblio" ||
+       !byId("connector-detail").classList.contains("active"))
+      throw Error("Back/Forward did not restore the BIBLIO page");
+    history.replaceState({}, "", location.pathname + "#/connectors/not-a-service");
+    dispatchEvent(new PopStateEvent("popstate"));
+    await new Promise(resolve=>setTimeout(resolve,50));
+    if(state.view!=="connections")
+      throw Error("Unknown marketplace route was not handled safely");
     await selectView("connector-biblio");
+
+    // A late Shopify API response must not update BIBLIO or another page.
+    const headingBefore=byId("connector-page-heading").textContent;
+    window.holdConnectorReads=true;
+    const pending=selectView("connector-shopify");
+    await selectView("settings");
+    if(typeof window.finishHeldConnectorRead!=="function")
+      throw Error("Delayed connector API fixture did not start");
+    window.finishHeldConnectorRead();
+    await pending;
+    window.holdConnectorReads=false;
+    if(byId("connector-page-heading").textContent!==headingBefore ||
+       state.view!=="settings" || byId("page-title").textContent!=="Settings")
+      throw Error("Stale connector response modified the page after navigation");
+    await selectView("connector-biblio");
+
     const toggle=byId("sidebar-toggle");
     const before=toggle.getAttribute("aria-expanded");
     toggle.click();

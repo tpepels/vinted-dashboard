@@ -5427,12 +5427,14 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
 }
 
 async function refreshMarketplaceOperations() {
+  const requestedView = state.view;
   const channel = currentConnectorPage();
   const [data, scoped] = await Promise.all([
     api("/api/app/marketplace-operations?limit=60"),
     channel ? api("/api/app/marketplace-operations?channel="
       + encodeURIComponent(channel) + "&limit=60") : Promise.resolve(null),
   ]);
+  if (state.view !== requestedView) return;
   renderMarketplaceOperations(data);
   if (scoped) renderMarketplaceOperations(scoped, "#connector-operations-list");
 }
@@ -5536,6 +5538,9 @@ async function testMarketplaceConnection(channel, button) {
 }
 
 async function connections() {
+  // A connector load may finish after the user has switched pages. Do not
+  // render a stale account into the currently selected connector screen.
+  const requestedView = state.view;
   if (state.biblioActivityTimer) {
     clearTimeout(state.biblioActivityTimer);
     state.biblioActivityTimer = null;
@@ -5546,6 +5551,7 @@ async function connections() {
     api("/api/app/connectors/biblio/activity").catch(() => null),
     api("/api/app/connectors/development").catch(() => null),
   ]);
+  if (state.view !== requestedView) return data;
   state.connectors = data.connectors || [];
   state.biblioActivity = biblioActivity;
   state.marketplaceDevelopment = development;
@@ -5553,8 +5559,11 @@ async function connections() {
   try {
     await refreshMarketplaceOperations();
   } catch (error) {
-    $("#marketplace-operations-list").textContent = "Operation history unavailable: " + error.message;
+    const message = "Marketplace activity is unavailable. Refresh to try again.";
+    $("#marketplace-operations-list").textContent = message;
+    if (currentConnectorPage()) $("#connector-operations-list").textContent = message;
   }
+  if (state.view !== requestedView) return data;
   const integrated = state.connectors.filter(connector =>
     !["csv", "excel", "vinted"].includes(connector.channel)
     && connector.configured);
@@ -5927,8 +5936,11 @@ function openConnectorConfig(channel, connector) {
   const schema = connectorSchemas[channel];
   if (!schema) return;
   if (currentConnectorPage() !== channel) {
-    return selectView("connector-" + channel).then(() =>
-      openConnectorConfig(channel, (state.connectors || []).find(row => row.channel === channel)));
+    return selectView("connector-" + channel).then(() => {
+      if (currentConnectorPage() !== channel) return;
+      return openConnectorConfig(channel,
+        (state.connectors || []).find(row => row.channel === channel));
+    });
   }
   state.connectorChannel = channel;
   $("#connector-config-title").textContent = schema.title;
