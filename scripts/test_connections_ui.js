@@ -17,10 +17,9 @@ const elements = {
   "#marketplace-development": {innerHTML: ""},
   "#marketplace-detail": {innerHTML: ""},
   "#other-marketplaces": {open: false},
-  "#connector-other-grid": {contains: (element) => element === ebayCard},
+  "#connector-other-grid": {contains: () => false},
   ".marketplace-open-connection": {onclick: null},
 };
-const ebayCard = {scrolled: false, classList: {add() {}}, scrollIntoView() {this.scrolled = true;}};
 const buttons = ["biblio", "ebay"].map(channel => ({
   dataset: {marketChannel: channel},
   onclick: null,
@@ -30,7 +29,6 @@ const buttons = ["biblio", "ebay"].map(channel => ({
 }));
 const selectors = {
   querySelector(selector) {
-    if (selector === '[data-connector-channel="ebay"]') return ebayCard;
     return elements[selector] || null;
   },
   querySelectorAll(selector) {
@@ -39,7 +37,8 @@ const selectors = {
   },
 };
 const context = {
-  state: {marketplaceSelected: "biblio"},
+  state: {marketplaceSelected: "biblio", navigatedTo: null},
+  selectView: view => { context.state.navigatedTo = view; },
   document: selectors,
   $: (s) => selectors.querySelector(s),
   $$: (s) => Array.from(selectors.querySelectorAll(s)),
@@ -73,8 +72,7 @@ assert.equal(context.state.marketplaceSelected, "ebay");
 assert.match(elements["#marketplace-detail"].innerHTML, /EBAY/);
 assert.equal(typeof elements[".marketplace-open-connection"].onclick, "function");
 elements[".marketplace-open-connection"].onclick();
-assert.equal(elements["#other-marketplaces"].open, true);
-assert.equal(ebayCard.scrolled, true);
+assert.equal(context.state.navigatedTo, "connector-ebay");
 
 context.renderMarketplaceDevelopment(null);
 assert.match(elements["#marketplace-development"].textContent, /No marketplace audit/);
