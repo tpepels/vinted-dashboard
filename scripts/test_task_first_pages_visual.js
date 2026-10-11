@@ -31,7 +31,7 @@ const assertions=[
   ' reconcile:["suggestions","manual","sales","history"],listings:["browse","insights"],',
   ' sales:["orders","costs"],analytics:["overview","demand","detail"],',
   ' imports:["import","export"],connections:["marketplaces","activity"],',
-  ' connector:["overview","manage","activity"],settings:["account","support","advanced"]};',
+  ' connector:["overview","photos","listings","account","activity"],settings:["account","support","advanced"]};',
   'for(const [group,labels] of Object.entries(groups)){',
   ' const section=$("#"+(group==="connector"?"connector-detail":group));',
   ' section.classList.add("active");',
@@ -82,16 +82,21 @@ const assertions=[
   ' ["#today-metrics","#today-overview-panel"],',
   ' ["#listing-stat-oldest","#listings-insights-panel"],',
   ' ["#purchase-cost-card","#sales-costs-panel"],',
-  ' ["#connector-config","#connector-page-settings"]]){',
+  ' ["#connector-config","#connector-page-settings"],',
+  ' ["#biblio-dashboard-postings-panel","#connector-listings-panel"],',
+  ' ["#connector-page-photos","#connector-photos-panel"]]){
   ' if(!$(parent).contains($(control)))throw Error(control+" not in "+parent);',
   '}',
   'const colored=[["inventory","items"],["listings","browse"],',
-  ' ["sales","orders"],["analytics","overview"]].map(([group,tab])=>{',
+  ' ["sales","orders"],["analytics","overview"]].map(([group,tab])=>{
   ' const section=$("#"+group);section.classList.add("active");',
   ' const color=getComputedStyle(section.querySelector("[data-workspace-tab="+tab+"]")).color;',
   ' section.classList.remove("active");return color;',
   '});',
-  'if(new Set(colored).size<4)throw Error("Different sections need different colors: "+colored.join("/"));',
+  'if(new Set(colored).size!==1)throw Error("Page layout should have one consistent tab color: "+colored.join("/"));',
+  'const canvas=getComputedStyle(document.querySelector("main")).backgroundColor;',
+  'const sidebar=getComputedStyle($("#app-sidebar")).backgroundColor;',
+  'if(canvas===sidebar)throw Error("Sidebar and page canvas need distinct surfaces");',
   'const result={viewport:innerWidth,scroll:document.documentElement.scrollWidth,',
   ' tabs:document.querySelectorAll("[data-workspace-tab]").length,controls:required.length,colors:colored};',
   'if(result.scroll>result.viewport+2)throw Error("Horizontal overflow "+JSON.stringify(result));',
@@ -119,10 +124,10 @@ for(const width of [360,768,1280]) {
   if(!found)console.error("Page tail:",dom.slice(-1200));
   assert(found,"Task tab assertions did not finish at "+width);
   const result=JSON.parse(decodeURIComponent(found[1]));
-  assert.equal(result.tabs,25);
+  assert.equal(result.tabs,27);
   execFileSync(chrome,[...flags,"--screenshot="+png,"file://"+filepath],
     {encoding:"utf8",timeout:30000});
   assert(fs.statSync(png).size>2000,"Chromium screenshot should be non-empty");
   console.log("TASK_FIRST_PAGE_LAYOUT "+JSON.stringify(result));
 }
-console.log("Ten task-tab groups, distinct section colors and responsive layout: PASS");
+console.log("Ten task-tab groups, consistent page palette and responsive layout: PASS");
