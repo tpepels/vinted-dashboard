@@ -112,7 +112,8 @@ def queue_operation(
             and operation_type == "photos"
             and existing.status == "queued"
             and stored.get("automatic_photo_retry")
-            and (requested.get("force_photos") or requested.get("failed_photos_only"))
+            and (requested.get("force_photos") or requested.get("failed_photos_only")
+                 or requested.get("photo_indices"))
             and existing.job_type == job_type
         ):
             # A user retry must not be blocked for ~26 hours by the
