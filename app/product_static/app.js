@@ -5672,6 +5672,8 @@ async function connections() {
     button.onclick = () => selectView("connector-" + button.dataset.c);
   });
   const selectedChannel = currentConnectorPage();
+  $("#connector-page-biblio").classList.toggle("hidden", selectedChannel !== "biblio");
+  $("#connector-page-vinted").classList.toggle("hidden", selectedChannel !== "vinted");
   const current = state.connectors.find(connector => connector.channel === selectedChannel);
   $("#connector-page-heading").textContent = current?.display_name
     || (selectedChannel === "vinted" ? "Vinted" : connectorSchemas[selectedChannel]?.title || "Marketplace");
