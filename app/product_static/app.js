@@ -813,6 +813,83 @@ function relocateConnectorPanels() {
   $("#connector-page-vinted").appendChild($("#paired-browsers-panel"));
 }
 relocateConnectorPanels();
+
+// Small, reusable task navigation. All forms, controls, and charts retain their
+// original DOM nodes; switching sections never rebuilds or resets user input.
+const workspaceTabState = {};
+function activateWorkspaceTab(group, tab) {
+  const bar = $('[data-workspace-tabs="' + group + '"]');
+  if (!bar) return false;
+  const selected = bar.querySelector('[data-workspace-tab="' + tab + '"]');
+  if (!selected) return false;
+  workspaceTabState[group] = tab;
+  bar.querySelectorAll("[data-workspace-tab]").forEach(button => {
+    const active = button === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+  });
+  $$("[data-workspace-panel]").forEach(panel => {
+    if (!panel.dataset.workspacePanel.startsWith(group + ":")) return;
+    panel.classList.toggle("hidden", panel.dataset.workspacePanel !== group + ":" + tab);
+  });
+  return true;
+}
+$$("[data-workspace-tabs]").forEach(bar => {
+  const group = bar.dataset.workspaceTabs;
+  const tabs = Array.from(bar.querySelectorAll("[data-workspace-tab]"));
+  tabs.forEach((button, index) => {
+    button.onclick = () => activateWorkspaceTab(group, button.dataset.workspaceTab);
+    button.onkeydown = event => {
+      if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const indexNext = event.key === "Home" ? 0
+        : event.key === "End" ? tabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      const next = tabs[indexNext];
+      activateWorkspaceTab(group, next.dataset.workspaceTab);
+      next.focus();
+    };
+  });
+  activateWorkspaceTab(group, workspaceTabState[group] || tabs[0]?.dataset.workspaceTab);
+});
+
+// Advanced filters must advertise when a hidden filter is active; otherwise
+// a listing can disappear with no visible explanation.
+const optionalFilterGroups = [
+  ["#inventory-more-filters", ["#inventory-cost"], "More filters", "#inventory-reset"],
+  ["#listing-more-filters",
+    ["#listing-interest","#listing-duplicate","#listing-price-min","#listing-price-max"],
+    "More filters: favourites, duplicates and price", "#listing-reset"],
+  ["#sales-more-filters", ["#sales-state","#sales-channel"], "More filters", "#sales-reset"],
+];
+function updateOptionalFilterSummaries() {
+  optionalFilterGroups.forEach(([selector, fields, title]) => {
+    const panel = $(selector);
+    if (!panel) return;
+    const active = fields.filter(id => String($(id)?.value || "").trim() !== "").length;
+    const summary = panel.querySelector("summary");
+    if (summary) summary.textContent = title + (active
+      ? " · " + active + " active" : "");
+    panel.classList.toggle("has-active-filter", active > 0);
+  });
+}
+optionalFilterGroups.forEach(([selector, fields, , reset]) => {
+  const panel = $(selector);
+  if (panel) {
+    fields.forEach(id => {
+      const field = $(id);
+      if (!field) return;
+      field.addEventListener("input", updateOptionalFilterSummaries);
+      field.addEventListener("change", updateOptionalFilterSummaries);
+    });
+  }
+  const resetButton = $(reset);
+  if (resetButton) resetButton.addEventListener("click", () =>
+    queueMicrotask(updateOptionalFilterSummaries));
+});
+updateOptionalFilterSummaries();
+
 const commonPageViews = new Set([
   "today", "inventory", "listings", "sales", "analytics",
   "reconcile", "imports", "connections", "settings",
@@ -1044,6 +1121,19 @@ function renderTodaySourceStatus(connectors) {
     .filter((row) => row.configured || row.operational)
     .sort((a, b) => String(a.display_name || a.channel).localeCompare(String(b.display_name || b.channel)));
 
+  const needsAttention = rows.filter(row => {
+    if (!row.operational) return true;
+    if (!row.last_synced_at) return false;
+    const age = Date.now() - Date.parse(row.last_synced_at);
+    return Number.isFinite(age) && age > 7 * 86400000;
+  }).length;
+  const overview = $("#today-sources-overview");
+  if (overview) overview.textContent = rows.length
+    ? needsAttention
+      ? needsAttention + " source" + (needsAttention === 1 ? "" : "s") + " need attention"
+      : rows.length + " connected source" + (rows.length === 1 ? "" : "s")
+    : "No marketplace connected";
+
   $("#today-source-status").innerHTML = rows.length
     ? rows.map((row) => {
       const synced = relativeTimestamp(row.last_synced_at);
@@ -1085,7 +1175,7 @@ function todayWorkRow(row) {
 
 function renderTodayWorkQueue(rows, total) {
   const queue = Array.isArray(rows) ? rows : [];
-  const visible = state.todayShowAll ? queue : queue.slice(0, 12);
+  const visible = state.todayShowAll ? queue : queue.slice(0, 5);
   $("#today-work-count").textContent = total
     ? total + " task" + (total === 1 ? "" : "s")
     : "Clear";
@@ -1110,8 +1200,8 @@ function renderTodayWorkQueue(rows, total) {
     if (!state.todayShowAll && queue.length > visible.length) {
       html += '<div class="work-more"><button id="today-show-all" class="btn" type="button">Show all '
         + queue.length + " tasks</button></div>";
-    } else if (state.todayShowAll && queue.length > 12) {
-      html += '<div class="work-more"><button id="today-show-less" class="btn" type="button">Show top 12</button></div>';
+    } else if (state.todayShowAll && queue.length > 5) {
+      html += '<div class="work-more"><button id="today-show-less" class="btn" type="button">Show top 5</button></div>';
     }
     $("#today-actions").innerHTML = html;
   }
@@ -2225,7 +2315,7 @@ function renderBiblioPublish(data) {
     ["quantity", "Quantity", fields.quantity, sources.quantity, false, true],
     ["photos", "Photos", source.photo_count ? source.photo_count + " Vinted photo" + (source.photo_count === 1 ? "" : "s") + " - automatic BIBLIO upload" : "No Vinted photos available", source.photo_count ? "vinted" : null, false, false],
   ];
-  $("#biblio-publish-fields").innerHTML = rows.map(([key, label, value, sourceName, editable, required]) => {
+  const renderedFields = rows.map(([key, label, value, sourceName, editable, required]) => {
     const missing = required && (value == null || String(value).trim() === "");
     let valueHtml;
     if (editable) {
@@ -2259,7 +2349,21 @@ function renderBiblioPublish(data) {
       + valueHtml
       + (sourceName ? biblioSourceBadge(sourceName) : "")
       + '</div>';
-  }).join("");
+  });
+  // Put core listing fields up front. The extended BIBLIO catalogue format has
+  // many useful but optional fields; rendering all of them at once obscures
+  // the actual publication decision.
+  const essentials = new Set(["title","author","description","isbn","condition",
+    "price_cents","book_id","quantity","photos"]);
+  const standardRows = renderedFields.filter((_, index) => essentials.has(rows[index][0]));
+  const extraRows = renderedFields.filter((_, index) => !essentials.has(rows[index][0]));
+  $("#biblio-publish-fields").innerHTML =
+    '<div class="biblio-review-main"><h3>Check this listing</h3>'
+    + '<p class="muted">These are the details that matter before publishing.</p>'
+    + standardRows.join("") + '</div>'
+    + '<details class="biblio-optional-book-fields"><summary>Edition, publication and catalogue details ('
+    + extraRows.length + ' optional fields)</summary>'
+    + '<div class="biblio-review-extra">' + extraRows.join("") + '</div></details>';
 
   const missing = data.missing || [];
   let warning = "";
@@ -4615,6 +4719,7 @@ function renderListingStats(rows, duplicates) {
 }
 
 function renderListings() {
+  updateOptionalFilterSummaries();
   const rows = (state.listings || []).map((row, _index) => ({ ...row, _index }));
   const query = $("#listing-search").value.trim().toLowerCase();
   const channel = $("#listing-channel").value;
