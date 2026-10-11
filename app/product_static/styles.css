@@ -1444,3 +1444,172 @@ main > header h1{font-size:clamp(24px,2.8vw,32px);letter-spacing:-.025em;line-he
     white-space:nowrap;font-size:13px;padding:10px 13px}
   main>header{padding-left:12px}
 }
+
+
+/* Unified page palette, rather than a separate colour for each feature.
+   The colour hierarchy belongs to the layout: deep-ink navigation, misty
+   canvas, warm white cards, soft sage section panels and teal actions. */
+:root{
+  --bg:#edf2f0;
+  --card:#fffefa;
+  --ink:#223532;
+  --muted:#566a64;
+  --line:#d6e2dd;
+  --accent:#107970;
+  --accent-strong:#0b6058;
+  --soft:#e4f1ec;
+  --shadow:0 7px 24px rgba(35,61,54,.052);
+  --shadow-hover:0 12px 30px rgba(35,61,54,.08);
+  --layout-sidebar:#243c42;
+  --layout-sidebar-ink:#eff7f3;
+  --layout-sidebar-muted:#b7cdc6;
+  --layout-canvas:#edf2f0;
+  --layout-panel:#fffefa;
+  --layout-panel-soft:#f5f8f5;
+  --layout-panel-warm:#fbf6ed;
+  --layout-header:#e4f0ec;
+  --layout-accent:#107970;
+  --layout-outline:#b8d8cd;
+}
+body{background:var(--layout-canvas)}
+.shell aside,
+.shell.sidebar-collapsed aside{background:var(--layout-sidebar);
+  border-color:#38555a;box-shadow:8px 0 30px rgba(21,48,48,.07);color:var(--layout-sidebar-ink)}
+.shell aside .brand strong,.shell aside #app-name{color:var(--layout-sidebar-ink)}
+.shell aside .brand small,.shell aside .bridge-version{color:var(--layout-sidebar-muted)}
+.shell aside #workspace-navigation .nav-group .nav-label{color:var(--layout-sidebar-muted);
+  font-size:10px;letter-spacing:.12em;font-weight:800}
+.shell aside #workspace-navigation .nav{color:#d3e3dd;background:transparent;
+  border:1px solid transparent}
+.shell aside #workspace-navigation .nav:hover{background:#324e52;color:#fff}
+.shell aside #workspace-navigation .nav.active,
+.shell aside #workspace-navigation .nav[data-view="today"].active,
+.shell aside #workspace-navigation .nav[data-view="inventory"].active,
+.shell aside #workspace-navigation .nav[data-view="reconcile"].active,
+.shell aside #workspace-navigation .nav[data-view="imports"].active,
+.shell aside #workspace-navigation .nav[data-view="settings"].active,
+.shell aside #workspace-navigation .nav[data-view="listings"].active,
+.shell aside #workspace-navigation .nav[data-view="sales"].active,
+.shell aside #workspace-navigation .nav[data-view="analytics"].active,
+.shell aside #workspace-navigation .nav[data-view="connections"].active,
+.shell aside #workspace-navigation .nav.nav-connector.active{
+  background:#e0f0e9;color:#164d47;border-color:#b9dad1;
+  box-shadow:inset 3px 0 0 #107970;font-weight:800}
+.shell aside footer a,.shell aside footer .link{color:var(--layout-sidebar-muted)}
+.shell aside .sidebar-toggle{background:#38565a;color:#f7fbfa;border-color:#567074}
+.shell aside .sidebar-toggle:hover{background:#47666a}
+main{background:linear-gradient(180deg,#edf4f1 0,#f2f5f3 290px,#eff3f1 100%);
+  --section-accent:var(--layout-accent);
+  --section-ink:#0b6058;
+  --section-tint:var(--soft);
+  --section-border:#c5ded5}
+main:has(> #today.active),
+main:has(> #inventory.active),main:has(> #reconcile.active),
+main:has(> #imports.active),main:has(> #listings.active),
+main:has(> #sales.active),main:has(> #analytics.active),
+main:has(> #connections.active),main:has(> #connector-detail.active),
+main:has(> #settings.active){
+  --section-accent:var(--layout-accent);
+  --section-ink:#0b6058;
+  --section-tint:var(--soft);
+  --section-border:#c5ded5}
+main > header{background:var(--layout-header);border:1px solid #cbded5;
+  border-radius:15px;padding:17px 22px;margin:0 0 22px;
+  box-shadow:0 4px 15px rgba(34,77,66,.025)}
+main > header::before{left:0;top:13px;bottom:13px;width:4px;
+  background:var(--layout-accent)}
+main > header .eyebrow{color:#436e65}
+.view .card,.view details.card{background:var(--layout-panel);
+  border-color:var(--line)}
+.card{box-shadow:var(--shadow)}
+.view .card-head{background:#f9fbf9;border-bottom-color:var(--line);
+  border-radius:13px 13px 0 0}
+.view .mini-metric,.view .metric{background:var(--layout-panel)}
+#today .today-command{background:linear-gradient(114deg,#e5f2ec 0%,#f8fbf7 88%);
+  border-color:#c9e1d6}
+#analytics .analytics-behavior,#sales #purchase-cost-card{
+  border-top-color:var(--layout-outline)}
+.view.active .btn.primary:not(.danger){background:var(--layout-accent);
+  border-color:var(--layout-accent);color:white}
+.dashboard-section-tabs .dashboard-tab.active,
+.dashboard-section-tabs .dashboard-tab[aria-selected="true"],
+.dashboard-tab.active,.dashboard-tab[aria-selected="true"]{
+  background:var(--soft);border-color:#bfdcd0;color:var(--accent-strong);
+  box-shadow:inset 0 -2px 0 var(--layout-accent)}
+.dashboard-section-tabs .dashboard-tab:not([aria-selected="true"]){color:#435a54}
+.dashboard-filter-details.has-active-filter>summary{background:var(--soft);
+  border-color:#c1dcd3;color:#0b6058}
+.view .dashboard-task-disclosure>summary{background:var(--layout-panel-soft)}
+.view .dashboard-tab-panel{min-width:0;max-width:100%}
+.view .connector-overview-link{background:var(--layout-panel);border-color:var(--line)}
+.view .connector-task-card{background:#fffefb;border-color:var(--line)}
+.view .connector-task-card:hover{background:#e9f5f0;border-color:#a2c9bc}
+.view .connector-action-strip{background:var(--layout-panel-warm);border-color:#eadcc6}
+.view .biblio-summary-stats>div,.view .biblio-status-overview>.biblio-summary,
+.view .biblio-status-overview>.biblio-latest{background:var(--layout-panel-soft);
+  border-color:var(--line)}
+/* Connector navigation is page-level, not a stack of nested accordions. */
+#connector-detail{max-width:1250px}
+#connector-detail .connector-page-top{margin-bottom:18px}
+#connector-detail .connector-page-title h2{font-size:clamp(24px,2.4vw,30px)}
+#connector-detail .connector-workflow-tabs{display:flex;flex-wrap:wrap;
+  gap:8px;background:#e5eee9;border:1px solid #d0dfd7;
+  border-radius:14px;padding:7px;margin:0 0 22px}
+#connector-detail .connector-workflow-tabs .dashboard-tab{
+  flex:1 1 130px;text-align:center;min-height:44px;
+  font-size:14px;border-radius:9px;padding:11px 13px}
+#connector-detail .connector-workflow-tabs .dashboard-tab.active{
+  background:#fffefa;box-shadow:0 2px 8px rgba(42,77,65,.07);
+  border:1px solid #bacfc5;color:#0a655b}
+#connector-detail .connector-workflow-tabs .dashboard-tab.hidden{display:none!important}
+#connector-detail .connector-task-page{max-width:1050px}
+#connector-detail .connector-task-page-heading{padding:18px 20px;margin:0 0 17px;
+  border:1px solid #d7e6dd;border-radius:12px;background:#f4f9f5}
+#connector-detail .connector-task-page-heading h3{font-size:21px;line-height:1.35;
+  margin:0 0 5px;color:var(--ink)}
+#connector-detail .connector-task-page-heading p{margin:0;font-size:14px;
+  line-height:1.55;color:var(--muted)}
+#connector-detail .connector-account-start{padding:18px 20px;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  gap:18px;margin-bottom:18px;background:#fdfcf8}
+#connector-detail .connector-account-start>div{flex:1 1 250px;min-width:0}
+#connector-detail .connector-account-start strong{font-size:16px}
+#connector-detail .connector-account-start p{font-size:14px;line-height:1.5;
+  margin:6px 0 0;color:var(--muted)}
+#connector-detail .connector-account-start>.btn{min-height:44px}
+#connector-detail #connector-page-photos .biblio-photos-panel{
+  border:none;box-shadow:none;padding:0;margin:0;background:transparent}
+#connector-detail #connector-page-photos .biblio-photos-panel>summary{display:none!important}
+#connector-detail #connector-page-photos .biblio-photos-panel>.biblio-task-inner{
+  margin:0;padding:0}
+#connector-detail #connector-page-photos .biblio-photo-wizard{margin:0;
+  max-width:900px;background:var(--layout-panel);border:1px solid var(--line);
+  border-radius:14px;padding:22px}
+#connector-detail #connector-listings-panel .connection-task-panel,
+#connector-detail #connector-activity-panel .connection-task-panel{
+  margin:0 0 15px;border-radius:12px}
+#connector-detail #connector-account-panel #connector-config{max-width:920px}
+#connector-detail #connector-account-panel #connector-page-vinted,
+#connector-detail #connector-listings-panel #connector-page-biblio{
+  width:100%;min-width:0}
+#connector-detail #connector-activity-panel #connector-page-activity>summary{
+  display:none!important}
+#connector-detail #connector-activity-panel #connector-page-activity[open]{
+  background:var(--layout-panel);padding:16px 18px}
+#connector-detail #connector-activity-panel #connector-page-activity .connection-task-content{
+  padding:0;min-width:0}
+#connector-detail #connector-page-biblio-activity>details{margin-bottom:15px}
+@media(max-width:850px){
+  #connector-detail .connector-workflow-tabs{flex-wrap:nowrap;
+    overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
+  #connector-detail .connector-workflow-tabs .dashboard-tab{
+    flex:0 0 auto!important;min-width:115px;white-space:nowrap}
+}
+@media(max-width:600px){
+  main>header{padding:13px 16px}
+  #connector-detail .connector-task-page-heading{padding:15px}
+  #connector-detail .connector-page-content>.connector{padding:15px}
+  #connector-detail .connector-account-start{flex-direction:column;align-items:stretch;padding:15px}
+  #connector-detail .connector-account-start>.btn{width:100%}
+  #connector-detail #connector-page-photos .biblio-photo-wizard{padding:13px}
+}
