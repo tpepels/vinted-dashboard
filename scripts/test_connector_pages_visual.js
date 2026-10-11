@@ -105,8 +105,25 @@ function runBrowserAssertions(){
     if(byId("connector-config").classList.contains("hidden")
         ||!byId("connector-page-settings").contains(byId("connector-config")))
       throw Error("BIBLIO credential form did not open in its page");
-    if(getComputedStyle(byId("connector-manage-panel")).display==="none")
+    if(getComputedStyle(byId("connector-account-panel")).display==="none")
       throw Error("BIBLIO account form opened in a hidden tab");
+    if(!byId("connector-page-photos").querySelector(".biblio-photos-panel"))
+      throw Error("Photo repair wizard is missing from its dedicated tab");
+    if(byId("connector-page-card").querySelector(".biblio-photos-panel"))
+      throw Error("Photo repair is still cluttering the overview");
+    if(byId("connector-page-biblio").closest("#connector-listings-panel")===null)
+      throw Error("BIBLIO listing management is not isolated");
+    activateWorkspaceTab("connector","photos");
+    if(getComputedStyle(byId("connector-photos-panel")).display==="none")
+      throw Error("Photo repair tab did not open");
+    if(!byId("connector-page-photos").querySelector(".biblio-photos-panel").open)
+      throw Error("Photo repair must be ready when its tab is opened");
+    activateWorkspaceTab("connector","listings");
+    if(getComputedStyle(byId("connector-listings-panel")).display==="none")
+      throw Error("Listings tab did not open");
+    activateWorkspaceTab("connector","activity");
+    if(getComputedStyle(byId("connector-activity-panel")).display==="none")
+      throw Error("Activity tab did not open");
     await selectView("connector-shopify");
     if(!byId("connector-config").classList.contains("hidden"))
       throw Error("Old connector settings leaked into Shopify");
@@ -118,6 +135,11 @@ function runBrowserAssertions(){
     if(!byId("connector-page-vinted").contains(byId("paired-browsers-panel"))||
        !byId("connector-page-card").querySelector(".pair"))
       throw Error("Vinted browser controls absent");
+    if(!document.querySelector(".connector-photos-tab").classList.contains("hidden")
+      ||!document.querySelector(".connector-listings-tab").classList.contains("hidden"))
+      throw Error("Vinted is showing BIBLIO-only tabs");
+    if(document.querySelector(".connector-account-tab").textContent!=="My browsers")
+      throw Error("Vinted account tab must describe browsers, not an FTP account");
     await selectView("connections");
     if(document.querySelectorAll(".connector-overview-link").length!==10)
       throw Error("All marketplace overview links must be present");
