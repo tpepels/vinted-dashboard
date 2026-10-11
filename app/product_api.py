@@ -64,6 +64,7 @@ from app.connectors.hosted import (
     biblio_configured,
     biblio_pending_changes,
     biblio_photo_file_signature,
+    _trusted_vinted_image_url,
     biblio_upload_profile,
     exchange_etsy_authorization_code,
     ebay_configured,
