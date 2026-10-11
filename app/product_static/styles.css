@@ -849,3 +849,64 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
   .shell aside #workspace-navigation .nav-group-connectors{grid-template-columns:repeat(2,minmax(0,1fr))}
   #connector-detail .connector-page-top>.btn{flex:1 1 100%}
 }
+
+/* Reuse Connection visual grammar inside the dedicated channel pages. */
+#connector-detail .connector-header{display:flex;justify-content:space-between;
+  align-items:flex-start;gap:12px;flex-wrap:wrap}
+#connector-detail .connector-header h2{font-size:19px;margin:0 0 4px}
+#connector-detail .connector-header p{min-height:0;margin:0;
+  font-size:13px;line-height:1.55;max-width:650px}
+#connector-detail .connector p{min-height:0;line-height:1.6}
+#connector-detail .connector>.actions{flex-wrap:wrap}
+#connector-detail .connector-settings-row{display:flex;flex-wrap:wrap;
+  gap:10px;align-items:center;border-top:1px solid var(--line);
+  padding-top:14px;margin-top:18px}
+#connector-detail .connection-state{display:inline-flex;align-items:center;
+  justify-content:center;padding:6px 10px;border:1px solid var(--line);
+  border-radius:999px;font-size:11px;font-weight:750;max-width:100%;text-align:center}
+#connector-detail .connection-state.verified,
+#connector-detail .connection-state.ready{background:#edf6ef;color:#265d45;border-color:#c7dfce}
+#connector-detail .connection-state.setup,
+#connector-detail .connection-state.unverified,
+#connector-detail .connection-state.not-ready{background:#faf4e8;color:#775e22;border-color:#e8d8ae}
+#connector-detail .connection-state.attention{background:#fff0ec;color:#963b34;border-color:#eac9c3}
+#connector-detail .connection-state.busy{background:#edf2fa;color:#355a82;border-color:#cedcec}
+#connector-detail .connector-workflow-hint,
+#connector-detail .connector-last-sync,
+#connector-detail .connector-next-step{font-size:12px;line-height:1.6;margin-top:12px}
+#connector-detail .biblio-primary-task{display:flex;align-items:center;
+  justify-content:space-between;gap:16px;flex-wrap:wrap;margin:18px 0 12px;
+  padding:16px;border-radius:12px;background:var(--soft)}
+#connector-detail .biblio-primary-task strong{font-size:14px}
+#connector-detail .biblio-primary-task p{margin:4px 0 0;max-width:590px}
+#connector-detail .biblio-primary-task .btn{flex:0 1 auto}
+#connector-detail .biblio-task-panel,
+#connector-detail .connection-task-panel{min-width:0}
+#connector-detail .connection-task-panel{padding:0 18px}
+#connector-detail .connection-task-panel>summary{display:flex;align-items:center;
+  justify-content:space-between;gap:12px;padding:17px 0;cursor:pointer}
+#connector-detail .connection-task-panel>summary strong{display:block;font-size:14px}
+#connector-detail .connection-task-panel>summary small{display:block;margin-top:4px;
+  font-size:12px;font-weight:400;color:var(--muted)}
+#connector-detail .connection-task-content{padding:0 0 18px;line-height:1.6;min-width:0}
+#connector-detail .biblio-summary-stats{display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+#connector-detail .biblio-summary-stats>div{border:1px solid var(--line);
+  border-radius:10px;padding:12px;display:grid;gap:4px}
+#connector-detail .biblio-summary-stats strong{font-size:22px;font-variant-numeric:tabular-nums}
+#connector-detail .biblio-summary-stats span{font-size:12px;color:var(--muted)}
+#connector-detail .biblio-recovery-row{display:flex;flex-wrap:wrap;gap:12px;
+  align-items:center;justify-content:space-between;border:1px solid var(--line);
+  border-radius:9px;padding:12px;margin:8px 0}
+#connector-detail .biblio-task-panel>summary{cursor:pointer}
+#connector-detail .biblio-user-note{font-size:12px;line-height:1.6}
+#connector-detail .biblio-photo-recovery-controls{flex-wrap:wrap}
+#connector-detail .biblio-photo-inspection-details{overflow-wrap:anywhere}
+#connector-detail .connection-task-panel .btn{white-space:normal}
+@media(max-width:650px){
+  #connector-detail .biblio-primary-task{align-items:stretch;flex-direction:column}
+  #connector-detail .biblio-primary-task .btn{width:100%}
+  #connector-detail .biblio-summary-stats{grid-template-columns:1fr}
+  #connector-detail .connector-settings-row>.btn{flex:1 1 100%}
+  #connector-detail .connector-header{flex-direction:column}
+}
