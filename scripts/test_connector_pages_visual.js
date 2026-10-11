@@ -155,13 +155,20 @@ function runBrowserAssertions(){
     document.body.appendChild(output);
   });
 }
+// Fail fast on malformed test injections instead of reporting a vague browser timeout.
+new Function(mocks+"\n"+schema+"\n"+nav+"\n"+connections+"\n"+config
+  +"\n("+runBrowserAssertions.toString()+")();");
 fs.mkdirSync("ui-evidence",{recursive:true});
 const results=[];
 for(const width of [360,768,1280])for(const mode of ["expanded","collapsed"]){
   const filepath=path.resolve("ui-evidence/connector-page-"+width+"-"+mode+".html");
   const png=path.resolve("ui-evidence/connector-page-"+width+"-"+mode+".png");
   const init='window.fixtureMode='+JSON.stringify(mode)+';';
-  fs.writeFileSync(filepath,base.replace("</body>",
+  const browserErrorReporter = '<script>window.onerror=function(message,source,line,col){'
+    + 'var out=document.createElement("output");out.id="connector-route-error";'
+    + 'out.textContent=String(message)+" at "+line+":"+col;document.body.appendChild(out);'
+    + '};</script>';
+  fs.writeFileSync(filepath,base.replace("</body>",browserErrorReporter+
     "<script>"+mocks+"\n"+schema+"\n"+nav+"\n"+connections+"\n"+config+
     "\n"+init+"\n("+runBrowserAssertions.toString()+")();</script></body>"));
   const flags=["--headless=new","--no-sandbox","--disable-gpu",
@@ -172,6 +179,7 @@ for(const width of [360,768,1280])for(const mode of ["expanded","collapsed"]){
   const failure=dom.match(/<output id="connector-route-error">([^<]+)<\/output>/);
   assert(!failure,"Browser failed "+width+"/"+mode+": "+(failure?.[1]||""));
   const observed=dom.match(/<output id="connector-route-metrics" data-state="([^"]+)"/);
+  if(!observed) console.error("Rendered page tail: "+dom.slice(-3500));
   assert(observed,"Browser navigation script did not finish "+width+"/"+mode);
   const measurement=JSON.parse(decodeURIComponent(observed[1]));
   assert(measurement.bodyScroll<=measurement.viewport+2,
