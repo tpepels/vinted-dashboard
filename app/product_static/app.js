@@ -394,6 +394,19 @@ function resetTableColumnWidths(table, key) {
   });
 }
 
+// Fixed baseline column widths keep long titles or missing values from
+// reshaping adjacent rows. Users may still resize columns and save overrides.
+const STABLE_TABLE_WIDTHS = {
+  "inventory-table": [48,280,150,120,75,125,100,105,110,150,100,160],
+  "listings-table": [300,120,108,138,95,100,90,110,168],
+  "sales-table": [148,115,285,170,105,115,115],
+};
+function stableTableWidths(table, labels) {
+  const root = table.closest(".table-wrap");
+  const widths = STABLE_TABLE_WIDTHS[root?.id];
+  return widths?.length === labels.length ? widths.slice() : null;
+}
+
 function activateResizableTable(table) {
   if (tableResizeSeen.has(table)) return;
   const row = table.tHead?.rows?.[0];
@@ -416,7 +429,8 @@ function activateResizableTable(table) {
     container.setAttribute("aria-label", "Scrollable data table");
   }
   const saved = tableStoredWidths(key, labels);
-  if (saved) applyTableColumnWidths(table, saved);
+  const stable = stableTableWidths(table, labels);
+  if (saved || stable) applyTableColumnWidths(table, saved || stable);
 
   headers.forEach((header, column) => {
     if (labels[column] && !header.querySelector("a,button,input,select")) {
@@ -433,7 +447,7 @@ function activateResizableTable(table) {
     handle.setAttribute("aria-label", "Resize " + (labels[column] || "column " + (column + 1)));
     handle.setAttribute("aria-valuemin", String(TABLE_MIN_COLUMN_WIDTH));
     handle.setAttribute("aria-valuemax", String(TABLE_MAX_COLUMN_WIDTH));
-    if (saved) handle.setAttribute("aria-valuenow", String(saved[column]));
+    if (saved || stable) handle.setAttribute("aria-valuenow", String((saved || stable)[column]));
     handle.title = "Drag or use arrow keys to resize; double-click to reset";
     header.appendChild(handle);
     let drag = null;
@@ -585,6 +599,42 @@ function activateMobileCardTable(table) {
     });
   }
   if (controls.childElementCount) table.parentNode.insertBefore(controls, table);
+}
+
+const tableRenderCache = new WeakMap();
+function replaceStableTable(selector, html, {preserveSelection = false} = {}) {
+  const host = $(selector);
+  if (!host) return false;
+  if (tableRenderCache.get(host) === html) return false;
+
+  const oldTable = host.querySelector("table");
+  const sortHeader = oldTable?.querySelector("thead th[data-sort-direction]");
+  const sortIndex = sortHeader
+    ? Array.from(sortHeader.parentElement.cells).indexOf(sortHeader) : -1;
+  const sortDirection = sortHeader?.dataset.sortDirection || null;
+  const selected = preserveSelection
+    ? new Set(Array.from(host.querySelectorAll(".inventory-select:checked"))
+      .map(input => input.dataset.id)) : null;
+  const left = host.scrollLeft;
+  const top = host.scrollTop;
+  host.innerHTML = html;
+  tableRenderCache.set(host, html);
+
+  if (selected?.size) {
+    host.querySelectorAll(".inventory-select").forEach(box => {
+      box.checked = selected.has(box.dataset.id);
+    });
+  }
+  const nextTable = host.querySelector("table");
+  const nextHeader = nextTable?.tHead?.rows?.[0]?.cells?.[sortIndex];
+  if (sortDirection && nextHeader) {
+    // sortTableByHeader toggles the header direction before sorting.
+    nextHeader.dataset.sortDirection = sortDirection === "asc" ? "desc" : "asc";
+    sortTableByHeader(nextHeader);
+  }
+  host.scrollLeft = left;
+  host.scrollTop = top;
+  return true;
 }
 
 function startResponsiveTables() {
@@ -3031,10 +3081,6 @@ $("#store-stock-audit-start").onclick = async () => {
 };
 
 async function inventory() {
-  if (state.biblioInventoryTimer) {
-    clearTimeout(state.biblioInventoryTimer);
-    state.biblioInventoryTimer = null;
-  }
   const q = encodeURIComponent($("#inventory-q").value.trim());
   const status = encodeURIComponent($("#inventory-status").value);
   const data = await api("/api/app/inventory?q=" + q + "&status=" + status);
@@ -3048,7 +3094,7 @@ async function inventory() {
   $("#inventory-count").textContent = visibleItems.length
     + " shown" + (visibleItems.length !== state.inventoryItems.length ? " of " + state.inventoryItems.length : "");
 
-  $("#inventory-table").innerHTML = visibleItems.length
+  const inventoryMarkup = visibleItems.length
     ? '<table><thead><tr><th><input id="inventory-select-all" type="checkbox" aria-label="Select all"></th><th>Item</th><th>SKU</th><th>Category</th><th>Qty</th><th>Location</th><th>Cost</th><th>Ask</th><th>Margin</th><th>Channels</th><th>Status</th><th>Actions</th></tr></thead><tbody>'
       + visibleItems.map((item) =>
         '<tr><td><input class="inventory-select" type="checkbox" data-id="' + esc(item.id) + '" aria-label="Select ' + esc(item.title) + '"></td>'
@@ -3082,6 +3128,7 @@ async function inventory() {
       ).join("")
       + "</tbody></table>"
     : '<div class="empty">No inventory yet. Add an item or import a file.</div>';
+  replaceStableTable("#inventory-table", inventoryMarkup, {preserveSelection: true});
 
   document.querySelectorAll(".edit-item").forEach((button) => {
     button.onclick = () => openItemForm(state.inventoryItems.find((item) => item.id === button.dataset.id));
@@ -3100,18 +3147,17 @@ async function inventory() {
   }
   updateInventorySelection();
   if ($("#store-stock-audit-panel").open && !state.storeStockAuditTimer) loadStoreStockAudit();
-  const biblioPending = state.inventoryItems.some((item) =>
-    (item.listings || []).some((listing) =>
-      listing.channel === "biblio"
-      && ["queued", "uploading"].includes(String(listing.biblio_sync?.state || ""))
-    )
-  );
-  if (biblioPending && state.view === "inventory") {
-    state.biblioInventoryTimer = setTimeout(() => {
-      if (state.view === "inventory") inventory();
-    }, 2500);
-  }
+  // Do not rebuild this table on a timer while a marketplace upload runs.
+  // An explicit Refresh stock action keeps the user's scroll/selection stable.
 }
+
+$("#inventory-refresh").onclick = async () => {
+  const button = $("#inventory-refresh");
+  button.disabled = true;
+  try { await inventory(); }
+  catch (error) { flash("Could not refresh stock: " + error.message, true); }
+  finally { button.disabled = false; }
+};
 
 $("#close-cross-list").onclick = () => {
   state.crossList = null;
@@ -4691,22 +4737,15 @@ function listingComparator(sort) {
 }
 
 async function listings() {
-  if (state.biblioListingsTimer) {
-    clearTimeout(state.biblioListingsTimer);
-    state.biblioListingsTimer = null;
-  }
   const data = await api("/api/app/listings");
   state.listings = data.listings || [];
   renderListings();
-  const biblioPending = state.listings.some((row) =>
-    row.channel === "biblio"
-    && ["queued", "uploading"].includes(String(row.biblio_sync?.state || ""))
-  );
-  if (biblioPending && state.view === "listings") {
-    state.biblioListingsTimer = setTimeout(() => {
-      if (state.view === "listings") listings();
-    }, 2500);
-  }
+  const pending = state.listings.filter(row =>
+    row.channel === "biblio" && ["queued", "uploading"].includes(String(row.biblio_sync?.state || ""))
+  ).length;
+  $("#listings-sync-note").textContent = pending
+    ? pending + " BIBLIO listing" + (pending === 1 ? "" : "s") + " processing · Refresh when ready"
+    : "";
 }
 
 function renderListingStats(rows, duplicates) {
@@ -4792,12 +4831,13 @@ function renderListings() {
   renderListingStats(filtered, duplicateMode === "unique" ? statsDuplicates : duplicates);
   $("#listing-count").textContent = filtered.length + " of " + rows.length;
 
-  const showFavourites = filtered.some((row) => row.favourites != null);
-  const showViews = filtered.some((row) => row.views != null);
-  const showDate = filtered.some((row) => row.channel === "vinted")
-    || filtered.some((row) => timeValue(listingDisplayDate(row)) > 0);
+  // A filter must never add or remove columns: that causes the entire
+  // table to jump sideways and changes row wrapping unexpectedly.
+  const showFavourites = true;
+  const showViews = true;
+  const showDate = true;
 
-  $("#listings-table").innerHTML = filtered.length
+  const listingsMarkup = filtered.length
     ? '<table><thead><tr><th>Listing</th><th>Marketplace</th><th>Status</th>'
       + (showDate ? "<th>Listed</th><th>Age</th>" : "")
       + (showFavourites ? "<th>Favourites</th>" : "")
@@ -4836,6 +4876,7 @@ function renderListings() {
       }).join("")
       + "</tbody></table>"
     : '<div class="empty">No matching listings.</div>';
+  replaceStableTable("#listings-table", listingsMarkup);
   bindCrossListButtons();
 }
 
@@ -4878,6 +4919,14 @@ $("#listing-stat-oldest").onclick = () => {
   // Insights can change filters, but the resulting listings are in Browse.
   $(selector).addEventListener("click", () => activateWorkspaceTab("listings", "browse"));
 });
+
+$("#listings-refresh").onclick = async () => {
+  const button = $("#listings-refresh");
+  button.disabled = true;
+  try { await listings(); }
+  catch (error) { flash("Could not refresh listings: " + error.message, true); }
+  finally { button.disabled = false; }
+};
 
 $("#listing-reset").onclick = () => {
   $("#listing-search").value = "";
@@ -4985,7 +5034,7 @@ function renderSales() {
 
   $("#sales-count").textContent = rows.length + " of " + state.salesRows.length;
   renderPurchaseCostSuggestions();
-  $("#sales-table").innerHTML = rows.length
+  const salesMarkup = rows.length
     ? '<table><thead><tr><th>Date</th><th>Channel</th><th>Item</th><th>Person</th><th>Direction</th><th>Status</th><th>Amount</th></tr></thead><tbody>'
       + rows.map((sale) =>
         "<tr><td>" + esc(when(sale.occurred_at)) + '</td><td><span class="pill '
@@ -4996,6 +5045,7 @@ function renderSales() {
       ).join("")
       + "</tbody></table>"
     : '<div class="empty">No matching orders.</div>';
+  replaceStableTable("#sales-table", salesMarkup);
 }
 
 ["#sales-direction", "#sales-state", "#sales-channel"].forEach((selector) => {
