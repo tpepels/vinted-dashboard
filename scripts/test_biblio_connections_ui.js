@@ -66,7 +66,7 @@ assert.ok(html.indexOf('biblio-send-selected-photos') > html.indexOf('biblio-pho
 for (const selector of [
   '.item-biblio-remove-local', '.item-marketplace-photos',
   '.biblio-missing-photo-set input:checked',
-  '.biblio-posting-action',
+  '.biblio-posting-action', '.biblio-resend-book',
 ]) {
   assert.ok(source.includes('$$("' + selector + '")'),
     "Collection selector must return all matching controls: " + selector);
