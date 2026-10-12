@@ -626,6 +626,13 @@ function replaceStableTable(selector, html, {preserveSelection = false} = {}) {
     });
   }
   const nextTable = host.querySelector("table");
+  if (nextTable) {
+    // Establish the fixed widths and responsive labels synchronously.
+    // Waiting for the MutationObserver would display an auto-sized table
+    // for a frame before the columns jump to their final positions.
+    activateResizableTable(nextTable);
+    activateMobileCardTable(nextTable);
+  }
   const nextHeader = nextTable?.tHead?.rows?.[0]?.cells?.[sortIndex];
   if (sortDirection && nextHeader) {
     // sortTableByHeader toggles the header direction before sorting.
