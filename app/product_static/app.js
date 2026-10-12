@@ -80,7 +80,7 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Enter your BIBLIO FTP credentials. BIBLIO uses FTPS or FTP, not SFTP. Both switches save immediately. Disabling uploads after Vinted updates does not cancel manual uploads or queued photo follow-ups.",
+    help: "Enter your BIBLIO FTP credentials. BIBLIO uses FTPS or FTP, not SFTP. Both switches save immediately. Saving them does not upload any listings. Disabling uploads after Vinted updates does not cancel manual uploads or queued photo follow-ups.",
     fields: [
       ["username", "BIBLIO FTP username", "", "text"],
       ["password", "BIBLIO FTP password", "", "password"],
