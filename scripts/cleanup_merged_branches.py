@@ -58,12 +58,13 @@ def pages(repository: str, collection: str, token: str):
 
 def candidates(branches, pull_requests, *, default_branch: str, repository: str):
     merged_heads = {
-        (str(pr.get("head", {}).get("ref") or ""), str(pr.get("head", {}).get("sha") or ""))
+        (str((pr.get("head") or {}).get("ref") or ""),
+         str((pr.get("head") or {}).get("sha") or ""))
         for pr in pull_requests
         if pr.get("merged_at")
-        and pr.get("base", {}).get("ref") == default_branch
-        and pr.get("base", {}).get("repo", {}).get("full_name") == repository
-        and pr.get("head", {}).get("repo", {}).get("full_name") == repository
+        and (pr.get("base") or {}).get("ref") == default_branch
+        and ((pr.get("base") or {}).get("repo") or {}).get("full_name") == repository
+        and ((pr.get("head") or {}).get("repo") or {}).get("full_name") == repository
     }
     return sorted([
         branch
