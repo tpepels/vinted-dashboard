@@ -663,16 +663,18 @@
         <details id="biblio-compare-panel" class="card connection-task-panel hidden">
           <summary><span><strong>Check what is actually on BIBLIO</strong><small>Compare your dashboard with an inventory file downloaded from BIBLIO</small></span></summary>
           <div class="connection-task-content">
-            <div class="connector-context-note"><strong>Read-only comparison</strong><span>Checking an export won't change your books or prices.</span></div>
-            <label class="connection-file-label" for="biblio-import-file">Inventory file downloaded from BIBLIO</label>
+            <label class="connection-file-label" for="biblio-import-file">BIBLIO inventory export</label>
             <input id="biblio-import-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv">
-            <div class="actions"><button id="verify-biblio" class="btn primary" type="button">Compare without changing anything</button></div>
-            <div id="biblio-compare-result" class="connection-task-result" role="status" aria-live="polite">Results will appear here after comparison.</div>
-            <details id="biblio-import-advanced" class="connection-danger-zone">
-              <summary>Advanced: update the dashboard from this file</summary>
-              <p>This imports listing information from the selected BIBLIO file into your dashboard. It does not publish anything to BIBLIO. Review the comparison first.</p>
-              <label class="checkline"><input id="biblio-import-authoritative" type="checkbox"> <span><strong>This file contains every active BIBLIO listing.</strong> Treat missing listings as inactive in the dashboard. Only tick this for a complete BIBLIO export.</span></label>
-              <button id="import-biblio" class="btn danger" type="button" disabled>Apply file to dashboard…</button>
+            <div class="biblio-compare-actions">
+              <button id="verify-biblio" class="btn primary" type="button" disabled>Compare listings</button>
+              <span>Read-only. Nothing changes on BIBLIO or in the dashboard.</span>
+            </div>
+            <div id="biblio-compare-result" class="connection-task-result hidden" role="status" aria-live="polite"></div>
+            <details id="biblio-import-advanced" class="connection-danger-zone hidden">
+              <summary>Update dashboard from this file (optional)</summary>
+              <p>Updates the dashboard only. Nothing is sent to BIBLIO.</p>
+              <label class="checkline"><input id="biblio-import-authoritative" type="checkbox"> <span>Complete export - mark dashboard listings absent from this file as inactive.</span></label>
+              <button id="import-biblio" class="btn danger" type="button" disabled>Apply to dashboard…</button>
             </details>
           </div>
         </details>
@@ -713,7 +715,6 @@
         <div class="connector-page-top">
           <button id="connector-page-back" class="btn" type="button">← All marketplaces</button>
           <div class="connector-page-title">
-            <p class="eyebrow">MARKETPLACE</p>
             <h2 id="connector-page-heading">Marketplace</h2>
             <p id="connector-page-description" class="muted">Choose what you want to do with this marketplace.</p>
           </div>
@@ -722,7 +723,8 @@
         <div class="dashboard-tabbar dashboard-section-tabs connector-workflow-tabs" role="tablist" aria-label="Marketplace tasks" data-workspace-tabs="connector">
           <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="connector-overview-panel" data-workspace-tab="overview">Overview</button>
           <button class="dashboard-tab connector-photos-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-photos-panel" data-workspace-tab="photos">Fix photos</button>
-          <button class="dashboard-tab connector-listings-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-listings-panel" data-workspace-tab="listings">My listings</button>
+          <button class="dashboard-tab connector-books-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-listings-panel" data-workspace-tab="books">Find a book</button>
+          <button class="dashboard-tab connector-compare-tab" role="tab" type="button" aria-selected="false" aria-controls="biblio-listings-compare-panel" data-workspace-tab="compare">Compare export</button>
           <button class="dashboard-tab connector-account-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-account-panel" data-workspace-tab="account">Account</button>
           <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-activity-panel" data-workspace-tab="activity">Activity</button>
         </div>
@@ -733,19 +735,12 @@
           <div class="connector-task-page-heading"><h3>Fix missing photos</h3><p>Choose one book, check its pictures and send only the missing ones.</p></div>
           <div id="connector-page-photos"></div>
         </div>
-        <div id="connector-listings-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:listings">
-          <div class="connector-task-page-heading"><h3>My BIBLIO listings</h3><p>Review your prepared books or compare them with a BIBLIO export.</p></div>
-          <div class="dashboard-tabbar connector-listings-tabs" role="tablist" aria-label="BIBLIO listing tasks" data-workspace-tabs="biblio-listings">
-            <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="biblio-listings-books-panel" data-workspace-tab="books">Find a book</button>
-            <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="biblio-listings-compare-panel" data-workspace-tab="compare">Compare BIBLIO export</button>
-          </div>
-          <div id="biblio-listings-books-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="biblio-listings:books">
+        <div id="connector-listings-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:books">
           <div id="connector-page-biblio" class="connector-page-secondary">
           <details id="biblio-dashboard-postings-panel" class="card connection-task-panel" open>
             <summary>Find a prepared book</summary>
             <div class="connection-task-content">
-              <div class="connector-context-note"><strong>Dashboard listings only</strong><span>Removing a book here does not remove it from BIBLIO.</span></div>
-              <div class="biblio-postings-toolbar">
+               <div class="biblio-postings-toolbar">
                 <label>Find a book<input id="biblio-postings-search" type="search" placeholder="Title or BIBLIO Book ID"></label>
                 <button id="biblio-postings-refresh" class="btn" type="button">Refresh list</button>
               </div>
@@ -754,7 +749,7 @@
           </details>
         </div>
         </div>
-        <div id="biblio-listings-compare-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="biblio-listings:compare">
+        <div id="biblio-listings-compare-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:compare">
           <div id="connector-page-biblio-compare" class="connector-page-secondary"></div>
         </div>
         </div>
