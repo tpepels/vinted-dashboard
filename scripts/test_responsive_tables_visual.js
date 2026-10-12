@@ -103,13 +103,13 @@ for(const width of widths){
   assert.equal(data.buttonClicked,1,"Row action no longer clickable");
   assert(data.selected,"Mobile Select all did not select inventory rows");
   assert(data.sorted,"Mobile table sorting did not change the row order");
-  const shouldBeCards=data.inventory.host<=860;
+  const shouldBeCards=data.inventory.host<=580;
   for(const key of ["inventory","listings","sales"]){
     assert.equal(data[key].rowDisplay,shouldBeCards?"grid":"table-row",
       "Unexpected "+key+" row layout at "+width+": "+JSON.stringify(data[key]));
     if(shouldBeCards){
       assert(data[key].table<=data[key].host+2,"Card is wider than its container");
-      const columns=data[key].host>=760 ? 4 : data[key].host>=610 ? 3 : 2;
+      const columns=2;
       assert.equal(data[key].gridColumns,columns,
         "Card facts should use available tablet/phone width: "+key+" at "+width);
     }
