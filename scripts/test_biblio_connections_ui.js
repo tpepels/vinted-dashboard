@@ -55,7 +55,7 @@ assert.match(html, /105<\/strong> books prepared/);
 assert.match(html, /3<\/strong> changes waiting/);
 assert.match(html, /4<\/strong> books need photo review/);
 assert.match(html, /Some photos could not be sent/);
-assert.match(html, /Fix photos for one book/);
+assert.match(html, /Check a book’s photos/);
 assert.match(html, /Choose a BIBLIO book/);
 assert.match(html, /biblio-photo-book-select/);
 assert.match(html, /biblio-refresh-photo-sources/);
@@ -88,6 +88,8 @@ assert.match(html, /Step 2 of 3/);
 assert.match(html, /Step 3 of 3/);
 assert.match(html, /biblio-photo-confirm-step" class="biblio-photo-stage hidden/);
 assert.match(html, /biblio-confirm-selected-photos/);
+assert.match(html, /biblio-photo-done-step/);
+assert.match(html, /View upload status/);
 const sample = {book_id:"example",title:"Example Book",active:true,
   photo_state:"error",photo_error:"BDB0004 fop_read_meta: vsftpd_passwd.db unexpected file type or format",
   biblio_source_photos:9,vinted_source_photos:9,last_ftp_photo_count:9,
