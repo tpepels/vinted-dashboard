@@ -98,6 +98,23 @@ def claim_one() -> dict[str, Any] | None:
         }
 
 
+
+def defer_without_attempt(job_id: str, until: datetime) -> None:
+    """Return a claimed job to the queue when uploads are temporarily paused.
+
+    A pause is not a connection failure: it must not consume a retry attempt or
+    mark any marketplace operation as started, failed, or completed.
+    """
+    with db.session_scope() as session:
+        job = session.get(BackgroundJob, uuid.UUID(job_id))
+        if job is None or job.status != "running":
+            return
+        job.status = "queued"
+        job.available_at = until
+        job.locked_at = None
+        job.attempts = max(0, int(job.attempts or 0) - 1)
+
+
 def complete(job_id: str) -> None:
     with db.session_scope() as session:
         job = session.get(BackgroundJob, uuid.UUID(job_id))
