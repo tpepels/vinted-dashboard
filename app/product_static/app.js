@@ -5939,46 +5939,112 @@ function renderBiblioDashboardPostings(rows) {
   const query = ($("#biblio-postings-search")?.value || "").trim().toLowerCase();
   const items = (rows || []).filter(item =>
     [item.title, item.book_id].some(value => String(value || "").toLowerCase().includes(query)));
-  const shown = items.slice(0, 100);
-  root.innerHTML = '<p class="muted">' + items.length + ' matching dashboard postings'
-    + (items.length > shown.length ? ' · showing first ' + shown.length + '; narrow the search' : '')
-    + '</p><div class="biblio-postings-list">'
-    + (shown.map(item => {
-      const removed = Boolean(item.dashboard_removed);
-      return '<article class="biblio-posting-row"><div class="biblio-posting-copy">'
-        + '<strong>' + esc(item.title || "Untitled") + '</strong>'
-        + '<span>Book ID ' + esc(item.book_id)
-        + ' · ' + (removed ? 'Removed from dashboard' : 'In dashboard') + '</span>'
-        + '<small>Source photos: ' + Number(item.photo_count || 0)
-        + ' · Last FTP photo state: ' + esc(item.photo_state || "Not sent") + '</small>'
-        + (item.remote_missing ? '<small>BIBLIO seller export: book missing on last authoritative check.</small>' : '')
-        + '</div>'
-        + (!removed && item.remote_missing ? '<button class="btn biblio-resend-book" type="button" data-book="' + esc(item.book_id)
-          + '">Resend book details…</button>' : '')
-        + '<button class="btn ' + (removed ? 'primary ' : 'danger ')
-        + 'biblio-posting-action" type="button" data-item="' + esc(item.inventory_item_id)
-        + '" data-book="' + esc(item.book_id) + '" data-action="'
-        + (removed ? "readd" : "remove") + '">'
-        + (removed ? 'Review & re-add…' : 'Remove from dashboard…') + '</button></article>';
-    }).join("") || '<p class="muted">No matching BIBLIO postings in this dashboard.</p>')
-    + '</div>';
+  const limit = Math.max(12, Number(state.biblioBookVisibleLimit || 12));
+  const shown = items.slice(0, limit);
+  const selected = items.find(item =>
+    String(item.book_id || "") === String(state.biblioSelectedBookId || ""));
+  const status = item => item.dashboard_removed ? "Removed here"
+    : item.remote_missing ? "Missing on BIBLIO" : "Prepared";
+  const bookRows = shown.map(item => {
+    const chosen = selected && String(selected.book_id) === String(item.book_id);
+    return '<button class="biblio-book-pick' + (chosen ? ' selected' : '')
+      + '" type="button" data-book="' + esc(item.book_id)
+      + '" aria-pressed="' + Boolean(chosen) + '">'
+      + '<span class="biblio-book-name">' + esc(item.title || "Untitled") + '</span>'
+      + '<span class="biblio-book-status' + (item.remote_missing ? ' needs-check' : '')
+      + '">' + esc(status(item)) + '</span></button>';
+  }).join("");
+  let selectedHtml = "";
+  if (selected) {
+    const removed = Boolean(selected.dashboard_removed);
+    const photoIssue = /error|fail|uncertain/i.test(String(selected.photo_state || ""));
+    const explanation = removed
+      ? "This record was removed from the dashboard. The BIBLIO listing was not deleted."
+      : selected.remote_missing
+        ? "This book was missing from the last complete BIBLIO export. Check the seller account before resending."
+        : "Prepared in your dashboard. Check BIBLIO to confirm whether it is published.";
+    selectedHtml = '<section class="biblio-book-detail" aria-label="Selected book">'
+      + '<div class="biblio-book-detail-top"><div>'
+      + '<h3>' + esc(selected.title || "Untitled") + '</h3>'
+      + '<p>Book ID ' + esc(selected.book_id) + '</p></div>'
+      + '<button class="btn biblio-close-book" type="button" aria-label="Close book details">Close</button>'
+      + '</div>'
+      + '<p class="biblio-book-guidance">' + esc(explanation) + '</p>'
+      + (!removed ? '<p class="biblio-book-photo-status">'
+        + Number(selected.photo_count || 0) + ' source photos'
+        + (photoIssue ? ' · Photo upload needs checking' : '')
+        + '</p>' : '')
+      + '<div class="biblio-book-actions">'
+      + (!removed ? '<button class="btn primary biblio-check-book-photos" type="button" data-book="'
+        + esc(selected.book_id) + '" data-item="' + esc(selected.inventory_item_id || "")
+        + '">Check photos</button>' : '')
+      + (!removed && selected.remote_missing
+        ? '<button class="btn biblio-resend-book" type="button" data-book="'
+          + esc(selected.book_id) + '">Resend book details…</button>' : '')
+      + '<button class="btn biblio-posting-action" type="button" data-item="'
+      + esc(selected.inventory_item_id || "") + '" data-book="' + esc(selected.book_id)
+      + '" data-action="' + (removed ? 'readd' : 'remove') + '">'
+      + (removed ? 'Review and re-add…' : 'Remove from dashboard…') + '</button>'
+      + '</div></section>';
+  }
+  root.innerHTML =
+    '<div class="biblio-book-results-head"><span>' + items.length
+    + (items.length === 1 ? ' book' : ' books')
+    + (query ? ' found' : ' prepared in dashboard') + '</span>'
+    + (items.length > shown.length ? '<span>Showing ' + shown.length + '</span>' : '')
+    + '</div>'
+    + selectedHtml
+    + '<div class="biblio-book-list" aria-label="Books">'
+    + (bookRows || '<p class="biblio-book-empty">'
+      + (query ? 'No matching books. Try another title or Book ID.'
+        : 'No BIBLIO books in the dashboard yet.') + '</p>')
+    + '</div>'
+    + (items.length > shown.length
+      ? '<button class="btn biblio-show-more-books" type="button">Show more books</button>' : '')
+    + '<p class="biblio-book-footnote">Prepared books are not necessarily published on BIBLIO.</p>';
+  $$(".biblio-book-pick").forEach(button => {
+    button.onclick = () => {
+      state.biblioSelectedBookId = button.dataset.book;
+      renderBiblioDashboardPostings(rows);
+      root.querySelector(".biblio-book-detail h3")?.scrollIntoView({
+        behavior:"smooth", block:"nearest"
+      });
+    };
+  });
+  $(".biblio-close-book")?.addEventListener("click", () => {
+    const bookId = state.biblioSelectedBookId;
+    state.biblioSelectedBookId = null;
+    renderBiblioDashboardPostings(rows);
+    const pick = Array.from(root.querySelectorAll(".biblio-book-pick"))
+      .find(button => button.dataset.book === bookId);
+    pick?.focus();
+  });
+  $(".biblio-show-more-books")?.addEventListener("click", () => {
+    state.biblioBookVisibleLimit = limit + 12;
+    renderBiblioDashboardPostings(rows);
+    $(".biblio-show-more-books")?.focus();
+  });
+  $$(".biblio-check-book-photos").forEach(button => {
+    button.onclick = () => openMarketplaceRecovery(
+      "biblio_photos", button.dataset.item || null, button.dataset.book || null);
+  });
   $$(".biblio-resend-book").forEach(button => {
     button.onclick = async () => {
       const bookId = button.dataset.book;
-      if (!window.confirm("Resend the inventory details for Book ID " + bookId + "? "
-        + "No photographs or other books will be reuploaded. "
-        + "First check BIBLIO Upload History and its upload filter; this action cannot confirm publication.")) return;
+      if (!window.confirm("Resend this book's inventory details to BIBLIO? "
+        + "Photos and other books will not be resent. Check BIBLIO Upload History first.")) return;
       button.disabled = true;
       try {
         const result = await api("/api/app/connectors/biblio/retry-listing-inventory", {
           method:"POST", body:JSON.stringify({book_id:bookId}),
         });
-        flash(result.already_queued ? "That book is already queued." :
-          "One BIBLIO inventory record queued. Check BIBLIO Upload History before retrying again.");
+        flash(result.already_queued ? "This book is already queued." :
+          "Book details queued. Check BIBLIO Upload History to confirm processing.");
         await connections();
       } catch (error) {
-        flash("Could not queue inventory retry: " + error.message, true);
-      } finally { button.disabled = false; }
+        flash("Could not resend book details: " + error.message, true);
+        button.disabled = false;
+      }
     };
   });
   $$(".biblio-posting-action").forEach(button => {
@@ -5990,8 +6056,7 @@ function renderBiblioDashboardPostings(rows) {
       }
       const bookId = button.dataset.book;
       if (!window.confirm("Remove " + bookId + " only from this dashboard? "
-        + "The book will remain on BIBLIO. No delete file will be sent. "
-        + "You can review and re-add it later using its original Book ID.")) return;
+        + "It will remain on BIBLIO. No deletion will be sent.")) return;
       button.disabled = true;
       try {
         await api("/api/app/inventory/" + encodeURIComponent(button.dataset.item)
@@ -5999,16 +6064,16 @@ function renderBiblioDashboardPostings(rows) {
             method:"POST", body:JSON.stringify({book_id:bookId}),
           });
         state.biblioBookChoices = null;
-        flash("Posting removed from dashboard. Nothing was deleted from BIBLIO.");
+        state.biblioSelectedBookId = null;
+        flash("Removed from dashboard. The BIBLIO listing has not been deleted.");
         await loadBiblioDashboardPostings();
       } catch (error) {
         button.disabled = false;
-        flash("Could not remove dashboard posting: " + error.message,true);
+        flash("Could not remove dashboard record: " + error.message,true);
       }
     };
   });
 }
-
 async function loadBiblioDashboardPostings() {
   if (currentConnectorPage() !== "biblio") return;
   const data = await api("/api/app/connectors/biblio/dashboard-postings");
