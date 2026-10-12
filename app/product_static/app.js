@@ -893,10 +893,7 @@ function activateWorkspaceTab(group, tab) {
       loadBiblioPhotoChoices().catch(() => {});
     }
   }
-  if (group === "connector" && tab === "listings") {
-    activateWorkspaceTab("biblio-listings", workspaceTabState["biblio-listings"] || "books");
-  }
-  if (group === "biblio-listings" && currentConnectorPage() === "biblio") {
+  if (group === "connector" && currentConnectorPage() === "biblio") {
     const postings = $("#biblio-dashboard-postings-panel");
     const comparison = $("#biblio-compare-panel");
     if (tab === "books" && postings) {
@@ -1095,6 +1092,7 @@ async function selectView(view, {historyMode = "push"} = {}) {
   });
   $$(".view").forEach((section) => section.classList.toggle(
     "active", section.id === (channel ? "connector-detail" : view)));
+  $("#shell").classList.toggle("connector-focused", Boolean(channel));
   $("#page-title").textContent = channel
     ? (channel === "vinted" ? "Vinted" : connectorSchemas[channel]?.title || channel)
     : $('.nav[data-view="' + view + '"]').getAttribute("aria-label");
@@ -5677,8 +5675,7 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
     return;
   }
   if (kind === "biblio_compare") {
-    activateWorkspaceTab("connector", "listings");
-    activateWorkspaceTab("biblio-listings", "compare");
+    activateWorkspaceTab("connector", "compare");
     const panel = $("#biblio-compare-panel");
     if (!panel || panel.classList.contains("hidden")) {
       return flash("Connect BIBLIO before comparing its inventory export.", true);
@@ -6283,9 +6280,6 @@ async function connections() {
     const wizard = $("#connector-page-photos .biblio-photos-panel");
     if (wizard) wizard.open = true;
   }
-  if (selectedChannel === "biblio" && workspaceTabState.connector === "listings") {
-    activateWorkspaceTab("biblio-listings", workspaceTabState["biblio-listings"] || "books");
-  }
   if (selectedChannel === "biblio" && workspaceTabState.connector === "activity") {
     const history = $(".biblio-history-panel");
     if (history) history.open = true;
@@ -6301,7 +6295,8 @@ async function connections() {
   const isVinted = selectedChannel === "vinted";
   const canRepairPhotos = isBiblio && Boolean($("#connector-page-photos .biblio-photos-panel"));
   $(".connector-photos-tab").classList.toggle("hidden", !canRepairPhotos);
-  $(".connector-listings-tab").classList.toggle("hidden", !isBiblio);
+  $(".connector-books-tab").classList.toggle("hidden", !isBiblio);
+  $(".connector-compare-tab").classList.toggle("hidden", !isBiblio);
   const accountTab = $(".connector-account-tab");
   accountTab.textContent = isVinted ? "My browsers" : "Account";
   $("#connector-account-title").textContent = isVinted ? "Connected Chrome browsers" : "Account connection";
@@ -6316,7 +6311,7 @@ async function connections() {
     ? "The Chrome extension updates saved data without constant Vinted background scans."
     : accountHealth?.message || "Connect an account to get started.";
   $("#connector-account-configure").classList.toggle("hidden", isVinted || !connectorSchemas[selectedChannel]);
-  if (selectedChannel !== "biblio" && ["photos","listings"].includes(workspaceTabState.connector)) {
+  if (selectedChannel !== "biblio" && ["photos","books","compare"].includes(workspaceTabState.connector)) {
     activateWorkspaceTab("connector", "overview");
   }
   $("#other-marketplaces-count").textContent = String(other.length);
@@ -6324,15 +6319,14 @@ async function connections() {
   const compareAvailable = state.connectors.some(connector =>
     connector.channel === "biblio" && connector.operational);
   $("#biblio-compare-panel").classList.toggle("hidden", !compareAvailable);
-  const compareTab = $('[data-workspace-tabs="biblio-listings"] [data-workspace-tab="compare"]');
+  const compareTab = $('[data-workspace-tabs="connector"] [data-workspace-tab="compare"]');
   if (compareTab) compareTab.classList.toggle("hidden", !compareAvailable);
-  if (!compareAvailable && workspaceTabState["biblio-listings"] === "compare") {
-    activateWorkspaceTab("biblio-listings", "books");
+  if (!compareAvailable && workspaceTabState.connector === "compare") {
+    activateWorkspaceTab("connector", "overview");
   }
   const openCompare = $(".biblio-open-compare");
   if (openCompare) openCompare.onclick = () => {
-    activateWorkspaceTab("connector", "listings");
-    activateWorkspaceTab("biblio-listings", "compare");
+    activateWorkspaceTab("connector", "compare");
     const panel = $("#biblio-compare-panel");
     panel.open = true;
     panel.scrollIntoView({behavior:"smooth", block:"start"});
@@ -6834,7 +6828,6 @@ function biblioComparisonHtml(result) {
     + (result.missing_local_ids?.length
       ? '<details><summary>Books only in the dashboard</summary><p>'
         + esc(result.missing_local_ids.join(", ")) + '</p></details>' : '')
-    + '<p class="muted">No book descriptions, prices or stock quantities were changed by this comparison.</p>'
     + '</div>';
 }
 
@@ -6843,7 +6836,11 @@ if (biblioImportInput) biblioImportInput.onchange = () => {
   state.biblioCompareCheckedFile = null;
   state.biblioCompareResult = null;
   $("#import-biblio").disabled = true;
-  $("#biblio-compare-result").textContent = "File selected. Compare it first to see what differs.";
+  $("#biblio-import-advanced").classList.add("hidden");
+  $("#biblio-import-advanced").open = false;
+  $("#biblio-compare-result").classList.add("hidden");
+  $("#biblio-compare-result").textContent = "";
+  $("#verify-biblio").disabled = !biblioImportInput.files?.length;
 };
 
 $("#verify-biblio").onclick = async () => {
@@ -6855,7 +6852,8 @@ $("#verify-biblio").onclick = async () => {
   $("#import-biblio").disabled = true;
   state.biblioCompareCheckedFile = null;
   state.biblioCompareResult = null;
-  message.textContent = "Comparing the BIBLIO file with your dashboard…";
+  message.classList.remove("hidden");
+  message.textContent = "Comparing listings…";
   try {
     const result = await api("/api/app/connectors/biblio/verify", {
       method: "POST",
@@ -6864,6 +6862,7 @@ $("#verify-biblio").onclick = async () => {
     state.biblioCompareCheckedFile = file;
     state.biblioCompareResult = result;
     $("#import-biblio").disabled = false;
+    $("#biblio-import-advanced").classList.remove("hidden");
     message.innerHTML = biblioComparisonHtml(result);
     await connections();
   } catch (error) {
@@ -6898,6 +6897,8 @@ $("#import-biblio").onclick = async () => {
       + '<p>This changed local BIBLIO listing records, not your live BIBLIO account.</p>';
     state.biblioCompareCheckedFile = null;
     state.biblioCompareResult = null;
+    $("#biblio-import-advanced").classList.add("hidden");
+    $("#biblio-import-advanced").open = false;
     flash("Dashboard listing records updated. No files were sent to BIBLIO.");
     await connections();
   } catch (error) {
