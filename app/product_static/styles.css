@@ -671,62 +671,62 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
 
 /* Marketplace history: prioritize the next human decision, not database fields.
    Cards reflow without horizontal scrolling on narrow Connections pages. */
-#connections .marketplace-activity-toolbar{
+:is(#connections,#connector-detail) .marketplace-activity-toolbar{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
   flex-wrap:wrap;margin:13px 0 16px
 }
-#connections .marketplace-activity-toolbar p{
+:is(#connections,#connector-detail) .marketplace-activity-toolbar p{
   margin:0;font-size:12px;color:var(--state-neutral);line-height:1.6
 }
-#connections .marketplace-activity-toolbar label{
+:is(#connections,#connector-detail) .marketplace-activity-toolbar label{
   display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:650
 }
-#connections .marketplace-activity-toolbar select{
+:is(#connections,#connector-detail) .marketplace-activity-toolbar select{
   min-width:148px;max-width:100%;font-size:12px;padding:8px 10px;
   border:1px solid var(--line);border-radius:8px;background:var(--card)
 }
-#connections .marketplace-activity-list{display:grid;gap:10px}
-#connections .marketplace-activity-row{
+:is(#connections,#connector-detail) .marketplace-activity-list{display:grid;gap:10px}
+:is(#connections,#connector-detail) .marketplace-activity-row{
   min-width:0;border:1px solid var(--line);border-radius:10px;
   padding:14px 16px;background:var(--card);overflow-wrap:anywhere
 }
-#connections .marketplace-activity-header{
+:is(#connections,#connector-detail) .marketplace-activity-header{
   display:flex;justify-content:space-between;gap:10px 15px;align-items:start;flex-wrap:wrap
 }
-#connections .marketplace-activity-header strong{font-size:13px}
-#connections .marketplace-activity-header p{
+:is(#connections,#connector-detail) .marketplace-activity-header strong{font-size:13px}
+:is(#connections,#connector-detail) .marketplace-activity-header p{
   margin:4px 0 0;font-size:11px;color:var(--state-neutral)
 }
-#connections .marketplace-activity-verification,
-#connections .marketplace-activity-next,
-#connections .marketplace-activity-error{
+:is(#connections,#connector-detail) .marketplace-activity-verification,
+:is(#connections,#connector-detail) .marketplace-activity-next,
+:is(#connections,#connector-detail) .marketplace-activity-error{
   font-size:12px;line-height:1.55;margin:9px 0 0
 }
-#connections .marketplace-activity-verification{color:var(--state-neutral)}
-#connections .marketplace-activity-next{max-width:760px}
-#connections .marketplace-activity-error{color:var(--state-danger)}
-#connections .marketplace-activity-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-#connections .marketplace-activity-actions .btn{font-size:12px;white-space:normal;min-height:38px}
-#connections .marketplace-activity-row .operation-technical{
+:is(#connections,#connector-detail) .marketplace-activity-verification{color:var(--state-neutral)}
+:is(#connections,#connector-detail) .marketplace-activity-next{max-width:760px}
+:is(#connections,#connector-detail) .marketplace-activity-error{color:var(--state-danger)}
+:is(#connections,#connector-detail) .marketplace-activity-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+:is(#connections,#connector-detail) .marketplace-activity-actions .btn{font-size:12px;white-space:normal;min-height:38px}
+:is(#connections,#connector-detail) .marketplace-activity-row .operation-technical{
   border-top:1px solid var(--line);padding-top:8px;margin-top:12px
 }
-#connections .marketplace-activity-row .operation-technical summary{
+:is(#connections,#connector-detail) .marketplace-activity-row .operation-technical summary{
   cursor:pointer;font-size:11px;font-weight:650;color:var(--state-neutral)
 }
-#connections .marketplace-activity-row .operation-technical p{
+:is(#connections,#connector-detail) .marketplace-activity-row .operation-technical p{
   margin:8px 0 0;line-height:1.55;font-size:11px;overflow-wrap:anywhere
 }
-#connections .marketplace-activity-row :is(button,summary,select):focus-visible{
+:is(#connections,#connector-detail) .marketplace-activity-row :is(button,summary,select):focus-visible{
   outline:3px solid var(--accent);outline-offset:3px
 }
 #item-marketplaces-panel .item-marketplace-history-row .marketplace-next-step{
   display:block;font-size:12px;line-height:1.55;margin-top:7px;color:var(--state-neutral)
 }
 @media(max-width:680px){
-  #connections .marketplace-activity-toolbar{align-items:stretch;flex-direction:column}
-  #connections .marketplace-activity-toolbar label{justify-content:space-between}
-  #connections .marketplace-activity-row{padding:12px}
-  #connections .marketplace-activity-actions .btn{width:100%;flex:1 1 100%}
+  :is(#connections,#connector-detail) .marketplace-activity-toolbar{align-items:stretch;flex-direction:column}
+  :is(#connections,#connector-detail) .marketplace-activity-toolbar label{justify-content:space-between}
+  :is(#connections,#connector-detail) .marketplace-activity-row{padding:12px}
+  :is(#connections,#connector-detail) .marketplace-activity-actions .btn{width:100%;flex:1 1 100%}
 }
 
 /* Dedicated marketplace pages and collapsible workspace navigation. */
@@ -2043,3 +2043,85 @@ main > header .eyebrow{color:#436e65}
     width:100%
   }
 }
+
+/* Activity is the same readable task view on Connections AND marketplace pages.
+   The previously unscoped connector view rendered as a wall of text. */
+:is(#connections,#connector-detail) .marketplace-activity-toolbar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px 20px;
+  flex-wrap:wrap;margin:2px 0 18px
+}
+:is(#connections,#connector-detail) .marketplace-activity-count{
+  font-size:16px;line-height:1.35;color:var(--ink)
+}
+:is(#connections,#connector-detail) .marketplace-activity-filter{
+  display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap
+}
+:is(#connections,#connector-detail) .marketplace-activity-filter-button{
+  font-size:13px;line-height:1.35;font-weight:650;
+  border-color:transparent;background:transparent;color:var(--muted);
+  min-height:39px;padding:8px 12px
+}
+:is(#connections,#connector-detail) .marketplace-activity-filter-button.active{
+  border-color:var(--line);background:var(--layout-panel-soft);
+  color:var(--ink);box-shadow:inset 0 -2px 0 var(--layout-accent)
+}
+:is(#connections,#connector-detail) .marketplace-activity-list{
+  display:grid;gap:12px;max-width:940px
+}
+:is(#connections,#connector-detail) .marketplace-activity-row{
+  background:var(--layout-panel);border:1px solid var(--line);border-radius:12px;
+  padding:20px 22px;min-width:0;max-width:100%;overflow-wrap:anywhere
+}
+:is(#connections,#connector-detail) .marketplace-activity-header{
+  display:flex;align-items:center;justify-content:space-between;gap:8px 14px;
+  flex-wrap:wrap
+}
+:is(#connections,#connector-detail) .marketplace-activity-header strong{
+  font-size:15px;line-height:1.4;font-weight:750
+}
+:is(#connections,#connector-detail) .marketplace-activity-description{
+  font-size:14px;line-height:1.55;color:var(--muted);max-width:67ch;
+  margin:10px 0 0
+}
+:is(#connections,#connector-detail) .marketplace-activity-actions{
+  margin-top:15px;display:flex;gap:9px;flex-wrap:wrap
+}
+:is(#connections,#connector-detail) .marketplace-activity-actions .btn{
+  font-size:13px;min-height:42px;padding:9px 15px
+}
+:is(#connections,#connector-detail) .marketplace-activity-row .operation-technical{
+  border-top:0;padding:0;margin:12px 0 0;max-width:100%
+}
+:is(#connections,#connector-detail) .marketplace-activity-row .operation-technical summary{
+  display:inline-block;padding:6px 0;cursor:pointer;font-size:12px;
+  line-height:1.5;font-weight:500;color:var(--muted)
+}
+:is(#connections,#connector-detail) .marketplace-activity-row .operation-technical-body{
+  border-top:1px solid var(--line);margin-top:7px;padding-top:9px
+}
+:is(#connections,#connector-detail) .marketplace-activity-row .operation-technical-body p{
+  font-size:12px;line-height:1.55;margin:5px 0;color:var(--muted)
+}
+:is(#connections,#connector-detail) .marketplace-activity-empty{
+  font-size:14px;color:var(--muted);margin:12px 0
+}
+@media(max-width:680px){
+  :is(#connections,#connector-detail) .marketplace-activity-toolbar{
+    align-items:flex-start;flex-direction:column
+  }
+  :is(#connections,#connector-detail) .marketplace-activity-filter{
+    width:100%;flex-wrap:nowrap
+  }
+  :is(#connections,#connector-detail) .marketplace-activity-filter-button{
+    flex:1 1 50%;min-width:0
+  }
+  :is(#connections,#connector-detail) .marketplace-activity-row{padding:16px}
+}
+/* One activity heading, one refresh control. No extra description layer. */
+#connector-detail #connector-activity-panel>.connector-task-page-heading{
+  border:0;background:transparent;padding:0;margin:0 0 12px
+}
+#connector-detail #connector-activity-panel>.connector-task-page-heading h3{
+  font-size:19px;margin:0
+}
+#connector-detail #connector-activity-panel>.connector-task-page-heading p{display:none}
