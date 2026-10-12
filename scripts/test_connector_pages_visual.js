@@ -17,7 +17,7 @@ const slice=(begin,end)=>{
 const schema=slice("const connectorSchemas = {","function esc(value)");
 const nav=slice("const connectorPageChannels = [","async function today()");
 const connections=slice("async function connections() {","function renderEtsyOAuthTools(");
-const config=slice("function openConnectorConfig(channel, connector) {",
+const config=slice("function renderBiblioPauseState(until, configured = true) {",
   '$("#close-connector-config").onclick');
 assert.match(nav,/\$\$\("\.nav"\)\.forEach/);
 assert.match(nav,/\$\$\("\.view"\)\.forEach/);
