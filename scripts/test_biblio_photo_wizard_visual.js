@@ -33,7 +33,7 @@ const fixture=[
 const assertions=[
   '(async()=>{',
   ' const activity={health:{active_listings:1},current:{status:"error"},runs:[]};',
-  ' const pageHeader=$(".connector-task-page-heading").getBoundingClientRect();',
+  ' const taskArea=$("#connector-page-photos").getBoundingClientRect();',
   ' $("#mount").innerHTML=renderBiblioActivity(activity,true);',
   ' $(".biblio-photos-panel").open=true;',
   ' setBiblioPhotoStep("choose");',
@@ -44,8 +44,8 @@ const assertions=[
   ' if(!Number.isFinite(pad)||pad<16)throw Error("Photo wizard content has no useful inner padding: "+pad);',
   ' if(stage.left-card.left<pad-3)throw Error("Content begins too close to wizard border");',
   ' if(card.width>862)throw Error("Wizard exceeds its intended reading width: "+card.width);',
-  ' if(Math.abs(pageHeader.left-card.left)>3||Math.abs(pageHeader.width-card.width)>3)',
-  '   throw Error("Wizard and page heading have different horizontal alignment");',
+  ' if(Math.abs(taskArea.left-card.left)>3||Math.abs(taskArea.width-card.width)>3)',
+  '   throw Error("Wizard no longer fits the available task area");',
   ' if($(".biblio-photo-progress").children.length!==3)',
   '   throw Error("Photo wizard progress indicator lost its three steps");',
   ' if($(".biblio-progress-item[aria-current=step]")?.dataset.biblioProgress!=="choose")',
@@ -93,7 +93,6 @@ for(const width of [360,768,1280]){
   fs.writeFileSync(file,'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+css+
     '</style></head><body><main style="padding:12px;width:min(100%,'+width+'px)">'
     +'<section id="connector-detail" class="view active"><div id="connector-photos-panel" class="dashboard-tab-panel connector-task-page">'
-    +'<div class="connector-task-page-heading"><h3>Fix missing photos</h3><p>Choose one book, check its pictures and send only the missing ones.</p></div>'
     +'<div id="connector-page-photos"><div id="mount"></div></div></div></section></main><script>'
     +fixture+'\n'+src.slice(a,b)+'\n'+assertions+'</script></body></html>');
   const flags=["--headless=new","--no-sandbox","--disable-gpu","--disable-dev-shm-usage",
