@@ -2728,9 +2728,9 @@ function biblioPhotoSelectedIndices() {
 }
 
 function setBiblioPhotoStep(step) {
-  if (!["choose", "review", "confirm"].includes(step)) return;
+  if (!["choose", "review", "confirm", "done"].includes(step)) return;
   state.biblioPhotoStep = step;
-  const progress = ["choose", "review", "confirm"];
+  const progress = ["choose", "review", "confirm", "done"];
   $$(".biblio-progress-item").forEach(item => {
     const current = item.dataset.biblioProgress === step;
     item.classList.toggle("is-complete",
@@ -2739,7 +2739,7 @@ function setBiblioPhotoStep(step) {
     else item.removeAttribute("aria-current");
   });
   const stages = {choose:"#biblio-photo-choose-step",review:"#biblio-photo-review-step",
-    confirm:"#biblio-photo-confirm-step"};
+    confirm:"#biblio-photo-confirm-step",done:"#biblio-photo-done-step"};
   Object.entries(stages).forEach(([name, selector]) => {
     const element = $(selector);
     if (element) element.classList.toggle("hidden", name !== step);
@@ -2763,8 +2763,11 @@ function setBiblioPhotoStep(step) {
     const gate = $("#biblio-photo-connection-gate");
     if (gate) gate.classList.toggle("hidden", !check);
     const send = $("#biblio-confirm-selected-photos");
-    if (send) send.disabled = !state.biblioPhotoInspection?.active || !selected.length
-      || (check && !state.biblioPhotoConnectionChecked);
+    if (send) {
+      send.disabled = !state.biblioPhotoInspection?.active || !selected.length
+        || (check && !state.biblioPhotoConnectionChecked);
+      send.textContent = "Send " + selected.length + " photo" + (selected.length === 1 ? "" : "s");
+    }
   }
 }
 
@@ -2879,7 +2882,7 @@ function renderBiblioActivity(activity, operational) {
   const photoHelp = operational
     ? '<details class="biblio-task-panel biblio-photos-panel"'
       + (state.biblioPhotoExpanded ? ' open' : '') + '>'
-      + '<summary><span><strong>Fix photos for one book</strong><small>A guided, three-step check</small></span></summary>'
+      + '<summary><span><strong>Check a book’s photos</strong><small>Compare, select and send</small></span></summary>'
       + '<div class="biblio-task-inner biblio-photo-wizard">'
       + '<div class="biblio-photo-progress" role="list" aria-label="Photo repair progress">'
       + '<span role="listitem" class="biblio-progress-item" data-biblio-progress="choose"><span class="biblio-progress-number" aria-hidden="true">1</span>Choose book</span>'
@@ -2888,7 +2891,7 @@ function renderBiblioActivity(activity, operational) {
       + '</div>'
       + '<div id="biblio-photo-choose-step" class="biblio-photo-stage'
       + (state.biblioPhotoStep !== "choose" ? ' hidden' : '') + '">'
-      + '<p class="biblio-photo-step-count">Step 1 of 3</p><h3>Which book needs photos?</h3>'
+      + '<p class="biblio-photo-step-count">Step 1 of 3</p><h3>Choose the book to check</h3>'
       + '<label class="biblio-field-label" for="biblio-photo-book-select">Choose a BIBLIO book</label>'
       + '<select id="biblio-photo-book-select"><option value="">Loading books when opened…</option></select>'
       + '<details class="biblio-photo-manual-id"><summary>Enter a book ID instead</summary>'
@@ -2899,7 +2902,7 @@ function renderBiblioActivity(activity, operational) {
       + '</div>'
       + '<div id="biblio-photo-review-step" class="biblio-photo-stage'
       + (state.biblioPhotoStep !== "review" ? ' hidden' : '') + '">'
-      + '<p class="biblio-photo-step-count">Step 2 of 3</p><h3>Which photos are missing?</h3>'
+      + '<p class="biblio-photo-step-count">Step 2 of 3</p><h3>Select missing photos</h3>'
       + '<p class="muted">Compare with the book on BIBLIO, then select only photos that need to be sent. '
       + 'This dashboard cannot see BIBLIO’s published photos.</p>'
       + '<div id="biblio-photo-inspection" role="status" aria-live="polite">' + biblioPhotoInspectionHtml() + '</div>'
@@ -2921,7 +2924,7 @@ function renderBiblioActivity(activity, operational) {
       + '</div>'
       + '<div id="biblio-photo-confirm-step" class="biblio-photo-stage'
       + (state.biblioPhotoStep !== "confirm" ? ' hidden' : '') + '">'
-      + '<p class="biblio-photo-step-count">Step 3 of 3</p><h3>Ready to resend?</h3>'
+      + '<p class="biblio-photo-step-count">Step 3 of 3</p><h3>Send these photos?</h3>'
       + '<p id="biblio-photo-confirm-summary" class="biblio-photo-confirm-summary"></p>'
       + '<p>Only the selected photos will be queued. The book listing and all other photos will stay unchanged.</p>'
       + '<div id="biblio-photo-connection-gate" class="biblio-wizard-warning hidden">'
@@ -2938,6 +2941,15 @@ function renderBiblioActivity(activity, operational) {
       + '<div class="biblio-wizard-actions">'
       + '<button id="biblio-photo-back-to-review" class="btn" type="button">← Change selection</button>'
       + '<button id="biblio-confirm-selected-photos" class="btn primary" type="button" disabled>Send selected photos</button>'
+      + '</div></div>'
+      + '<div id="biblio-photo-done-step" class="biblio-photo-stage'
+      + (state.biblioPhotoStep !== "done" ? ' hidden' : '') + '" role="status" aria-live="polite">'
+      + '<h3>Photos queued</h3>'
+      + '<p>Selected photos have been scheduled for transfer. BIBLIO has not confirmed that they are visible yet.</p>'
+      + '<p>Check the upload status below, then check the book on BIBLIO. Avoid sending the same photos again while processing.</p>'
+      + '<div class="biblio-wizard-actions">'
+      + '<button id="biblio-photo-done-another" class="btn" type="button">Check another book</button>'
+      + '<button id="biblio-photo-done-activity" class="btn primary" type="button">View upload status</button>'
       + '</div></div></div></details>'
     : '';
   const fileHistory = runs.map((run) => {
@@ -6536,11 +6548,8 @@ async function connections() {
         await api("/api/app/connectors/biblio/retry-listing-photos", {
           method:"POST", body:JSON.stringify({book_id:info.book_id,photo_indices:indices}),
         });
-        flash("Queued " + indices.length + " selected photos for BIBLIO. "
-          + "Check the seller listing after BIBLIO processes them.");
         state.biblioPhotoSelection = [];
-        state.biblioPhotoStep = "review";
-        await inspectBiblioPhotoTarget();
+        setBiblioPhotoStep("done");
         // Avoid tearing down the wizard after queueing. A normal explicit
         // connection refresh remains available for checking later results.
       } catch (error) {
@@ -6552,8 +6561,25 @@ async function connections() {
       }
     };
   }
+  const checkAnotherBook = $("#biblio-photo-done-another");
+  if (checkAnotherBook) checkAnotherBook.onclick = () => {
+    state.biblioPhotoTarget = "";
+    state.biblioPhotoInspection = null;
+    state.biblioPhotoSelection = [];
+    state.biblioPhotoError = "";
+    const select = $("#biblio-photo-book-select");
+    if (select) select.value = "";
+    const field = $("#biblio-photo-book-id");
+    if (field) field.value = "";
+    setBiblioPhotoStep("choose");
+  };
+  const viewUploadStatus = $("#biblio-photo-done-activity");
+  if (viewUploadStatus) viewUploadStatus.onclick = () => {
+    activateWorkspaceTab("connector", "activity");
+    refreshMarketplaceOperations().catch(error => flash(error.message, true));
+  };
   // Restore the stage and selection on an ordinary status refresh.
-  $$(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
+  $(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
     input.onchange = () => {
       state.biblioPhotoSelection = biblioPhotoSelectedIndices();
       setBiblioPhotoStep("review");
