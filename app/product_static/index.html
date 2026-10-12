@@ -92,29 +92,18 @@
             <button id="onboarding-reconcile" class="btn" type="button">Review matches</button>
           </div>
         </div>
-        <div class="card today-command">
-          <div class="today-command-copy">
-            <p class="eyebrow">COMMAND CENTER</p>
-            <h2 id="today-focus-title">Loading today...</h2>
-            <p id="today-focus-detail" class="muted"></p>
-          </div>
-          <div class="today-command-actions">
-            <button class="btn primary today-shortcut" type="button" data-view="inventory" data-action="add-stock">Add stock</button>
-            <button class="btn today-shortcut" type="button" data-view="reconcile">Reconcile stock</button>
-            <button class="btn today-shortcut" type="button" data-view="connections">Check sources</button>
-          </div>
-        </div>
+
         
 <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Today" data-workspace-tabs="today">
-<button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="today-tasks-panel" data-workspace-tab="tasks">What needs doing</button>
-<button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="today-overview-panel" data-workspace-tab="overview">Numbers & sources</button>
+<button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="today-tasks-panel" data-workspace-tab="tasks">To do</button>
+<button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="today-overview-panel" data-workspace-tab="overview">Overview</button>
 </div>
         <div id="today-tasks-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="today:tasks">
         <div class="today-layout">
           <div class="card today-work">
             <div class="card-head inline-head">
-              <div><p class="eyebrow">PRIORITY</p><h2>Today's work</h2></div>
-              <span id="today-work-count" class="muted"></span>
+              <div><h2>To do</h2><span id="today-work-count" class="muted"></span></div>
+              <button class="btn primary today-shortcut" type="button" data-view="inventory" data-action="add-stock">Add stock</button>
             </div>
             <div id="today-actions"></div>
           </div>
@@ -644,8 +633,8 @@
         </div>
         <div id="connections-marketplaces-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="connections:marketplaces">
         <div class="card">
-          <div class="card-head inline-head">
-            <div><p class="eyebrow">YOUR SALES CHANNELS</p><h2>Your marketplaces</h2><p class="muted connections-intro-copy">Choose a marketplace to publish books, bring in listings, or resolve a problem. Account settings and technical information stay out of the way.</p></div>
+          <div class="card-head inline-head connections-simple-head">
+            <h2>Choose a marketplace</h2>
             <button id="connections-refresh" class="btn" type="button">Refresh</button>
           </div>
           <div class="connections-shortcuts">
@@ -653,7 +642,6 @@
             <button id="connections-reconcile" class="btn" type="button">Check stock across marketplaces</button>
           </div>
           <p id="connection-health-summary" class="connections-health-summary" role="status" aria-live="polite">Checking marketplace connections…</p>
-          <p class="connections-workflow">Your books live in Inventory. Connecting a marketplace does not automatically list your books there.</p>
           <div id="connector-grid" class="connector-grid"></div>
           <details id="other-marketplaces" class="connections-other-markets">
             <summary>Connect another marketplace (<span id="other-marketplaces-count">0</span> available)</summary>
@@ -732,7 +720,6 @@
         <div id="connector-page-card" class="connector-page-content" role="region" aria-label="Marketplace connection and actions"></div>
         </div>
         <div id="connector-photos-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:photos">
-          <div class="connector-task-page-heading"><h3>Check book photos</h3><p>Compare the photos on BIBLIO, then send only the ones that are missing.</p></div>
           <div id="connector-page-photos"></div>
         </div>
         <div id="connector-listings-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:books">
@@ -762,9 +749,8 @@
           <div id="connector-page-vinted" class="connector-page-secondary"></div>
         </div>
         <div id="connector-activity-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:activity">
-        <div class="connector-task-page-heading"><h3>Upload history</h3></div>
         <details id="connector-page-activity" class="card connection-task-panel" open>
-          <summary><span><strong>What happened recently?</strong><small>See imports, uploads, and actions that may need your attention</small></span></summary>
+          <summary>Activity</summary>
           <div class="connection-task-content">
             <button id="connector-page-activity-refresh" class="btn" type="button">Refresh</button>
             <div id="connector-operations-list" role="status"><p class="muted">Loading marketplace activity…</p></div>
