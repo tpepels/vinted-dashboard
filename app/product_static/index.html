@@ -722,7 +722,7 @@
         </div>
         <div class="dashboard-tabbar dashboard-section-tabs connector-workflow-tabs" role="tablist" aria-label="Marketplace tasks" data-workspace-tabs="connector">
           <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="connector-overview-panel" data-workspace-tab="overview">Overview</button>
-          <button class="dashboard-tab connector-photos-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-photos-panel" data-workspace-tab="photos">Fix photos</button>
+          <button class="dashboard-tab connector-photos-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-photos-panel" data-workspace-tab="photos">Check photos</button>
           <button class="dashboard-tab connector-books-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-listings-panel" data-workspace-tab="books">Find a book</button>
           <button class="dashboard-tab connector-compare-tab" role="tab" type="button" aria-selected="false" aria-controls="biblio-listings-compare-panel" data-workspace-tab="compare">Compare export</button>
           <button class="dashboard-tab connector-account-tab" role="tab" type="button" aria-selected="false" aria-controls="connector-account-panel" data-workspace-tab="account">Account</button>
@@ -732,7 +732,7 @@
         <div id="connector-page-card" class="connector-page-content" role="region" aria-label="Marketplace connection and actions"></div>
         </div>
         <div id="connector-photos-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:photos">
-          <div class="connector-task-page-heading"><h3>Fix missing photos</h3><p>Choose one book, check its pictures and send only the missing ones.</p></div>
+          <div class="connector-task-page-heading"><h3>Check book photos</h3><p>Compare the photos on BIBLIO, then send only the ones that are missing.</p></div>
           <div id="connector-page-photos"></div>
         </div>
         <div id="connector-listings-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:books">
@@ -762,12 +762,12 @@
           <div id="connector-page-vinted" class="connector-page-secondary"></div>
         </div>
         <div id="connector-activity-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:activity">
-        <div class="connector-task-page-heading"><h3>Recent activity</h3><p>See uploads, imports and items that may need your attention.</p></div>
+        <div class="connector-task-page-heading"><h3>Upload history</h3></div>
         <div id="connector-page-biblio-activity"></div>
         <details id="connector-page-activity" class="card connection-task-panel" open>
           <summary><span><strong>What happened recently?</strong><small>See imports, uploads, and actions that may need your attention</small></span></summary>
           <div class="connection-task-content">
-            <button id="connector-page-activity-refresh" class="btn" type="button">Refresh activity</button>
+            <button id="connector-page-activity-refresh" class="btn" type="button">Refresh</button>
             <div id="connector-operations-list" role="status"><p class="muted">Loading marketplace activity…</p></div>
           </div>
         </details>
