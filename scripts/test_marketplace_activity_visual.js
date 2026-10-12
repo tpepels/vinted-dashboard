@@ -52,7 +52,7 @@ context.renderMarketplaceOperations({operations:[
     created_at:"2026-10-09T10:00:00Z",
   },
 ]});
-assert.match(root.innerHTML,/Inspect book photos/);
+assert.match(root.innerHTML,/Check book photos/);
 assert.doesNotMatch(root.innerHTML,/Try sending photos again/);
 const browser = process.env.CHROME_BIN || execFileSync(
   "bash",["-lc","command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser"],
