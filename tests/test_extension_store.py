@@ -260,7 +260,7 @@ def test_bridge_popup_always_shows_manifest_version():
     js = (ROOT / "app" / "extension" / "popup.js").read_text(encoding="utf-8")
     assert 'id="bridge-version"' in html
     assert 'chrome.runtime.getManifest().version' in js
-    assert '"Chrome Bridge v"+version' in js
+    assert '"Chrome Bridge v" + version' in js
 
 
 def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
