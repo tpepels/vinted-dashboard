@@ -143,6 +143,8 @@ function runBrowserAssertions(){
     await selectView("connector-shopify");
     if(!byId("connector-config").classList.contains("hidden"))
       throw Error("Old connector settings leaked into Shopify");
+    if(byId("connector-page-settings").querySelector(".connector-account-help, .connector-settings-row"))
+      throw Error("BIBLIO settings leaked into Shopify account tab");
     if(!byId("connector-page-card").querySelector(".sync[data-c=shopify]"))
       throw Error("Shopify importer absent");
     await selectView("connector-vinted");
