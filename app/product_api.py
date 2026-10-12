@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy import and_, func, select, update
 
 from app import billing, db, jobs, listing_assistant, models, publishing, stock_intake, store_stock_audit
+from app.biblio_pause import biblio_paused_until, set_biblio_pause
 from app.stock_relations import record_physical_quantity, confirm_physical_relation, is_physical, is_provisional
 from app.diagnostics import build_bundle, recent_logs, redact_text
 from app.bridge_package import extension_source_version
@@ -5412,6 +5413,11 @@ def connectors(context: RequestContext = Depends(require_context)):
                 **info,
                 "configured": configured,
                 "saved_values": saved_values,
+                "biblio_upload_paused_until": (
+                    biblio_paused_until(context.workspace.id).isoformat()
+                    if channel == Channel.BIBLIO and biblio_paused_until(context.workspace.id)
+                    else None
+                ),
                 "operational": operational,
                 # 'operational' currently means credentials/authorization present,
                 # not that the credentials were tested or a sync succeeded.
@@ -6038,6 +6044,35 @@ def enqueue_biblio_photo_retry(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
             "queued": True, "already_queued": not created}
+
+
+class BiblioPauseRequest(BaseModel):
+    minutes: StrictInt = Field(ge=0, le=60)
+
+
+@router.put("/api/app/connectors/biblio/upload-pause")
+def pause_biblio_uploads(
+    payload: BiblioPauseRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Pause queued BIBLIO sends for one hour, with automatic worker resumption.
+
+    An in-progress transfer cannot be interrupted safely. Other marketplace
+    jobs are unaffected. This never changes Vinted-triggered auto-sync.
+    """
+    if payload.minutes not in (0, 60):
+        raise HTTPException(status_code=422, detail="Pause for one hour or resume now")
+    if not _biblio_configured_for_workspace(context.workspace):
+        raise HTTPException(status_code=400, detail="Set up BIBLIO first")
+    until = set_biblio_pause(context.workspace, payload.minutes)
+    return {
+        "ok": True,
+        "paused_until": until.isoformat() if until else None,
+        "note": (
+            "BIBLIO jobs already running may finish; queued sends resume automatically at expiry."
+            if until else "Queued BIBLIO uploads may proceed. Automatic sync remains unchanged."
+        ),
+    }
 
 
 class BiblioPreferencesRequest(BaseModel):
