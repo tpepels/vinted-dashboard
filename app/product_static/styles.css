@@ -2165,3 +2165,36 @@ main > header .eyebrow{color:#436e65}
 #connector-detail #connector-activity-panel #connector-page-activity{
   margin-bottom:0
 }
+
+/* Task-first screens: avoid headers that repeat the selected tab. */
+#today-tasks-panel .today-work>.card-head{
+  padding:12px 18px;gap:12px;align-items:center;
+}
+#today-tasks-panel .today-work>.card-head #today-work-count{
+  font-size:13px;font-weight:650;color:var(--muted);
+}
+#today-tasks-panel .today-work>.card-head .today-shortcut{
+  margin-left:auto;min-height:40px;
+}
+#connections-marketplaces-panel .connections-simple-head{
+  padding:14px 18px;align-items:center;
+}
+#connections-marketplaces-panel .connections-simple-head h2{
+  margin:0;font-size:17px;line-height:1.3;
+}
+#connector-detail .connector--biblio>.connector-status-only{
+  justify-content:flex-end;margin-bottom:10px;min-height:0;
+}
+#connector-detail #connector-photos-panel>.connector-task-page-heading,
+#connector-detail #connector-activity-panel>.connector-task-page-heading{
+  display:none
+}
+@media(max-width:560px){
+  #today-tasks-panel .today-work>.card-head,
+  #connections-marketplaces-panel .connections-simple-head{
+    flex-wrap:wrap
+  }
+  #today-tasks-panel .today-work>.card-head .today-shortcut{
+    flex:0 0 auto
+  }
+}
