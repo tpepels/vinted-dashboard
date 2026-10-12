@@ -5983,7 +5983,7 @@ function renderBiblioDashboardPostings(rows) {
         + (removed ? 'Review & re-add…' : 'Remove from dashboard…') + '</button></article>';
     }).join("") || '<p class="muted">No matching BIBLIO postings in this dashboard.</p>')
     + '</div>';
-  $(".biblio-resend-book").forEach(button => {
+  $$(".biblio-resend-book").forEach(button => {
     button.onclick = async () => {
       const bookId = button.dataset.book;
       if (!window.confirm("Resend the inventory details for Book ID " + bookId + "? "
@@ -6002,7 +6002,7 @@ function renderBiblioDashboardPostings(rows) {
       } finally { button.disabled = false; }
     };
   });
-  $(".biblio-posting-action").forEach(button => {
+  $$(".biblio-posting-action").forEach(button => {
     button.onclick = async () => {
       if (button.dataset.action === "readd") {
         await selectView("inventory");
