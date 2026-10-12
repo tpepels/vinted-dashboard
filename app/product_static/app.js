@@ -1674,7 +1674,14 @@ function renderItemMarketplacePanel(data) {
           + '" type="button">Retry read-only import…</button>'
         : '') + '</div>';
   }).join("");
-  $("#item-marketplaces-content").innerHTML =
+  const contentRoot = $("#item-marketplaces-content");
+  const expandedDetails = new Set();
+  contentRoot.querySelectorAll("details[open]").forEach(detail => {
+    const channel = detail.closest(".item-marketplace-row")?.dataset.marketplace || "summary";
+    const kind = detail.className || "details";
+    expandedDetails.add(channel + ":" + kind);
+  });
+  contentRoot.innerHTML =
     '<div class="item-marketplace-summary"><div class="item-marketplace-summary-copy">'
     + '<strong>' + Number(item.quantity ?? 0) + '</strong><span>physical units in stock</span>'
     + '<span>' + listings.length + ' linked marketplaces</span>'
@@ -1698,6 +1705,12 @@ function renderItemMarketplacePanel(data) {
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
     + '<p class="item-marketplace-footnote">Stock and price changes are separate, explicit actions. '
     + 'WooCommerce regular prices, Shopify base prices and Wix actual prices change only when explicitly confirmed. Send BIBLIO changes from Connections.</p>';
+  contentRoot.querySelectorAll("details").forEach(detail => {
+    const channel = detail.closest(".item-marketplace-row")?.dataset.marketplace || "summary";
+    if (expandedDetails.has(channel + ":" + (detail.className || "details"))) {
+      detail.open = true;
+    }
+  });
   const itemId = item.id;
   $(".item-marketplace-publish").onclick = () => openCrossList(itemId);
   $(".item-marketplace-edit").onclick = () => {
@@ -3080,10 +3093,15 @@ $("#store-stock-audit-start").onclick = async () => {
   }
 };
 
+let inventoryRequestSequence = 0;
 async function inventory() {
+  const sequence = ++inventoryRequestSequence;
   const q = encodeURIComponent($("#inventory-q").value.trim());
   const status = encodeURIComponent($("#inventory-status").value);
   const data = await api("/api/app/inventory?q=" + q + "&status=" + status);
+  // Search requests may finish out of order. Never allow an older query to
+  // overwrite the rows for the latest input and make the table appear to jump.
+  if (sequence !== inventoryRequestSequence) return;
   state.inventoryItems = data.items || [];
   const costFilter = $("#inventory-cost").value;
   const visibleItems = state.inventoryItems.filter((item) => {
@@ -3251,7 +3269,13 @@ $("#bulk-form").onsubmit = async (event) => {
   }
 };
 
-$("#inventory-q").oninput = () => inventory().catch((error) => flash(error.message, true));
+let inventorySearchTimer = null;
+$("#inventory-q").oninput = () => {
+  clearTimeout(inventorySearchTimer);
+  inventorySearchTimer = setTimeout(() => {
+    inventory().catch(error => flash(error.message, true));
+  }, 220);
+};
 $("#inventory-status").onchange = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-cost").onchange = () => inventory().catch((error) => flash(error.message, true));
 $("#inventory-reset").onclick = () => {
