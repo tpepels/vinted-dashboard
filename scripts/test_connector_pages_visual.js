@@ -125,20 +125,24 @@ function runBrowserAssertions(){
       throw Error("Photo repair tab did not open");
     if(!byId("connector-page-photos").querySelector(".biblio-photos-panel").open)
       throw Error("Photo repair must be ready when its tab is opened");
-    activateWorkspaceTab("connector","listings");
+    activateWorkspaceTab("connector","books");
     if(getComputedStyle(byId("connector-listings-panel")).display==="none")
-      throw Error("Listings tab did not open");
-    activateWorkspaceTab("biblio-listings","books");
-    if(getComputedStyle(byId("biblio-listings-books-panel")).display==="none")
-      throw Error("BIBLIO books not shown");
+      throw Error("Find a book tab did not open");
     if(!byId("biblio-dashboard-postings-panel").open)
       throw Error("BIBLIO books are hidden behind an accordion");
     if(getComputedStyle(byId("biblio-dashboard-postings-panel").querySelector("summary")).display!=="none")
       throw Error("BIBLIO books still have a redundant collapse arrow");
-    activateWorkspaceTab("biblio-listings","compare");
+    activateWorkspaceTab("connector","compare");
     if(getComputedStyle(byId("biblio-listings-compare-panel")).display==="none"
       ||!byId("biblio-compare-panel").open)
       throw Error("BIBLIO comparison is hidden behind a collapsed panel");
+    if(getComputedStyle(byId("biblio-compare-result")).display!=="none"
+      ||getComputedStyle(byId("biblio-import-advanced")).display!=="none")
+      throw Error("Results and advanced import must stay hidden until comparison");
+    if(getComputedStyle(document.querySelector("main>header")).display!=="none")
+      throw Error("Marketplace must not repeat the workspace page title");
+    if(document.querySelector("[data-workspace-tabs=biblio-listings]"))
+      throw Error("BIBLIO still has a nested navigation row");
     if(getComputedStyle(byId("biblio-compare-panel").querySelector("summary")).display!=="none")
       throw Error("BIBLIO comparison still has a redundant collapse arrow");
     activateWorkspaceTab("connector","activity");
@@ -158,7 +162,8 @@ function runBrowserAssertions(){
        !byId("connector-page-card").querySelector(".pair"))
       throw Error("Vinted browser controls absent");
     if(!document.querySelector(".connector-photos-tab").classList.contains("hidden")
-      ||!document.querySelector(".connector-listings-tab").classList.contains("hidden"))
+      ||!document.querySelector(".connector-books-tab").classList.contains("hidden")
+      ||!document.querySelector(".connector-compare-tab").classList.contains("hidden"))
       throw Error("Vinted is showing BIBLIO-only tabs");
     if(document.querySelector(".connector-account-tab").textContent!=="My browsers")
       throw Error("Vinted account tab must describe browsers, not an FTP account");
