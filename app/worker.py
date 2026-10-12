@@ -235,6 +235,31 @@ def run_forever() -> None:
         )
         operation_id = (job.get("payload") or {}).get("operation_id")
         try:
+            if job.get("job_type") == "biblio_sync":
+                resolved_workspace = uuid.UUID(str(job["workspace_id"]))
+                payload = job.get("payload") or {}
+                # Empty payloads are exclusively Vinted-triggered auto-sync
+                # jobs. Drop stale queued jobs if the user disabled auto-sync.
+                if not payload:
+                    from app.connectors.hosted import biblio_auto_sync_enabled
+                    if not biblio_auto_sync_enabled(resolved_workspace):
+                        logger.info(
+                            "skipped BIBLIO auto-sync job %s: auto-sync disabled",
+                            job["id"],
+                        )
+                        jobs.complete(job["id"])
+                        continue
+
+                from app.biblio_pause import biblio_paused_until
+                paused_until = biblio_paused_until(resolved_workspace)
+                if paused_until is not None:
+                    jobs.defer_without_attempt(job["id"], paused_until)
+                    logger.info(
+                        "BIBLIO job %s paused until %s; other jobs continue",
+                        job["id"], paused_until.isoformat(),
+                    )
+                    continue
+
             if operation_id:
                 from app.marketplace_operations import begin_operation
                 if not begin_operation(uuid.UUID(str(operation_id)), uuid.UUID(job["id"])):
