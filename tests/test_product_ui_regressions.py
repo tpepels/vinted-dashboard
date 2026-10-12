@@ -656,7 +656,9 @@ def test_biblio_safe_compare_first_workflow_is_separate_from_credentials():
     assert "Compare the selected BIBLIO file before applying it" in APP_JS
     assert "if (!window.confirm(message)) return;" in APP_JS
     assert 'id="biblio-compare-result"' in html
-    assert "No book descriptions, prices or stock quantities were changed" in APP_JS
+    assert "Read-only. Nothing changes on BIBLIO or in the dashboard." in html
+    assert 'id="biblio-import-advanced" class="connection-danger-zone hidden"' in html
+    assert '$("#biblio-import-advanced").classList.remove("hidden")' in APP_JS
 
 def test_connector_forms_prefill_saved_nonsecret_settings_only():
     assert "connector?.saved_values || {}" in APP_JS
