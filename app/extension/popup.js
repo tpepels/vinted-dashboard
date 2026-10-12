@@ -1,99 +1,106 @@
-const $=s=>document.querySelector(s);
-const send=p=>chrome.runtime.sendMessage(p);
+const $ = selector => document.querySelector(selector);
+const send = payload => chrome.runtime.sendMessage(payload);
 
-function show(text,error=false){
-  $("#status").textContent=text;
-  $("#status").className="status "+(error?"error":"");
+function show(text, error = false) {
+  $("#status").textContent = text;
+  $("#status").className = "status" + (error ? " error" : "");
 }
 
-function pageCooldownText(status){
-  const until=Math.max(
-    Number(status?.age_scan_cooldown_until||0),
-    Number(status?.page_cooldown_until||0),
-  );
-  return until>Date.now()?" · page scan paused until "+new Date(until).toLocaleTimeString():"";
+function pausedUntil(status) {
+  const until = Number(status?.api_cooldown_until || 0);
+  return until > Date.now() ? new Date(until).toLocaleString() : null;
 }
 
-function apiCooldownText(status){
-  const until=Number(status?.api_cooldown_until||0);
-  return until>Date.now()?" · API paused until "+new Date(until).toLocaleTimeString():"";
+function syncDetails(status) {
+  const panel = $("#sync-details");
+  const text = $("#detail-info");
+  const pending = Number(status.detail_pending ?? status.detail_deferred ?? 0);
+  const enriched = Number(status.detail_enriched || 0);
+  const paused = pausedUntil(status);
+  const notes = [];
+  if (pending > 0) {
+    notes.push(pending + " listings still need optional details checked on Vinted. "
+      + "Your basic listing update has already been sent. "
+      + "To reduce the risk of Vinted blocking access, the bridge checks up to three "
+      + "additional listings per update.");
+  }
+  if (enriched > 0) notes.push("Extra details checked for " + enriched + " listings in the last update.");
+  if (paused) notes.push("Vinted has limited requests. More checks are paused until " + paused + ".");
+  const unread = Number(status.age_scan_failed || 0);
+  if (unread) notes.push(unread + " older listing dates could not be checked.");
+  panel.classList.toggle("hidden", notes.length === 0);
+  text.textContent = notes.join(" ");
 }
 
-async function refresh(){
-  const r=await send({type:"status"});
-  $("#pair").classList.toggle("hidden",!!r.paired);
-  $("#paired").classList.toggle("hidden",!r.paired);
-  const version=chrome.runtime.getManifest().version;
-  $("#bridge-version").textContent="Chrome Bridge v"+version;
-
-  if(r.paired){
-    const status=r.status||{};
-    const last=status.at?new Date(status.at).toLocaleString():"not synced yet";
-    const scanned=Number(status.age_scan_scanned||0);
-    const failed=Number(status.age_scan_failed||0);
-    const remaining=Number(status.age_scan_remaining||0);
-    const detailPending=Number(status.detail_pending??status.detail_deferred??0);
-    const detailEnriched=Number(status.detail_enriched||0);
-    const ageState=status.age_scan_running
-      ? " · "+remaining+" page ages remaining"+pageCooldownText(status)
-      : scanned
-        ? " · "+scanned+" page ages scanned"+(failed?" · "+failed+" unread":"")
-        : "";
-    const detailState=detailPending
-      ? " · "+detailPending+" API details pending"
-      : detailEnriched
-        ? " · "+detailEnriched+" API details enriched"
-        : "";
-    show(
-      (r.workspace||"Workspace")+" · v"+version+" · "+last+ageState+detailState+apiCooldownText(status),
-      !!r.error,
-    );
-  }else{
-    show("Not paired yet · v"+version);
+async function refresh() {
+  const response = await send({type:"status"});
+  $("#pair").classList.toggle("hidden", !!response.paired);
+  $("#paired").classList.toggle("hidden", !response.paired);
+  const version = chrome.runtime.getManifest().version;
+  $("#bridge-version").textContent = "Chrome Bridge v" + version;
+  if (!response.paired) {
+    $("#sync-details").classList.add("hidden");
+    return show("Not connected. Enter the pairing code shown in your dashboard.");
+  }
+  const status = response.status || {};
+  const last = status.at ? new Date(status.at).toLocaleString() : null;
+  const paused = pausedUntil(status);
+  if (status.ok === false) {
+    show("Last update failed. " + (status.error || "Check the Vinted tab and try later."), true);
+  } else if (last) {
+    const count = Number(status.listings || 0);
+    const summary = count + " Vinted listing" + (count === 1 ? "" : "s") + " synced";
+    show(summary + "\nLast checked: " + last
+      + (paused ? "\nExtra checks paused until " + paused : ""));
+  } else {
+    show("Connected to " + (response.workspace || "your dashboard") + ". No update yet.");
+  }
+  syncDetails(status);
+  if (response.error) {
+    // Cached status may still be usable, but we could not check the server.
+    show("Cannot reach the dashboard right now. Last saved update: "
+      + (last || "none") + ".", true);
   }
 }
 
-$("#pair-btn").onclick=async()=>{
-  show("Pairing…");
-  const r=await send({type:"pair",code:$("#code").value});
-  if(r?.ok===false||r?.error)return show(r.error||"Pairing failed",true);
+$("#pair-btn").onclick = async () => {
+  show("Connecting browser…");
+  const response = await send({type:"pair", code:$("#code").value});
+  if (response?.ok === false || response?.error) {
+    return show(response.error || "Could not connect browser.", true);
+  }
   await refresh();
 };
 
-$("#sync").onclick=async()=>{
-  show("Collecting a limited Vinted update (never reloads your tab)…");
-  const r=await send({type:"sync-now"});
-  const remaining=Number(r?.age_scan_remaining||0);
-  const pending=Number(r?.detail_pending??r?.detail_deferred??0);
-  const enriched=Number(r?.detail_enriched||0);
-
-  if(r?.sync_skipped_for_interval){
-    return show("Sync limited to every 2 hours. Next attempt after "
-      + new Date(r.next_sync_at).toLocaleTimeString() + ". Your Vinted tabs are untouched.");
+$("#sync").onclick = async () => {
+  const button = $("#sync");
+  button.disabled = true;
+  show("Checking Vinted for changes…");
+  try {
+    const result = await send({type:"sync-now"});
+    if (result?.sync_skipped_for_api_cooldown) {
+      return show("Vinted checks are paused until "
+        + new Date(result.api_cooldown_until).toLocaleString() + ".");
+    }
+    if (result?.sync_skipped_for_interval) {
+      return show("Vinted was checked recently. Next check after "
+        + new Date(result.next_sync_at).toLocaleTimeString() + ".");
+    }
+    if (!result?.ok) return show(result?.error || "Could not check Vinted.", true);
+    await refresh();
+  } catch (error) {
+    show("Could not check Vinted: " + String(error.message || error), true);
+  } finally {
+    button.disabled = false;
   }
-  if(r?.sync_skipped_for_api_cooldown){
-    return show("Vinted API sync is cooling down"+apiCooldownText(r)+".");
-  }
-
-  if(!r?.ok){
-    return show(r?.error||"Sync failed",true);
-  }
-
-  let text="Synced "+r.listings+" listings.";
-  if(enriched)text+=" "+enriched+" API details enriched.";
-  if(pending)text+=" "+pending+" API details pending.";
-  if(r?.detail_rate_limited)text+=" Detail enrichment stopped after an API 429"+apiCooldownText(r)+".";
-  else if(r?.api_rate_limited)text+=" A Vinted API request was rate limited"+apiCooldownText(r)+".";
-  if(remaining)text+=" Some historical posting ages are not refreshed in quiet mode.";
-  show(text);
 };
 
-$("#dashboard").onclick=async()=>{
-  const r=await send({type:"status"});
-  chrome.tabs.create({url:r.apiOrigin});
+$("#dashboard").onclick = async () => {
+  const response = await send({type:"status"});
+  chrome.tabs.create({url:response.apiOrigin});
 };
 
-$("#unpair").onclick=async()=>{
+$("#unpair").onclick = async () => {
   await send({type:"unpair"});
   await refresh();
 };
