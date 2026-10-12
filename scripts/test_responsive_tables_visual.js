@@ -55,7 +55,7 @@ for(const width of widths){
     +makeTable("listings-table",listingLabels,listingRows)
     +makeTable("sales-table",salesLabels,salesRows)
     +'<div id="editable-table" class="card table-wrap"><table class="stock-scan-table"><thead><tr><th>SKU</th><th>Description</th><th>Quantity</th></tr></thead><tbody><tr><td><input value="BOOK-001"></td><td><input value="Example"></td><td><input value="1"></td></tr></tbody></table></div>';
-  const inline=realHelpers + [
+  const inline='const $=selector=>document.querySelector(selector);\n'+realHelpers + [
     'const shell=document.querySelector(".shell");',
     'const inventory=document.querySelector("#inventory-table table");',
     'const headerSelect=document.querySelector("#inventory-select-all");',
@@ -70,10 +70,30 @@ for(const width of widths){
     'const sort=document.querySelector("#inventory-table .mobile-table-sort select");',
     'if(sort){sort.value="4:desc";sort.dispatchEvent(new Event("change",{bubbles:true}));}',
     'const sorted=inventory.tBodies[0].rows[0].cells[4].textContent.trim()==="3";',
+    '// A long title must not change any column widths or cause row geometry to shift.',
+    'const headings=()=>Array.from(inventory.tHead.rows[0].cells).map(cell=>cell.getBoundingClientRect().width);',
+    'const widthsBefore=headings();',
+    'inventory.tBodies[0].rows[0].cells[1].textContent="An exceptionally long book title repeated: "+("a very long title ".repeat(20));',
+    'const widthsAfter=headings();',
+    'const columnShift=Math.max(...widthsBefore.map((n,i)=>Math.abs(n-widthsAfter[i])));',
+    'if(columnShift>2)throw Error("Column width changed after a long row value: "+columnShift);',
+    'const originalHTML=inventory.outerHTML;',
+    'const inventoryHost=document.querySelector("#inventory-table");',
+    'inventoryHost.scrollLeft=85;',
+    'const beforeScroll=inventoryHost.scrollLeft;',
+    'replaceStableTable("#inventory-table",originalHTML,{preserveSelection:true});',
+    'const rendered=inventoryHost.querySelector("table");',
+    'const skipped=!replaceStableTable("#inventory-table",originalHTML,{preserveSelection:true});',
+    'if(!skipped||inventoryHost.querySelector("table")!==rendered)',
+    '  throw Error("Identical table data unnecessarily replaced the DOM");',
+    'if(Math.abs(inventoryHost.scrollLeft-beforeScroll)>2)',
+    '  throw Error("Table refresh reset the horizontal scroll position");',
+    'if(!Array.from(rendered.querySelectorAll(".inventory-select")).every(box=>box.checked))',
+    '  throw Error("Table refresh lost checked inventory items");',
     'const measure=id=>{const host=document.getElementById(id);const table=host.querySelector("table");const tr=table.tBodies[0].rows[0];return {host:host.clientWidth,hostScroll:host.scrollWidth,table:Math.round(table.getBoundingClientRect().width),tableDisplay:getComputedStyle(table).display,rowDisplay:getComputedStyle(tr).display,gridColumns:getComputedStyle(tr).gridTemplateColumns.trim().split(/\\s+/).filter(Boolean).length,cards:table.classList.contains("mobile-cards"),labels:tr.cells[1].dataset.label||null};};',
     'const output=document.createElement("output");',
     'output.id="responsive-table-metrics";',
-    'output.dataset.state=encodeURIComponent(JSON.stringify({requestedWidth:parseInt(shell.dataset.width),shellWidth:shell.clientWidth,shellScroll:shell.scrollWidth,bodyScroll:document.documentElement.scrollWidth,viewport:innerWidth,buttonClicked:clicked,selected,sorted,mobileSortVisible:sort&&getComputedStyle(sort.closest(".mobile-table-tools")).display!=="none",inventory:measure("inventory-table"),listings:measure("listings-table"),sales:measure("sales-table"),editable:measure("editable-table")}));',
+    'output.dataset.state=encodeURIComponent(JSON.stringify({requestedWidth:parseInt(shell.dataset.width),shellWidth:shell.clientWidth,shellScroll:shell.scrollWidth,bodyScroll:document.documentElement.scrollWidth,viewport:innerWidth,buttonClicked:clicked,selected,sorted,columnShift,identicalRenderSkipped:skipped,mobileSortVisible:sort&&getComputedStyle(sort.closest(".mobile-table-tools")).display!=="none",inventory:measure("inventory-table"),listings:measure("listings-table"),sales:measure("sales-table"),editable:measure("editable-table")}));',
     'document.body.appendChild(output);',
   ].join("\n");
   const html='<!doctype html><html lang="en"><head><meta charset="utf-8">'+
@@ -103,6 +123,8 @@ for(const width of widths){
   assert.equal(data.buttonClicked,1,"Row action no longer clickable");
   assert(data.selected,"Mobile Select all did not select inventory rows");
   assert(data.sorted,"Mobile table sorting did not change the row order");
+  assert(data.columnShift<=2,"Long row content changed column geometry");
+  assert(data.identicalRenderSkipped,"Identical row data rebuilt the table");
   const shouldBeCards=data.inventory.host<=580;
   for(const key of ["inventory","listings","sales"]){
     assert.equal(data[key].rowDisplay,shouldBeCards?"grid":"table-row",
