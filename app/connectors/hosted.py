@@ -4692,6 +4692,7 @@ def sync_biblio_workspace(
     *,
     listing_id: uuid.UUID | None = None,
     full_sync: bool = False,
+    force_inventory: bool = False,
     force_photos: bool = False,
     photos_only: bool = False,
     failed_photos_only: bool = False,
@@ -4710,6 +4711,8 @@ def sync_biblio_workspace(
             raise ValueError("Photo selections must include the original image fingerprints")
     if automatic_photo_follow_up and (not photos_only or listing_id is None):
         raise ValueError("An automatic photo follow-up must target one book")
+    if force_inventory and (listing_id is None or photos_only or full_sync):
+        raise ValueError("An inventory retry must target exactly one active book")
     values = _workspace_or_env_biblio_values(workspace_id)
     upload_profile = biblio_upload_profile(workspace_id)
     _refresh_biblio_linked_sources(workspace_id, listing_id=listing_id)
@@ -4721,7 +4724,7 @@ def sync_biblio_workspace(
     inventory_rows = (
         []
         if photos_only
-        else (active if full_sync else [row for row in active if row.get("inventory_dirty")])
+        else (active if full_sync else [row for row in active if row.get("inventory_dirty") or force_inventory])
     )
     delete_rows = (
         []
@@ -4894,6 +4897,7 @@ def sync_biblio_workspace(
         detail={
             "stage": "preparing",
             "mode": mode,
+            "forced_inventory_retry": bool(force_inventory),
             "listing_id": str(listing_id) if listing_id else None,
             "upload_profile": upload_profile,
             "inventory_filename": inventory_filename,
