@@ -6320,7 +6320,7 @@ async function connections() {
     connector.channel === "biblio" && connector.operational);
   $("#biblio-compare-panel").classList.toggle("hidden", !compareAvailable);
   const compareTab = $('[data-workspace-tabs="connector"] [data-workspace-tab="compare"]');
-  if (compareTab) compareTab.classList.toggle("hidden", !compareAvailable);
+  if (compareTab) compareTab.classList.toggle("hidden", !isBiblio || !compareAvailable);
   if (!compareAvailable && workspaceTabState.connector === "compare") {
     activateWorkspaceTab("connector", "overview");
   }
