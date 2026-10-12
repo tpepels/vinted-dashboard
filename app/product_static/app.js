@@ -5951,8 +5951,10 @@ function renderBiblioDashboardPostings(rows) {
       + '" type="button" data-book="' + esc(item.book_id)
       + '" aria-pressed="' + Boolean(chosen) + '">'
       + '<span class="biblio-book-name">' + esc(item.title || "Untitled") + '</span>'
-      + '<span class="biblio-book-status' + (item.remote_missing ? ' needs-check' : '')
-      + '">' + esc(status(item)) + '</span></button>';
+      + (item.dashboard_removed || item.remote_missing
+        ? '<span class="biblio-book-status' + (item.remote_missing ? ' needs-check' : '')
+          + '">' + esc(status(item)) + '</span>' : '')
+      + '</button>';
   }).join("");
   let selectedHtml = "";
   if (selected) {
