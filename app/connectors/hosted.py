@@ -4711,7 +4711,8 @@ def sync_biblio_workspace(
             raise ValueError("Photo selections must include the original image fingerprints")
     if automatic_photo_follow_up and (not photos_only or listing_id is None):
         raise ValueError("An automatic photo follow-up must target one book")
-    if force_inventory and (listing_id is None or photos_only or full_sync):
+    if force_inventory and (listing_id is None or photos_only or full_sync
+                            or force_photos or failed_photos_only or photo_indices is not None):
         raise ValueError("An inventory retry must target exactly one active book")
     values = _workspace_or_env_biblio_values(workspace_id)
     upload_profile = biblio_upload_profile(workspace_id)
@@ -4721,6 +4722,8 @@ def sync_biblio_workspace(
         listing_id=listing_id,
         profile=upload_profile,
     )
+    if force_inventory and (len(active) != 1 or deletes):
+        raise ValueError("BIBLIO book is no longer active with stock; do not send a delete on retry")
     inventory_rows = (
         []
         if photos_only
@@ -4805,6 +4808,11 @@ def sync_biblio_workspace(
             if attempts or skipped:
                 photo_rows.append({**row, "photo_attempts": attempts,
                                    "photo_skipped": skipped})
+    # A deliberate one-book inventory retry never includes images, even if
+    # there are independently queued/failed photo repairs for that book.
+    if force_inventory:
+        photo_rows = []
+        photo_skipped = 0
     # A complete receipt set should be recognized without opening an FTP
     # connection or replaying previously accepted photographs.
     if photo_indices is None and not automatic_photo_follow_up:
