@@ -126,7 +126,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", default=os.getenv("GITHUB_REPOSITORY", "tpepels/vinted-dashboard"))
     parser.add_argument("--execute", action="store_true", help="Delete exact matched merged branches")
-    parser.add_argument("--max-delete", type=int, default=114, help="Abort if candidate count exceeds audit cap")
+    parser.add_argument("--max-delete", type=int, default=115, help="Abort if candidate count exceeds audit cap")
     args = parser.parse_args()
     if not args.repository or "/" not in args.repository:
         parser.error("Expected owner/repository")
