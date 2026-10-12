@@ -5127,7 +5127,30 @@ def marketplace_operations_list(
         rows = session.execute(
             query.order_by(MarketplaceOperation.created_at.desc(), MarketplaceOperation.id.desc()).limit(limit)
         ).scalars().all()
-        return {"operations": [serialize_marketplace_operation(row) for row in rows]}
+        # Activity buttons must identify the actual book, not ask the seller to
+        # guess which operation "One listing" refers to. Only linked records
+        # from this workspace are eligible.
+        biblio_listing_ids = {
+            row.channel_listing_id for row in rows
+            if row.channel == Channel.BIBLIO and row.channel_listing_id is not None
+        }
+        linked_books = {}
+        if biblio_listing_ids:
+            listings = session.execute(select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == context.workspace.id,
+                models.ChannelListing.channel == Channel.BIBLIO,
+                models.ChannelListing.id.in_(biblio_listing_ids),
+            )).scalars().all()
+            linked_books = {listing.id: listing for listing in listings}
+        operations = []
+        for row in rows:
+            operation = serialize_marketplace_operation(row)
+            book = linked_books.get(row.channel_listing_id)
+            if book is not None:
+                operation["book_id"] = book.external_id or book.external_sku
+                operation["book_title"] = book.title
+            operations.append(operation)
+        return {"operations": operations}
 
 
 @router.get("/api/app/marketplace-operations/{operation_id}")
