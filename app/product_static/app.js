@@ -6231,6 +6231,7 @@ async function connections() {
     .filter(selector => $(selector)?.open);
   // Remove guidance carried over from a previously selected connector.
   $("#connector-page-settings .connector-account-help")?.remove();
+  $("#connector-page-settings .connector-settings-row")?.remove();
   $("#connector-page-card").innerHTML = current ? connectorHtml(current)
     : '<p class="muted">This marketplace is not available in the current workspace.</p>';
 
