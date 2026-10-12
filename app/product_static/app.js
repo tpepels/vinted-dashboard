@@ -5671,7 +5671,7 @@ async function inspectUncertainMarketplaceOperation(operationId, button, itemId 
   }
 }
 
-async function openMarketplaceRecovery(kind, inventoryItemId = null) {
+async function openMarketplaceRecovery(kind, inventoryItemId = null, bookId = null) {
   if (kind === "biblio_photos" || kind === "biblio_compare") {
     if (currentConnectorPage() !== "biblio") await selectView("connector-biblio");
   }
@@ -5683,7 +5683,14 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
     state.biblioPhotoExpanded = true;
     panel.scrollIntoView({behavior:"smooth",block:"center"});
     const select = $("#biblio-photo-book-select");
-    if (select) select.focus();
+    if (bookId) {
+      state.biblioPhotoTarget = bookId;
+      await loadBiblioPhotoChoices();
+      if (select) select.value = bookId;
+      const field = $("#biblio-photo-book-id");
+      if (field) field.value = bookId;
+      await inspectBiblioPhotoTarget();
+    } else if (select) select.focus();
     return;
   }
   if (kind === "biblio_compare") {
@@ -5735,9 +5742,9 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
     const lastInspection = op.result?.inspection;
     const statusTone = failed ? "danger" : attention ? "warning"
       : ["queued","running"].includes(op.status) ? "info" : "neutral";
-    const targetLabel = op.target === "all" ? "All listings"
+    const targetLabel = op.book_title || (op.target === "all" ? "All listings"
       : /^[0-9a-f-]{36}$/i.test(String(op.target || "")) ? "One listing"
-      : op.target || "One listing";
+      : op.target || "One listing");
     // Lead with a single explanation and an action, not several backend states.
     let explanation = "";
     if (photoJob && attention) {
@@ -5768,7 +5775,8 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
       : nextStep?.label || "Review";
     const recovery = nextStep && ["biblio_photos","biblio_compare","inspect_item"].includes(nextStep.kind)
       ? '<button class="btn primary marketplace-operation-next" type="button" data-kind="'
-        + esc(nextStep.kind) + '" data-item="' + esc(op.inventory_item_id || "") + '">'
+        + esc(nextStep.kind) + '" data-item="' + esc(op.inventory_item_id || "")
+        + '" data-book="' + esc(op.book_id || "") + '">'
         + esc(recoveryLabel) + '</button>' : "";
     const inspect = op.can_inspect_remote && nextStep?.kind === "inspect_remote"
       ? '<button class="btn primary marketplace-operation-inspect" type="button" data-id="'
@@ -5792,6 +5800,7 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
       + ' · ' + esc(actionLabel(op)) + '</strong>'
       + '<span class="operation-status operation-status-' + statusTone + '">'
       + esc(statuses[op.status] || "Needs review") + '</span></div>'
+      + (op.book_title ? '<p class="marketplace-activity-book">' + esc(op.book_title) + '</p>' : "")
       + '<p class="marketplace-activity-description">' + esc(explanation) + '</p>'
       + (recovery || inspect || retry
           ? '<div class="marketplace-activity-actions">' + recovery + inspect + retry + '</div>' : '')
@@ -5825,7 +5834,8 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
     button.onclick = () => inspectUncertainMarketplaceOperation(button.dataset.id, button);
   });
   $$(".marketplace-operation-next").forEach(button => {
-    button.onclick = () => openMarketplaceRecovery(button.dataset.kind, button.dataset.item || null);
+    button.onclick = () => openMarketplaceRecovery(
+      button.dataset.kind, button.dataset.item || null, button.dataset.book || null);
   });
   $$(".marketplace-operation-retry").forEach(button => {
     button.onclick = async () => {
