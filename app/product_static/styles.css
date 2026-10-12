@@ -545,7 +545,7 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
 .table-wrap.mobile-card-host{container:data-table / inline-size}
 .mobile-table-tools{display:none}
 .table-wrap .stock-scan-table{min-width:980px}
-@container data-table (max-width:860px){
+@container data-table (max-width:580px){
   .mobile-table-tools{
     display:flex;align-items:end;justify-content:space-between;flex-wrap:wrap;
     gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);
@@ -627,18 +627,6 @@ body.is-resizing-columns,body.is-resizing-columns *{cursor:col-resize!important;
 /* Editable reconciliation rows retain readable input sizes inside local scrolling. */
 .table-wrap .editable-table{min-width:860px}
 
-/* Wider card layouts use the available horizontal space without returning to
-   cramped 10- to 12-column tables. Phone cards keep the two-column layout. */
-@container data-table (min-width:610px) and (max-width:860px){
-  .table-wrap table.mobile-cards>tbody>tr{
-    grid-template-columns:repeat(3,minmax(0,1fr));
-  }
-}
-@container data-table (min-width:760px) and (max-width:860px){
-  .table-wrap table.mobile-cards>tbody>tr{
-    grid-template-columns:repeat(4,minmax(0,1fr));
-  }
-}
 
 /* Integration health: credential presence is neutral until a read-only
    access check actually succeeds; unsuccessful imports need clear next steps. */
@@ -1768,5 +1756,61 @@ main > header .eyebrow{color:#436e65}
 @media(max-width:390px){
   #connector-detail #connector-page-photos .biblio-photo-progress .biblio-progress-item{
     font-size:10px;
+  }
+}
+
+
+/* Stable data tables. A changing text value or filtered dataset must not
+   resize every other column or convert laptop tables into stacked cards.
+   Phones get cards; larger layouts retain a scrollable, fixed-width table. */
+#inventory-table table,
+#listings-table table,
+#sales-table table{
+  table-layout:fixed;
+  border-spacing:0;
+}
+#inventory-table td,#listings-table td,#sales-table td{
+  overflow-wrap:break-word;
+  word-break:normal;
+  vertical-align:top;
+}
+#inventory-table td .title,
+#listings-table td .title,
+#sales-table td .title{line-height:1.4;overflow-wrap:break-word}
+#inventory-table td .sub,
+#listings-table td .sub,
+#sales-table td .sub{
+  white-space:normal;line-height:1.45;
+}
+#inventory-table td.row-actions,
+#listings-table td.row-actions{
+  white-space:normal;
+}
+#inventory-table table:not(.mobile-cards) .row-actions .btn,
+#listings-table table:not(.mobile-cards) .row-actions .btn{
+  min-height:36px;
+  font-size:12px;
+  margin:2px;
+}
+.table-refresh-controls{
+  display:flex;align-items:center;justify-content:flex-end;
+  gap:12px;flex-wrap:wrap;min-height:48px;margin:0 0 8px;
+}
+.table-refresh-controls #listings-sync-note{
+  font-size:13px;line-height:1.5;
+}
+.table-refresh-controls .btn{
+  min-height:40px;
+}
+.table-wrap{scrollbar-gutter:stable;scrollbar-width:thin}
+.table-wrap table.table-resizable{
+  table-layout:fixed;
+}
+@media(max-width:620px){
+  #inventory-items-panel .dashboard-primary-toolbar{
+    align-items:stretch;
+  }
+  #inventory-refresh,#listings-refresh{
+    min-height:42px;
   }
 }

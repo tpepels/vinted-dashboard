@@ -346,7 +346,13 @@ def test_vinted_age_cards_sort_by_exact_or_vinted_relative_age():
 
 
 def test_vinted_age_columns_remain_visible_when_dates_are_unknown():
-    assert 'const showDate = filtered.some((row) => row.channel === "vinted")' in APP_JS
+    assert 'const showDate = true;' in APP_JS
+    assert 'const showFavourites = true;' in APP_JS
+    assert 'const showViews = true;' in APP_JS
+    assert 'replaceStableTable("#listings-table", listingsMarkup)' in APP_JS
+    assert 'replaceStableTable("#inventory-table", inventoryMarkup, {preserveSelection: true})' in APP_JS
+    assert 'state.biblioListingsTimer = setTimeout' not in APP_JS
+    assert 'state.biblioInventoryTimer = setTimeout' not in APP_JS
     assert 'row.listed_at || null' in APP_JS
 
 

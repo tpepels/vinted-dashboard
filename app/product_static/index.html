@@ -149,6 +149,7 @@
           <span id="inventory-count" class="toolbar-count"></span>
           <span id="inventory-selected" class="toolbar-count">0 selected</span>
           <button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button>
+          <button id="inventory-refresh" class="btn" type="button" title="Reload current inventory without resetting filters">Refresh stock</button>
           <button id="add-stock" class="btn primary" type="button">Add stock</button>
         </div>
         <details id="inventory-more-filters" class="dashboard-filter-details">
@@ -533,6 +534,7 @@
             <label>Maximum price<input id="listing-price-max" class="price-filter" type="number" min="0" step="0.50" inputmode="decimal" placeholder="Max €" aria-label="Maximum price"></label></div>
         </details>
 
+        <div class="table-refresh-controls"><span id="listings-sync-note" class="muted" role="status"></span><button id="listings-refresh" class="btn" type="button">Refresh listings</button></div>
         <div id="listings-table" class="card table-wrap"></div>
         </div>
       </section>
