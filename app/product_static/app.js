@@ -915,6 +915,13 @@ function activateWorkspaceTab(group, tab) {
     const history = $(".biblio-history-panel");
     if (history) history.open = true;
   }
+  if (group === "connections" && tab === "activity" && state.view === "connections") {
+    const activity = $("#marketplace-operations-panel");
+    if (activity) activity.open = true;
+    refreshMarketplaceOperations().catch(() => {
+      $("#marketplace-operations-list").textContent = "Activity unavailable. Try Refresh history.";
+    });
+  }
   bar.querySelectorAll("[data-workspace-tab]").forEach(button => {
     const active = button === selected;
     button.classList.toggle("active", active);
@@ -6129,7 +6136,7 @@ async function connections() {
         + 'Your seller account must support this pattern for multiple photos to appear. '
         + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" rel="noopener noreferrer">BIBLIO photo setup guide</a>.</p>'
         + '<p>' + esc(health.message) + ' ' + esc(health.next) + '</p></details>'
-        + '<div class="connector-settings-row">' + (ready ? configure : '')
+        + '<div class="connector-settings-row">'
         + (ready ? '<button class="btn test-marketplace" data-c="biblio" type="button">Check account access</button>' : '')
         + '</div>'
         + '</section>';
@@ -6222,6 +6229,8 @@ async function connections() {
   const openBiblioPanels = [".biblio-photos-panel", ".biblio-history-panel",
     ".biblio-recovery-panel", ".biblio-photo-manual-id", ".biblio-photo-advanced"]
     .filter(selector => $(selector)?.open);
+  // Remove guidance carried over from a previously selected connector.
+  $("#connector-page-settings .connector-account-help")?.remove();
   $("#connector-page-card").innerHTML = current ? connectorHtml(current)
     : '<p class="muted">This marketplace is not available in the current workspace.</p>';
 
@@ -6257,6 +6266,8 @@ async function connections() {
   // Technical FTP guidance belongs to Account, never between Overview tasks.
   const accountHelp = $("#connector-page-card .connector-account-help");
   if (accountHelp) $("#connector-page-settings").appendChild(accountHelp);
+  const accountActions = $("#connector-page-card .connector-settings-row");
+  if (accountActions) $("#connector-page-settings").appendChild(accountActions);
 
   // Hide irrelevant tabs; these are tasks, not arbitrary account internals.
   const isBiblio = selectedChannel === "biblio";
@@ -6283,9 +6294,14 @@ async function connections() {
   }
   $("#other-marketplaces-count").textContent = String(other.length);
   $("#other-marketplaces").classList.toggle("hidden", other.length === 0);
-  $("#biblio-compare-panel").classList.toggle("hidden",
-    !state.connectors.some(connector => connector.channel === "biblio" && connector.operational)
-  );
+  const compareAvailable = state.connectors.some(connector =>
+    connector.channel === "biblio" && connector.operational);
+  $("#biblio-compare-panel").classList.toggle("hidden", !compareAvailable);
+  const compareTab = $('[data-workspace-tabs="biblio-listings"] [data-workspace-tab="compare"]');
+  if (compareTab) compareTab.classList.toggle("hidden", !compareAvailable);
+  if (!compareAvailable && workspaceTabState["biblio-listings"] === "compare") {
+    activateWorkspaceTab("biblio-listings", "books");
+  }
   const openCompare = $(".biblio-open-compare");
   if (openCompare) openCompare.onclick = () => {
     activateWorkspaceTab("connector", "listings");
