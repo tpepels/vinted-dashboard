@@ -51,7 +51,7 @@ const mocks=[
   'const esc=value=>String(value??"").replace(/[&<>"]/g,char=>',
   '({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[char]||char));',
   'function when(value){return String(value||"unknown");}',
-  'function flash(){} function stopBarcodeCamera(){}',
+  'function flash(message){window.fixtureFlashError=message;} function stopBarcodeCamera(){}',
   'async function today(){} async function inventory(){} async function reconcile(){}',
   'async function listings(){} async function sales(){} async function analytics(){}',
   'async function imports(){} async function settings(){}',
@@ -86,7 +86,7 @@ function runBrowserAssertions(){
       await selectView("connector-"+channel);
       const card=document.querySelector("#connector-page-card .connector");
       if(!card||card.dataset.connectorChannel!==channel)
-        throw Error("No dedicated page for "+channel);
+        throw Error("No dedicated page for "+channel+" (load error: "+(window.fixtureFlashError||"none")+")");
       if(routeFromHash()!=="connector-"+channel)throw Error("Bad URL route "+channel);
       if(!document.querySelector("#connector-detail").classList.contains("active"))
         throw Error("Page is not visible "+channel);
