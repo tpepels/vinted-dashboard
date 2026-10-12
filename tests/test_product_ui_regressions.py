@@ -899,7 +899,8 @@ def test_store_stock_controls_are_minimal_check_first_and_shared():
 
 def test_connections_shows_tasks_and_keeps_verbose_help_collapsed():
     html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text()
-    assert "Choose a marketplace to publish books" in html
+    assert "Choose a marketplace" in html
+    assert "Choose a marketplace to publish books" not in html
     assert "Manage individual books in Inventory." not in html
     assert 'details class="connection-technical-help"' in APP_JS
     assert 'class="biblio-photo-manual-id"' in APP_JS
