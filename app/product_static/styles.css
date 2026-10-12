@@ -2145,3 +2145,23 @@ main > header .eyebrow{color:#436e65}
 #connector-detail #biblio-photo-done-step .biblio-wizard-actions{
   margin-top:22px
 }
+
+/* The activity tab opens with actions. Older BIBLIO FTP history is optional. */
+#connector-detail #connector-activity-panel .biblio-history-panel>summary{
+  display:flex!important;align-items:center;justify-content:space-between;
+  min-height:44px;padding:12px 16px;cursor:pointer;
+  font-size:13px;color:var(--muted)
+}
+#connector-detail #connector-activity-panel .biblio-history-panel{
+  background:transparent;box-shadow:none;border:1px solid var(--line);
+  margin-top:22px;max-width:940px
+}
+#connector-detail #connector-activity-panel .biblio-history-panel:not([open])>.biblio-task-inner{
+  display:none
+}
+#connector-detail #connector-activity-panel .biblio-history-panel>summary small{
+  display:none
+}
+#connector-detail #connector-activity-panel #connector-page-activity{
+  margin-bottom:0
+}
