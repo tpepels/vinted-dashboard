@@ -534,7 +534,7 @@ def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert '"/api/app/connectors/biblio/retry-photos"' in APP_JS
     assert '"/api/app/connectors/biblio/full-sync"' in APP_JS
     assert "photos sent " in APP_JS
-    assert "BIBLIO may need additional time to process" in APP_JS
+    assert "BIBLIO may take time to show new books and photos" in APP_JS
 
 def test_biblio_inventory_and_listing_rows_show_publication_state():
     assert "function biblioListingState(sync)" in APP_JS
@@ -554,7 +554,7 @@ def test_biblio_inventory_and_listing_rows_show_publication_state():
 
 def test_biblio_ui_explains_deferred_photo_retry_and_filename_warning():
     assert "photo retry scheduled" in APP_JS
-    assert "BIBLIO may not recognize its photos immediately" in APP_JS
+    assert "dashboard schedules one later photo follow-up" in APP_JS
     assert "Photo warning:" in APP_JS
     assert "BookID.jpg, BookID_1.jpg, BookID_2.jpg" in APP_JS
     assert "Multiple photos require BIBLIO to map" in APP_JS

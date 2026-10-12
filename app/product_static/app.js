@@ -866,7 +866,7 @@ const connectorPageViews = new Set(connectorPageChannels.map(channel => "connect
 function relocateConnectorPanels() {
   // Keep the one existing form and its event listeners; don't duplicate IDs.
   $("#connector-page-settings").appendChild($("#connector-config"));
-  $("#connector-page-biblio").appendChild($("#biblio-compare-panel"));
+  $("#connector-page-biblio-compare").appendChild($("#biblio-compare-panel"));
   $("#connector-page-vinted").appendChild($("#paired-browsers-panel"));
 }
 relocateConnectorPanels();
@@ -893,9 +893,34 @@ function activateWorkspaceTab(group, tab) {
       loadBiblioPhotoChoices().catch(() => {});
     }
   }
+  if (group === "connector" && tab === "listings") {
+    activateWorkspaceTab("biblio-listings", workspaceTabState["biblio-listings"] || "books");
+  }
+  if (group === "biblio-listings" && currentConnectorPage() === "biblio") {
+    const postings = $("#biblio-dashboard-postings-panel");
+    const comparison = $("#biblio-compare-panel");
+    if (tab === "books" && postings) {
+      postings.open = true;
+      if (state.biblioDashboardPostings == null) {
+        loadBiblioDashboardPostings().catch(error => {
+          $("#biblio-postings-content").textContent = "Could not load books: " + error.message;
+        });
+      }
+    }
+    if (tab === "compare" && comparison) comparison.open = true;
+  }
   if (group === "connector" && tab === "activity") {
     const activity = $("#connector-page-activity");
     if (activity) activity.open = true;
+    const history = $(".biblio-history-panel");
+    if (history) history.open = true;
+  }
+  if (group === "connections" && tab === "activity" && state.view === "connections") {
+    const activity = $("#marketplace-operations-panel");
+    if (activity) activity.open = true;
+    refreshMarketplaceOperations().catch(() => {
+      $("#marketplace-operations-list").textContent = "Activity unavailable. Try Refresh history.";
+    });
   }
   bar.querySelectorAll("[data-workspace-tab]").forEach(button => {
     const active = button === selected;
@@ -2933,8 +2958,8 @@ function renderBiblioActivity(activity, operational) {
     + (state.biblioActivityExpanded ? ' open' : '') + '><summary>'
     + '<span><strong>Past BIBLIO uploads</strong><small>Review previous transfers if something is missing</small></span>'
     + '</summary><div class="biblio-task-inner">'
-    + '<p>“Sent” means that BIBLIO received the files. BIBLIO may need additional time to process and display the books and photos.</p>'
-    + '<p>For a newly added book, BIBLIO may not recognize its photos immediately. The dashboard automatically attempts one later photo follow-up when needed; you normally do not need to resend all photos.</p>'
+    + '<div class="connector-context-note"><strong>Transfers are not publication</strong>'
+    + '<span>BIBLIO may take time to show new books and photos. The dashboard schedules one later photo follow-up when needed.</span></div>'
     + '<div class="biblio-activity-history">' + (fileHistory || '<p>No transfers have been recorded yet.</p>') + '</div>'
     + '</div></details>';
   const advanced = operational
@@ -2946,7 +2971,7 @@ function renderBiblioActivity(activity, operational) {
       + '<button class="btn biblio-retry-photos" type="button">Resend all photos…</button></div>'
       + '<div class="biblio-recovery-row"><div><strong>Resend the entire catalogue</strong><p>Reuploads every active listing, updates and photos, even if nothing has changed. Usually unnecessary.</p></div>'
       + '<button class="btn biblio-full-sync" type="button">Resend all listings…</button></div>'
-      + '<p class="biblio-user-note">This does not confirm publication. BIBLIO orders are not imported automatically because the separate Bulk Order Management interface is not connected.</p>'
+      + '<p class="biblio-user-note">Only use these recovery actions for a confirmed bulk-upload problem.</p>'
       + '</div></details>'
     : '';
   return '<div class="biblio-human-workflow">'
@@ -5653,6 +5678,7 @@ async function openMarketplaceRecovery(kind, inventoryItemId = null) {
   }
   if (kind === "biblio_compare") {
     activateWorkspaceTab("connector", "listings");
+    activateWorkspaceTab("biblio-listings", "compare");
     const panel = $("#biblio-compare-panel");
     if (!panel || panel.classList.contains("hidden")) {
       return flash("Connect BIBLIO before comparing its inventory export.", true);
@@ -6078,8 +6104,7 @@ async function connections() {
         + Number(biblioStats.deletes_pending || 0);
       const photoAttention = Number(biblioStats.photo_attention || 0);
       return '<section class="connector connector--biblio" data-connector-channel="biblio" aria-label="BIBLIO">'
-        + '<div class="connector-header"><div><h2>Sell your books on BIBLIO</h2>'
-        + '<p>Choose a book, review its listing and send it to BIBLIO.</p></div>'
+        + '<div class="connector-header"><div><h2>BIBLIO overview</h2></div>'
         + '<span class="connection-state ' + esc(health.state) + '">'
         + esc(ready ? health.label : "Connect your account") + '</span></div>'
         + '<div class="connector-task-grid" aria-label="BIBLIO tasks">'
@@ -6111,7 +6136,7 @@ async function connections() {
         + 'Your seller account must support this pattern for multiple photos to appear. '
         + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" rel="noopener noreferrer">BIBLIO photo setup guide</a>.</p>'
         + '<p>' + esc(health.message) + ' ' + esc(health.next) + '</p></details>'
-        + '<div class="connector-settings-row">' + (ready ? configure : '')
+        + '<div class="connector-settings-row">'
         + (ready ? '<button class="btn test-marketplace" data-c="biblio" type="button">Check account access</button>' : '')
         + '</div>'
         + '</section>';
@@ -6157,7 +6182,6 @@ async function connections() {
       + (connector.operational && connectorSchemas[channel]?.test
         ? '<button class="btn test-marketplace" data-c="' + name
           + '" type="button">Check account access</button>' : '')
-      + '<p class="connector-next-step"><strong>Next:</strong> ' + esc(health.next) + '</p>'
       + '<p class="connector-last-sync">' + lastSeen + '</p>'
       + latestAttempt
       + '<details class="connection-technical-help"><summary>About this connection</summary>'
@@ -6205,6 +6229,9 @@ async function connections() {
   const openBiblioPanels = [".biblio-photos-panel", ".biblio-history-panel",
     ".biblio-recovery-panel", ".biblio-photo-manual-id", ".biblio-photo-advanced"]
     .filter(selector => $(selector)?.open);
+  // Remove guidance carried over from a previously selected connector.
+  $("#connector-page-settings .connector-account-help")?.remove();
+  $("#connector-page-settings .connector-settings-row")?.remove();
   $("#connector-page-card").innerHTML = current ? connectorHtml(current)
     : '<p class="muted">This marketplace is not available in the current workspace.</p>';
 
@@ -6230,6 +6257,18 @@ async function connections() {
     const wizard = $("#connector-page-photos .biblio-photos-panel");
     if (wizard) wizard.open = true;
   }
+  if (selectedChannel === "biblio" && workspaceTabState.connector === "listings") {
+    activateWorkspaceTab("biblio-listings", workspaceTabState["biblio-listings"] || "books");
+  }
+  if (selectedChannel === "biblio" && workspaceTabState.connector === "activity") {
+    const history = $(".biblio-history-panel");
+    if (history) history.open = true;
+  }
+  // Technical FTP guidance belongs to Account, never between Overview tasks.
+  const accountHelp = $("#connector-page-card .connector-account-help");
+  if (accountHelp) $("#connector-page-settings").appendChild(accountHelp);
+  const accountActions = $("#connector-page-card .connector-settings-row");
+  if (accountActions) $("#connector-page-settings").appendChild(accountActions);
 
   // Hide irrelevant tabs; these are tasks, not arbitrary account internals.
   const isBiblio = selectedChannel === "biblio";
@@ -6256,12 +6295,18 @@ async function connections() {
   }
   $("#other-marketplaces-count").textContent = String(other.length);
   $("#other-marketplaces").classList.toggle("hidden", other.length === 0);
-  $("#biblio-compare-panel").classList.toggle("hidden",
-    !state.connectors.some(connector => connector.channel === "biblio" && connector.operational)
-  );
+  const compareAvailable = state.connectors.some(connector =>
+    connector.channel === "biblio" && connector.operational);
+  $("#biblio-compare-panel").classList.toggle("hidden", !compareAvailable);
+  const compareTab = $('[data-workspace-tabs="biblio-listings"] [data-workspace-tab="compare"]');
+  if (compareTab) compareTab.classList.toggle("hidden", !compareAvailable);
+  if (!compareAvailable && workspaceTabState["biblio-listings"] === "compare") {
+    activateWorkspaceTab("biblio-listings", "books");
+  }
   const openCompare = $(".biblio-open-compare");
   if (openCompare) openCompare.onclick = () => {
     activateWorkspaceTab("connector", "listings");
+    activateWorkspaceTab("biblio-listings", "compare");
     const panel = $("#biblio-compare-panel");
     panel.open = true;
     panel.scrollIntoView({behavior:"smooth", block:"start"});

@@ -51,7 +51,7 @@ const mocks=[
   'const esc=value=>String(value??"").replace(/[&<>"]/g,char=>',
   '({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[char]||char));',
   'function when(value){return String(value||"unknown");}',
-  'function flash(){} function stopBarcodeCamera(){}',
+  'function flash(message){window.fixtureFlashError=message;} function stopBarcodeCamera(){}',
   'async function today(){} async function inventory(){} async function reconcile(){}',
   'async function listings(){} async function sales(){} async function analytics(){}',
   'async function imports(){} async function settings(){}',
@@ -66,6 +66,10 @@ const mocks=[
   'message:row.configured?"Credentials saved":"Connect first",',
   'next:row.configured?"Review listings":"Set up connection"};}',
   'function renderEtsyOAuthTools(){} async function loadBiblioPhotoChoices(){}',
+  'async function loadBiblioDashboardPostings(){',
+  'if(!window.fixturePostingsLoads)window.fixturePostingsLoads=0;',
+  'window.fixturePostingsLoads++;}',
+
   'const fixtureConnectors='+JSON.stringify(fixtures)+';',
   'async function api(url){',
   'if(url==="/api/app/connectors" && window.holdConnectorReads)',
@@ -86,7 +90,7 @@ function runBrowserAssertions(){
       await selectView("connector-"+channel);
       const card=document.querySelector("#connector-page-card .connector");
       if(!card||card.dataset.connectorChannel!==channel)
-        throw Error("No dedicated page for "+channel);
+        throw Error("No dedicated page for "+channel+" (load error: "+(window.fixtureFlashError||"none")+")");
       if(routeFromHash()!=="connector-"+channel)throw Error("Bad URL route "+channel);
       if(!document.querySelector("#connector-detail").classList.contains("active"))
         throw Error("Page is not visible "+channel);
@@ -99,9 +103,12 @@ function runBrowserAssertions(){
     }
     await selectView("connector-biblio");
     const byId=id=>document.getElementById(id);
-    if(!byId("connector-page-biblio").contains(byId("biblio-compare-panel")))
-      throw Error("BIBLIO seller-file verification missing from its page");
-    byId("connector-page-card").querySelector(".configure").click();
+    if(!byId("connector-page-biblio-compare").contains(byId("biblio-compare-panel")))
+      throw Error("BIBLIO comparison not inside its own task tab");
+    if(byId("connector-page-card").querySelector(".connector-account-help"))
+      throw Error("Technical BIBLIO account details leaked into Overview");
+    activateWorkspaceTab("connector","account");
+    byId("connector-account-configure").click();
     if(byId("connector-config").classList.contains("hidden")
         ||!byId("connector-page-settings").contains(byId("connector-config")))
       throw Error("BIBLIO credential form did not open in its page");
@@ -121,12 +128,27 @@ function runBrowserAssertions(){
     activateWorkspaceTab("connector","listings");
     if(getComputedStyle(byId("connector-listings-panel")).display==="none")
       throw Error("Listings tab did not open");
+    activateWorkspaceTab("biblio-listings","books");
+    if(getComputedStyle(byId("biblio-listings-books-panel")).display==="none")
+      throw Error("BIBLIO books not shown");
+    if(!byId("biblio-dashboard-postings-panel").open)
+      throw Error("BIBLIO books are hidden behind an accordion");
+    if(getComputedStyle(byId("biblio-dashboard-postings-panel").querySelector("summary")).display!=="none")
+      throw Error("BIBLIO books still have a redundant collapse arrow");
+    activateWorkspaceTab("biblio-listings","compare");
+    if(getComputedStyle(byId("biblio-listings-compare-panel")).display==="none"
+      ||!byId("biblio-compare-panel").open)
+      throw Error("BIBLIO comparison is hidden behind a collapsed panel");
+    if(getComputedStyle(byId("biblio-compare-panel").querySelector("summary")).display!=="none")
+      throw Error("BIBLIO comparison still has a redundant collapse arrow");
     activateWorkspaceTab("connector","activity");
     if(getComputedStyle(byId("connector-activity-panel")).display==="none")
       throw Error("Activity tab did not open");
     await selectView("connector-shopify");
     if(!byId("connector-config").classList.contains("hidden"))
       throw Error("Old connector settings leaked into Shopify");
+    if(byId("connector-page-settings").querySelector(".connector-account-help, .connector-settings-row"))
+      throw Error("BIBLIO settings leaked into Shopify account tab");
     if(!byId("connector-page-card").querySelector(".sync[data-c=shopify]"))
       throw Error("Shopify importer absent");
     await selectView("connector-vinted");
@@ -211,7 +233,7 @@ function runBrowserAssertions(){
       ariaExpanded:toggle.getAttribute("aria-expanded"),
       view:state.view,route:routeFromHash(),
       formCopies:document.querySelectorAll("#connector-config").length,
-      biblioPanelMoved:byId("connector-page-biblio").contains(byId("biblio-compare-panel")),
+      biblioPanelMoved:byId("connector-page-biblio-compare").contains(byId("biblio-compare-panel")),
       vintedPanelMoved:byId("connector-page-vinted").contains(byId("paired-browsers-panel")),
       navCount:document.querySelectorAll(".nav").length
     };

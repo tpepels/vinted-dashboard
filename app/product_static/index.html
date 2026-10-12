@@ -663,11 +663,11 @@
         <details id="biblio-compare-panel" class="card connection-task-panel hidden">
           <summary><span><strong>Check what is actually on BIBLIO</strong><small>Compare your dashboard with an inventory file downloaded from BIBLIO</small></span></summary>
           <div class="connection-task-content">
-            <p>Choose an inventory export from BIBLIO to check what it reports. Comparing does not change books, prices or stock.</p>
+            <div class="connector-context-note"><strong>Read-only comparison</strong><span>Checking an export won't change your books or prices.</span></div>
             <label class="connection-file-label" for="biblio-import-file">Inventory file downloaded from BIBLIO</label>
             <input id="biblio-import-file" type="file" accept=".txt,.tsv,.csv,text/plain,text/csv">
             <div class="actions"><button id="verify-biblio" class="btn primary" type="button">Compare without changing anything</button></div>
-            <div id="biblio-compare-result" class="connection-task-result" role="status" aria-live="polite">Choose a file, then compare it with the dashboard.</div>
+            <div id="biblio-compare-result" class="connection-task-result" role="status" aria-live="polite">Results will appear here after comparison.</div>
             <details id="biblio-import-advanced" class="connection-danger-zone">
               <summary>Advanced: update the dashboard from this file</summary>
               <p>This imports listing information from the selected BIBLIO file into your dashboard. It does not publish anything to BIBLIO. Review the comparison first.</p>
@@ -697,13 +697,12 @@
         <details id="marketplace-operations-panel" class="card connection-task-panel">
           <summary><span><strong>Recent activity</strong><small>See completed actions and anything that needs your attention</small></span></summary>
           <div class="connection-task-content">
-            <p class="muted">A completed BIBLIO transfer does not confirm publication.</p>
             <button class="btn" id="marketplace-operations-refresh" type="button">Refresh history</button>
             <div id="marketplace-operations-list"><p class="muted">Loading activity…</p></div>
           </div>
         </details>
         </div>
-        <details id="paired-browsers-panel" class="card connection-task-panel">
+        <details id="paired-browsers-panel" class="card connection-task-panel" open>
           <summary><span><strong>My connected browsers</strong><small>See and disconnect devices paired with Vinted</small></span></summary>
           <div id="devices" class="connection-task-content"></div>
         </details>
@@ -735,19 +734,28 @@
           <div id="connector-page-photos"></div>
         </div>
         <div id="connector-listings-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:listings">
-          <div class="connector-task-page-heading"><h3>My BIBLIO listings</h3><p>Review books already sent or compare them with your seller inventory.</p></div>
+          <div class="connector-task-page-heading"><h3>My BIBLIO listings</h3><p>Review your prepared books or compare them with a BIBLIO export.</p></div>
+          <div class="dashboard-tabbar connector-listings-tabs" role="tablist" aria-label="BIBLIO listing tasks" data-workspace-tabs="biblio-listings">
+            <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="biblio-listings-books-panel" data-workspace-tab="books">Find a book</button>
+            <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="biblio-listings-compare-panel" data-workspace-tab="compare">Compare BIBLIO export</button>
+          </div>
+          <div id="biblio-listings-books-panel" class="dashboard-tab-panel" role="tabpanel" data-workspace-panel="biblio-listings:books">
           <div id="connector-page-biblio" class="connector-page-secondary">
-          <details id="biblio-dashboard-postings-panel" class="card connection-task-panel">
-            <summary><span><strong>Manage books already sent</strong><small>Find a book, correct its dashboard record, or prepare to send it again</small></span></summary>
+          <details id="biblio-dashboard-postings-panel" class="card connection-task-panel" open>
+            <summary>Find a prepared book</summary>
             <div class="connection-task-content">
-              <p class="muted">Removing a posting here affects only this dashboard. It does not delete the book on BIBLIO. Re-adding reuses the same Book ID and requires reviewing the publish form.</p>
+              <div class="connector-context-note"><strong>Dashboard listings only</strong><span>Removing a book here does not remove it from BIBLIO.</span></div>
               <div class="biblio-postings-toolbar">
                 <label>Find a book<input id="biblio-postings-search" type="search" placeholder="Title or BIBLIO Book ID"></label>
                 <button id="biblio-postings-refresh" class="btn" type="button">Refresh list</button>
               </div>
-              <div id="biblio-postings-content" role="status" aria-live="polite">Open this section to load your postings.</div>
+              <div id="biblio-postings-content" role="status" aria-live="polite">Loading your prepared books…</div>
             </div>
           </details>
+        </div>
+        </div>
+        <div id="biblio-listings-compare-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="biblio-listings:compare">
+          <div id="connector-page-biblio-compare" class="connector-page-secondary"></div>
         </div>
         </div>
         <div id="connector-account-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:account">
@@ -762,7 +770,7 @@
         <div id="connector-activity-panel" class="dashboard-tab-panel hidden connector-task-page" role="tabpanel" data-workspace-panel="connector:activity">
         <div class="connector-task-page-heading"><h3>Recent activity</h3><p>See uploads, imports and items that may need your attention.</p></div>
         <div id="connector-page-biblio-activity"></div>
-        <details id="connector-page-activity" class="card connection-task-panel">
+        <details id="connector-page-activity" class="card connection-task-panel" open>
           <summary><span><strong>What happened recently?</strong><small>See imports, uploads, and actions that may need your attention</small></span></summary>
           <div class="connection-task-content">
             <button id="connector-page-activity-refresh" class="btn" type="button">Refresh activity</button>
@@ -791,7 +799,7 @@
           <p class="muted">For troubleshooting only: implementation coverage, not a marketplace account status. A completed transfer does not prove that a book or photo is publicly visible.</p>
           <div id="marketplace-development">Loading technical operation status…</div>
         </details>
-        <details class="dashboard-task-disclosure" id="settings-support-panel"><summary>Support and diagnostics</summary>
+        <details class="dashboard-task-disclosure" id="settings-support-panel" open><summary>Support and diagnostics</summary>
         <div id="diagnostics-card" class="card form">
           <div class="card-head inline-head">
             <div><p class="eyebrow">SUPPORT</p><h2>Diagnostics</h2></div>
