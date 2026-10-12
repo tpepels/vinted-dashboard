@@ -3734,6 +3734,9 @@ def biblio_dashboard_postings(context: RequestContext = Depends(require_context)
                 "dashboard_status": listing.status,
                 "photo_count": len((listing.extra or {}).get("image_urls") or []),
                 "photo_state": (listing.extra or {}).get("photo_sync_state"),
+                "remote_missing": "missing_from_biblio_active_inventory" in (
+                    (listing.extra or {}).get("remote_mismatch_fields") or []
+                ) and not bool((listing.extra or {}).get("remote_verification_stale")),
             } for listing, item in rows],
         }
 
@@ -5899,6 +5902,67 @@ def biblio_retry_listing_photos(
     info.pop("photo_source_urls", None)
     return {"ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
             "already_queued": not created, **info}
+
+
+
+class BiblioRetryInventoryRequest(BaseModel):
+    book_id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/api/app/connectors/biblio/retry-listing-inventory")
+def biblio_retry_listing_inventory(
+    payload: BiblioRetryInventoryRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Resend the details of one existing book using its unchanged Book ID.
+
+    No photos, other books, inventory deletion, or Vinted mutation. This is a
+    deliberate seller action after checking BIBLIO's processing history.
+    """
+    if not _biblio_configured_for_workspace(context.workspace):
+        raise HTTPException(status_code=400, detail="BIBLIO FTP is not configured")
+    with db.session_scope() as session:
+        matches = session.execute(select(models.ChannelListing).where(
+            models.ChannelListing.workspace_id == context.workspace.id,
+            models.ChannelListing.channel == Channel.BIBLIO,
+            models.ChannelListing.external_id == payload.book_id.strip(),
+        )).scalars().all()
+        if len(matches) != 1:
+            raise HTTPException(
+                status_code=404 if not matches else 409,
+                detail="Choose an unambiguous BIBLIO Book ID in this workspace",
+            )
+        listing = matches[0]
+        if (listing.status != ListingStatus.ACTIVE
+                or int(listing.quantity or 0) <= 0
+                or dict(listing.extra or {}).get("dashboard_removed")):
+            raise HTTPException(status_code=409, detail="Only active dashboard books with stock can be retried")
+        jobs_in_flight = session.execute(select(BackgroundJob).where(
+            BackgroundJob.workspace_id == context.workspace.id,
+            BackgroundJob.job_type == "biblio_sync",
+            BackgroundJob.status.in_(["queued", "running"]),
+        )).scalars().all()
+        if any(
+            not dict(job.payload or {}).get("listing_id")
+            or str(dict(job.payload or {}).get("listing_id")) == str(listing.id)
+            for job in jobs_in_flight
+        ):
+            raise HTTPException(status_code=409, detail="An upload for this book or all books is already queued")
+        try:
+            operation, created = queue_operation(
+                session, context.workspace.id, "biblio", "sync",
+                str(listing.id), job_type="biblio_sync",
+                payload={"listing_id": str(listing.id), "force_inventory": True},
+                inventory_item_id=listing.inventory_item_id,
+                channel_listing_id=listing.id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "ok": True, "book_id": listing.external_id, "already_queued": not created,
+            "job_id": str(operation.job_id), "operation_id": str(operation.id),
+            "note": "One book's inventory details queued. BIBLIO processing is not yet verified.",
+        }
 
 
 @router.post("/api/app/connectors/biblio/full-sync")
