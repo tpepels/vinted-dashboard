@@ -6583,7 +6583,7 @@ async function connections() {
     refreshMarketplaceOperations().catch(error => flash(error.message, true));
   };
   // Restore the stage and selection on an ordinary status refresh.
-  $(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
+  $$(".biblio-missing-photo-set input[type=checkbox]").forEach(input => {
     input.onchange = () => {
       state.biblioPhotoSelection = biblioPhotoSelectedIndices();
       setBiblioPhotoStep("review");
