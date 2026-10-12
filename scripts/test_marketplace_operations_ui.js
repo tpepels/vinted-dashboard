@@ -47,6 +47,7 @@ context.renderMarketplaceOperations({
   operations: [
     {
       id:"1", channel:"biblio", type:"photos", target:"BOOK-1",
+      book_id:"BOOK-1",book_title:"Example Book",
       status:"needs_verification", verification:"manual_required", can_retry:false,
       next_step:{kind:"biblio_photos",label:"Inspect book photos", detail:"Check file receipts first."},
       created_at:"2026-10-08", result:{photos_uploaded:4}, error:null,
@@ -76,6 +77,8 @@ context.renderMarketplaceOperations({
 assert.match(root.innerHTML, /Check needed/);
 assert.match(root.innerHTML, /marketplace-activity-row/);
 assert.match(root.innerHTML, /Check book photos/);
+assert.match(root.innerHTML, /Example Book/);
+assert.match(root.innerHTML, /data-book="BOOK-1"/);
 assert.match(root.innerHTML, /Photos were sent, but we cannot tell/);
 assert.match(root.innerHTML, /Try import again/);
 assert.match(root.innerHTML,/Check marketplace/);
