@@ -909,8 +909,6 @@ function activateWorkspaceTab(group, tab) {
   if (group === "connector" && tab === "activity") {
     const activity = $("#connector-page-activity");
     if (activity) activity.open = true;
-    const history = $(".biblio-history-panel");
-    if (history) history.open = true;
   }
   if (group === "connections" && tab === "activity" && state.view === "connections") {
     const activity = $("#marketplace-operations-panel");
@@ -6315,10 +6313,6 @@ async function connections() {
   if (selectedChannel === "biblio" && workspaceTabState.connector === "photos") {
     const wizard = $("#connector-page-photos .biblio-photos-panel");
     if (wizard) wizard.open = true;
-  }
-  if (selectedChannel === "biblio" && workspaceTabState.connector === "activity") {
-    const history = $(".biblio-history-panel");
-    if (history) history.open = true;
   }
   // Technical FTP guidance belongs to Account, never between Overview tasks.
   const accountHelp = $("#connector-page-card .connector-account-help");
