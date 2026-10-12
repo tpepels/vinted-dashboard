@@ -6065,9 +6065,11 @@ def pause_biblio_uploads(
     if not _biblio_configured_for_workspace(context.workspace):
         raise HTTPException(status_code=400, detail="Set up BIBLIO first")
     until = set_biblio_pause(context.workspace, payload.minutes)
+    released = jobs.release_paused_biblio_jobs(context.workspace.id) if until is None else 0
     return {
         "ok": True,
         "paused_until": until.isoformat() if until else None,
+        "resumed_queued_jobs": released,
         "note": (
             "BIBLIO jobs already running may finish; queued sends resume automatically at expiry."
             if until else "Queued BIBLIO uploads may proceed. Automatic sync remains unchanged."
