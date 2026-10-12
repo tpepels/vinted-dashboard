@@ -525,7 +525,7 @@ def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert "biblio-go-inventory" in APP_JS
     assert "biblio-fix-photos" in APP_JS
     assert "biblio-verify" in APP_JS
-    assert "Fix photos for one book" in APP_JS
+    assert "Check a book’s photos" in APP_JS
     assert "Resend every photo for this book" in APP_JS
     assert "Other troubleshooting" in APP_JS
     assert "Resend all photos" in APP_JS
