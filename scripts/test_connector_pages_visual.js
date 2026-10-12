@@ -99,9 +99,12 @@ function runBrowserAssertions(){
     }
     await selectView("connector-biblio");
     const byId=id=>document.getElementById(id);
-    if(!byId("connector-page-biblio").contains(byId("biblio-compare-panel")))
-      throw Error("BIBLIO seller-file verification missing from its page");
-    byId("connector-page-card").querySelector(".configure").click();
+    if(!byId("connector-page-biblio-compare").contains(byId("biblio-compare-panel")))
+      throw Error("BIBLIO comparison not inside its own task tab");
+    if(byId("connector-page-card").querySelector(".connector-account-help"))
+      throw Error("Technical BIBLIO account details leaked into Overview");
+    activateWorkspaceTab("connector","account");
+    byId("connector-account-configure").click();
     if(byId("connector-config").classList.contains("hidden")
         ||!byId("connector-page-settings").contains(byId("connector-config")))
       throw Error("BIBLIO credential form did not open in its page");
@@ -121,6 +124,19 @@ function runBrowserAssertions(){
     activateWorkspaceTab("connector","listings");
     if(getComputedStyle(byId("connector-listings-panel")).display==="none")
       throw Error("Listings tab did not open");
+    activateWorkspaceTab("biblio-listings","books");
+    if(getComputedStyle(byId("biblio-listings-books-panel")).display==="none")
+      throw Error("BIBLIO books not shown");
+    if(!byId("biblio-dashboard-postings-panel").open)
+      throw Error("BIBLIO books are hidden behind an accordion");
+    if(getComputedStyle(byId("biblio-dashboard-postings-panel").querySelector("summary")).display!=="none")
+      throw Error("BIBLIO books still have a redundant collapse arrow");
+    activateWorkspaceTab("biblio-listings","compare");
+    if(getComputedStyle(byId("biblio-listings-compare-panel")).display==="none"
+      ||!byId("biblio-compare-panel").open)
+      throw Error("BIBLIO comparison is hidden behind a collapsed panel");
+    if(getComputedStyle(byId("biblio-compare-panel").querySelector("summary")).display!=="none")
+      throw Error("BIBLIO comparison still has a redundant collapse arrow");
     activateWorkspaceTab("connector","activity");
     if(getComputedStyle(byId("connector-activity-panel")).display==="none")
       throw Error("Activity tab did not open");
@@ -211,7 +227,7 @@ function runBrowserAssertions(){
       ariaExpanded:toggle.getAttribute("aria-expanded"),
       view:state.view,route:routeFromHash(),
       formCopies:document.querySelectorAll("#connector-config").length,
-      biblioPanelMoved:byId("connector-page-biblio").contains(byId("biblio-compare-panel")),
+      biblioPanelMoved:byId("connector-page-biblio-compare").contains(byId("biblio-compare-panel")),
       vintedPanelMoved:byId("connector-page-vinted").contains(byId("paired-browsers-panel")),
       navCount:document.querySelectorAll(".nav").length
     };
