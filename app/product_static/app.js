@@ -46,6 +46,7 @@ const state = {
   biblioPhotoConnectionChecked: false,
   biblioActivityTimer: null,
   biblioInventoryTimer: null,
+  biblioPauseTimer: null,
   storeStockAuditTimer: null,
   biblioListingsTimer: null,
   crossList: null,
@@ -6729,6 +6730,56 @@ $("#connector-page-activity-refresh").onclick = async () => {
 $("#connections-inventory").onclick = () => selectView("inventory");
 $("#connections-reconcile").onclick = () => selectView("reconcile");
 
+function renderBiblioPauseState(until, configured = true) {
+  if (state.biblioPauseTimer) clearTimeout(state.biblioPauseTimer);
+  state.biblioPauseTimer = null;
+  const expiryMs = until ? Date.parse(until) : NaN;
+  const paused = configured && Number.isFinite(expiryMs) && expiryMs > Date.now();
+  $("#biblio-upload-pause").classList.toggle("hidden", paused);
+  $("#biblio-upload-pause").disabled = !configured;
+  $("#biblio-upload-resume").classList.toggle("hidden", !paused);
+  $("#biblio-upload-pause-status").textContent = !configured
+    ? "Set up BIBLIO before pausing transfers."
+    : paused
+      ? "BIBLIO transfers are paused until " + new Date(expiryMs).toLocaleString() + "."
+      : "BIBLIO transfers are available.";
+  if (paused) {
+    state.biblioPauseTimer = setTimeout(() => {
+      renderBiblioPauseState(null, configured);
+      const row = (state.connectors || []).find((c) => c.channel === "biblio");
+      if (row) row.biblio_upload_paused_until = null;
+    }, Math.max(1000, expiryMs - Date.now() + 1000));
+  }
+}
+
+async function changeBiblioUploadPause(minutes) {
+  const pause = $("#biblio-upload-pause");
+  const resume = $("#biblio-upload-resume");
+  pause.disabled = true;
+  resume.disabled = true;
+  $("#biblio-upload-pause-status").textContent = minutes
+    ? "Pausing BIBLIO transfers..." : "Resuming BIBLIO transfers...";
+  try {
+    const result = await api("/api/app/connectors/biblio/upload-pause", {
+      method: "PUT",
+      body: JSON.stringify({ minutes }),
+    });
+    const current = (state.connectors || []).find((c) => c.channel === "biblio");
+    if (current) current.biblio_upload_paused_until = result.paused_until;
+    renderBiblioPauseState(result.paused_until);
+  } catch (error) {
+    const current = (state.connectors || []).find((c) => c.channel === "biblio");
+    renderBiblioPauseState(current?.biblio_upload_paused_until, Boolean(current?.configured));
+    flash("Could not change the BIBLIO upload pause: " + error.message, true);
+  } finally {
+    resume.disabled = false;
+    pause.disabled = !((state.connectors || []).find((c) => c.channel === "biblio")?.configured);
+  }
+}
+
+$("#biblio-upload-pause").onclick = () => changeBiblioUploadPause(60);
+$("#biblio-upload-resume").onclick = () => changeBiblioUploadPause(0);
+
 function openConnectorConfig(channel, connector) {
   const schema = connectorSchemas[channel];
   if (!schema) return;
@@ -6795,6 +6846,7 @@ function openConnectorConfig(channel, connector) {
     });
   }
   $("#biblio-tools").classList.toggle("hidden", channel !== "biblio");
+  if (channel === "biblio") renderBiblioPauseState(connector?.biblio_upload_paused_until, Boolean(connector?.configured));
   renderEtsyOAuthTools(connector);
   $("#test-connector").classList.toggle("hidden", !schema.test || !connector?.operational);
   $("#remove-connector").classList.toggle("hidden", !connector?.configured);

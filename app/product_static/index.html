@@ -676,6 +676,14 @@
           </div>
           <div id="biblio-tools" class="hidden">
             <p class="muted">These are the credentials your dashboard uses to send listing files to BIBLIO. Changing them does not send or edit books.</p>
+            <div class="connection-upload-pause">
+              <p id="biblio-upload-pause-status" class="muted" role="status">BIBLIO transfers are available.</p>
+              <div class="actions">
+                <button id="biblio-upload-pause" class="btn" type="button">Pause BIBLIO uploads for 1 hour</button>
+                <button id="biblio-upload-resume" class="btn hidden" type="button">Resume BIBLIO uploads now</button>
+              </div>
+              <p class="muted">The pause ends automatically. It does not change automatic sync after Vinted updates or interrupt uploads already in progress.</p>
+            </div>
             <button id="test-biblio" class="btn" type="button">Check BIBLIO connection</button>
             <details class="connection-technical-help"><summary>About FTP and secure connections</summary><p>The dashboard prefers encrypted FTPS. BIBLIO documents standard FTP; unencrypted FTP needs your explicit permission in the settings above. An FTP connection test does not mean a book is publicly listed.</p></details>
           </div>

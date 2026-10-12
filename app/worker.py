@@ -205,6 +205,43 @@ def handle(job: dict) -> dict | None:
     return handler(payload, workspace_id)
 
 
+
+def _biblio_job_held_or_skipped(job: dict) -> bool:
+    """Handle a disabled auto-sync or a timed BIBLIO pause before remote I/O.
+
+    Return True if the job was completed without uploading or deferred without
+    counting an attempt. This must run before begin_operation().
+    """
+    if job.get("job_type") != "biblio_sync":
+        return False
+    from app.biblio_pause import biblio_paused_until
+    from app.connectors.hosted import biblio_auto_sync_enabled
+
+    workspace_id = uuid.UUID(str(job["workspace_id"]))
+    raw_payload = dict(job.get("payload") or {})
+    actual_payload = {
+        k: v for k, v in raw_payload.items()
+        if k != jobs.BIBLIO_PAUSE_MARKER
+    }
+    # The extension queues auto-sync as an empty payload, unlike manually
+    # submitted listing/photo operations. Respect the latest saved preference
+    # even when the job predates the preference change.
+    if not actual_payload and not biblio_auto_sync_enabled(workspace_id):
+        jobs.complete(job["id"])
+        logger.info("BIBLIO auto-sync job %s skipped: setting is off", job["id"])
+        return True
+
+    until = biblio_paused_until(workspace_id)
+    if until is not None:
+        jobs.defer_without_attempt(job["id"], until)
+        logger.info("BIBLIO job %s deferred until %s", job["id"], until.isoformat())
+        return True
+    if jobs.BIBLIO_PAUSE_MARKER in raw_payload:
+        jobs.clear_biblio_pause_marker(job["id"])
+        job["payload"] = actual_payload
+    return False
+
+
 def run_forever() -> None:
     logger.info("worker started")
     last_heartbeat = 0.0
@@ -235,6 +272,9 @@ def run_forever() -> None:
         )
         operation_id = (job.get("payload") or {}).get("operation_id")
         try:
+            if _biblio_job_held_or_skipped(job):
+                continue
+
             if operation_id:
                 from app.marketplace_operations import begin_operation
                 if not begin_operation(uuid.UUID(str(operation_id)), uuid.UUID(job["id"])):
