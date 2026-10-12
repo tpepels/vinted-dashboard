@@ -2825,36 +2825,7 @@ async function inspectBiblioPhotoTarget() {
 }
 
 function renderBiblioActivity(activity, operational) {
-  const health = activity?.health || {};
-  const dataAvailable = health.active_listings != null;
-  const count = (key) => Number(health[key] || 0);
-  const waiting = count("inventory_changes_pending") + count("deletes_pending");
-  const last = activity?.current || null;
-  const status = biblioActivityStatus(last);
   const runs = activity?.runs || [];
-  const lastSentAt = last?.completed_at || last?.started_at;
-  const verified = count("remote_verified_matching") + count("remote_verified_mismatching");
-  const overview = !dataAvailable
-    ? '<p class="biblio-user-warning">BIBLIO counts are temporarily unavailable.</p>'
-    : '<div class="biblio-summary">'
-      + '<p><strong>' + count("active_listings") + '</strong> books prepared'
-      + ' · <strong>' + waiting + '</strong> changes waiting'
-      + (count("photo_attention")
-        ? ' · <strong>' + count("photo_attention") + '</strong> books need photo review'
-        : '') + '</p>'
-      + (count("remote_verified_mismatching") || count("remote_verification_stale")
-        ? '<p class="biblio-user-warning">'
-          + count("remote_verified_mismatching") + ' differ from last comparison; '
-          + count("remote_verification_stale") + ' changed since then.</p>'
-        : '')
-      + '<p class="biblio-user-note">Prepared does not mean published.'
-      + (verified ? ' ' + verified + ' listings checked against a BIBLIO export.' : '')
-      + '</p></div>';
-  const latest = '<div class="biblio-latest">'
-    + '<span class="biblio-activity-dot ' + esc(status.cls) + '"></span>'
-    + '<div><strong>' + esc(last ? status.label : "Nothing sent yet") + '</strong>'
-    + '<p>' + (last ? esc(biblioActivityDetail(last)) : "Send changed books when you are ready.")
-    + (lastSentAt ? ' · ' + esc(when(lastSentAt)) : '') + '</p></div></div>';
   const photoHelp = operational
     ? '<details class="biblio-task-panel biblio-photos-panel"'
       + (state.biblioPhotoExpanded ? ' open' : '') + '>'
@@ -2961,7 +2932,6 @@ function renderBiblioActivity(activity, operational) {
       + '</div></details>'
     : '';
   return '<div class="biblio-human-workflow">'
-    + '<div class="biblio-status-overview">' + overview + latest + '</div>'
     + photoHelp + history + advanced
     + '</div>';
 }
@@ -6099,13 +6069,10 @@ async function connections() {
     && connector.configured);
   const attentionCount = integrated.filter(connector =>
     connectorHealth(connector).state === "attention").length;
-  const checkedCount = integrated.filter(connector =>
-    connectorHealth(connector).state === "verified").length;
   $("#connection-health-summary").textContent = integrated.length
-    ? integrated.length + " connected account" + (integrated.length === 1 ? "" : "s")
-      + (attentionCount ? " · " + attentionCount + " need attention" : "")
-      + (checkedCount ? " · " + checkedCount + " recently checked" : "")
-    : "Start by choosing a marketplace below.";
+    ? attentionCount ? attentionCount + " account" + (attentionCount === 1 ? "" : "s") + " need attention"
+      : integrated.length + " marketplace" + (integrated.length === 1 ? "" : "s") + " connected"
+    : "Choose a marketplace to get started.";
   const featured = state.connectors.filter(connector =>
     connectorPageChannels.includes(connector.channel)
     && (connector.configured || connector.channel === "vinted" || connector.channel === "biblio")
@@ -6136,7 +6103,7 @@ async function connections() {
         + Number(biblioStats.deletes_pending || 0);
       const photoAttention = Number(biblioStats.photo_attention || 0);
       return '<section class="connector connector--biblio" data-connector-channel="biblio" aria-label="BIBLIO">'
-        + '<div class="connector-header"><div><h2>BIBLIO overview</h2></div>'
+        + '<div class="connector-header connector-status-only">'
         + '<span class="connection-state ' + esc(health.state) + '">'
         + esc(ready ? health.label : "Connect your account") + '</span></div>'
         + '<div class="connector-task-grid" aria-label="BIBLIO tasks">'
@@ -6154,8 +6121,8 @@ async function connections() {
           ? '<div class="connector-action-strip"><div><strong>'
             + (pending ? pending + ' change' + (pending === 1 ? '' : 's') + ' ready to send'
               : 'No pending changes') + '</strong>'
-            + '<p>' + (pending ? 'Send your prepared listing changes when ready.'
-              : 'To add a book, choose Publish a book above.') + '</p></div>'
+            + '<p>' + (pending ? 'Check BIBLIO after sending to confirm the books appear.'
+              : 'Use Publish a book to prepare another listing.') + '</p></div>'
             + '<button class="btn primary sync" data-c="biblio" type="button"'
             + (pending ? '' : ' disabled title="No changes waiting to be sent"')
             + '>Send ' + (pending ? pending + ' pending change' + (pending === 1 ? '' : 's') : 'changes') + '</button></div>'
@@ -6235,7 +6202,7 @@ async function connections() {
     const detail = isVinted
       ? "Browser pairing, extension and received data"
       : channel === "biblio"
-        ? "Publish books, fix photos and check listings"
+        ? "Publish books, check photos and compare listings"
         : "Bring in listings, set up an account or troubleshoot";
     return '<button type="button" class="connector-overview-link" data-c="' + esc(channel)
       + '" data-connector-channel="' + esc(channel) + '"><span class="connector-overview-title">'
