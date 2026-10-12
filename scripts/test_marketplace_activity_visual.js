@@ -71,6 +71,8 @@ for (const width of [360,768,1280]) {
     'out.dataset.state=encodeURIComponent(JSON.stringify({viewport:innerWidth,'+
     'pageScroll:document.documentElement.scrollWidth,'+
     'cards:document.querySelectorAll(".marketplace-activity-row").length,'+
+    'rowBorder:parseFloat(getComputedStyle(document.querySelector(".marketplace-activity-row")).borderTopWidth),'+
+    'rowPadding:parseFloat(getComputedStyle(document.querySelector(".marketplace-activity-row")).paddingLeft),'+
     'actions:document.querySelectorAll(".marketplace-activity-actions button").length,'+
     'panel:Math.round(document.querySelector("#marketplace-operations-list").getBoundingClientRect().width)}));'+
     'document.body.appendChild(out);</script></body></html>';
@@ -95,5 +97,24 @@ for (const width of [360,768,1280]) {
   assert(fs.statSync(screenshot).size>4000);
   results.push({requestedWidth:width,...metrics,screenshot:path.relative(".",screenshot)});
 }
+// Prevent regressions where the exact same component loses all styling when
+// moved from Connections to a dedicated marketplace page.
+const focusedWidth = 1280;
+const focusedHtml = path.resolve("ui-evidence/marketplace-activity-1280.html");
+const focusedFile = path.resolve("ui-evidence/marketplace-activity-connector-1280.html");
+fs.writeFileSync(focusedFile, fs.readFileSync(focusedHtml,"utf8")
+  .replace('<main id="connections"', '<main id="connector-detail"'));
+const focusDom = execFileSync(browser, [
+  "--headless=new","--no-sandbox","--disable-gpu","--disable-dev-shm-usage",
+  "--virtual-time-budget=1000","--window-size=1280,1100",
+  "--dump-dom","file://"+focusedFile,
+],{encoding:"utf8",maxBuffer:5*1024*1024,timeout:30000});
+const focusMatch = focusDom.match(/<output id="activity-metrics" data-state="([^"]+)"/);
+assert(focusMatch, "Connector activity metrics unavailable");
+const focusResult = JSON.parse(decodeURIComponent(focusMatch[1]));
+assert(focusResult.rowBorder >= 1 && focusResult.rowPadding >= 12,
+  "Marketplace detail page must style activity as distinct cards");
+assert(focusResult.pageScroll <= focusResult.viewport+2,
+  "Connector activity must not overflow the viewport");
 console.log("MARKETPLACE_ACTIVITY_VIEWPORTS "+JSON.stringify(results));
 console.log("Market activity responsive cards in Chromium: PASS");
