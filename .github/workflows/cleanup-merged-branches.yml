@@ -25,4 +25,4 @@ jobs:
       - name: Delete exact merged PR heads, retaining all ambiguous branches
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/cleanup_merged_branches.py --execute --max-delete 114
+        run: python scripts/cleanup_merged_branches.py --execute --max-delete 115
