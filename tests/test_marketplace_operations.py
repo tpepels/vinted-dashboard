@@ -209,3 +209,53 @@ def test_scoped_history_and_explicit_retry_api(monkeypatch):
     )
     assert response.status_code == 200, response.text
     assert response.json()["operation"]["status"] == "queued"
+
+
+def test_biblio_activity_identifies_the_linked_book_without_cross_workspace_leak(monkeypatch):
+    monkeypatch.setattr("app.product_api.rate_limiter.check", lambda *args, **kwargs: None)
+    client = TestClient(entry.app)
+    registered = client.post("/api/auth/register", json={
+        "email": "book-activity@example.test",
+        "password": "a-long-test-password",
+        "workspace_name": "Activity Books",
+    })
+    assert registered.status_code == 200, registered.text
+    with db.session_scope() as session:
+        owner = session.execute(select(models.User).where(
+            models.User.email == "book-activity@example.test"
+        )).scalar_one()
+        workspace_id = session.execute(select(models.Membership).where(
+            models.Membership.user_id == owner.id
+        )).scalar_one().workspace_id
+        item = models.InventoryItem(
+            workspace_id=workspace_id, sku="ACTIVITY-BOOK", title="Known Book",
+            category="book", quantity=1, status="active",
+        )
+        session.add(item)
+        session.flush()
+        listing = models.ChannelListing(
+            workspace_id=workspace_id, inventory_item_id=item.id,
+            channel="biblio", external_id="ACTIVITY-BOOK",
+            title="Known Book", quantity=1, status="active",
+        )
+        session.add(listing)
+        session.flush()
+        item_id, listing_id = item.id, listing.id
+    op_id, _, _ = queue(
+        workspace_id, channel="biblio", operation_type="photos",
+        target=str(listing_id), inventory_item_id=item_id,
+        channel_listing_id=listing_id,
+    )
+    response = client.get("/api/app/marketplace-operations?channel=biblio")
+    assert response.status_code == 200, response.text
+    operation = next(row for row in response.json()["operations"] if row["id"] == str(op_id))
+    assert operation["book_title"] == "Known Book"
+    assert operation["book_id"] == "ACTIVITY-BOOK"
+    other = TestClient(entry.app)
+    registered_other = other.post("/api/auth/register", json={
+        "email": "other-book-activity@example.test",
+        "password": "a-long-test-password",
+        "workspace_name": "Other Activity",
+    })
+    assert registered_other.status_code == 200, registered_other.text
+    assert other.get("/api/app/marketplace-operations?channel=biblio").json()["operations"] == []
