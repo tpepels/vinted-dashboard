@@ -66,6 +66,10 @@ const mocks=[
   'message:row.configured?"Credentials saved":"Connect first",',
   'next:row.configured?"Review listings":"Set up connection"};}',
   'function renderEtsyOAuthTools(){} async function loadBiblioPhotoChoices(){}',
+  'async function loadBiblioDashboardPostings(){',
+  'if(!window.fixturePostingsLoads)window.fixturePostingsLoads=0;',
+  'window.fixturePostingsLoads++;}',
+
   'const fixtureConnectors='+JSON.stringify(fixtures)+';',
   'async function api(url){',
   'if(url==="/api/app/connectors" && window.holdConnectorReads)',
