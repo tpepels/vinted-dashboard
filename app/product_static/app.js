@@ -1683,7 +1683,7 @@ function renderItemMarketplacePanel(data) {
   }).join("");
   const contentRoot = $("#item-marketplaces-content");
   const expandedDetails = new Set();
-  contentRoot.querySelectorAll("details[open]").forEach(detail => {
+  (contentRoot.querySelectorAll?.("details[open]") || []).forEach(detail => {
     const channel = detail.closest(".item-marketplace-row")?.dataset.marketplace || "summary";
     const kind = detail.className || "details";
     expandedDetails.add(channel + ":" + kind);
@@ -1712,7 +1712,7 @@ function renderItemMarketplacePanel(data) {
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
     + '<p class="item-marketplace-footnote">Stock and price changes are separate, explicit actions. '
     + 'WooCommerce regular prices, Shopify base prices and Wix actual prices change only when explicitly confirmed. Send BIBLIO changes from Connections.</p>';
-  contentRoot.querySelectorAll("details").forEach(detail => {
+  (contentRoot.querySelectorAll?.("details") || []).forEach(detail => {
     const channel = detail.closest(".item-marketplace-row")?.dataset.marketplace || "summary";
     if (expandedDetails.has(channel + ":" + (detail.className || "details"))) {
       detail.open = true;
