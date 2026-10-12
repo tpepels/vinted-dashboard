@@ -75,7 +75,7 @@ context.renderMarketplaceOperations({
 });
 assert.match(root.innerHTML, /Check needed/);
 assert.match(root.innerHTML, /marketplace-activity-row/);
-assert.match(root.innerHTML, /Inspect book photos/);
+assert.match(root.innerHTML, /Check book photos/);
 assert.match(root.innerHTML, /Photos were sent, but we cannot tell/);
 assert.match(root.innerHTML, /Try import again/);
 assert.match(root.innerHTML,/Check marketplace/);
@@ -87,7 +87,7 @@ assert.match(app,/\$\$\("\.marketplace-operation-inspect"\)\.forEach/,
 assert.match(root.innerHTML, /<summary>Details<\/summary>/);
 assert.doesNotMatch(root.innerHTML, /Try sending photos again/);
 assert.match(root.innerHTML, /marketplace-activity-filter/);
-assert.match(root.innerHTML, /Check the result on the marketplace/);
+assert.match(root.innerHTML, /Inspect the remote listing/);
 assert.match(root.innerHTML, /data-id="2"/);
 assert.doesNotMatch(root.innerHTML, /data-id="1"/);
 assert.doesNotMatch(root.innerHTML, /data-id="3"/);
