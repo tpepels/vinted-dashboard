@@ -1,0 +1,28 @@
+name: Prune exact merged PR branches
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/cleanup_merged_branches.py
+      - .github/workflows/cleanup-merged-branches.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Verify branch selection invariants
+        run: python -m unittest discover -s tests -p 'test_branch_cleanup.py'
+      - name: Delete exact merged PR heads, retaining all ambiguous branches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/cleanup_merged_branches.py --execute --max-delete 115

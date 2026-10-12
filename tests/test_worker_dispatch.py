@@ -81,6 +81,7 @@ def test_worker_biblio_handler_preserves_target_and_photo_modes(monkeypatch):
         "workspace_id": workspace_id,
         "listing_id": listing_id,
         "full_sync": False,
+        "force_inventory": False,
         "force_photos": True,
         "photos_only": True,
         "failed_photos_only": False,

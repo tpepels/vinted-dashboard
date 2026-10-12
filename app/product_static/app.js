@@ -5971,7 +5971,11 @@ function renderBiblioDashboardPostings(rows) {
         + '<span>Book ID ' + esc(item.book_id)
         + ' · ' + (removed ? 'Removed from dashboard' : 'In dashboard') + '</span>'
         + '<small>Source photos: ' + Number(item.photo_count || 0)
-        + ' · Last FTP photo state: ' + esc(item.photo_state || "Not sent") + '</small></div>'
+        + ' · Last FTP photo state: ' + esc(item.photo_state || "Not sent") + '</small>'
+        + (item.remote_missing ? '<small>BIBLIO seller export: book missing on last authoritative check.</small>' : '')
+        + '</div>'
+        + (!removed && item.remote_missing ? '<button class="btn biblio-resend-book" type="button" data-book="' + esc(item.book_id)
+          + '">Resend book details…</button>' : '')
         + '<button class="btn ' + (removed ? 'primary ' : 'danger ')
         + 'biblio-posting-action" type="button" data-item="' + esc(item.inventory_item_id)
         + '" data-book="' + esc(item.book_id) + '" data-action="'
@@ -5979,7 +5983,26 @@ function renderBiblioDashboardPostings(rows) {
         + (removed ? 'Review & re-add…' : 'Remove from dashboard…') + '</button></article>';
     }).join("") || '<p class="muted">No matching BIBLIO postings in this dashboard.</p>')
     + '</div>';
-  $$(".biblio-posting-action").forEach(button => {
+  $(".biblio-resend-book").forEach(button => {
+    button.onclick = async () => {
+      const bookId = button.dataset.book;
+      if (!window.confirm("Resend the inventory details for Book ID " + bookId + "? "
+        + "No photographs or other books will be reuploaded. "
+        + "First check BIBLIO Upload History and its upload filter; this action cannot confirm publication.")) return;
+      button.disabled = true;
+      try {
+        const result = await api("/api/app/connectors/biblio/retry-listing-inventory", {
+          method:"POST", body:JSON.stringify({book_id:bookId}),
+        });
+        flash(result.already_queued ? "That book is already queued." :
+          "One BIBLIO inventory record queued. Check BIBLIO Upload History before retrying again.");
+        await connections();
+      } catch (error) {
+        flash("Could not queue inventory retry: " + error.message, true);
+      } finally { button.disabled = false; }
+    };
+  });
+  $(".biblio-posting-action").forEach(button => {
     button.onclick = async () => {
       if (button.dataset.action === "readd") {
         await selectView("inventory");
@@ -6132,6 +6155,9 @@ async function connections() {
             + '<button class="btn primary configure" data-c="biblio" type="button">Connect BIBLIO</button></div>')
         + renderBiblioActivity(biblioActivity, ready)
         + '<details class="connection-technical-help connector-account-help"><summary>Account and photo setup</summary>'
+        + '<p>Before the first upload, check BIBLIOdirect → Inventory → Upload Settings: '
+        + 'the seller-side import filter must match the selected file format. '
+        + 'Successful FTP transfer does not prove the book is live.</p>'
         + '<p>Photos use the BIBLIO filename pattern BookID.jpg, BookID_1.jpg, BookID_2.jpg. '
         + 'Your seller account must support this pattern for multiple photos to appear. '
         + '<a href="https://help.biblio.com/en/support/solutions/articles/70000339419" target="_blank" rel="noopener noreferrer">BIBLIO photo setup guide</a>.</p>'
