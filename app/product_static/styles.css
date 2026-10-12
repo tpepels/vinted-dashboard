@@ -2125,3 +2125,23 @@ main > header .eyebrow{color:#436e65}
   font-size:19px;margin:0
 }
 #connector-detail #connector-activity-panel>.connector-task-page-heading p{display:none}
+
+/* Put the linked BIBLIO book name immediately beneath the operation heading. */
+:is(#connections,#connector-detail) .marketplace-activity-book{
+  margin:5px 0 0;font-size:14px;font-weight:650;line-height:1.45;
+  color:var(--ink);overflow-wrap:anywhere
+}
+:is(#connections,#connector-detail) .marketplace-activity-book+.marketplace-activity-description{
+  margin-top:8px
+}
+/* Completion should be unmistakable, without another advanced-control panel. */
+#connector-detail #biblio-photo-done-step{
+  max-width:640px;padding:12px 0 8px
+}
+#connector-detail #biblio-photo-done-step h3{font-size:22px;margin:8px 0 10px}
+#connector-detail #biblio-photo-done-step p{
+  font-size:14px;line-height:1.6;color:var(--muted);margin:8px 0
+}
+#connector-detail #biblio-photo-done-step .biblio-wizard-actions{
+  margin-top:22px
+}
