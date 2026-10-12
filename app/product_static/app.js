@@ -5974,7 +5974,7 @@ function renderBiblioDashboardPostings(rows) {
         + ' · Last FTP photo state: ' + esc(item.photo_state || "Not sent") + '</small>'
         + (item.remote_missing ? '<small>BIBLIO seller export: book missing on last authoritative check.</small>' : '')
         + '</div>'
-        + (!removed ? '<button class="btn biblio-resend-book" type="button" data-book="' + esc(item.book_id)
+        + (!removed && item.remote_missing ? '<button class="btn biblio-resend-book" type="button" data-book="' + esc(item.book_id)
           + '">Resend book details…</button>' : '')
         + '<button class="btn ' + (removed ? 'primary ' : 'danger ')
         + 'biblio-posting-action" type="button" data-item="' + esc(item.inventory_item_id)
