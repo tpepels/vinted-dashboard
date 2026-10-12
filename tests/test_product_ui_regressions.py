@@ -158,7 +158,7 @@ def test_general_marketplace_integrations_are_exposed_in_product_ui():
     assert "Private Depop Selling API" in APP_JS
     assert '<span class="nav-label">Work</span>' in html
     assert '<span class="nav-label">Operations</span>' in html
-    assert 'id="today-focus-title"' in html
+    assert 'id="today-work-count"' in html
     assert 'id="today-source-status"' in html
     assert 'id="inventory-reset"' in html
     assert 'id="sales-reset"' in html
@@ -530,7 +530,7 @@ def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert "Other troubleshooting" in APP_JS
     assert "Resend all photos" in APP_JS
     assert "Resend all listings" in APP_JS
-    assert "Prepared does not mean published" in APP_JS
+    assert "Check BIBLIO after sending to confirm the books appear" in APP_JS
     assert '"/api/app/connectors/biblio/retry-photos"' in APP_JS
     assert '"/api/app/connectors/biblio/full-sync"' in APP_JS
     assert "photos sent " in APP_JS
