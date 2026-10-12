@@ -73,31 +73,34 @@ context.renderMarketplaceOperations({
     },
   ],
 });
-assert.match(root.innerHTML, /Sent; not verified on marketplace/);
+assert.match(root.innerHTML, /Check needed/);
 assert.match(root.innerHTML, /marketplace-activity-row/);
 assert.match(root.innerHTML, /Inspect book photos/);
-assert.match(root.innerHTML, /Check file receipts first/);
-assert.match(root.innerHTML, /Retry read-only import/);
-assert.match(root.innerHTML,/Check live result \(read only\)/);
+assert.match(root.innerHTML, /Photos were sent, but we cannot tell/);
+assert.match(root.innerHTML, /Try import again/);
+assert.match(root.innerHTML,/Check marketplace/);
 assert.match(root.innerHTML,/marketplace-operation-inspect/);
 assert.match(app,/\$\$\("\.item-marketplace-inspect"\)\.forEach/,
   "Per-item remote inspections must use collection binding");
 assert.match(app,/\$\$\("\.marketplace-operation-inspect"\)\.forEach/,
   "Activity remote inspections must bind all action buttons");
-assert.match(root.innerHTML, /Technical transfer details/);
+assert.match(root.innerHTML, /<summary>Details<\/summary>/);
 assert.doesNotMatch(root.innerHTML, /Try sending photos again/);
 assert.match(root.innerHTML, /marketplace-activity-filter/);
-assert.match(root.innerHTML, /Inspect the remote listing/);
+assert.match(root.innerHTML, /Check the result on the marketplace/);
 assert.match(root.innerHTML, /data-id="2"/);
 assert.doesNotMatch(root.innerHTML, /data-id="1"/);
 assert.doesNotMatch(root.innerHTML, /data-id="3"/);
-assert.match(root.innerHTML, /Needs review/);
-assert.equal(typeof filter.onchange, "function");
-filter.value="review";
-filter.onchange();
-assert.equal(context.state.marketplaceActivityFilter, "review");
-assert.match(root.innerHTML, /Inspect book photos/);
+assert.match(root.innerHTML, /Needs attention \(4\)/);
+assert.match(root.innerHTML, /data-filter="review"/);
+assert.match(root.innerHTML, /aria-pressed="true"/);
+context.state.marketplaceActivityFilter = "all";
+context.renderMarketplaceOperations({operations:[
+  {id:"done",channel:"biblio",type:"sync",target:"all",
+   status:"succeeded",verification:"no_remote_changes",result:{},created_at:"2026-10-10"},
+]});
+assert.match(root.innerHTML, /Nothing needed updating/);
 
 context.renderMarketplaceOperations({operations:[]});
-assert.match(root.innerHTML, /No marketplace activity yet/);
+assert.match(root.innerHTML, /No activity recorded/);
 console.log("Marketplace operation activity UI smoke test passed");
