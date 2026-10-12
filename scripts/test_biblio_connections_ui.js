@@ -51,10 +51,7 @@ const data = {
   runs: [],
 };
 const html = ctx.renderBiblioActivity(data, true);
-assert.match(html, /105<\/strong> books prepared/);
-assert.match(html, /3<\/strong> changes waiting/);
-assert.match(html, /4<\/strong> books need photo review/);
-assert.match(html, /Some photos could not be sent/);
+assert.doesNotMatch(html, /biblio-status-overview|books prepared|changes waiting/);
 assert.match(html, /Check a book’s photos/);
 assert.match(html, /Choose a BIBLIO book/);
 assert.match(html, /biblio-photo-book-select/);
@@ -75,10 +72,10 @@ assert.match(html, /Past BIBLIO uploads/);
 assert.match(html, /Other troubleshooting/);
 assert.match(html, /Resend all listings/);
 assert.doesNotMatch(html, /class="biblio-task-panel biblio-recovery-panel" open/);
-assert.match(html, /Prepared does not mean published/);
+assert.match(html, /Past BIBLIO uploads/);
 
 const empty = ctx.renderBiblioActivity(null, false);
-assert.match(empty, /counts are temporarily unavailable/);
+assert.doesNotMatch(empty, /biblio-status-overview/);
 assert.doesNotMatch(empty, /biblio-retry-photos/);
 assert.doesNotMatch(empty, /biblio-full-sync/);
 const safePhoto = ctx.biblioPhotoInspectionHtml();
