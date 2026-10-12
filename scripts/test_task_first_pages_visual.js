@@ -18,9 +18,13 @@ const chrome = process.env.CHROME_BIN || execFileSync(
 const fixture=[
   'const $=selector=>document.querySelector(selector);',
   'const $$=selector=>Array.from(document.querySelectorAll(selector));',
+  'const state={view:"today",biblioDashboardPostings:null,biblioPhotoExpanded:false};',
+  'function currentConnectorPage(){return null;}',
+  'function refreshMarketplaceOperations(){return Promise.resolve();}',
+  'function loadBiblioDashboardPostings(){return Promise.resolve();}',
   '// Production moves these single-instance panels to the connector page.',
   '$("#connector-page-settings").appendChild($("#connector-config"));',
-  '$("#connector-page-biblio").appendChild($("#biblio-compare-panel"));',
+  '$("#connector-page-biblio-compare").appendChild($("#biblio-compare-panel"));',
   '$("#connector-page-vinted").appendChild($("#paired-browsers-panel"));'
 ].join("\n");
 const assertions=[
@@ -31,9 +35,10 @@ const assertions=[
   ' reconcile:["suggestions","manual","sales","history"],listings:["browse","insights"],',
   ' sales:["orders","costs"],analytics:["overview","demand","detail"],',
   ' imports:["import","export"],connections:["marketplaces","activity"],',
-  ' connector:["overview","photos","listings","account","activity"],settings:["account","support","advanced"]};',
+  ' connector:["overview","photos","listings","account","activity"],',
+  ' "biblio-listings":["books","compare"],settings:["account","support","advanced"]};',
   'for(const [group,labels] of Object.entries(groups)){',
-  ' const section=$("#"+(group==="connector"?"connector-detail":group));',
+  ' const section=$("#"+(["connector","biblio-listings"].includes(group)?"connector-detail":group));',
   ' section.classList.add("active");',
   ' const bar=$("[data-workspace-tabs="+group+"]");',
   ' if(!bar)throw Error(group+": no navigation");',
@@ -74,8 +79,8 @@ const assertions=[
   'filter.value="";updateOptionalFilterSummaries();',
   'if($("#listing-more-filters summary").textContent.includes("active"))',
   ' throw Error("Reset advanced filter still shows an active count");',
-  'if($("#settings-support-panel").open||$("#settings .dashboard-danger-details").open)',
-  ' throw Error("Sensitive settings must be collapsed initially");',
+  'if(!$("#settings-support-panel").open||$("#settings .dashboard-danger-details").open)',
+  ' throw Error("Support is visible on its own tab; deletion stays gated");',
   'const ids=[...document.querySelectorAll("[id]")].map(e=>e.id);',
   'if(new Set(ids).size!==ids.length)throw Error("Duplicate ids");',
   'for(const [control,parent] of [["#inventory-table","#inventory-items-panel"],',
@@ -83,7 +88,8 @@ const assertions=[
   ' ["#listing-stat-oldest","#listings-insights-panel"],',
   ' ["#purchase-cost-card","#sales-costs-panel"],',
   ' ["#connector-config","#connector-page-settings"],',
-  ' ["#biblio-dashboard-postings-panel","#connector-listings-panel"],',
+  ' ["#biblio-dashboard-postings-panel","#biblio-listings-books-panel"],',
+  ' ["#biblio-compare-panel","#biblio-listings-compare-panel"],',
   ' ["#connector-page-photos","#connector-photos-panel"]]){',
   ' if(!$(parent).contains($(control)))throw Error(control+" not in "+parent);',
   '}',
@@ -124,7 +130,7 @@ for(const width of [360,768,1280]) {
   if(!found)console.error("Page tail:",dom.slice(-1200));
   assert(found,"Task tab assertions did not finish at "+width);
   const result=JSON.parse(decodeURIComponent(found[1]));
-  assert.equal(result.tabs,27);
+  assert.equal(result.tabs,29);
   execFileSync(chrome,[...flags,"--screenshot="+png,"file://"+filepath],
     {encoding:"utf8",timeout:30000});
   assert(fs.statSync(png).size>2000,"Chromium screenshot should be non-empty");
