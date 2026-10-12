@@ -16,6 +16,8 @@ from sqlalchemy import select
 from app import db
 from app.product_models import BackgroundJob
 
+BIBLIO_PAUSE_MARKER = "_biblio_upload_pause_deferred"
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -59,7 +61,11 @@ def enqueue_unique(
             )
         ).scalars().all()
         for row in existing:
-            if dict(row.payload or {}) == normalized_payload:
+            # A paused job still represents the same operation; its internal
+            # pause marker must not cause duplicate auto-sync jobs.
+            candidate = {key: value for key, value in dict(row.payload or {}).items()
+                         if key != BIBLIO_PAUSE_MARKER}
+            if candidate == normalized_payload:
                 return row.id
         job = BackgroundJob(
             workspace_id=workspace_id,
@@ -113,6 +119,43 @@ def defer_without_attempt(job_id: str, until: datetime) -> None:
         job.available_at = until
         job.locked_at = None
         job.attempts = max(0, int(job.attempts or 0) - 1)
+        job.payload = {**dict(job.payload or {}), BIBLIO_PAUSE_MARKER: True}
+
+
+def release_paused_biblio_jobs(workspace_id: uuid.UUID) -> int:
+    """Make only pause-deferred BIBLIO jobs available when resuming early.
+
+    Preserve photo retry delays for jobs not postponed by the pause.
+    """
+    released = 0
+    with db.session_scope() as session:
+        pending = session.execute(
+            select(BackgroundJob).where(
+                BackgroundJob.workspace_id == workspace_id,
+                BackgroundJob.job_type == "biblio_sync",
+                BackgroundJob.status == "queued",
+            )
+        ).scalars().all()
+        now = utcnow()
+        for row in pending:
+            payload = dict(row.payload or {})
+            if not payload.pop(BIBLIO_PAUSE_MARKER, False):
+                continue
+            row.payload = payload
+            row.available_at = now
+            released += 1
+    return released
+
+
+def clear_biblio_pause_marker(job_id: str) -> None:
+    """Remove the internal marker once a deferred job is ready to run."""
+    with db.session_scope() as session:
+        job = session.get(BackgroundJob, uuid.UUID(job_id))
+        if job is None:
+            return
+        payload = dict(job.payload or {})
+        if payload.pop(BIBLIO_PAUSE_MARKER, False):
+            job.payload = payload
 
 
 def complete(job_id: str) -> None:
