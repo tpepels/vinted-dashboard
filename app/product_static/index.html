@@ -397,8 +397,8 @@
       <section id="reconcile" class="view">
         <p class="dashboard-page-intro">Choose what you need to match. Nothing is merged without confirmation.</p>
         <div class="dashboard-tabbar" role="tablist" aria-label="Stock reconciliation tasks" data-workspace-tabs="reconcile">
-          <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="reconcile-suggestions-panel" data-workspace-tab="suggestions">Suggested matches</button>
-          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="reconcile-manual-panel" data-workspace-tab="manual">Link a listing</button>
+          <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="reconcile-suggestions-panel" data-workspace-tab="suggestions">Possible matches</button>
+          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="reconcile-manual-panel" data-workspace-tab="manual">Match a listing</button>
           <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="reconcile-sales-panel" data-workspace-tab="sales">Match a sale</button>
           <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="reconcile-history-panel" data-workspace-tab="history">Past changes</button>
         </div>
@@ -408,7 +408,7 @@
             <div><p class="eyebrow">PHYSICAL STOCK</p><h2>Check possible stock matches</h2></div>
             <span id="reconcile-summary" class="muted"></span>
           </div>
-          <p class="muted">Cross-marketplace stock merges stay explicit because two physical copies can share the same title or ISBN. Sale-to-stock linkage is different: exact item IDs and unique exact-title matches are linked automatically.</p>
+          <p class="muted">Two copies can share a title or ISBN. Check each suggestion before merging stock.</p>
           <div class="actions reconcile-actions">
             <button id="reconcile-refresh" class="btn" type="button">Refresh matches</button>
             <button id="reconcile-select-high" class="btn" type="button">Select likely matches</button>
@@ -420,7 +420,7 @@
         <div id="reconcile-manual-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="reconcile:manual">
         <div class="card form">
           <div class="card-head inline-head"><div><p class="eyebrow">MANUAL</p><h2>Match a listing to stock</h2></div></div>
-          <p class="muted">Choose a marketplace listing and the physical inventory item it belongs to. If the listing already has its own generated stock record, that record is explicitly merged into the selected master item.</p>
+          <p class="muted">Choose a listing and the stock item it belongs to. Confirm before combining separate stock records.</p>
           <div class="form-grid">
             <label>Marketplace listing<select id="reconcile-listing"></select></label>
             <label>Master inventory item<select id="reconcile-item"></select></label>
