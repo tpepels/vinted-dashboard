@@ -5696,103 +5696,119 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
   const root = $(rootSelector);
   if (!root) return;
   const scoped = rootSelector === "#connector-operations-list";
-  const filterId = scoped ? "connector-activity-filter" : "marketplace-activity-filter";
   const filterKey = scoped ? "connectorActivityFilter" : "marketplaceActivityFilter";
   const operations = data?.operations || [];
-  if (!operations.length) {
-    root.innerHTML = '<p class="muted">No marketplace activity yet. Imports, uploads and their results will appear here.</p>';
-    return;
-  }
   const needsReview = op => ["failed", "attention", "needs_verification"].includes(op.status);
   const openCount = operations.filter(needsReview).length;
   const workingCount = operations.filter(op => ["queued", "running"].includes(op.status)).length;
-  // The filter survives an activity refresh, avoiding jarring jumps.
-  const selectedFilter = state[filterKey] || "all";
+  const selectedFilter = state[filterKey] || (openCount ? "review" : "all");
   const statuses = {
-    queued:"Waiting to start", running:"In progress",
-    succeeded:"Finished", needs_verification:"Sent; not verified on marketplace",
-    failed:"Could not complete", attention:"Needs review", cancelled:"Cancelled",
+    queued:"Waiting", running:"Sending", succeeded:"Finished",
+    needs_verification:"Check needed", failed:"Failed",
+    attention:"Check needed", cancelled:"Cancelled",
   };
-  const verificationLabels = {
-    manual_required:"Remote result needs checking",
-    snapshot_imported:"Data imported into dashboard; publication not checked",
-    no_remote_changes:"No changed records sent",
-    not_checked:"Remote result not independently checked",
-    remote_verified:"Result checked on marketplace",
-    remote_mismatch:"Current state differs; the old request is still uncertain",
-  };
-  const priority = op => needsReview(op) ? 0 : ["queued","running"].includes(op.status) ? 1 : 2;
-  const sorted = operations.slice().sort((a,b) =>
-    priority(a)-priority(b) || String(b.created_at || "").localeCompare(String(a.created_at || "")));
-  const visible = sorted.filter(op => selectedFilter === "all"
-    || selectedFilter === "review" && needsReview(op)
-    || selectedFilter === "working" && ["queued", "running"].includes(op.status));
+  const priority = op => needsReview(op) ? 0 : ["queued", "running"].includes(op.status) ? 1 : 2;
+  const visible = operations.slice().sort((a,b) => priority(a)-priority(b)
+    || String(b.created_at || "").localeCompare(String(a.created_at || "")))
+    .filter(op => selectedFilter === "all" || needsReview(op));
   const actionLabel = op => op.type === "sync"
-    ? op.channel === "biblio" ? "Send listing changes" : "Import listings and orders"
-    : ({publish:"Add listing",update:"Update listing",photos:"Send photos",
+    ? op.channel === "biblio" ? "Listing update" : "Import"
+    : ({publish:"Publish listing",update:"Update listing",photos:"Photos",
       close:"Close sold listing",verify:"Check listing"}[op.type] || op.type);
-  const items = visible.map(op => {
+  const cards = visible.map(op => {
     const nextStep = op.next_step || null;
+    const photoJob = op.channel === "biblio" && op.type === "photos";
+    const failed = op.status === "failed";
+    const attention = needsReview(op);
     const lastInspection = op.result?.inspection;
-    const inspectionText = lastInspection?.checked_at
-      ? '<p class="marketplace-activity-verification">Last live comparison: '
-        + esc(lastInspection.outcome === "matched" ? "Requested state found" :
-          lastInspection.outcome === "different" ? "Current state differs" :
-          "Still requires review")
-        + ' · ' + esc(when(lastInspection.checked_at)) + '</p>' : "";
-    const statusTone = op.status === "failed" ? "danger"
-      : needsReview(op) ? "warning"
-      : ["queued","running"].includes(op.status) ? "info"
-      : op.status === "succeeded" && op.verification === "remote_verified" ? "success"
-      : "neutral";
-    const targetLabel = op.target === "all" ? "All linked listings"
+    const statusTone = failed ? "danger" : attention ? "warning"
+      : ["queued","running"].includes(op.status) ? "info" : "neutral";
+    const targetLabel = op.target === "all" ? "All listings"
       : /^[0-9a-f-]{36}$/i.test(String(op.target || "")) ? "One listing"
       : op.target || "One listing";
-    const result = Object.entries(op.result || {}).filter(([key])=>key!=="inspection").slice(0,8)
-      .map(([key,value]) => esc(key.replaceAll("_"," ") + ": " + String(value))).join(" · ");
-    const inspect = op.can_inspect_remote && nextStep?.kind === "inspect_remote"
-      ? '<button class="btn marketplace-operation-inspect" type="button" data-id="'
-        + esc(op.id) + '">Check live result (read only)</button>' : "";
+    // Lead with a single explanation and an action, not several backend states.
+    let explanation = "";
+    if (photoJob && attention) {
+      explanation = failed
+        ? "The photo upload failed. Check the connection and which pictures are missing before sending anything again."
+        : "Photos were sent, but we cannot tell whether BIBLIO displays them. Check the book before resending.";
+    } else if (op.status === "needs_verification" || op.status === "attention") {
+      explanation = op.can_inspect_remote
+        ? "We could not confirm the change. Check the marketplace without sending it again."
+        : (nextStep?.detail || "Check the result on the marketplace before trying again.");
+    } else if (failed) {
+      explanation = nextStep?.kind === "retry_import"
+        ? "The import failed. You can try reading the marketplace again."
+        : "This action did not finish. Check the details before trying again.";
+    } else if (op.status === "succeeded") {
+      explanation = op.verification === "no_remote_changes"
+        ? "Nothing needed updating."
+        : op.verification === "remote_verified" ? "Checked on the marketplace."
+        : op.channel === "biblio"
+          ? "Files sent. Check BIBLIO to confirm the changes appear."
+          : "Finished.";
+    } else {
+      explanation = op.status === "queued" ? "Waiting to start." : "Working on it.";
+    }
+    const recoveryLabel = nextStep?.kind === "biblio_photos" ? "Check book photos"
+      : nextStep?.kind === "biblio_compare" ? "Compare BIBLIO listings"
+      : nextStep?.kind === "inspect_item" ? "Open listing"
+      : nextStep?.label || "Review";
     const recovery = nextStep && ["biblio_photos","biblio_compare","inspect_item"].includes(nextStep.kind)
-      ? '<button class="btn marketplace-operation-next" type="button" data-kind="'
+      ? '<button class="btn primary marketplace-operation-next" type="button" data-kind="'
         + esc(nextStep.kind) + '" data-item="' + esc(op.inventory_item_id || "") + '">'
-        + esc(nextStep.label) + '</button>' : "";
+        + esc(recoveryLabel) + '</button>' : "";
+    const inspect = op.can_inspect_remote && nextStep?.kind === "inspect_remote"
+      ? '<button class="btn primary marketplace-operation-inspect" type="button" data-id="'
+        + esc(op.id) + '">Check marketplace</button>' : "";
     const retry = op.can_retry && nextStep?.kind === "retry_import"
-      ? '<button class="btn marketplace-operation-retry" type="button" data-id="'
-        + esc(op.id) + '">Retry read-only import…</button>' : "";
+      ? '<button class="btn primary marketplace-operation-retry" type="button" data-id="'
+        + esc(op.id) + '">Try import again</button>' : "";
+    const technicalFields = Object.entries(op.result || {}).filter(([key])=>key!=="inspection").slice(0,8)
+      .map(([key,value])=>esc(key.replaceAll("_"," ") + ": " + String(value))).join(" · ");
+    const details = [
+      'Recorded ' + esc(when(op.created_at)),
+      'Listing: ' + esc(targetLabel),
+      'Status: ' + esc(op.status),
+      'Verification: ' + esc(op.verification || "not checked"),
+      op.error ? 'Error: ' + esc(op.error) : '',
+      lastInspection?.checked_at ? 'Last check: ' + esc(when(lastInspection.checked_at)) : '',
+      technicalFields,
+    ].filter(Boolean).map(value=>'<p>' + value + '</p>').join("");
     return '<article class="marketplace-activity-row">'
-      + '<div class="marketplace-activity-header"><div><strong>' + esc(op.channel.toUpperCase())
+      + '<div class="marketplace-activity-header"><strong>' + esc(op.channel.toUpperCase())
       + ' · ' + esc(actionLabel(op)) + '</strong>'
-      + '<p>' + esc(targetLabel) + ' · ' + esc(when(op.created_at)) + '</p></div>'
       + '<span class="operation-status operation-status-' + statusTone + '">'
-      + esc(statuses[op.status] || op.status) + '</span></div>'
-      + '<p class="marketplace-activity-verification">' + esc(verificationLabels[op.verification] || "Verification not recorded") + '</p>'
-      + inspectionText
-      + (op.error ? '<p class="marketplace-activity-error">' + esc(op.error) + '</p>' : "")
-      + (nextStep ? '<p class="marketplace-activity-next">' + esc(nextStep.detail) + '</p>' : "")
-      + (recovery || retry || inspect ? '<div class="actions marketplace-activity-actions">' + inspect + recovery + retry + '</div>' : "")
-      + (result ? '<details class="operation-technical"><summary>Technical transfer details</summary><p>'
-          + result + '</p></details>' : '')
+      + esc(statuses[op.status] || "Needs review") + '</span></div>'
+      + '<p class="marketplace-activity-description">' + esc(explanation) + '</p>'
+      + (recovery || inspect || retry
+          ? '<div class="marketplace-activity-actions">' + recovery + inspect + retry + '</div>' : '')
+      + '<details class="operation-technical"><summary>Details</summary>'
+      + '<div class="operation-technical-body">' + details + '</div></details>'
       + '</article>';
   }).join("");
+  const headline = openCount ? openCount + ' ' + (openCount === 1 ? 'item' : 'items') + ' to check'
+    : workingCount ? workingCount + ' in progress' : 'No items need checking';
+  const reviewButton = '<button type="button" class="btn marketplace-activity-filter-button'
+    + (selectedFilter === "review" ? ' active' : '') + '" data-filter="review" aria-pressed="'
+    + (selectedFilter === "review") + '">Needs attention (' + openCount + ')</button>';
+  const allButton = '<button type="button" class="btn marketplace-activity-filter-button'
+    + (selectedFilter === "all" ? ' active' : '') + '" data-filter="all" aria-pressed="'
+    + (selectedFilter === "all") + '">All activity (' + operations.length + ')</button>';
   root.innerHTML = '<div class="marketplace-activity-toolbar">'
-    + '<p><strong>' + openCount + '</strong> need review · <strong>' + workingCount
-    + '</strong> in progress · ' + operations.length + ' recent operations</p>'
-    + '<label for="' + filterId + '">Show <select id="' + filterId + '">'
-    + '<option value="all"' + (selectedFilter === "all" ? ' selected' : '') + '>All activity</option>'
-    + '<option value="review"' + (selectedFilter === "review" ? ' selected' : '')
-      + '>Needs review (' + openCount + ')</option>'
-    + '<option value="working"' + (selectedFilter === "working" ? ' selected' : '')
-      + '>In progress (' + workingCount + ')</option>'
-    + '</select></label></div>'
-    + '<div class="marketplace-activity-list" role="list">'
-    + (items || '<p class="muted">Nothing in this category. Choose All activity to see the history.</p>')
-    + '</div>';
-  const filter = $("#" + filterId);
-  if (filter) filter.onchange = () => {
-    state[filterKey] = filter.value;
-    renderMarketplaceOperations(data, rootSelector);
-  };
+    + '<strong class="marketplace-activity-count">' + headline + '</strong>'
+    + '<div class="marketplace-activity-filter" role="group" aria-label="Activity filter">'
+    + reviewButton + allButton + '</div></div>'
+    + '<div class="marketplace-activity-list">'
+    + (cards || '<p class="marketplace-activity-empty">'
+      + (selectedFilter === "review" ? "Nothing needs your attention." : "No activity recorded.")
+      + '</p>') + '</div>';
+  $$(".marketplace-activity-filter-button").forEach(button => {
+    button.onclick = () => {
+      state[filterKey] = button.dataset.filter;
+      renderMarketplaceOperations(data, rootSelector);
+    };
+  });
   $$(".marketplace-operation-inspect").forEach(button => {
     button.onclick = () => inspectUncertainMarketplaceOperation(button.dataset.id, button);
   });
@@ -5801,22 +5817,20 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
   });
   $$(".marketplace-operation-retry").forEach(button => {
     button.onclick = async () => {
-      if (!window.confirm("Retry this marketplace data import? This fetches listings and orders only. "
-        + "It does not publish, update stock or send photos.")) return;
+      if (!window.confirm("Try importing this marketplace's data again? This only reads listings and orders; it will not change stock or publish anything.")) return;
       button.disabled = true;
       try {
         await api("/api/app/marketplace-operations/" + encodeURIComponent(button.dataset.id)
           + "/retry", {method:"POST"});
-        flash("Read-only import queued. Check Recent marketplace activity for its result.");
+        flash("Import scheduled. Check Activity for the result.");
         await refreshMarketplaceOperations();
       } catch (error) {
-        flash("Import could not be retried: " + error.message, true);
+        flash("Couldn't start the import: " + error.message, true);
         button.disabled = false;
       }
     };
   });
 }
-
 async function refreshMarketplaceOperations() {
   const requestedView = state.view;
   const channel = currentConnectorPage();
