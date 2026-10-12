@@ -130,10 +130,10 @@ for(const width of [360,768,1280]) {
   if(!found)console.error("Page tail:",dom.slice(-1200));
   assert(found,"Task tab assertions did not finish at "+width);
   const result=JSON.parse(decodeURIComponent(found[1]));
-  assert.equal(result.tabs,29);
+  assert.equal(result.tabs,28);
   execFileSync(chrome,[...flags,"--screenshot="+png,"file://"+filepath],
     {encoding:"utf8",timeout:30000});
   assert(fs.statSync(png).size>2000,"Chromium screenshot should be non-empty");
   console.log("TASK_FIRST_PAGE_LAYOUT "+JSON.stringify(result));
 }
-console.log("Ten task-tab groups, consistent page palette and responsive layout: PASS");
+console.log("Nine task-tab groups, consistent page palette and responsive layout: PASS");
