@@ -1950,3 +1950,96 @@ main > header .eyebrow{color:#436e65}
     padding:14px
   }
 }
+
+/* Connector task pages: one heading, one navigation level, one primary action.
+   Preserve the layout palette without separate nested title cards. */
+.shell.connector-focused main>header{display:none}
+#connector-detail .connector-page-top{
+  align-items:center;gap:16px;margin-bottom:16px
+}
+#connector-detail .connector-page-title h2{
+  font-size:clamp(22px,2.3vw,28px);margin:0
+}
+#connector-detail .connector-page-title p{display:none}
+#connector-detail .connector-workflow-tabs{
+  background:transparent;border:0;border-bottom:1px solid var(--line);
+  border-radius:0;padding:0 0 8px;gap:6px;margin:0 0 22px;
+}
+#connector-detail .connector-workflow-tabs .dashboard-tab{
+  flex:1 1 125px;min-height:44px;border:1px solid transparent;
+  border-radius:8px;padding:10px 12px
+}
+#connector-detail .connector-workflow-tabs .dashboard-tab.active{
+  background:var(--layout-panel);border:1px solid var(--line);
+  box-shadow:inset 0 -2px 0 var(--layout-accent);color:var(--accent-strong)
+}
+#connector-detail #connector-listings-panel,
+#connector-detail #biblio-listings-compare-panel{
+  max-width:900px;margin:0 auto
+}
+#connector-listings-panel #biblio-dashboard-postings-panel,
+#biblio-listings-compare-panel #biblio-compare-panel{
+  width:100%;max-width:100%;margin:0;
+  border:1px solid var(--line);border-radius:13px;
+  background:var(--layout-panel);box-shadow:var(--shadow)
+}
+#biblio-listings-compare-panel #biblio-compare-panel>summary{display:none!important}
+#biblio-listings-compare-panel #biblio-compare-panel[open]>.connection-task-content{
+  padding:25px 28px 27px;min-width:0;line-height:1.5
+}
+#biblio-listings-compare-panel .connection-file-label{
+  display:block;color:var(--ink);font-size:15px;font-weight:700;
+  line-height:1.35;margin-bottom:9px
+}
+#biblio-listings-compare-panel input[type=file]{
+  display:block;width:100%;min-width:0;max-width:100%;
+  min-height:46px;border:1px solid var(--line);border-radius:9px
+}
+#biblio-listings-compare-panel .biblio-compare-actions{
+  display:flex;align-items:center;flex-wrap:wrap;gap:10px 17px;margin-top:16px
+}
+#biblio-listings-compare-panel .biblio-compare-actions>.btn{
+  min-height:44px;white-space:normal
+}
+#biblio-listings-compare-panel .biblio-compare-actions>span{
+  font-size:12px;line-height:1.4;color:var(--muted)
+}
+#biblio-listings-compare-panel #biblio-compare-result{
+  margin-top:20px;padding:17px 18px
+}
+#biblio-listings-compare-panel #biblio-compare-result.hidden,
+#biblio-listings-compare-panel #biblio-import-advanced.hidden{
+  display:none!important
+}
+#biblio-listings-compare-panel #biblio-import-advanced{
+  margin-top:20px;border-top:1px solid var(--line)
+}
+#biblio-listings-compare-panel #biblio-import-advanced>summary{
+  color:var(--muted);font-size:13px;padding:15px 0;
+  font-weight:650;cursor:pointer
+}
+#biblio-listings-compare-panel #biblio-import-advanced .checkline{
+  display:flex;align-items:flex-start;gap:9px;
+  margin:12px 0 16px;font-weight:500;font-size:13px;line-height:1.5
+}
+#biblio-listings-compare-panel #biblio-import-advanced .checkline input{
+  flex:0 0 auto;margin-top:3px
+}
+#connector-listings-panel #biblio-dashboard-postings-panel .biblio-postings-toolbar{
+  margin-top:0
+}
+@media(max-width:850px){
+  #connector-detail .connector-workflow-tabs .dashboard-tab{
+    flex:0 0 auto!important;min-width:110px
+  }
+}
+@media(max-width:600px){
+  #connector-detail .connector-page-top{gap:10px}
+  #connector-detail .connector-page-title{flex:1 1 100%;order:-1}
+  #connector-detail #biblio-listings-compare-panel #biblio-compare-panel[open]>.connection-task-content{
+    padding:18px 16px 20px
+  }
+  #biblio-listings-compare-panel .biblio-compare-actions>.btn{
+    width:100%
+  }
+}
