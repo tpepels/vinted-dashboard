@@ -1149,7 +1149,6 @@ async function today() {
         : "Add acquisition costs to calculate margin"
     );
 
-  renderTodayFocus(queue);
   renderTodaySourceStatus(connectorData.connectors || []);
   renderTodayWorkQueue(queue, Number(todayData.work_queue_count || queue.length));
 }
@@ -1178,26 +1177,6 @@ function todayPriorityBand(row) {
   return "opportunity";
 }
 
-function renderTodayFocus(rows) {
-  const queue = Array.isArray(rows) ? rows : [];
-  const urgent = queue.filter((row) => todayPriorityBand(row) === "urgent").length;
-  const attention = queue.filter((row) => todayPriorityBand(row) === "attention").length;
-  const opportunity = queue.filter((row) => todayPriorityBand(row) === "opportunity").length;
-  const first = queue[0];
-
-  if (!first) {
-    $("#today-focus-title").textContent = "Everything important is clear.";
-    $("#today-focus-detail").textContent = "No reseller task needs attention right now.";
-    return;
-  }
-
-  $("#today-focus-title").textContent = (urgent ? "Start with: " : "Next: ") + first.title;
-  const parts = [];
-  if (urgent) parts.push(urgent + " urgent");
-  if (attention) parts.push(attention + " follow-up");
-  if (opportunity) parts.push(opportunity + " optimization");
-  $("#today-focus-detail").textContent = parts.join(" · ") + " · highest-priority work is shown first";
-}
 
 function relativeTimestamp(value) {
   if (!value) return null;
@@ -1237,23 +1216,23 @@ function renderTodaySourceStatus(connectors) {
       const synced = relativeTimestamp(row.last_synced_at);
       const syncTime = row.last_synced_at ? new Date(row.last_synced_at).getTime() : null;
       const ageHours = Number.isFinite(syncTime) ? Math.max(0, (Date.now() - syncTime) / 3600000) : null;
-      let status = "ready";
+      let status = "No update yet";
       let dot = "warn";
       if (!row.operational) {
-        status = "attention";
+        status = "Check connection";
         dot = "error";
       } else if (ageHours != null && ageHours <= 24) {
-        status = "fresh";
+        status = "Updated today";
         dot = "ok";
       } else if (ageHours != null && ageHours <= 168) {
-        status = "stale";
-        dot = "warn";
+        status = "Updated this week";
+        dot = "ok";
       } else if (ageHours != null) {
-        status = "old";
-        dot = "error";
+        status = "Check last update";
+        dot = "warn";
       }
       const detail = row.operational
-        ? (synced ? "Last sync " + synced : "Connected - no sync recorded yet")
+        ? (synced ? "Last update " + synced : "Connected - no update yet")
         : (row.note || "Connection needs attention");
       return '<div class="source-row"><span class="source-dot ' + dot + '"></span>'
         + '<div class="source-copy"><strong>' + esc(row.display_name || row.channel)
@@ -1265,8 +1244,7 @@ function renderTodaySourceStatus(connectors) {
 
 function todayWorkRow(row) {
   return '<div class="work-row work-' + esc(row.kind || "general") + '">'
-    + '<div class="work-copy"><div class="work-heading"><span class="work-kind">'
-    + esc((row.kind || "task").replaceAll("_", " ")) + '</span><strong>' + esc(row.title)
+    + '<div class="work-copy"><div class="work-heading"><strong>' + esc(row.title)
     + '</strong></div><p>' + esc(row.detail || "") + '</p></div>'
     + '<div class="actions compact">' + todayWorkControls(row) + "</div></div>";
 }
@@ -1280,7 +1258,7 @@ function renderTodayWorkQueue(rows, total) {
 
   if (!queue.length) {
     $("#today-actions").innerHTML =
-      '<div class="today-clear"><strong>You are caught up.</strong><span>No reseller task needs attention right now.</span></div>';
+      '<p class="today-clear">No tasks need attention.</p>';
   } else {
     const definitions = [
       ["urgent", "Urgent"],
