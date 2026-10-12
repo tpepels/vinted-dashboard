@@ -80,13 +80,13 @@ const importFields = [
 const connectorSchemas = {
   biblio: {
     title: "BIBLIO",
-    help: "Enter the FTP credentials provided for your BIBLIO seller account. These settings let the dashboard send book information and photos. Saving them does not upload any listings. Technical connection and photo-format details are available below.",
+    help: "Enter your BIBLIO FTP credentials. BIBLIO uses FTPS or FTP, not SFTP. Both switches save immediately. Disabling uploads after Vinted updates does not cancel manual uploads or queued photo follow-ups.",
     fields: [
       ["username", "BIBLIO FTP username", "", "text"],
       ["password", "BIBLIO FTP password", "", "password"],
       ["filename_prefix", "File name prefix (optional)", "reseller-dashboard", "text"],
-      ["allow_plain_ftp", "Allow unencrypted FTP only if BIBLIO does not support encrypted FTPS (less secure)", "", "checkbox"],
-      ["auto_sync", "Automatically send changed BIBLIO listings after new Vinted updates", "", "checkbox"],
+      ["allow_plain_ftp", "Allow unencrypted FTP if secure FTPS fails (less secure - saves immediately)", "", "checkbox"],
+      ["auto_sync", "Automatically upload after Vinted updates (saves immediately)", "", "checkbox"],
     ],
   },
   ebay: {
@@ -6754,6 +6754,46 @@ function openConnectorConfig(channel, connector) {
     return '<label>' + esc(label) + '<input name="' + esc(name) + '" type="' + esc(type)
       + '" placeholder="' + esc(placeholder) + '" value="' + esc(value) + '"></label>';
   }).join("");
+  if (channel === "biblio") {
+    const toggles = Array.from(
+      $("#connector-fields").querySelectorAll('input[type="checkbox"]')
+    );
+    toggles.forEach((input) => {
+      input.onchange = async () => {
+        const wanted = input.checked;
+        const name = input.name;
+        const caption = name === "auto_sync"
+          ? "Automatic uploads after Vinted updates"
+          : "Unencrypted FTP fallback";
+        toggles.forEach((toggle) => { toggle.disabled = true; });
+        $("#connector-config-status").textContent = caption + ": saving...";
+        try {
+          const response = await api("/api/app/connectors/biblio/preferences", {
+            method: "PATCH",
+            body: JSON.stringify({ [name]: wanted }),
+          });
+          if (response[name] !== wanted) throw new Error("Server did not confirm this setting.");
+          const current = (state.connectors || []).find((row) => row.channel === "biblio");
+          if (current) {
+            current.saved_values = {
+              ...(current.saved_values || {}),
+              [name]: wanted ? "true" : "false",
+            };
+          }
+          $("#connector-config-status").textContent = caption + ": "
+            + (wanted ? "On" : "Off") + " - saved. Other connection fields require Save settings. "
+            + "Previously queued photo follow-ups may still run.";
+        } catch (error) {
+          input.checked = !wanted;
+          $("#connector-config-status").textContent = "Could not save "
+            + caption.toLowerCase() + ": " + error.message;
+          flash(error.message, true);
+        } finally {
+          toggles.forEach((toggle) => { toggle.disabled = false; });
+        }
+      };
+    });
+  }
   $("#biblio-tools").classList.toggle("hidden", channel !== "biblio");
   renderEtsyOAuthTools(connector);
   $("#test-connector").classList.toggle("hidden", !schema.test || !connector?.operational);

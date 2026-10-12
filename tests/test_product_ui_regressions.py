@@ -645,7 +645,8 @@ def test_biblio_safe_compare_first_workflow_is_separate_from_credentials():
     assert '["host", "FTP host"' not in APP_JS
     assert '"allow_plain_ftp"' in APP_JS
     assert '"auto_sync"' in APP_JS
-    assert "Automatically send changed BIBLIO listings after new Vinted updates" in APP_JS
+    assert "Automatically upload after Vinted updates (saves immediately)" in APP_JS
+    assert "/api/app/connectors/biblio/preferences" in APP_JS
     assert "Saving them does not upload any listings" in APP_JS
     assert 'id="biblio-compare-panel"' in html
     assert 'id="verify-biblio"' in html

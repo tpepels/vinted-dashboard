@@ -62,6 +62,7 @@ from app.constants import (
 from app.connectors.base import Capability, connector_catalog
 from app.connectors.hosted import (
     biblio_configured,
+    _workspace_or_env_biblio_values,
     biblio_pending_changes,
     biblio_photo_file_signature,
     _trusted_vinted_image_url,
@@ -5394,6 +5395,17 @@ def connectors(context: RequestContext = Depends(require_context)):
                     saved_values[key] = str(value)
         if channel == Channel.BIBLIO:
             saved_values["upload_profile"] = biblio_upload_profile(context.workspace.id)
+            # Show the effective switches even if credentials are from env.
+            if configured:
+                try:
+                    effective = _workspace_or_env_biblio_values(context.workspace.id)
+                    for key in ("auto_sync", "allow_plain_ftp"):
+                        saved_values[key] = (
+                            "true" if str(effective.get(key) or "").strip().lower()
+                            in {"1", "true", "yes", "on"} else "false"
+                        )
+                except RuntimeError:
+                    pass
 
         result.append(
             {
@@ -6026,6 +6038,53 @@ def enqueue_biblio_photo_retry(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "job_id": str(job_id), "operation_id": str(operation_id),
             "queued": True, "already_queued": not created}
+
+
+class BiblioPreferencesRequest(BaseModel):
+    auto_sync: bool | None = None
+    allow_plain_ftp: bool | None = None
+
+
+@router.patch("/api/app/connectors/biblio/preferences")
+def save_biblio_preferences(
+    payload: BiblioPreferencesRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Save BIBLIO switches without resetting remote connection health.
+
+    For a bootstrap installation, copy environment credentials into the
+    encrypted workspace store so an explicit off value overrides env defaults.
+    """
+    if payload.auto_sync is None and payload.allow_plain_ftp is None:
+        raise HTTPException(status_code=400, detail="Choose a BIBLIO setting to change")
+    try:
+        fallback = _workspace_or_env_biblio_values(context.workspace.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail="Set up BIBLIO credentials first") from exc
+    with db.session_scope() as session:
+        row = session.execute(select(ConnectorCredential).where(
+            ConnectorCredential.workspace_id == context.workspace.id,
+            ConnectorCredential.channel == Channel.BIBLIO,
+        )).scalar_one_or_none()
+        values = decrypt_json(row.encrypted_payload) if row else fallback
+        if payload.auto_sync is not None:
+            values["auto_sync"] = "true" if payload.auto_sync else "false"
+        if payload.allow_plain_ftp is not None:
+            values["allow_plain_ftp"] = "true" if payload.allow_plain_ftp else "false"
+        if row is None:
+            session.add(ConnectorCredential(
+                workspace_id=context.workspace.id,
+                channel=Channel.BIBLIO,
+                encrypted_payload=encrypt_json(values),
+            ))
+        else:
+            row.encrypted_payload = encrypt_json(values)
+    return {
+        "ok": True,
+        "auto_sync": str(values.get("auto_sync") or "").lower() in {"1", "true", "yes", "on"},
+        "allow_plain_ftp": str(values.get("allow_plain_ftp") or "").lower() in {"1", "true", "yes", "on"},
+        "note": "Automatic Vinted-triggered sync is separate from manual uploads and queued photo follow-ups.",
+    }
 
 
 @router.put("/api/app/connectors/{channel}/credentials")
