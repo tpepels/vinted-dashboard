@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 import re
 
@@ -519,6 +520,7 @@ def test_biblio_prefilled_fields_remain_editable_and_are_posted_as_reviewed_valu
 
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_biblio_connections_expose_plain_language_tasks_and_recovery_controls():
     assert 'api("/api/app/connectors/biblio/activity")' in APP_JS
     assert "function renderBiblioActivity(activity, operational)" in APP_JS
