@@ -78,12 +78,13 @@ jobs:
       - run: node scripts/test_bridge_popup_language.js
       - run: node scripts/test_vinted_page_age.js
       - run: node scripts/test_vinted_content_idempotent.js
+      - run: node scripts/test_vinted_bridge_message_recovery.js
       - run: node scripts/test_vinted_quiet_mode.js
       - run: node scripts/test_vinted_rate_safe_sync.js
       - run: alembic upgrade head
         env:
           DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
-      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.4.2 --output /tmp/chrome-bridge.zip
+      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.4.3 --output /tmp/chrome-bridge.zip
       - name: Build Docker image (retry registry throttling)
         run: |
           for attempt in 1 2 3; do
