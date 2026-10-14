@@ -36,7 +36,7 @@ jobs:
           COOKIE_SECURE: "true"
 
           DATABASE_URL: postgresql+psycopg2://user:pass@example.invalid/db
-          EXTENSION_LATEST_VERSION: 3.4.2
+          EXTENSION_LATEST_VERSION: 3.4.3
           BACKUP_PROVIDER: ci-managed-snapshot
           BACKUP_RESTORE_DRILL_AT: 2026-10-01
       - run: python -m pytest -q
