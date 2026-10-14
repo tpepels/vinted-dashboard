@@ -52,7 +52,7 @@ const state = {
   crossList: null,
   connectors: [],
   marketplaceDevelopment: null,
-  marketplaceSelected: "biblio",
+  marketplaceSelected: "vinted",
   barcodeStream: null,
   barcodeTimer: null,
   barcodeDetector: null,
@@ -860,7 +860,7 @@ $("#logout").onclick = async () => {
 };
 
 const connectorPageChannels = [
-  "vinted", "biblio", "ebay", "etsy", "woocommerce",
+  "vinted", "ebay", "etsy", "woocommerce",
   "shopify", "bigcommerce", "squarespace", "wix", "depop",
 ];
 const connectorPageViews = new Set(connectorPageChannels.map(channel => "connector-" + channel));
@@ -1526,8 +1526,8 @@ function itemContentComparisonMarkup(listing, comparison, currency) {
 
 function renderItemMarketplacePanel(data) {
   const item = data.item || {};
-  const listings = data.listings || [];
-  const operations = data.operations || [];
+  const listings = (data.listings || []).filter(row => row.channel !== "biblio");
+  const operations = (data.operations || []).filter(row => row.channel !== "biblio");
   const closing = (data.closure_actions || []).filter(action =>
     action.needs_reopen || ["attention", "error", "running", "queued"].includes(action.status));
   const comparison = data.content_comparison || null;
@@ -2125,7 +2125,8 @@ function renderCrossList(data) {
       : []),
   ].join("");
 
-  const destinations = Array.isArray(data.destinations) ? data.destinations : [];
+  const destinations = (Array.isArray(data.destinations) ? data.destinations : [])
+    .filter(destination => destination.channel !== "biblio");
   const groupOrder = ["ready", "attention", "listed", "unavailable"];
   const groups = groupOrder.map((group) => ({
     group,
@@ -4522,7 +4523,7 @@ async function reconcile() {
     api("/api/app/cross-channel-actions"),
   ]);
   state.inventoryItems = inventoryData.items || [];
-  state.listings = listingData.listings || [];
+  state.listings = (listingData.listings || []).filter(row => row.channel !== "biblio");
   renderReconciliation(data, crossData);
 }
 
@@ -4751,7 +4752,7 @@ function listingComparator(sort) {
 
 async function listings() {
   const data = await api("/api/app/listings");
-  state.listings = data.listings || [];
+  state.listings = (data.listings || []).filter(row => row.channel !== "biblio");
   renderListings();
   const pending = state.listings.filter(row =>
     row.channel === "biblio" && ["queued", "uploading"].includes(String(row.biblio_sync?.state || ""))
@@ -5542,7 +5543,7 @@ function marketplaceRuntimeDetails(market, definitions) {
 function renderMarketplaceDevelopment(definitions) {
   const root = $("#marketplace-development");
   if (!root) return;
-  const markets = definitions?.channels || [];
+  const markets = (definitions?.channels || []).filter(row => row.channel !== "biblio");
   if (!markets.length) {
     root.textContent = "No marketplace audit is available.";
     return;
@@ -5663,7 +5664,7 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
   if (!root) return;
   const scoped = rootSelector === "#connector-operations-list";
   const filterKey = scoped ? "connectorActivityFilter" : "marketplaceActivityFilter";
-  const operations = data?.operations || [];
+  const operations = (data?.operations || []).filter(op => op.channel !== "biblio");
   const needsReview = op => ["failed", "attention", "needs_verification"].includes(op.status);
   const openCount = operations.filter(needsReview).length;
   const workingCount = operations.filter(op => ["queued", "running"].includes(op.status)).length;
@@ -6109,13 +6110,13 @@ async function connections() {
     clearTimeout(state.biblioActivityTimer);
     state.biblioActivityTimer = null;
   }
-  const [data, devices, biblioActivity] = await Promise.all([
+  const [data, devices] = await Promise.all([
     api("/api/app/connectors"),
     api("/api/app/extension/devices"),
-    api("/api/app/connectors/biblio/activity").catch(() => null),
   ]);
+  const biblioActivity = null;
   if (state.view !== requestedView) return data;
-  state.connectors = data.connectors || [];
+  state.connectors = (data.connectors || []).filter(row => row.channel !== "biblio");
   state.biblioActivity = biblioActivity;
   // Activity is requested only when the user opens it, not on every
   // connection refresh. This keeps ordinary pages fast and quiet.
@@ -6143,9 +6144,9 @@ async function connections() {
     : "Choose a marketplace to get started.";
   const featured = state.connectors.filter(connector =>
     connectorPageChannels.includes(connector.channel)
-    && (connector.configured || connector.channel === "vinted" || connector.channel === "biblio")
+    && (connector.configured || connector.channel === "vinted")
   ).sort((a, b) => {
-    const priority = {vinted: 0, biblio: 1};
+    const priority = {vinted: 0};
     return (priority[a.channel] ?? 5) - (priority[b.channel] ?? 5);
   });
   const other = state.connectors.filter(connector =>
