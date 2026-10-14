@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta, timezone
 import uuid
 from types import SimpleNamespace
@@ -79,6 +81,7 @@ def test_workspace_ebay_sync_uses_encrypted_credentials(monkeypatch):
         assert listing.price_cents == 2450
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_workspace_biblio_sync_uploads_master_listing(monkeypatch):
     workspace_id = _workspace()
     with db.session_scope() as session:
