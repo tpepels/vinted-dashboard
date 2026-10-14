@@ -29,7 +29,7 @@ from app.connectors.workspace_sync import (
 
 
 ACTION_TYPE = "close_listing"
-REMOTE_CHANNELS = {Channel.EBAY, Channel.BIBLIO}
+REMOTE_CHANNELS = {Channel.EBAY}  # BIBLIO integration retired.
 OPEN_LISTING_STATUSES = {
     ListingStatus.ACTIVE,
     getattr(ListingStatus, "RESERVED", "reserved"),
