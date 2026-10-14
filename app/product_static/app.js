@@ -52,7 +52,7 @@ const state = {
   crossList: null,
   connectors: [],
   marketplaceDevelopment: null,
-  marketplaceSelected: "biblio",
+  marketplaceSelected: "vinted",
   barcodeStream: null,
   barcodeTimer: null,
   barcodeDetector: null,
@@ -860,7 +860,7 @@ $("#logout").onclick = async () => {
 };
 
 const connectorPageChannels = [
-  "vinted", "biblio", "ebay", "etsy", "woocommerce",
+  "vinted", "ebay", "etsy", "woocommerce",
   "shopify", "bigcommerce", "squarespace", "wix", "depop",
 ];
 const connectorPageViews = new Set(connectorPageChannels.map(channel => "connector-" + channel));
@@ -1127,7 +1127,9 @@ async function today() {
   const activeInventory = Number(analyticsData.active_inventory || 0);
   const pricedCount = Number(analyticsData.priced_inventory_count || 0);
   const marginCount = Number(analyticsData.margin_inventory_count || 0);
-  const queue = Array.isArray(todayData.work_queue) ? todayData.work_queue : [];
+  const queue = (Array.isArray(todayData.work_queue) ? todayData.work_queue : [])
+    .filter(row => row.channel !== "biblio" && row.view !== "connector-biblio"
+      && row.stock_action?.channel !== "biblio");
   state.todayQueue = queue;
 
   $("#today-metrics").innerHTML =
@@ -1150,8 +1152,8 @@ async function today() {
         : "Add acquisition costs to calculate margin"
     );
 
-  renderTodaySourceStatus(connectorData.connectors || []);
-  renderTodayWorkQueue(queue, Number(todayData.work_queue_count || queue.length));
+  renderTodaySourceStatus((connectorData.connectors || []).filter(row => row.channel !== "biblio"));
+  renderTodayWorkQueue(queue, queue.length);
 }
 
 function todayWorkControls(row) {
@@ -1195,7 +1197,7 @@ function relativeTimestamp(value) {
 
 function renderTodaySourceStatus(connectors) {
   const rows = (connectors || [])
-    .filter((row) => row.group !== "files" && row.channel !== "manual")
+    .filter((row) => row.group !== "files" && row.channel !== "manual" && row.channel !== "biblio")
     .filter((row) => row.configured || row.operational)
     .sort((a, b) => String(a.display_name || a.channel).localeCompare(String(b.display_name || b.channel)));
 
@@ -1526,10 +1528,11 @@ function itemContentComparisonMarkup(listing, comparison, currency) {
 
 function renderItemMarketplacePanel(data) {
   const item = data.item || {};
-  const listings = data.listings || [];
-  const operations = data.operations || [];
+  const listings = (data.listings || []).filter(row => row.channel !== "biblio");
+  const operations = (data.operations || []).filter(row => row.channel !== "biblio");
   const closing = (data.closure_actions || []).filter(action =>
-    action.needs_reopen || ["attention", "error", "running", "queued"].includes(action.status));
+    action.channel !== "biblio"
+    && (action.needs_reopen || ["attention", "error", "running", "queued"].includes(action.status)));
   const comparison = data.content_comparison || null;
   $("#item-marketplaces-title").textContent = "Marketplace listings · " + (item.title || "this item");
   const reviewCount = listings.filter(listing =>
@@ -1711,7 +1714,7 @@ function renderItemMarketplacePanel(data) {
     + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
     + '<p class="item-marketplace-footnote">Stock and price changes are separate, explicit actions. '
-    + 'WooCommerce regular prices, Shopify base prices and Wix actual prices change only when explicitly confirmed. Send BIBLIO changes from Connections.</p>';
+    + 'WooCommerce regular prices, Shopify base prices and Wix actual prices change only when explicitly confirmed.</p>';
   (contentRoot.querySelectorAll?.("details") || []).forEach(detail => {
     const channel = detail.closest(".item-marketplace-row")?.dataset.marketplace || "summary";
     if (expandedDetails.has(channel + ":" + (detail.className || "details"))) {
@@ -2125,7 +2128,8 @@ function renderCrossList(data) {
       : []),
   ].join("");
 
-  const destinations = Array.isArray(data.destinations) ? data.destinations : [];
+  const destinations = (Array.isArray(data.destinations) ? data.destinations : [])
+    .filter(destination => destination.channel !== "biblio");
   const groupOrder = ["ready", "attention", "listed", "unavailable"];
   const groups = groupOrder.map((group) => ({
     group,
@@ -4522,7 +4526,7 @@ async function reconcile() {
     api("/api/app/cross-channel-actions"),
   ]);
   state.inventoryItems = inventoryData.items || [];
-  state.listings = listingData.listings || [];
+  state.listings = (listingData.listings || []).filter(row => row.channel !== "biblio");
   renderReconciliation(data, crossData);
 }
 
@@ -4751,7 +4755,7 @@ function listingComparator(sort) {
 
 async function listings() {
   const data = await api("/api/app/listings");
-  state.listings = data.listings || [];
+  state.listings = (data.listings || []).filter(row => row.channel !== "biblio");
   renderListings();
   const pending = state.listings.filter(row =>
     row.channel === "biblio" && ["queued", "uploading"].includes(String(row.biblio_sync?.state || ""))
@@ -4809,7 +4813,7 @@ function renderListingStats(rows, duplicates) {
 
 function renderListings() {
   updateOptionalFilterSummaries();
-  const rows = (state.listings || []).map((row, _index) => ({ ...row, _index }));
+  const rows = (state.listings || []).filter(row => row.channel !== "biblio").map((row, _index) => ({ ...row, _index }));
   const query = $("#listing-search").value.trim().toLowerCase();
   const channel = $("#listing-channel").value;
   const status = $("#listing-status").value;
@@ -5542,7 +5546,7 @@ function marketplaceRuntimeDetails(market, definitions) {
 function renderMarketplaceDevelopment(definitions) {
   const root = $("#marketplace-development");
   if (!root) return;
-  const markets = definitions?.channels || [];
+  const markets = (definitions?.channels || []).filter(row => row.channel !== "biblio");
   if (!markets.length) {
     root.textContent = "No marketplace audit is available.";
     return;
@@ -5663,7 +5667,7 @@ function renderMarketplaceOperations(data, rootSelector = "#marketplace-operatio
   if (!root) return;
   const scoped = rootSelector === "#connector-operations-list";
   const filterKey = scoped ? "connectorActivityFilter" : "marketplaceActivityFilter";
-  const operations = data?.operations || [];
+  const operations = (data?.operations || []).filter(op => op.channel !== "biblio");
   const needsReview = op => ["failed", "attention", "needs_verification"].includes(op.status);
   const openCount = operations.filter(needsReview).length;
   const workingCount = operations.filter(op => ["queued", "running"].includes(op.status)).length;
@@ -6109,13 +6113,13 @@ async function connections() {
     clearTimeout(state.biblioActivityTimer);
     state.biblioActivityTimer = null;
   }
-  const [data, devices, biblioActivity] = await Promise.all([
+  const [data, devices] = await Promise.all([
     api("/api/app/connectors"),
     api("/api/app/extension/devices"),
-    api("/api/app/connectors/biblio/activity").catch(() => null),
   ]);
+  const biblioActivity = null;
   if (state.view !== requestedView) return data;
-  state.connectors = data.connectors || [];
+  state.connectors = (data.connectors || []).filter(row => row.channel !== "biblio");
   state.biblioActivity = biblioActivity;
   // Activity is requested only when the user opens it, not on every
   // connection refresh. This keeps ordinary pages fast and quiet.
@@ -6143,9 +6147,9 @@ async function connections() {
     : "Choose a marketplace to get started.";
   const featured = state.connectors.filter(connector =>
     connectorPageChannels.includes(connector.channel)
-    && (connector.configured || connector.channel === "vinted" || connector.channel === "biblio")
+    && (connector.configured || connector.channel === "vinted")
   ).sort((a, b) => {
-    const priority = {vinted: 0, biblio: 1};
+    const priority = {vinted: 0};
     return (priority[a.channel] ?? 5) - (priority[b.channel] ?? 5);
   });
   const other = state.connectors.filter(connector =>

@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -98,6 +99,7 @@ def test_extension_pairing_is_revocable_and_workspace_scoped():
     assert TestClient(entry.app).get("/api/extension/status", headers=auth).status_code == 401
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_vinted_browser_sync_queues_one_deduplicated_biblio_auto_sync(monkeypatch):
     monkeypatch.setattr("app.auth.rate_limiter.check", lambda *args, **kwargs: None)
     client = TestClient(entry.app)
@@ -182,6 +184,7 @@ def test_vinted_browser_sync_queues_one_deduplicated_biblio_auto_sync(monkeypatc
         assert dict(jobs[0].payload or {}) == {}
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_vinted_browser_sync_does_not_queue_biblio_when_auto_sync_disabled(monkeypatch):
     monkeypatch.setattr("app.auth.rate_limiter.check", lambda *args, **kwargs: None)
     client = TestClient(entry.app)

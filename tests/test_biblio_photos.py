@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import io
 import uuid
 
@@ -7,6 +9,8 @@ from PIL import Image
 
 from app.connectors import hosted
 
+
+pytestmark = pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 
 def _png_bytes(width: int = 640, height: int = 800) -> bytes:
     image = Image.new("RGB", (width, height), "white")

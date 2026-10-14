@@ -1,3 +1,4 @@
+import pytest
 """Timed BIBLIO pause and auto-sync-off regression tests."""
 
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,8 @@ from sqlalchemy import select
 from app import biblio_pause, db, entry, jobs, models, worker
 from app.product_models import BackgroundJob
 
+
+pytestmark = pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 
 def setup_client(email):
     client = TestClient(entry.app)

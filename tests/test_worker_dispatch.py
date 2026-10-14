@@ -27,8 +27,7 @@ def test_worker_noop_requires_no_workspace():
 
 
 def test_workspace_connector_jobs_require_workspace():
-    with pytest.raises(RuntimeError, match="biblio_sync requires a workspace"):
-        worker.handle({"job_type": "biblio_sync", "payload": {}})
+    assert worker.handle({"job_type": "biblio_sync", "payload": {}})["skipped"] is True
 
 
 def test_worker_dispatches_through_registered_handler(monkeypatch):

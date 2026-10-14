@@ -188,6 +188,8 @@ _JOB_HANDLERS = {
 
 def handle(job: dict) -> dict | None:
     job_type = str(job.get("job_type") or "")
+    if job_type == "biblio_sync":
+        return {"skipped": True, "reason": "BIBLIO integration removed"}
     handler = _JOB_HANDLERS.get(job_type)
     if handler is None:
         raise RuntimeError(f"Unknown background job type: {job_type}")
@@ -214,6 +216,19 @@ def _biblio_job_held_or_skipped(job: dict) -> bool:
     """
     if job.get("job_type") != "biblio_sync":
         return False
+    # Retired integration: drain historical queued uploads without contacting
+    # BIBLIO. Mark related operations terminal so nothing remains stuck.
+    jobs.complete(job["id"])
+    operation_id = (job.get("payload") or {}).get("operation_id")
+    if operation_id:
+        from app.marketplace_operations import fail_operation
+        fail_operation(
+            uuid.UUID(str(operation_id)),
+            "BIBLIO integration removed; queued transfer cancelled",
+            will_retry=False,
+        )
+    logger.info("cancelled retired BIBLIO job %s", job["id"])
+    return True
     from app.biblio_pause import biblio_paused_until
     from app.connectors.hosted import biblio_auto_sync_enabled
 
