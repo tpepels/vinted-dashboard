@@ -1529,7 +1529,8 @@ function renderItemMarketplacePanel(data) {
   const listings = (data.listings || []).filter(row => row.channel !== "biblio");
   const operations = (data.operations || []).filter(row => row.channel !== "biblio");
   const closing = (data.closure_actions || []).filter(action =>
-    action.needs_reopen || ["attention", "error", "running", "queued"].includes(action.status));
+    action.channel !== "biblio"
+    && (action.needs_reopen || ["attention", "error", "running", "queued"].includes(action.status)));
   const comparison = data.content_comparison || null;
   $("#item-marketplaces-title").textContent = "Marketplace listings · " + (item.title || "this item");
   const reviewCount = listings.filter(listing =>
@@ -1711,7 +1712,7 @@ function renderItemMarketplacePanel(data) {
     + '<p>Transfers may need marketplace confirmation.</p>'
     + (operationsMarkup || '<p>No operations recorded for this item yet.</p>') + '</details>'
     + '<p class="item-marketplace-footnote">Stock and price changes are separate, explicit actions. '
-    + 'WooCommerce regular prices, Shopify base prices and Wix actual prices change only when explicitly confirmed. Send BIBLIO changes from Connections.</p>';
+    + 'WooCommerce regular prices, Shopify base prices and Wix actual prices change only when explicitly confirmed.</p>';
   (contentRoot.querySelectorAll?.("details") || []).forEach(detail => {
     const channel = detail.closest(".item-marketplace-row")?.dataset.marketplace || "summary";
     if (expandedDetails.has(channel + ":" + (detail.className || "details"))) {
@@ -4810,7 +4811,7 @@ function renderListingStats(rows, duplicates) {
 
 function renderListings() {
   updateOptionalFilterSummaries();
-  const rows = (state.listings || []).map((row, _index) => ({ ...row, _index }));
+  const rows = (state.listings || []).filter(row => row.channel !== "biblio").map((row, _index) => ({ ...row, _index }));
   const query = $("#listing-search").value.trim().toLowerCase();
   const channel = $("#listing-channel").value;
   const status = $("#listing-status").value;
