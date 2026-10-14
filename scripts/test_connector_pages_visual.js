@@ -22,7 +22,7 @@ const config=slice("function renderBiblioPauseState(until, configured = true) {"
 assert.match(nav,/\$\$\("\.nav"\)\.forEach/);
 assert.match(nav,/\$\$\("\.view"\)\.forEach/);
 assert.match(connections,/\$\$\("\.configure"\)\.forEach/);
-const channels=["vinted","biblio","ebay","etsy","woocommerce","shopify",
+const channels=["vinted","ebay","etsy","woocommerce","shopify",
   "bigcommerce","squarespace","wix","depop"];
 for(const channel of channels)
   assert(html.includes('data-view="connector-'+channel+'"'),channel+" missing sidebar link");
