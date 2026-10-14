@@ -1,3 +1,4 @@
+import pytest
 """Phase 5: cross-market stock protection under multiple sales and refunds."""
 import uuid
 from datetime import datetime, timezone
@@ -44,6 +45,7 @@ def _stock():
         return workspace.id, item.id, sales[0].id, sales[1].id
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_refund_of_one_of_two_sales_cancels_another_sales_pending_close():
     workspace_id, item_id, first_id, second_id = _stock()
     with db.session_scope() as session:
@@ -120,6 +122,7 @@ def test_worker_checks_authoritative_stock_before_initiating_remote_close(monkey
         assert listing.status == ListingStatus.ACTIVE
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_completed_close_that_becomes_incorrect_is_flagged_for_manual_reopening(monkeypatch):
     workspace_id, item_id, first_id, second_id = _stock()
     with db.session_scope() as session:
