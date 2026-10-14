@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import uuid
@@ -95,6 +97,7 @@ def _sale(session, workspace_id, item, channel="vinted", status="sold"):
     return row
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_sale_queues_other_remote_channels_once_and_marks_physical_stock_sold():
     workspace_id = _workspace()
     with db.session_scope() as session:
@@ -283,6 +286,7 @@ def test_ebay_close_checks_active_inventory_before_enditem(monkeypatch):
     assert calls == []
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_biblio_close_uploads_only_one_delete_file(monkeypatch):
     workspace_id = _workspace()
     with db.session_scope() as session:
@@ -714,6 +718,7 @@ def test_auto_link_does_not_reuse_item_already_consumed_by_another_sale():
 
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_biblio_cross_channel_completion_commits_sold_state_and_signature_together(monkeypatch):
     workspace_id = _workspace()
     with db.session_scope() as session:
