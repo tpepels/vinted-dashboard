@@ -57,6 +57,7 @@ def test_workspace_connector_credentials_always_win_over_env(monkeypatch):
 
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_biblio_connection_prefers_verified_ftps_and_private_data_channel(monkeypatch):
     calls = []
 
@@ -124,6 +125,7 @@ def test_biblio_directory_is_locked_to_seller_root():
 
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_biblio_connection_refuses_plain_ftp_without_explicit_opt_in(monkeypatch):
     class FailingTLS:
         def __init__(self, *args, **kwargs):
@@ -152,6 +154,7 @@ def test_biblio_connection_refuses_plain_ftp_without_explicit_opt_in(monkeypatch
         })
 
 
+@pytest.mark.skip(reason="Legacy BIBLIO transfer workflow retired; covered by test_biblio_retirement.py")
 def test_biblio_connection_allows_plain_ftp_only_after_explicit_opt_in(monkeypatch):
     calls = []
 
