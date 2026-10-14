@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from app import worker
+from app import db, jobs, models, worker
+from app.cross_channel import REMOTE_CHANNELS
+from app.constants import Channel
+from app.product_models import BackgroundJob
 from app.connectors.hosted import _connect_biblio_ftp
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +32,26 @@ def test_retired_biblio_worker_handler_does_not_send():
         "workspace_id": None,
         "payload": {"listing_id": "legacy"},
     }) == {"skipped": True, "reason": "BIBLIO integration removed"}
+
+
+def test_historical_biblio_jobs_are_cancelled_without_retries():
+    with db.session_scope() as session:
+        workspace = models.Workspace(name="Retired BIBLIO", slug="retired-biblio-test")
+        session.add(workspace)
+        session.flush()
+        workspace_id = workspace.id
+
+    job_id = jobs.enqueue("biblio_sync", {"listing_id": "archived"}, workspace_id)
+    claimed = jobs.claim_one()
+    assert claimed["id"] == str(job_id)
+    assert worker._biblio_job_held_or_skipped(claimed) is True
+    with db.session_scope() as session:
+        row = session.get(BackgroundJob, job_id)
+        assert row.status == "success"
+        assert row.attempts == 1
+
+    assert Channel.BIBLIO not in REMOTE_CHANNELS
+
 
 
 def test_biblio_is_not_a_visible_marketplace():
