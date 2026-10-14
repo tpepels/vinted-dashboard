@@ -20,7 +20,7 @@ const elements = {
   "#connector-other-grid": {contains: () => false},
   ".marketplace-open-connection": {onclick: null},
 };
-const buttons = ["biblio", "ebay"].map(channel => ({
+const buttons = ["ebay", "shopify"].map(channel => ({
   dataset: {marketChannel: channel},
   onclick: null,
   selected: false,
@@ -37,7 +37,7 @@ const selectors = {
   },
 };
 const context = {
-  state: {marketplaceSelected: "biblio", navigatedTo: null},
+  state: {marketplaceSelected: "ebay", navigatedTo: null},
   selectView: view => { context.state.navigatedTo = view; },
   document: selectors,
   $: (s) => selectors.querySelector(s),
@@ -50,9 +50,9 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(source, context);
-const channels = ["biblio", "ebay"].map(channel => ({
+const channels = ["ebay", "shopify"].map(channel => ({
   channel, display_name: channel.toUpperCase(), group: "marketplace",
-  runtime: {credential_ready: channel === "biblio", listing_count: 1},
+  runtime: {credential_ready: channel === "ebay", listing_count: 1},
   operations: {connect: {status: "implemented"}},
 }));
 const contract = {
@@ -63,16 +63,16 @@ const contract = {
 };
 
 context.renderMarketplaceDevelopment(contract);
-assert.match(elements["#marketplace-development"].innerHTML, /BIBLIO/);
-assert.match(elements["#marketplace-detail"].innerHTML, /BIBLIO/);
+assert.doesNotMatch(elements["#marketplace-development"].innerHTML, /BIBLIO/);
+assert.match(elements["#marketplace-detail"].innerHTML, /EBAY/);
 assert.equal(typeof buttons[0].onclick, "function");
 assert.equal(typeof buttons[1].onclick, "function");
 buttons[1].onclick();
-assert.equal(context.state.marketplaceSelected, "ebay");
-assert.match(elements["#marketplace-detail"].innerHTML, /EBAY/);
+assert.equal(context.state.marketplaceSelected, "shopify");
+assert.match(elements["#marketplace-detail"].innerHTML, /SHOPIFY/);
 assert.equal(typeof elements[".marketplace-open-connection"].onclick, "function");
 elements[".marketplace-open-connection"].onclick();
-assert.equal(context.state.navigatedTo, "connector-ebay");
+assert.equal(context.state.navigatedTo, "connector-shopify");
 
 context.renderMarketplaceDevelopment(null);
 assert.match(elements["#marketplace-development"].textContent, /No marketplace audit/);
