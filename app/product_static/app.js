@@ -1127,7 +1127,9 @@ async function today() {
   const activeInventory = Number(analyticsData.active_inventory || 0);
   const pricedCount = Number(analyticsData.priced_inventory_count || 0);
   const marginCount = Number(analyticsData.margin_inventory_count || 0);
-  const queue = Array.isArray(todayData.work_queue) ? todayData.work_queue : [];
+  const queue = (Array.isArray(todayData.work_queue) ? todayData.work_queue : [])
+    .filter(row => row.channel !== "biblio" && row.view !== "connector-biblio"
+      && row.stock_action?.channel !== "biblio");
   state.todayQueue = queue;
 
   $("#today-metrics").innerHTML =
@@ -1150,8 +1152,8 @@ async function today() {
         : "Add acquisition costs to calculate margin"
     );
 
-  renderTodaySourceStatus(connectorData.connectors || []);
-  renderTodayWorkQueue(queue, Number(todayData.work_queue_count || queue.length));
+  renderTodaySourceStatus((connectorData.connectors || []).filter(row => row.channel !== "biblio"));
+  renderTodayWorkQueue(queue, queue.length);
 }
 
 function todayWorkControls(row) {
@@ -1195,7 +1197,7 @@ function relativeTimestamp(value) {
 
 function renderTodaySourceStatus(connectors) {
   const rows = (connectors || [])
-    .filter((row) => row.group !== "files" && row.channel !== "manual")
+    .filter((row) => row.group !== "files" && row.channel !== "manual" && row.channel !== "biblio")
     .filter((row) => row.configured || row.operational)
     .sort((a, b) => String(a.display_name || a.channel).localeCompare(String(b.display_name || b.channel)));
 
