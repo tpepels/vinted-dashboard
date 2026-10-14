@@ -4429,6 +4429,11 @@ def _biblio_truthy(value: Any) -> bool:
 
 
 def _connect_biblio_ftp(values: dict[str, str]) -> ftplib.FTP:
+    # Retired integration: block all outbound FTP and FTPS, including old
+    # manual endpoints, queued jobs and sold-out deletion actions. Keep legacy
+    # records and parsing code for historical inventory/reference purposes.
+    raise RuntimeError("BIBLIO integration has been removed; no FTP transfers are permitted")
+
     values = _harden_biblio_values(values)
     host = values.get("host", BIBLIO_FTP_HOST).strip() or BIBLIO_FTP_HOST
     username = values.get("username", "").strip()
