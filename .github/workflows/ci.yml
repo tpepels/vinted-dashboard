@@ -36,7 +36,7 @@ jobs:
           COOKIE_SECURE: "true"
 
           DATABASE_URL: postgresql+psycopg2://user:pass@example.invalid/db
-          EXTENSION_LATEST_VERSION: 3.4.2
+          EXTENSION_LATEST_VERSION: 3.4.3
           BACKUP_PROVIDER: ci-managed-snapshot
           BACKUP_RESTORE_DRILL_AT: 2026-10-01
       - run: python -m pytest -q
@@ -78,12 +78,13 @@ jobs:
       - run: node scripts/test_bridge_popup_language.js
       - run: node scripts/test_vinted_page_age.js
       - run: node scripts/test_vinted_content_idempotent.js
+      - run: node scripts/test_vinted_bridge_message_recovery.js
       - run: node scripts/test_vinted_quiet_mode.js
       - run: node scripts/test_vinted_rate_safe_sync.js
       - run: alembic upgrade head
         env:
           DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
-      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.4.2 --output /tmp/chrome-bridge.zip
+      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.4.3 --output /tmp/chrome-bridge.zip
       - name: Build Docker image (retry registry throttling)
         run: |
           for attempt in 1 2 3; do

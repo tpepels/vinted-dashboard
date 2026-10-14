@@ -82,10 +82,6 @@ $("#sync").onclick = async () => {
       return show("Vinted checks are paused until "
         + new Date(result.api_cooldown_until).toLocaleString() + ".");
     }
-    if (result?.sync_skipped_for_interval) {
-      return show("Vinted was checked recently. Next check after "
-        + new Date(result.next_sync_at).toLocaleTimeString() + ".");
-    }
     if (!result?.ok) return show(result?.error || "Could not check Vinted.", true);
     await refresh();
   } catch (error) {

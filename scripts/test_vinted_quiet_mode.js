@@ -79,13 +79,13 @@ vm.runInContext(source,context,{filename:"background.js"});
   assert(first.age_scan_remaining===0,"Page-age worker must be disabled");
 
   const second=await context.runSync("manual");
-  assert(second.sync_skipped_for_interval&&collectCount===1,
-    "Manual button may not bypass the two-hour limit");
+  assert(second.ok&&collectCount===2&&!second.sync_skipped_for_interval,
+    "Manual refresh must bypass the two-hour automatic interval");
 
   state.lastSyncAttemptAt=Date.now()-2*60*60*1000-1000;
   tab.active=true;
   const busy=await context.runSync("periodic");
-  assert(!busy.ok&&collectCount===1,
+  assert(!busy.ok&&collectCount===2,
     "Automatic update must skip when the Vinted tab is focused and active");
 
   tab.active=false;
@@ -95,11 +95,11 @@ vm.runInContext(source,context,{filename:"background.js"});
   assert(denial.api_rate_limited&&denial.api_cooldown_until>Date.now()+23*60*60*1000,
     "A Vinted denial must trigger at least 23 hours remaining cooldown");
   const blockedAgain=await context.runSync("manual");
-  assert(collectCount===2&&blockedAgain.sync_skipped_for_api_cooldown,
+  assert(collectCount===3&&blockedAgain.sync_skipped_for_api_cooldown,
     "Cooldown must stop user-triggered requests as well");
 
   assert(tabsCreated.length===0,"No Vinted tabs should be created");
   assert(tabsReloaded.length===0,"No Vinted tabs should be reloaded");
   assert(windowsRemoved.length===0,"No worker windows should be necessary");
-  console.log("Vinted quiet bridge: 120-minute throttle, no browsing interference, 24h cooldown: ok");
+  console.log("Vinted quiet bridge: 120-minute automatic-only throttle, manual refresh, 24h rate-limit cooldown: ok");
 })().catch(error=>{console.error(error);process.exitCode=1;});

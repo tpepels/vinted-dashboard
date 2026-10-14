@@ -38,7 +38,7 @@ const ctx = {
   document: {querySelector: key => elements[key]},
   chrome: {
     runtime: {
-      getManifest: () => ({version:"3.4.2"}),
+      getManifest: () => ({version:"3.4.3"}),
       sendMessage: async () => response,
     },
     tabs: {create() {}},
@@ -56,7 +56,7 @@ vm.createContext(ctx);
   assert.match(elements["#detail-info"].textContent, /280 listings still need optional details/);
   assert.match(elements["#detail-info"].textContent, /basic listing update has already been sent/);
   assert.equal(elements["#sync-details"].classList.contains("hidden"), false);
-  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.2");
+  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.3");
   response = {paired:true,workspace:"Personal Workspace",status:{
     ok:true,at:"2026-10-12T10:28:20Z",listings:280,detail_pending:0,
   }};

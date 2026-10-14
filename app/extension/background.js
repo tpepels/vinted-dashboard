@@ -16,6 +16,8 @@ const API_RATE_LIMIT_COOLDOWN_MS=60*60*1000;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
 const AGE_JOB_WATCHDOG_MS=240000;
 const CONTENT_PROTOCOL=10;
+const LOST_MESSAGE_CHANNEL=/A listener indicated an asynchronous response|message (?:port|channel) closed|The message port closed before a response was received/i;
+const MISSING_MESSAGE_RECEIVER=/Receiving end does not exist|Could not establish connection/i;
 let syncInFlight=null;
 let ageJobInFlight=null;
 let lastAgeNavigationAt=0;
@@ -43,11 +45,53 @@ async function vintedTab(reason="periodic"){
   return{tab:complete.find(tab=>tab.active)||complete[0],temporary:false};
 }
 async function ensureCurrentContentScript(tab){
+  let response=null;
   try{
-    const result=await chrome.tabs.sendMessage(tab.id,{type:"bridge-content-protocol"});
-    if(Number(result?.protocol)===CONTENT_PROTOCOL)return tab;
-  }catch{}
-  throw new Error("Vinted tab is using an older extension script. Reload it yourself when convenient; the bridge will not reload your page.");
+    response=await chrome.tabs.sendMessage(tab.id,{type:"bridge-content-protocol"});
+  }catch(error){
+    if(!MISSING_MESSAGE_RECEIVER.test(String(error?.message||error))){
+      throw new Error("The Vinted tab's bridge could not respond. Keep the tab open, reload it, then try updating again.");
+    }
+    // The page has no listener (for example, a tab opened while the extension
+    // was being upgraded). Inject without reloading or navigating the page.
+    // Never inject on a protocol mismatch: that would create two listeners.
+    await chrome.scripting.executeScript({
+      target:{tabId:tab.id},files:["vinted_age.js","content.js"],
+    });
+    response=await chrome.tabs.sendMessage(tab.id,{type:"bridge-content-protocol"});
+  }
+  if(Number(response?.protocol)===CONTENT_PROTOCOL)return tab;
+  throw new Error("Vinted tab is using an older extension script. Reload that tab once and try again.");
+}
+async function collectFromVintedTab(tab,reason){
+  const payload={type:"collect-vinted-data",reason};
+  try{
+    return await message(tab.id,payload);
+  }catch(error){
+    if(!LOST_MESSAGE_CHANNEL.test(String(error?.message||error)))throw error;
+    // Chrome discards pending content-script replies when a tab navigates or
+    // reloads. The dashboard was never sent this snapshot, so one bounded
+    // manual retry is safe. Periodic checks wait for their next alarm.
+    if(reason!=="manual"){
+      throw new Error("Vinted changed or closed its tab during the automatic check. Next automatic check will retry; you can also check manually.");
+    }
+    await sleep(500);
+    let ready;
+    try{
+      ready=await waitForTab(tab.id,15000);
+      const url=new URL(String(ready.url||""));
+      if(!url.hostname.startsWith("www.vinted."))throw Error("Vinted tab was replaced");
+      await ensureCurrentContentScript(ready);
+    }catch{
+      throw new Error("Vinted tab lost its connection during the update. Open Vinted, keep that tab open, and try Check now again.");
+    }
+    try{
+      return await message(ready.id,payload);
+    }catch(retryError){
+      if(!LOST_MESSAGE_CHANNEL.test(String(retryError?.message||retryError)))throw retryError;
+      throw new Error("Vinted tab stopped responding during the update. Keep the tab open without navigating, reload it once, and try Check now again.");
+    }
+  }
 }
 async function stopLegacyAgeScan(){
   // Older versions may have stored an aggressive multi-tab scan. Cancel it
@@ -402,7 +446,7 @@ async function runSync(reason="manual"){
     };
   }
   const recentAttempt=lastAttempt>0&&Date.now()-lastAttempt<SYNC_INTERVAL_MS;
-  if(recentAttempt)return{
+  if(reason==="periodic"&&recentAttempt)return{
     ...previousStatus,ok:true,reason,
     sync_skipped_for_interval:true,
     next_sync_at:lastAttempt+SYNC_INTERVAL_MS,
@@ -418,7 +462,7 @@ async function runSync(reason="manual"){
       const tabUrl=new URL(String(tab.url||""));
       if(!tabUrl.hostname.startsWith("www.vinted."))throw new Error("Open and sign in to Vinted first.");
       await chrome.storage.local.set({vintedOrigin:tabUrl.origin});
-      const response=await message(tab.id,{type:"collect-vinted-data",reason});
+      const response=await collectFromVintedTab(tab,reason);
       if(!response?.ok){
         if(response?.rate_limited){
           const cooldownUntil=Date.now()+VINTED_ACCESS_COOLDOWN_MS;
