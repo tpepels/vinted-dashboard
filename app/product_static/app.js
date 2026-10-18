@@ -200,12 +200,16 @@ function money(value, currency) {
   }).format(Number(value) / 100);
 }
 
-function lifetimeRevenue(summary) {
-  const totals = Array.isArray(summary.sales_all_time_totals) ? summary.sales_all_time_totals : [];
-  if (!totals.length) {
-    return Number(summary.sales_all_time_count || 0) ? "—" : money(0, summary.currency);
+function formattedRevenueTotals(totals, saleCount, currency) {
+  if (!Array.isArray(totals) || !totals.length) {
+    return Number(saleCount || 0) ? "—" : money(0, currency);
   }
-  return totals.map((row) => money(row.cents, row.currency)).join(" + ");
+  return totals.map(row => money(row.cents, row.currency)).join(" + ");
+}
+
+function lifetimeRevenue(summary) {
+  return formattedRevenueTotals(
+    summary.sales_all_time_totals, summary.sales_all_time_count, summary.currency);
 }
 
 function lifetimeCoverage(summary) {
@@ -228,14 +232,38 @@ function revenueMetricCards(summary) {
       "All marketplaces · cancelled and refunded excluded");
 }
 
-async function showRevenueSummary(target) {
+function periodRevenueMetricCards(summary) {
+  const label = summary.period_label || "Selected period";
+  const totalCount = Number(summary.sales_period_count || 0);
+  const knownCount = Number(summary.sales_period_revenue_known_count || 0);
+  const revenue = formattedRevenueTotals(
+    summary.sales_period_totals, totalCount, summary.currency);
+  const completeness = totalCount
+    ? knownCount + " of " + totalCount + " sales with known amounts"
+    : "No completed sales recorded in this period";
+  return metric("Sales revenue · " + label, revenue, completeness)
+    + metric("Completed sales · " + label, totalCount,
+      "Cancelled/refunded excluded · all marketplaces")
+    + metric("Average sale · " + label,
+      knownCount && summary.sales_period_totals?.length === 1
+        ? money(Math.round(summary.sales_period_totals[0].cents / knownCount),
+          summary.sales_period_totals[0].currency)
+        : "—",
+      knownCount ? "Based on sales with a known amount" : "No priced sales");
+}
+
+async function showRevenueSummary(target, {period = null, isCurrent = () => true} = {}) {
   const node = $(target);
   node.innerHTML = '<p class="muted">Loading sales revenue…</p>';
   try {
-    const summary = await api("/api/app/analytics");
-    node.innerHTML = revenueMetricCards(summary);
+    const endpoint = "/api/app/analytics"
+      + (period ? "?period=" + encodeURIComponent(period) : "");
+    const summary = await api(endpoint);
+    if (!isCurrent()) return null;
+    node.innerHTML = period ? periodRevenueMetricCards(summary) : revenueMetricCards(summary);
     return summary;
   } catch (error) {
+    if (!isCurrent()) return null;
     node.innerHTML = '<article class="card metric"><span>Sales revenue</span>'
       + '<strong>Unavailable</strong><div class="sub">'
       + esc("Could not load revenue: " + error.message) + '</div></article>';
@@ -5278,8 +5306,8 @@ function renderVintedBehavior(data) {
     + " active listings have snapshot history";
 
   $("#vinted-metrics").innerHTML =
-    metric("Views gained", summary.views_gained || 0, data.days + " days")
-    + metric("Favourites gained", summary.favourites_gained || 0, data.days + " days")
+    metric("Views gained", summary.views_gained || 0, data.period_label || data.days + " days")
+    + metric("Favourites gained", summary.favourites_gained || 0, data.period_label || data.days + " days")
     + metric("Favourites / 100 views",
       summary.favourites_per_100_views == null ? "—" : summary.favourites_per_100_views)
     + metric("Median active age",
@@ -5297,7 +5325,8 @@ function renderVintedBehavior(data) {
       summary.gross_margin_pct == null ? "—" : summary.gross_margin_pct + "%",
       summary.roi_pct == null ? "" : "ROI " + summary.roi_pct + "%"
     )
-    + metric("Price changes", summary.price_changes_30d || 0, "last 30 days");
+    + metric("Price changes", summary.price_changes_window ?? summary.price_changes_30d ?? 0,
+      data.period_label || data.days + " days");
 
   $("#vinted-thresholds").textContent =
     "Segments use workspace thresholds: momentum = at least "
@@ -5391,7 +5420,7 @@ function renderVintedBehavior(data) {
     steady: "Steady",
   };
   $("#vinted-efficiency").innerHTML = rows.length
-    ? '<table><thead><tr><th>Listing</th><th>Age</th><th>Views</th><th>+7d</th><th>Favs</th><th>+7d</th><th>Fav / 100 views</th><th>Views/day</th><th>Price changes</th><th>Signal</th></tr></thead><tbody>'
+    ? '<table><thead><tr><th>Listing</th><th>Age</th><th>Views</th><th>Views +' + esc(data.period_label || data.days + " days") + '</th><th>Favs</th><th>Favs +' + esc(data.period_label || data.days + " days") + '</th><th>Fav / 100 views</th><th>Views/day</th><th>Price changes</th><th>Signal (7d)</th></tr></thead><tbody>'
       + rows.map((row) => {
         const title = row.url
           ? '<a href="' + esc(row.url) + '" target="_blank" rel="noreferrer">' + esc(row.title) + "</a>"
@@ -5401,10 +5430,10 @@ function renderVintedBehavior(data) {
           + money(row.price_cents, row.currency) + "</div></td><td>"
           + (row.age_days == null ? "—" : esc(row.age_days) + " d")
           + "</td><td>"
-          + esc(row.views) + '</td><td class="gain">+' + esc(row.views_gain_7d)
-          + "</td><td>" + esc(row.favourites) + '</td><td class="gain">+' + esc(row.favourites_gain_7d)
+          + esc(row.views) + '</td><td class="gain">+' + esc(row.views_gain_window)
+          + "</td><td>" + esc(row.favourites) + '</td><td class="gain">+' + esc(row.favourites_gain_window)
           + "</td><td>" + esc(row.favourites_per_100_views == null ? "—" : row.favourites_per_100_views)
-          + "</td><td>" + esc(row.views_per_day) + "</td><td>" + esc(row.price_changes_30d)
+          + "</td><td>" + esc(row.views_per_day) + "</td><td>" + esc(row.price_changes_window ?? row.price_changes_30d)
           + '</td><td><span class="signal ' + esc(row.segment) + '">'
           + esc(segmentLabel[row.segment] || row.segment) + "</span></td></tr>";
       }).join("")
@@ -5412,65 +5441,71 @@ function renderVintedBehavior(data) {
     : '<div class="empty">No active Vinted listing history yet.</div>';
 }
 
+let analyticsLoadSequence = 0;
 async function analytics() {
-  const days = Number($("#analytics-days").value || 90);
-  // Independent of the optional Vinted activity and history endpoints.
-  const revenueTask = showRevenueSummary("#analytics-revenue-metrics");
-  const reportsTask = Promise.allSettled([
-    api("/api/app/analytics/history?days=" + days),
-    api("/api/app/analytics/vinted?days=" + days),
+  const period = $("#analytics-days").value || "90";
+  const requestId = ++analyticsLoadSequence;
+  const isCurrent = () => requestId === analyticsLoadSequence
+    && $("#analytics-days").value === period;
+  // All Analytics sale KPIs and the charts share the same period boundary.
+  const revenueTask = showRevenueSummary("#analytics-revenue-metrics", {period, isCurrent});
+  const reportTasks = Promise.allSettled([
+    api("/api/app/analytics/history?period=" + encodeURIComponent(period)),
+    api("/api/app/analytics/vinted?period=" + encodeURIComponent(period)),
   ]);
+  $("#analytics-metrics").innerHTML = "";
   const summary = await revenueTask;
+  if (!isCurrent()) return;
   if (summary) {
-  const activeInventory = Number(summary.active_inventory || 0);
-  const pricedInventory = Number(summary.priced_inventory_count || 0);
-  const costedInventory = Number(summary.costed_inventory_count || 0);
-  const marginInventory = Number(summary.margin_inventory_count || 0);
-  $("#analytics-metrics").innerHTML =
-    metric("Active inventory", activeInventory)
-    + metric(
-      "Inventory cost",
-      costedInventory ? money(summary.inventory_cost_cents, summary.currency) : "—",
-      costedInventory + " of " + activeInventory + " costs recorded"
-    )
-    + metric(
-      "Inventory ask",
-      pricedInventory ? money(summary.inventory_ask_cents, summary.currency) : "—",
-      pricedInventory + " of " + activeInventory + " priced"
-    )
-    + metric(
-      "Potential margin",
-      marginInventory ? money(summary.inventory_potential_margin_cents, summary.currency) : "—",
-      marginInventory + " of " + activeInventory + " have cost + ask"
-    )
-    + metric(
-      "Sales YTD",
-      summary.sales_ytd_count,
-      money(summary.sales_ytd_cents, summary.currency)
-        + " · " + summary.sales_ytd_revenue_known_count + " of " + summary.sales_ytd_count + " amounts known"
-    )
-    + metric(
-      "Gross profit YTD",
-      summary.sales_ytd_costed_count
-        ? money(summary.sales_ytd_gross_profit_cents, summary.currency)
-        : "—",
-      summary.sales_ytd_costed_count + " of " + summary.sales_ytd_revenue_known_count + " revenue-known sales costed"
-    )
-    + metric(
-      "Gross margin YTD",
-      summary.sales_ytd_gross_margin_pct == null ? "—" : summary.sales_ytd_gross_margin_pct + "%",
-      summary.sales_ytd_roi_pct == null ? "" : "ROI " + summary.sales_ytd_roi_pct + "%"
-    )
-    + metric("Followers", summary.followers == null ? "—" : summary.followers, summary.following == null ? "" : summary.following + " following");
+    $("#analytics-metrics").innerHTML =
+      metric("Gross profit · " + summary.period_label,
+        summary.sales_period_costed_count
+          ? money(summary.sales_period_gross_profit_cents, summary.currency) : "—",
+        summary.sales_period_costed_count + " of "
+          + summary.sales_period_revenue_known_count + " revenue-known sales costed")
+      + metric("Gross margin · " + summary.period_label,
+        summary.sales_period_gross_margin_pct == null
+          ? "—" : summary.sales_period_gross_margin_pct + "%",
+        summary.sales_period_roi_pct == null ? "" : "ROI " + summary.sales_period_roi_pct + "%")
+      + metric("Acquisition costs · " + summary.period_label,
+        summary.sales_period_costed_count
+          ? money(summary.sales_period_cost_cents, summary.currency) : "—",
+        "Only sales with a recorded acquisition cost");
+
+    const active = Number(summary.active_inventory || 0);
+    const costed = Number(summary.costed_inventory_count || 0);
+    const priced = Number(summary.priced_inventory_count || 0);
+    const margin = Number(summary.margin_inventory_count || 0);
+    $("#analytics-inventory-snapshot").innerHTML =
+      metric("Active inventory · now", active)
+      + metric("Inventory cost · now",
+        costed ? money(summary.inventory_cost_cents, summary.currency) : "—",
+        costed + " of " + active + " costs recorded")
+      + metric("Inventory asking value · now",
+        priced ? money(summary.inventory_ask_cents, summary.currency) : "—",
+        priced + " of " + active + " priced")
+      + metric("Potential margin · now",
+        margin ? money(summary.inventory_potential_margin_cents, summary.currency) : "—",
+        margin + " of " + active + " have cost and asking price")
+      + metric("Followers · now",
+        summary.followers == null ? "—" : summary.followers,
+        summary.following == null ? "" : summary.following + " following");
   } else {
     $("#analytics-metrics").innerHTML = "";
+    $("#analytics-inventory-snapshot").innerHTML = "";
   }
 
-  const [historyResult, vintedResult] = await reportsTask;
+  const [historyResult, vintedResult] = await reportTasks;
+  if (!isCurrent()) return;
   if (vintedResult.status === "fulfilled") {
+    vintedResult.value.period_label = summary?.period_label || period;
     renderVintedBehavior(vintedResult.value);
   } else {
     $("#vinted-metrics").innerHTML = '<p class="muted">Vinted activity unavailable.</p>';
+    ["#vinted-categories","#vinted-efficiency","#vinted-sold-stock",
+      "#vinted-age-bars","#vinted-segment-bars"].forEach(target => {
+      $(target).innerHTML = '<div class="empty">Vinted report unavailable.</div>';
+    });
   }
   if (historyResult.status !== "fulfilled") {
     ["#views-chart", "#favourites-chart", "#followers-chart", "#sales-chart"].forEach(target => {
@@ -5484,7 +5519,7 @@ async function analytics() {
   seriesChart("#views-chart", history.daily, "views_gained");
   seriesChart("#favourites-chart", history.daily, "favourites_gained");
   seriesChart("#followers-chart", history.followers, "followers");
-  seriesChart("#sales-chart", history.daily, "revenue_cents", { moneyValues: true });
+  seriesChart("#sales-chart", history.daily, "revenue_cents", {moneyValues: true});
 
   $("#analytics-listings").innerHTML = history.top_listings.length
     ? '<table><thead><tr><th>Listing</th><th>Views</th><th>+7d</th><th>Favourites</th><th>+7d</th><th>Status</th></tr></thead><tbody>'
@@ -5499,7 +5534,7 @@ async function analytics() {
       + "</tbody></table>"
     : '<div class="empty">No Vinted listing history yet.</div>';
 
-  $$(".analytics-listing").forEach((row) => {
+  $$(".analytics-listing").forEach(row => {
     row.onclick = () => loadListingHistory(row.dataset.id);
   });
 }
