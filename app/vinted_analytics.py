@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.constants import Channel, ListingStatus
 from app.stock_policy import sale_counts_as_sold
+from app.sale_costs import sale_acquisition_cost
 
 
 @dataclass(frozen=True)
@@ -237,7 +238,7 @@ def _sale_economics(
     item: models.InventoryItem | None,
 ) -> dict[str, Any]:
     revenue = int(sale.total_cents) if sale.total_cents is not None else None
-    cost = int(item.cost_cents) if item is not None and item.cost_cents is not None else None
+    cost, cost_source = sale_acquisition_cost(sale, item)
     complete = revenue is not None and cost is not None
     profit = revenue - cost if complete else None
     margin_pct = (
@@ -258,7 +259,7 @@ def _sale_economics(
         "gross_margin_pct": margin_pct,
         "roi_pct": roi_pct,
         "economics_complete": complete,
-        "cost_source": attributes.get("cost_source"),
+        "cost_source": cost_source,
         "cost_source_adjusted": bool(attributes.get("cost_source_adjusted")),
     }
 

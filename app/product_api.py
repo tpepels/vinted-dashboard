@@ -132,6 +132,7 @@ from app.reconciliation import apply_reconciliation_merges, reconciliation_sugge
 from app.purchase_costs import apply_purchase_cost, purchase_cost_suggestions
 from app.runtime_config import is_production, public_app_origin, safe_runtime_summary
 from app.stock_policy import sale_counts_as_sold
+from app.sale_costs import sale_acquisition_cost, record_sale_acquisition_cost
 from app.strategy import strategy_settings
 from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
 import json
@@ -386,6 +387,18 @@ class SaleLinkRequest(BaseModel):
 class PurchaseCostApplyRequest(BaseModel):
     inventory_item_id: uuid.UUID
     cost_cents: int = Field(ge=0)
+
+
+class SaleAcquisitionCostRequest(BaseModel):
+    cost_cents: int | None = Field(default=None, ge=0)
+
+
+class SaleAverageCostRequest(BaseModel):
+    cost_cents: int = Field(ge=0)
+    currency: str = "EUR"
+    scope: str = "all"
+    overwrite_existing: bool = False
+    preview: bool = True
 
 
 class MappingPresetRequest(BaseModel):
@@ -4496,6 +4509,79 @@ def apply_purchase_cost_to_inventory(
     return {"ok": True, **result}
 
 
+@router.patch("/api/app/sales/{sale_id}/acquisition-cost")
+def update_sale_acquisition_cost(
+    sale_id: uuid.UUID,
+    payload: SaleAcquisitionCostRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    with db.session_scope() as session:
+        sale = session.get(models.Sale, sale_id)
+        if sale is None or sale.workspace_id != context.workspace.id or not sale_counts_as_sold(sale):
+            raise HTTPException(status_code=404, detail="Completed sale not found")
+        record_sale_acquisition_cost(sale, payload.cost_cents, "manual_sale", str(context.user.id))
+        session.flush()
+        item = session.get(models.InventoryItem, sale.inventory_item_id) if sale.inventory_item_id else None
+        cents, source = sale_acquisition_cost(sale, item)
+    return {"ok": True, "sale_id": str(sale_id), "cost_cents": cents, "cost_source": source}
+
+
+@router.post("/api/app/sales/average-cost")
+def backfill_sale_average_cost(
+    payload: SaleAverageCostRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    currency = str(payload.currency or "").strip().upper()
+    if len(currency) != 3 or not currency.isalpha():
+        raise HTTPException(status_code=400, detail="Currency must be a 3-letter code")
+    if payload.scope not in {"all", "30", "90", "180", "365", "ytd"}:
+        raise HTTPException(status_code=400, detail="Invalid sale period")
+    now = datetime.now(timezone.utc)
+    since = None if payload.scope == "all" else _analytics_period_window(payload.scope, 90, now)[0]
+    with db.session_scope() as session:
+        stmt = select(models.Sale).where(
+            models.Sale.workspace_id == context.workspace.id,
+            models.Sale.direction == "sell",
+        )
+        if since is not None:
+            stmt = stmt.where(models.Sale.occurred_at >= since, models.Sale.occurred_at <= now)
+        sold = [row for row in session.execute(stmt).scalars().all() if sale_counts_as_sold(row)]
+        ids = {row.inventory_item_id for row in sold if row.inventory_item_id}
+        items = {
+            item.id: item for item in session.execute(
+                select(models.InventoryItem).where(
+                    models.InventoryItem.workspace_id == context.workspace.id,
+                    models.InventoryItem.id.in_(ids),
+                )
+            ).scalars().all()
+        } if ids else {}
+        compatible = [
+            row for row in sold if str(row.currency or "EUR").upper() == currency
+        ]
+        eligible = [
+            row for row in compatible
+            if payload.overwrite_existing
+            or sale_acquisition_cost(row, items.get(row.inventory_item_id))[0] is None
+        ]
+        if not payload.preview:
+            for row in eligible:
+                record_sale_acquisition_cost(
+                    row, payload.cost_cents, "estimated_bulk", str(context.user.id),
+                )
+            session.flush()
+        known_revenue = sum(row.total_cents is not None for row in eligible)
+    return {
+        "ok": True, "preview": payload.preview, "scope": payload.scope,
+        "currency": currency, "cost_cents": payload.cost_cents,
+        "matching_sales": len(sold), "eligible_sales": len(eligible),
+        "already_costed": len(compatible) - len(eligible),
+        "other_currency": len(sold) - len(compatible),
+        "with_sale_amount": known_revenue,
+        "estimated_cost_cents": len(eligible) * payload.cost_cents,
+        "updated": 0 if payload.preview else len(eligible),
+    }
+
+
 @router.get("/api/app/sales")
 def sales(context: RequestContext = Depends(require_context)):
     with db.session_scope() as session:
@@ -4505,6 +4591,15 @@ def sales(context: RequestContext = Depends(require_context)):
             .order_by(models.Sale.occurred_at.desc(), models.Sale.last_seen_at.desc())
             .limit(1000)
         ).scalars().all()
+        ids = {row.inventory_item_id for row in rows if row.inventory_item_id}
+        items = {
+            item.id: item for item in session.execute(
+                select(models.InventoryItem).where(
+                    models.InventoryItem.workspace_id == context.workspace.id,
+                    models.InventoryItem.id.in_(ids),
+                )
+            ).scalars().all()
+        } if ids else {}
     return {
         "sales": [
             {
@@ -4517,6 +4612,12 @@ def sales(context: RequestContext = Depends(require_context)):
                 "counterparty": row.counterparty,
                 "total_cents": row.total_cents,
                 "currency": row.currency,
+                "acquisition_cost_cents": sale_acquisition_cost(
+                    row, items.get(row.inventory_item_id),
+                )[0] if sale_counts_as_sold(row) else None,
+                "acquisition_cost_source": sale_acquisition_cost(
+                    row, items.get(row.inventory_item_id),
+                )[1] if sale_counts_as_sold(row) else None,
                 "status": row.status,
                 "is_closed": row.is_closed,
                 "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
@@ -4675,11 +4776,10 @@ def analytics(
         period_totals[currency] = period_totals.get(currency, 0) + int(row.total_cents)
     period_costed = [
         row for row in period_revenue_sales
-        if row.inventory_item_id in sold_items
-        and sold_items[row.inventory_item_id].cost_cents is not None
+        if sale_acquisition_cost(row, sold_items.get(row.inventory_item_id))[0] is not None
     ]
     period_cost_cents = sum(
-        int(sold_items[row.inventory_item_id].cost_cents)
+        sale_acquisition_cost(row, sold_items.get(row.inventory_item_id))[0]
         for row in period_costed
     )
     period_costed_revenue_cents = sum(int(row.total_cents) for row in period_costed)
@@ -4690,11 +4790,10 @@ def analytics(
     ]
     complete_sales = [
         row for row in revenue_known_sales
-        if row.inventory_item_id in sold_items
-        and sold_items[row.inventory_item_id].cost_cents is not None
+        if sale_acquisition_cost(row, sold_items.get(row.inventory_item_id))[0] is not None
     ]
     sales_ytd_cost_cents = sum(
-        int(sold_items[row.inventory_item_id].cost_cents)
+        sale_acquisition_cost(row, sold_items.get(row.inventory_item_id))[0]
         for row in complete_sales
     )
     sales_ytd_costed_revenue_cents = sum(
@@ -4737,6 +4836,17 @@ def analytics(
             for currency, cents in sorted(period_totals.items())
         ],
         "sales_period_costed_count": len(period_costed),
+        "sales_period_uncosted_count": len(period_revenue_sales) - len(period_costed),
+        "sales_period_economics_complete": (len(period_costed) == len(sold_period)),
+        "sales_period_estimated_count": sum(
+            (row.extra or {}).get("acquisition_cost_source") == "estimated_bulk"
+            or (
+                (row.extra or {}).get("acquisition_cost_cents") is None
+                and (sold_items.get(row.inventory_item_id) is not None)
+                and (sold_items[row.inventory_item_id].attributes or {}).get("cost_source") == "average_bulk"
+            )
+            for row in period_costed
+        ),
         "sales_period_cost_cents": period_cost_cents,
         "sales_period_costed_revenue_cents": period_costed_revenue_cents,
         "sales_period_gross_profit_cents": period_profit_cents,
