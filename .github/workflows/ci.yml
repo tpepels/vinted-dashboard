@@ -41,6 +41,7 @@ jobs:
           BACKUP_RESTORE_DRILL_AT: 2026-10-01
       - run: python -m pytest -q
       - run: node --check app/product_static/app.js
+      - run: node scripts/test_analytics_monthly_trends.js
       - run: node scripts/test_revenue_average_cost_browser.js
       - run: node scripts/test_simple_ui_language.js
       - run: node scripts/test_connections_ui.js
