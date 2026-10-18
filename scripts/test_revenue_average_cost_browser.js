@@ -22,6 +22,7 @@ const bootstrap=String.raw`
   window.confirm=()=>true;
   let historicalBulkApplied=false;
   let historicalManualCost=null;
+  let historicalQuantity=5;
   const analytics={
     sales_all_time_count:37, sales_all_time_revenue_known_count:37,
     sales_all_time_totals:[{currency:"EUR",cents:123456}],
@@ -42,12 +43,20 @@ const bootstrap=String.raw`
       other_currency:0,estimated_cost_cents:1500,updated:options?.body?.includes('"preview":false')?15:0
     };
     if(url.includes("/api/app/inventory?"))return {items:[]};
+    if(url.includes("/api/app/sales/historical-test/book-quantity")){
+      historicalQuantity=JSON.parse(options.body).quantity;
+      return {ok:true,book_quantity:historicalQuantity,
+        cost_cents:historicalBulkApplied?100*historicalQuantity:null};
+    }
     if(url.includes("/api/app/sales/average-cost")) {
       const payload=JSON.parse(options.body || "{}");
       if(payload.preview===false)historicalBulkApplied=true;
       return {ok:true,eligible_sales:historicalBulkApplied?0:1,
         matching_sales:1,already_costed:0,other_currency:0,with_sale_amount:1,
-        estimated_cost_cents:100,updated:payload.preview===false?1:0};
+        eligible_books:historicalQuantity,unknown_quantity_sales:0,
+        skipped_unknown_quantity_sales:0,assumed_one_quantity_sales:0,
+        estimated_cost_cents:historicalQuantity*100,
+        updated:payload.preview===false?1:0};
     }
     if(url.includes("/api/app/sales/historical-test/acquisition-cost")) {
       historicalManualCost=JSON.parse(options.body).cost_cents;
@@ -74,7 +83,9 @@ const bootstrap=String.raw`
       id:"historical-test",direction:"sell",title:"Older sold book",channel:"vinted",
       external_order_id:"HIST-1",total_cents:1200,currency:"EUR",
       acquisition_cost_cents:historicalManualCost===null
-        ?(historicalBulkApplied?100:null):historicalManualCost,
+        ?(historicalBulkApplied?historicalQuantity*100:null):historicalManualCost,
+      book_quantity:historicalQuantity,quantity_source:"manual",
+      acquisition_unit_cost_cents:historicalBulkApplied?100:null,
       acquisition_cost_source:historicalManualCost===null
         ?(historicalBulkApplied?"estimated_bulk":null):"manual_sale",
       status:"completed",is_closed:true,occurred_at:"2026-06-01T12:00:00Z",
@@ -120,19 +131,26 @@ const browserTest=String.raw`
     result.backfillFormVisible=!document.querySelector("#sales-costs-panel").classList.contains("hidden");
     document.querySelector("#sale-cost-backfill-preview-btn").click();
     await sleep(80);
-    result.backfillPreview=document.querySelector("#sale-cost-backfill-preview").textContent.includes("1 historical sales");
+    result.backfillPreview=document.querySelector("#sale-cost-backfill-preview").textContent.includes("5 books across 1 historical sales");
     result.backfillApplyEnabled=!document.querySelector("#sale-cost-backfill-apply").disabled;
     document.querySelector("#sale-cost-backfill-apply").click();
     await sleep(150);
     document.querySelector("#sale-cost-history-filter").value="all";
     document.querySelector("#sale-cost-history-filter").dispatchEvent(new Event("change"));
-    result.backfillRecorded=document.querySelector("#sale-cost-history-table").textContent.includes("Estimated");
+    result.backfillRecorded=document.querySelector("#sale-cost-history-table").textContent.includes("Estimated")
+      && document.querySelector("#sale-cost-history-table .sale-cost-input").value==="5.00";
+    const quantityRow=document.querySelector("#sale-cost-history-table .sale-quantity-edit");
+    quantityRow.querySelector("input").value="6";
+    quantityRow.querySelector(".sale-quantity-save").click();
+    await sleep(150);
+    result.bookQuantitySaved=document.querySelector("#sale-cost-history-table .sale-quantity-input").value==="6"
+      && document.querySelector("#sale-cost-history-table .sale-cost-input").value==="6.00";
     const historicRow=document.querySelector("#sale-cost-history-table .sale-cost-edit");
     historicRow.querySelector("input").value="2.50";
     historicRow.querySelector(".sale-cost-save").click();
     await sleep(150);
     result.manualHistoricEdit=document.querySelector("#sale-cost-history-table").textContent.includes("Manually recorded")
-      && document.querySelector("#sale-cost-history-table input").value==="2.50";
+      && document.querySelector("#sale-cost-history-table .sale-cost-input").value==="2.50";
     document.querySelector('.nav[data-view="analytics"]').click();
     await sleep(200);
     result.statisticsRevenue=document.querySelector("#analytics-revenue-metrics").textContent;
@@ -183,7 +201,8 @@ try {
   assert(!result.error,"Browser test failed: "+JSON.stringify(result));
   assert.deepEqual(result.errors,[],"Page had JavaScript errors: "+JSON.stringify(result.errors));
   for(const key of ["initialView","clickHandler","formOpens","previewWorks","applyEnabled","applied","reportFailureIsolated",
-    "backfillFormVisible","backfillPreview","backfillApplyEnabled","backfillRecorded","manualHistoricEdit"]) {
+    "backfillFormVisible","backfillPreview","backfillApplyEnabled","backfillRecorded",
+    "bookQuantitySaved","manualHistoricEdit"]) {
     assert.equal(result[key],true,key+": "+JSON.stringify(result));
   }
   assert(result.salesRevenue.includes("1,234.56") || result.salesRevenue.includes("1.234,56")
