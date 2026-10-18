@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const {pathToFileURL} = require("node:url");
 const {execFileSync} = require("node:child_process");
 
 const root=path.join(__dirname,"..");
@@ -16,7 +17,7 @@ assert(!app.includes("</script>"),"Unsafe inline source for browser test");
 const bootstrap=String.raw`
   (()=>{
   window.dashboardTestErrors=[];
-  window.addEventListener("error",e=>window.dashboardTestErrors.push(String(e.message)));
+  window.addEventListener("error",e=>window.dashboardTestErrors.push(String(e.message)+" @ "+String(e.filename)+":"+e.lineno+":"+e.colno));
   window.addEventListener("unhandledrejection",e=>window.dashboardTestErrors.push(String(e.reason)));
   window.confirm=()=>true;
   const analytics={
@@ -97,7 +98,7 @@ const browserTest=String.raw`
 const resultHtml=html.replace('<link rel="stylesheet" href="/app-static/styles.css">',
   "<style>"+css+"</style>").replace(
   '<script src="/app-static/app.js"></script>',
-  "<script>"+bootstrap+"</script><script>"+app+"</script><script>"+browserTest+"</script>");
+  "<script>"+bootstrap+"</script><script src=\""+pathToFileURL(path.join(root,"app/product_static/app.js")).href+"\"></script><script>"+browserTest+"</script>");
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),"dashboard-e2e-"));
 const file=path.join(tmp,"test.html");
 try {
