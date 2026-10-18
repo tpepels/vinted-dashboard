@@ -644,10 +644,18 @@ def record_workspace_snapshot(
             sale.occurred_at = _dt(order.get("updated_at"), captured_at)
             sale.last_seen_at = captured_at
             item_external_id = str(order.get("item_id") or "").strip() or None
-            sale.extra = {
+            extra = dict(sale.extra or {})
+            extra.update({
                 "url": order.get("vinted_url"),
                 "item_external_id": item_external_id,
-            }
+            })
+            # A marketplace sync may omit item count on later snapshots.
+            # Preserve manual book-count overrides, recorded acquisition costs,
+            # and prior observed counts instead of replacing the entire JSON.
+            quantity = order.get("quantity")
+            if type(quantity) is int and 1 <= quantity <= 1000:
+                extra["quantity"] = quantity
+            sale.extra = extra
             session.flush()
             reconcile_sale_state(
                 session,
