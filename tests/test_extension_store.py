@@ -311,7 +311,7 @@ def test_vinted_cooldown_and_dormant_age_job_are_not_reenabled():
     assert "sync_skipped_for_api_cooldown:true" in background
     assert 'if(reason==="periodic"&&apiCooldownUntil>Date.now())' in background
     assert "sync_skipped_for_interval:true" in background
-    assert "lastSyncAttemptAt" in background
+    assert "lastSuccessfulSyncAt" in background
     assert 'if(a.name===AGE_JOB_ALARM)return stopLegacyAgeScan();' in background
     assert 'reason==="periodic"' in background
     assert "Vinted is in use; automatic sync postponed." in background
@@ -328,9 +328,10 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert "Vinted rate limited the API sync." in content
     assert "error.vintedRateLimited=true" in content
     assert 'if(status==="active")throw error;' in content
-    assert "secondaryRateLimited=true" in content
+    assert "secondaryRateLimited=isRateLimitError(error)" in content
+    assert "secondaryAccessBlocked=true" in content
     assert "const queue=missing.slice(0,3);" in content
-    assert "if(!detailSync.rate_limited)" in content
+    assert "if(!detailSync.rate_limited&&!detailSync.access_blocked)" in content
 
 
 
