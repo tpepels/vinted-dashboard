@@ -14,6 +14,7 @@ const css=fs.readFileSync(path.join(root,"app/product_static/styles.css"),"utf8"
 const app=fs.readFileSync(path.join(root,"app/product_static/app.js"),"utf8");
 assert(!app.includes("</script>"),"Unsafe inline source for browser test");
 const bootstrap=String.raw`
+  (()=>{
   window.dashboardTestErrors=[];
   window.addEventListener("error",e=>window.dashboardTestErrors.push(String(e.message)));
   window.addEventListener("unhandledrejection",e=>window.dashboardTestErrors.push(String(e.reason)));
@@ -52,6 +53,7 @@ const bootstrap=String.raw`
       json:async()=> result??{detail:"Optional report unavailable"},
       text:async()=>JSON.stringify(result)};
   };
+  })();
 `;
 const browserTest=String.raw`
   (async()=>{
