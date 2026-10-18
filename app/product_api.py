@@ -242,6 +242,14 @@ class InventoryBulkRequest(BaseModel):
     status: str | None = None
 
 
+class InventoryAverageCostRequest(BaseModel):
+    cost_cents: int = Field(ge=0)
+    currency: str = "EUR"
+    scope: str = "active"
+    overwrite_existing: bool = False
+    preview: bool = True
+
+
 class QuickListingCreateRequest(BaseModel):
     sku: str | None = None
     title: str
@@ -1370,6 +1378,57 @@ def bulk_update_inventory(
                 item.attributes = attributes
         session.flush()
     return {"ok": True, "updated": len(items)}
+
+
+@router.post("/api/app/inventory/average-cost")
+def sweep_inventory_average_cost(
+    payload: InventoryAverageCostRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    """Apply a per-unit average acquisition cost, without changing marketplace listings."""
+    currency = str(payload.currency or "").strip().upper()
+    if len(currency) != 3 or not currency.isalpha():
+        raise HTTPException(status_code=400, detail="Currency must be a 3-letter code")
+    if payload.scope not in ("active", "all"):
+        raise HTTPException(status_code=400, detail="Scope must be active or all")
+    with db.session_scope() as session:
+        statement = select(models.InventoryItem).where(
+            models.InventoryItem.workspace_id == context.workspace.id,
+        )
+        if payload.scope == "active":
+            statement = statement.where(models.InventoryItem.status == ItemStatus.ACTIVE)
+        items = session.execute(statement).scalars().all()
+        compatible = [
+            item for item in items
+            if str(item.currency or "EUR").upper() == currency
+        ]
+        eligible = [
+            item for item in compatible
+            if payload.overwrite_existing or item.cost_cents is None
+        ]
+        if not payload.preview:
+            for item in eligible:
+                item.cost_cents = payload.cost_cents
+                attributes = dict(item.attributes or {})
+                attributes["cost_source"] = "average_bulk"
+                attributes.pop("cost_source_adjusted", None)
+                item.attributes = attributes
+            session.flush()
+        units = sum(max(0, int(item.quantity or 0)) for item in eligible)
+    return {
+        "ok": True,
+        "preview": payload.preview,
+        "scope": payload.scope,
+        "currency": currency,
+        "cost_cents": payload.cost_cents,
+        "matching_items": len(items),
+        "eligible_items": len(eligible),
+        "already_costed": len(compatible) - len(eligible),
+        "other_currency": len(items) - len(compatible),
+        "affected_units": units,
+        "estimated_cost_cents": units * payload.cost_cents,
+        "updated": 0 if payload.preview else len(eligible),
+    }
 
 
 @router.patch("/api/app/inventory/{item_id}")

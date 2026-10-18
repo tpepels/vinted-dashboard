@@ -3242,6 +3242,90 @@ $("#biblio-publish-submit").onclick = async () => {
   }
 };
 
+function averageCostPayload(preview = true) {
+  const input = $("#inventory-average-cost-value");
+  const value = Number(input.value);
+  const currency = $("#inventory-average-cost-currency").value.trim().toUpperCase();
+  if (input.value.trim() === "" || !Number.isFinite(value) || value < 0
+      || !/^\d+(?:\.\d{1,2})?$/.test(input.value.trim())) {
+    throw new Error("Enter a valid average cost with at most two decimals.");
+  }
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Enter a three-letter currency.");
+  return {
+    cost_cents: Math.round(value * 100),
+    currency,
+    scope: $("#inventory-average-cost-scope").value,
+    overwrite_existing: $("#inventory-average-cost-overwrite").checked,
+    preview,
+  };
+}
+
+let averageCostPreview = null;
+function invalidateAverageCostPreview() {
+  averageCostPreview = null;
+  $("#inventory-average-cost-apply").disabled = true;
+  $("#inventory-average-cost-preview").textContent = "Preview the affected items before applying.";
+}
+$("#inventory-average-cost-open").onclick = () => {
+  $("#inventory-average-cost-form").classList.remove("hidden");
+  invalidateAverageCostPreview();
+  $("#inventory-average-cost-form").scrollIntoView({behavior:"smooth",block:"start"});
+};
+$("#inventory-average-cost-close").onclick = () => $("#inventory-average-cost-form").classList.add("hidden");
+["inventory-average-cost-value", "inventory-average-cost-currency",
+ "inventory-average-cost-scope", "inventory-average-cost-overwrite"].forEach((id) => {
+  $("#" + id).addEventListener("input", invalidateAverageCostPreview);
+  $("#" + id).addEventListener("change", invalidateAverageCostPreview);
+});
+$("#inventory-average-cost-preview-btn").onclick = async () => {
+  const button = $("#inventory-average-cost-preview-btn");
+  let payload;
+  try { payload = averageCostPayload(); } catch (error) { return flash(error.message, true); }
+  button.disabled = true;
+  try {
+    const result = await api("/api/app/inventory/average-cost", {
+      method:"POST", body:JSON.stringify(payload),
+    });
+    if (JSON.stringify(averageCostPayload()) !== JSON.stringify(payload)) return;
+    averageCostPreview = {payload, result};
+    $("#inventory-average-cost-preview").textContent =
+      result.eligible_items + " items (" + result.affected_units + " units) × "
+      + money(payload.cost_cents, payload.currency) + " = "
+      + money(result.estimated_cost_cents, payload.currency)
+      + " estimated acquisition value. "
+      + result.already_costed + " already costed; "
+      + result.other_currency + " other-currency items excluded.";
+    $("#inventory-average-cost-apply").disabled = result.eligible_items === 0;
+  } catch (error) { flash(error.message, true); }
+  finally { button.disabled = false; }
+};
+$("#inventory-average-cost-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const preview = averageCostPreview;
+  let payload;
+  try { payload = averageCostPayload(false); } catch (error) { return flash(error.message, true); }
+  if (!preview || JSON.stringify({...payload,preview:true}) !== JSON.stringify(preview.payload)) {
+    return flash("Preview the current settings before applying.", true);
+  }
+  if (!window.confirm("Assign " + money(payload.cost_cents,payload.currency)
+      + " per unit to " + preview.result.eligible_items + " inventory items?"
+      + (payload.overwrite_existing ? " Existing purchase costs WILL be replaced." : ""))) return;
+  const button = $("#inventory-average-cost-apply");
+  button.disabled = true;
+  try {
+    const result = await api("/api/app/inventory/average-cost", {
+      method:"POST", body:JSON.stringify(payload),
+    });
+    flash("Assigned average cost to " + result.updated + " items.");
+    invalidateAverageCostPreview();
+    $("#inventory-average-cost-form").classList.add("hidden");
+    await inventory();
+  } catch (error) {
+    flash(error.message, true);
+    invalidateAverageCostPreview();
+  }
+};
+
 $("#bulk-edit").onclick = () => {
   if (!selectedInventoryIds().length) return;
   $("#bulk-form").reset();

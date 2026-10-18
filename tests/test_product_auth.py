@@ -43,6 +43,50 @@ def test_two_accounts_cannot_see_each_others_inventory():
     assert response.status_code == 404
 
 
+def test_average_cost_sweep_previews_and_preserves_existing_costs():
+    client = TestClient(entry.app)
+    csrf = _register(client, "average-cost@example.test")
+    for sku, cost, currency, quantity in [
+        ("A", None, "EUR", 2),
+        ("B", 500, "EUR", 1),
+        ("C", None, "USD", 1),
+    ]:
+        response = client.post(
+            "/api/app/inventory",
+            headers=_write_headers(csrf),
+            json={"sku": sku, "title": sku, "category": "book", "quantity": quantity,
+                  "cost_cents": cost, "currency": currency},
+        )
+        assert response.status_code == 200, response.text
+
+    endpoint = "/api/app/inventory/average-cost"
+    payload = {"cost_cents": 100, "currency": "EUR", "scope": "active"}
+    preview = client.post(endpoint, headers=_write_headers(csrf), json=payload)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["eligible_items"] == 1
+    assert preview.json()["affected_units"] == 2
+    assert preview.json()["estimated_cost_cents"] == 200
+    assert preview.json()["other_currency"] == 1
+    assert [row["cost_cents"] for row in client.get("/api/app/inventory").json()["items"] if row["sku"] == "A"] == [None]
+
+    apply = client.post(endpoint, headers=_write_headers(csrf), json={**payload, "preview": False})
+    assert apply.status_code == 200, apply.text
+    assert apply.json()["updated"] == 1
+    costs = {row["sku"]: row["cost_cents"] for row in client.get("/api/app/inventory").json()["items"]}
+    assert costs == {"A": 100, "B": 500, "C": None}
+
+    overwrite = client.post(endpoint, headers=_write_headers(csrf), json={
+        **payload, "preview": False, "overwrite_existing": True,
+    })
+    assert overwrite.status_code == 200, overwrite.text
+    assert overwrite.json()["updated"] == 2
+    costs = {row["sku"]: row["cost_cents"] for row in client.get("/api/app/inventory").json()["items"]}
+    assert costs == {"A": 100, "B": 100, "C": None}
+    assert client.post(endpoint, headers=_write_headers(csrf), json={
+        "cost_cents": -1, "preview": False,
+    }).status_code == 422
+
+
 def test_extension_pairing_is_revocable_and_workspace_scoped():
     client = TestClient(entry.app)
     csrf = _register(client, "seller@example.test")

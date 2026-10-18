@@ -8,6 +8,18 @@ APP_JS = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "app.
 )
 
 
+def test_inventory_average_cost_sweep_is_explicit_and_previews_before_apply():
+    html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text(encoding="utf-8")
+    api = (Path(__file__).resolve().parents[1] / "app" / "product_api.py").read_text(encoding="utf-8")
+    assert 'id="inventory-average-cost-form"' in html
+    assert 'id="inventory-average-cost-preview-btn"' in html
+    assert 'id="inventory-average-cost-overwrite"' in html
+    assert '@router.post("/api/app/inventory/average-cost")' in api
+    assert "if payload.overwrite_existing or item.cost_cents is None" in api
+    assert 'api("/api/app/inventory/average-cost"' in APP_JS
+    assert 'hourCycle:"h23"' in APP_JS
+
+
 def test_inventory_bulk_selection_uses_multi_element_selector():
     assert 'return $$(".inventory-select:checked").map' in APP_JS
     assert 'const boxes = $$(".inventory-select");' in APP_JS
