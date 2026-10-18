@@ -8,7 +8,9 @@ const source = fs.readFileSync("app/extension/background.js", "utf8");
 const LOST = "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received";
 
 async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
-  const state = {bridgeToken:"paired-token",bridgeWorkspace:"Personal",syncStatus:{},lastSyncAttemptAt:lastAttempt};
+  const state = {bridgeToken:"paired-token",bridgeWorkspace:"Personal",
+    syncStatus:lastAttempt>0?{ok:true}:{},
+    lastSyncAttemptAt:lastAttempt,lastSuccessfulSyncAt:lastAttempt};
   const tab = {id:24,windowId:9,status:"complete",active:false,url:"https://www.vinted.pt/member/42"};
   let sentToDashboard = 0;
   let collections = 0;
