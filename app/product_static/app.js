@@ -5231,11 +5231,11 @@ function saleCostControls(sale) {
 }
 
 function bindSaleCostEditors(rootSelector) {
-  $(rootSelector + " .sale-quantity-save").forEach(button => {
+  $$(rootSelector + " .sale-quantity-save").forEach(button => {
     button.onclick = async () => {
       const input = button.closest(".sale-quantity-edit")?.querySelector(".sale-quantity-input");
       const raw = String(input?.value || "").trim();
-      if (!/^\\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 1000)
+      if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 1000)
         return flash("Enter a valid number of books (1–1000).", true);
       button.disabled = true;
       try {
@@ -5247,7 +5247,7 @@ function bindSaleCostEditors(rootSelector) {
       } catch(error) {flash(error.message,true);button.disabled=false;}
     };
   });
-  $(rootSelector + " .sale-cost-save").forEach(button => {
+  $$(rootSelector + " .sale-cost-save").forEach(button => {
     button.onclick = async () => {
       const input = button.closest(".sale-cost-edit")?.querySelector(".sale-cost-input");
       const raw = String(input?.value || "").trim();
