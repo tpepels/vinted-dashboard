@@ -111,6 +111,7 @@ try {
   const match=rendered.match(/<output id="e2e-revenue-and-average-cost">([^<]+)<\/output>/);
   assert(match,"Headless browser did not finish the interaction test");
   const result=JSON.parse(match[1].replace(/&quot;/g,'"').replace(/&amp;/g,"&"));
+  console.log("BROWSER_E2E_REPORT "+JSON.stringify(result));
   assert(!result.error,"Browser test failed: "+JSON.stringify(result));
   assert.deepEqual(result.errors,[],"Page had JavaScript errors: "+JSON.stringify(result.errors));
   for(const key of ["initialView","clickHandler","formOpens","previewWorks","applyEnabled","applied","reportFailureIsolated"]) {
