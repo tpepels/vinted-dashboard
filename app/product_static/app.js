@@ -5215,11 +5215,11 @@ function saleCostControls(sale) {
 }
 
 function bindSaleCostEditors(rootSelector) {
-  $(rootSelector + " .sale-cost-save").forEach(button => {
+   $(rootSelector + " .sale-cost-save").forEach(button => {
     button.onclick = async () => {
       const input = button.closest(".sale-cost-edit")?.querySelector(".sale-cost-input");
       const raw = String(input?.value || "").trim();
-      if (!/^\\d+(?:\\.\\d{1,2})?$/.test(raw)) {
+      if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) {
         return flash("Enter a purchase cost with up to two decimals.", true);
       }
       button.disabled = true;
@@ -5233,7 +5233,7 @@ function bindSaleCostEditors(rootSelector) {
       } catch (error) { flash(error.message, true); button.disabled = false; }
     };
   });
-  $(rootSelector + " .sale-cost-clear").forEach(button => {
+   $(rootSelector + " .sale-cost-clear").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Clear the cost override for this sale? A linked inventory cost, if present, will be used instead.")) return;
       button.disabled = true;
@@ -5276,7 +5276,7 @@ function invalidateSaleCostBulkPreview() {
 function saleCostBulkPayload(preview=true) {
   const raw=$("#sale-cost-backfill-value").value.trim();
   const currency=$("#sale-cost-backfill-currency").value.trim().toUpperCase();
-  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(raw)) throw Error("Enter a valid cost per sale.");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) throw Error("Enter a valid cost per sale.");
   if (!/^[A-Z]{3}$/.test(currency)) throw Error("Enter a valid three-letter currency.");
   return {
     cost_cents:Math.round(Number(raw)*100), currency,
