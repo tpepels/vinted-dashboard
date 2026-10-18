@@ -62,7 +62,27 @@ const bootstrap=String.raw`
       historicalManualCost=JSON.parse(options.body).cost_cents;
       return {ok:true,cost_cents:historicalManualCost,cost_source:"manual_sale"};
     }
-    if(url.includes("/api/app/analytics/history")||url.includes("/api/app/analytics/vinted")
+    if(url.includes("/api/app/analytics/history")){
+      const period=new URL(url,"https://dashboard.example").searchParams.get("period") || "90";
+      const now=new Date();
+      const start=period==="ytd"
+        ?new Date(Date.UTC(now.getUTCFullYear(),0,1))
+        :new Date(now.getTime()-Number(period)*86400000);
+      const quantity=period==="30"?2:period==="ytd"?20:9;
+      const first=new Date(start.getTime()+86400000);
+      return {
+        period_start:start.toISOString(),period_end:now.toISOString(),
+        days:period==="ytd"?200:Number(period),
+        daily:[
+          {date:first.toISOString().slice(0,10),sales:1,revenue_cents:1000,
+            views_gained:4,favourites_gained:1},
+          {date:now.toISOString().slice(0,10),sales:quantity-1,
+            revenue_cents:(quantity-1)*1000,views_gained:15,favourites_gained:2},
+        ],
+        followers:[],top_listings:[],
+      };
+    }
+    if(url.includes("/api/app/analytics/vinted")
        ||url.includes("/api/app/purchase-cost-suggestions"))return null;
     if(url.includes("/api/app/analytics")) {
       const period=new URL(url,"https://dashboard.example").searchParams.get("period");
@@ -155,18 +175,37 @@ const browserTest=String.raw`
     await sleep(200);
     result.statisticsRevenue=document.querySelector("#analytics-revenue-metrics").textContent;
     result.statisticsProfit=document.querySelector("#analytics-metrics").textContent;
+    result.salesDashboardTabs=document.querySelector('[data-workspace-tab="overview"]').textContent.includes("Sales performance")
+      && document.querySelector('[data-workspace-tab="demand"]').textContent.includes("Vinted reach")
+      && document.querySelector('[data-workspace-tab="detail"]').textContent.includes("Stock");
+    result.costCoverageRemoved=!document.querySelector("#analytics-metrics").textContent.includes("Cost coverage")
+      && document.querySelector("#sale-cost-data-quality").textContent.includes("acquisition costs");
+    result.monthlyOrders90=document.querySelector("#analytics-monthly-table").textContent;
+    result.monthlyChart90=Boolean(document.querySelector("#analytics-monthly-sales-chart svg"))
+      && Boolean(document.querySelector("#analytics-monthly-revenue-chart svg"))
+      && Boolean(document.querySelector("#analytics-cumulative-sales-chart svg"))
+      && Boolean(document.querySelector("#analytics-cumulative-revenue-chart svg"));
     const periodSelect=document.querySelector("#analytics-days");
     periodSelect.value="30";
     periodSelect.dispatchEvent(new Event("change",{bubbles:true}));
     await sleep(200);
     result.revenue30=document.querySelector("#analytics-revenue-metrics").textContent;
     result.profit30=document.querySelector("#analytics-metrics").textContent;
+    result.monthlyOrders30=document.querySelector("#analytics-monthly-table").textContent;
     periodSelect.value="ytd";
     periodSelect.dispatchEvent(new Event("change",{bubbles:true}));
     await sleep(200);
     result.revenueYtd=document.querySelector("#analytics-revenue-metrics").textContent;
     result.profitYtd=document.querySelector("#analytics-metrics").textContent;
-    result.reportFailureIsolated=document.querySelector("#sales-chart").textContent.includes("History unavailable");
+    result.monthlyOrdersYtd=document.querySelector("#analytics-monthly-table").textContent;
+    result.reportFailureIsolated=document.querySelector("#vinted-metrics").textContent.includes("Vinted engagement unavailable")
+      && Boolean(document.querySelector("#analytics-monthly-sales-chart svg"));
+    document.querySelector('[data-workspace-tab="demand"]').click();
+    result.vintedDashboardVisible=!document.querySelector("#analytics-demand-panel").classList.contains("hidden")
+      && document.querySelector("#analytics-overview-panel").classList.contains("hidden");
+    document.querySelector('[data-workspace-tab="detail"]').click();
+    result.stockDashboardVisible=!document.querySelector("#analytics-detail-panel").classList.contains("hidden")
+      && document.querySelector("#analytics-overview-panel").classList.contains("hidden");
     result.errors=window.dashboardTestErrors;
     const out=document.createElement("output");
     out.id="e2e-revenue-and-average-cost";
@@ -202,7 +241,9 @@ try {
   assert.deepEqual(result.errors,[],"Page had JavaScript errors: "+JSON.stringify(result.errors));
   for(const key of ["initialView","clickHandler","formOpens","previewWorks","applyEnabled","applied","reportFailureIsolated",
     "backfillFormVisible","backfillPreview","backfillApplyEnabled","backfillRecorded",
-    "bookQuantitySaved","manualHistoricEdit"]) {
+    "bookQuantitySaved","manualHistoricEdit",
+    "salesDashboardTabs","costCoverageRemoved","monthlyChart90","vintedDashboardVisible",
+    "stockDashboardVisible"]) {
     assert.equal(result[key],true,key+": "+JSON.stringify(result));
   }
   assert(result.salesRevenue.includes("1,234.56") || result.salesRevenue.includes("1.234,56")
@@ -217,6 +258,9 @@ try {
   assert(result.statisticsProfit.includes("90 days")
       && result.profit30.includes("30 days") && result.profitYtd.includes("YTD"),
     "Analytics profit cards must follow selected period");
+  assert(result.monthlyOrders90.includes("9") && result.monthlyOrders30.includes("2")
+      && result.monthlyOrdersYtd.includes("20"),
+    "Monthly table must follow period and cumulative order totals");
   assert(result.salesRevenue.includes("37"),"Sales lifetime metrics must remain unchanged");
   console.log("Browser E2E: average-cost workflow, independent lifetime Sales and period-aware Analytics: PASS");
 } finally {
