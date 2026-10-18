@@ -5215,7 +5215,7 @@ function saleCostControls(sale) {
 }
 
 function bindSaleCostEditors(rootSelector) {
-   $(rootSelector + " .sale-cost-save").forEach(button => {
+   $$(rootSelector + " .sale-cost-save").forEach(button => {
     button.onclick = async () => {
       const input = button.closest(".sale-cost-edit")?.querySelector(".sale-cost-input");
       const raw = String(input?.value || "").trim();
@@ -5233,7 +5233,7 @@ function bindSaleCostEditors(rootSelector) {
       } catch (error) { flash(error.message, true); button.disabled = false; }
     };
   });
-   $(rootSelector + " .sale-cost-clear").forEach(button => {
+   $$(rootSelector + " .sale-cost-clear").forEach(button => {
     button.onclick = async () => {
       if (!window.confirm("Clear the cost override for this sale? A linked inventory cost, if present, will be used instead.")) return;
       button.disabled = true;
