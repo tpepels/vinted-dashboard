@@ -8,6 +8,24 @@ APP_JS = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "app.
 )
 
 
+def test_historical_sale_cost_backfill_is_editable_and_profit_coverage_is_explicit():
+    html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    for marker in (
+        'id="sale-cost-backfill-form"',
+        'id="sale-cost-backfill-preview-btn"',
+        'id="sale-cost-history-table"',
+        'id="analytics-edit-sale-costs"',
+    ):
+        assert marker in html
+    assert 'api("/api/app/sales/average-cost"' in APP_JS
+    assert '"/acquisition-cost"' in APP_JS
+    assert "economicsReady && summary.sales_period_costed_count" in APP_JS
+    assert "Not a complete profit figure" in APP_JS
+    assert "Estimated" in APP_JS
+
+
 def test_inventory_average_cost_sweep_is_explicit_and_previews_before_apply():
     html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text(encoding="utf-8")
     api = (Path(__file__).resolve().parents[1] / "app" / "product_api.py").read_text(encoding="utf-8")
