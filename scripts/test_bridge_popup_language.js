@@ -38,7 +38,7 @@ const ctx = {
   document: {querySelector: key => elements[key]},
   chrome: {
     runtime: {
-      getManifest: () => ({version:"3.4.3"}),
+      getManifest: () => ({version:"3.4.4"}),
       sendMessage: async () => response,
     },
     tabs: {create() {}},
@@ -56,12 +56,19 @@ vm.createContext(ctx);
   assert.match(elements["#detail-info"].textContent, /280 listings still need optional details/);
   assert.match(elements["#detail-info"].textContent, /basic listing update has already been sent/);
   assert.equal(elements["#sync-details"].classList.contains("hidden"), false);
-  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.3");
+  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.4");
   response = {paired:true,workspace:"Personal Workspace",status:{
     ok:true,at:"2026-10-12T10:28:20Z",listings:280,detail_pending:0,
   }};
   await ctx.refresh();
   assert.equal(elements["#sync-details"].classList.contains("hidden"), true);
+  response = {paired:true,workspace:"Personal Workspace",status:{
+    ok:true,at:"2026-10-12T10:28:20Z",listings:280,detail_pending:0,
+    api_cooldown_until:Date.now()+60*60*1000,
+  }};
+  await ctx.refresh();
+  assert.match(elements["#status"].textContent, /Automatic checks paused until/);
+  assert.match(elements["#detail-info"].textContent, /Manual checks remain available/);
   response = {paired:false};
   await ctx.refresh();
   assert.match(elements["#status"].textContent, /Not connected/);

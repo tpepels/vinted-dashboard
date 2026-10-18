@@ -25,7 +25,7 @@ function syncDetails(status) {
       + "additional listings per update.");
   }
   if (enriched > 0) notes.push("Extra details checked for " + enriched + " listings in the last update.");
-  if (paused) notes.push("Vinted has limited requests. More checks are paused until " + paused + ".");
+  if (paused) notes.push("Vinted limited requests. Automatic checks are paused until " + paused + ". Manual checks remain available.");
   const unread = Number(status.age_scan_failed || 0);
   if (unread) notes.push(unread + " older listing dates could not be checked.");
   panel.classList.toggle("hidden", notes.length === 0);
@@ -51,7 +51,7 @@ async function refresh() {
     const count = Number(status.listings || 0);
     const summary = count + " Vinted listing" + (count === 1 ? "" : "s") + " synced";
     show(summary + "\nLast checked: " + last
-      + (paused ? "\nExtra checks paused until " + paused : ""));
+      + (paused ? "\nAutomatic checks paused until " + paused + " (manual check available)" : ""));
   } else {
     show("Connected to " + (response.workspace || "your dashboard") + ". No update yet.");
   }
@@ -78,10 +78,6 @@ $("#sync").onclick = async () => {
   show("Checking Vinted for changes…");
   try {
     const result = await send({type:"sync-now"});
-    if (result?.sync_skipped_for_api_cooldown) {
-      return show("Vinted checks are paused until "
-        + new Date(result.api_cooldown_until).toLocaleString() + ".");
-    }
     if (!result?.ok) return show(result?.error || "Could not check Vinted.", true);
     await refresh();
   } catch (error) {

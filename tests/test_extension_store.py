@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "3.4.3"
+    assert manifest["version"] == "3.4.4"
 
 
 
@@ -273,13 +273,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.3.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.4.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.3"
+    assert response.headers["x-bridge-version"] == "3.4.4"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.3.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.4.zip")
     assert versioned.status_code == 200
-    assert "v3.4.3.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.4.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
@@ -309,6 +309,7 @@ def test_vinted_detail_parser_prefers_direct_category_and_description_fields():
 def test_vinted_cooldown_and_dormant_age_job_are_not_reenabled():
     background = (ROOT / "app" / "extension" / "background.js").read_text(encoding="utf-8")
     assert "sync_skipped_for_api_cooldown:true" in background
+    assert 'if(reason==="periodic"&&apiCooldownUntil>Date.now())' in background
     assert "sync_skipped_for_interval:true" in background
     assert "lastSyncAttemptAt" in background
     assert 'if(a.name===AGE_JOB_ALARM)return stopLegacyAgeScan();' in background

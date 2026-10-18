@@ -528,6 +528,8 @@
       </section>
 
       <section id="sales" class="view">
+        <div id="sales-lifetime-metrics" class="metrics"></div>
+        <p class="muted sales-summary-note">Lifetime totals cover all marketplaces and are independent of order-table filters. Cancelled and refunded orders are excluded; missing amounts are reported separately.</p>
         <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Sales" data-workspace-tabs="sales">
         <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="sales-orders-panel" data-workspace-tab="orders">Orders</button>
         <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="sales-costs-panel" data-workspace-tab="costs">Record purchase costs</button>
@@ -569,9 +571,7 @@
 
       <section id="analytics" class="view">
         <div class="toolbar analytics-toolbar"><select id="analytics-days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">1 year</option></select></div>
-        <details class="dashboard-filter-details dashboard-summary-details"><summary>Inventory, sales and margin figures</summary>
-          <div id="analytics-metrics" class="metrics"></div>
-        </details>
+        <div id="analytics-metrics" class="metrics"></div>
         <div class="dashboard-tabbar" role="tablist" aria-label="Analytics sections" data-workspace-tabs="analytics">
           <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="analytics-overview-panel" data-workspace-tab="overview">Trends</button>
           <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="analytics-demand-panel" data-workspace-tab="demand">Vinted activity</button>

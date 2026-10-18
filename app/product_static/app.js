@@ -200,6 +200,19 @@ function money(value, currency) {
   }).format(Number(value) / 100);
 }
 
+function lifetimeRevenue(summary) {
+  const totals = Array.isArray(summary.sales_all_time_totals) ? summary.sales_all_time_totals : [];
+  if (!totals.length) {
+    return Number(summary.sales_all_time_count || 0) ? "—" : money(0, summary.currency);
+  }
+  return totals.map((row) => money(row.cents, row.currency)).join(" + ");
+}
+
+function lifetimeCoverage(summary) {
+  return Number(summary.sales_all_time_revenue_known_count || 0) + " of "
+    + Number(summary.sales_all_time_count || 0) + " sale amounts known";
+}
+
 function when(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -1140,9 +1153,9 @@ async function today() {
       pricedCount + " of " + activeInventory + " priced"
     )
     + metric(
-      "Sales YTD",
-      analyticsData.sales_ytd_count,
-      money(analyticsData.sales_ytd_cents, analyticsData.currency)
+      "Total sales revenue",
+      lifetimeRevenue(analyticsData),
+      lifetimeCoverage(analyticsData) + " · all time"
     )
     + metric(
       "Potential margin",
@@ -4958,11 +4971,13 @@ $("#listing-reset").onclick = () => {
 };
 
 async function sales() {
-  const [data, purchaseCosts] = await Promise.all([
+  const [data, purchaseCosts, summary] = await Promise.all([
     api("/api/app/sales"),
     api("/api/app/purchase-cost-suggestions"),
+    api("/api/app/analytics"),
   ]);
   state.salesRows = data.sales || [];
+  state.salesSummary = summary;
   state.purchaseCostSuggestions = purchaseCosts || {
     suggestions: [],
     count: 0,
@@ -5049,6 +5064,15 @@ function renderSales() {
     return true;
   });
 
+  const summary = state.salesSummary || {};
+  $("#sales-lifetime-metrics").innerHTML =
+    metric("Total revenue · all time", lifetimeRevenue(summary), lifetimeCoverage(summary))
+    + metric("Sales · all time", Number(summary.sales_all_time_count || 0), "All marketplaces · cancelled/refunded excluded")
+    + metric(
+      "Revenue this year",
+      money(summary.sales_ytd_cents, summary.currency),
+      Number(summary.sales_ytd_count || 0) + " sales this calendar year"
+    );
   $("#sales-count").textContent = rows.length + " of " + state.salesRows.length;
   renderPurchaseCostSuggestions();
   const salesMarkup = rows.length
@@ -5284,7 +5308,9 @@ async function analytics() {
   const costedInventory = Number(summary.costed_inventory_count || 0);
   const marginInventory = Number(summary.margin_inventory_count || 0);
   $("#analytics-metrics").innerHTML =
-    metric("Active inventory", activeInventory)
+    metric("Total revenue · all time", lifetimeRevenue(summary), lifetimeCoverage(summary))
+    + metric("Sales · all time", Number(summary.sales_all_time_count || 0), "All marketplaces · cancelled/refunded excluded")
+    + metric("Active inventory", activeInventory)
     + metric(
       "Inventory cost",
       costedInventory ? money(summary.inventory_cost_cents, summary.currency) : "—",

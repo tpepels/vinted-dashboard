@@ -60,6 +60,22 @@ def test_purchase_cost_apply_uses_multi_element_selector():
 
 
 
+def test_lifetime_revenue_is_visible_without_opening_an_analytics_disclosure():
+    html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    api = (Path(__file__).resolve().parents[1] / "app" / "product_api.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'id="sales-lifetime-metrics"' in html
+    assert '<details class="dashboard-filter-details dashboard-summary-details">' not in html
+    assert '"sales_all_time_count": len(sold_all_time)' in api
+    assert '"sales_all_time_totals": [' in api
+    assert 'sold_all_time = [row for row in all_time_sale_rows if sale_counts_as_sold(row)]' in api
+    assert 'metric("Total revenue · all time", lifetimeRevenue(summary)' in APP_JS
+    assert 'api("/api/app/analytics")' in APP_JS
+
+
 def test_profitability_analytics_exposes_sortable_sale_economics():
     assert '"Gross margin YTD"' in APP_JS
     assert "<th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th>" in APP_JS

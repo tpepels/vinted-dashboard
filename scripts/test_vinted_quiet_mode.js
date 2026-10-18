@@ -95,11 +95,14 @@ vm.runInContext(source,context,{filename:"background.js"});
   assert(denial.api_rate_limited&&denial.api_cooldown_until>Date.now()+23*60*60*1000,
     "A Vinted denial must trigger at least 23 hours remaining cooldown");
   const blockedAgain=await context.runSync("manual");
-  assert(collectCount===3&&blockedAgain.sync_skipped_for_api_cooldown,
-    "Cooldown must stop user-triggered requests as well");
+  assert(collectCount===4&&blockedAgain.api_rate_limited&&!blockedAgain.sync_skipped_for_api_cooldown,
+    "A deliberate manual sync must attempt Vinted even during an automatic cooldown");
+  const pausedAutomatic=await context.runSync("periodic");
+  assert(collectCount===4&&pausedAutomatic.sync_skipped_for_api_cooldown,
+    "Automatic sync must remain paused after Vinted denies access");
 
   assert(tabsCreated.length===0,"No Vinted tabs should be created");
   assert(tabsReloaded.length===0,"No Vinted tabs should be reloaded");
   assert(windowsRemoved.length===0,"No worker windows should be necessary");
-  console.log("Vinted quiet bridge: 120-minute automatic-only throttle, manual refresh, 24h rate-limit cooldown: ok");
+  console.log("Vinted quiet bridge: manual override and automatic 24h rate-limit cooldown: ok");
 })().catch(error=>{console.error(error);process.exitCode=1;});

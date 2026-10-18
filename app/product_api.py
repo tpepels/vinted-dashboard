@@ -4483,6 +4483,13 @@ def analytics(context: RequestContext = Depends(require_context)):
                 models.ChannelListing.status == ListingStatus.ACTIVE,
             )
         ).scalar_one()
+        all_time_sale_rows = session.execute(
+            select(models.Sale).where(
+                models.Sale.workspace_id == context.workspace.id,
+                models.Sale.direction == "sell",
+            )
+        ).scalars().all()
+        sold_all_time = [row for row in all_time_sale_rows if sale_counts_as_sold(row)]
         sale_rows = session.execute(
             select(models.Sale).where(
                 models.Sale.workspace_id == context.workspace.id,
@@ -4566,6 +4573,15 @@ def analytics(context: RequestContext = Depends(require_context)):
         (int(ask) - int(item.cost_cents or 0)) * max(0, int(item.quantity or 0))
         for item, ask in margin_rows
     )
+    all_time_revenue_known_sales = [
+        row for row in sold_all_time if row.total_cents is not None
+    ]
+    all_time_currency_totals: dict[str, int] = {}
+    for row in all_time_revenue_known_sales:
+        currency = str(row.currency or "EUR").upper()
+        all_time_currency_totals[currency] = (
+            all_time_currency_totals.get(currency, 0) + int(row.total_cents)
+        )
     revenue_known_sales = [
         row for row in sold_rows
         if row.total_cents is not None
@@ -4607,6 +4623,12 @@ def analytics(context: RequestContext = Depends(require_context)):
         "inventory_cost_cents": inventory_cost_cents,
         "inventory_ask_cents": inventory_ask_cents,
         "inventory_potential_margin_cents": inventory_potential_margin_cents,
+        "sales_all_time_count": len(sold_all_time),
+        "sales_all_time_revenue_known_count": len(all_time_revenue_known_sales),
+        "sales_all_time_totals": [
+            {"currency": currency, "cents": cents}
+            for currency, cents in sorted(all_time_currency_totals.items())
+        ],
         "sales_ytd_count": len(sold_rows),
         "sales_ytd_revenue_known_count": len(revenue_known_sales),
         "sales_ytd_cents": sum(int(row.total_cents) for row in revenue_known_sales),
