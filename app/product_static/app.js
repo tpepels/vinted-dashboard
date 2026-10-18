@@ -5197,6 +5197,20 @@ function renderPurchaseCostSuggestions() {
   });
 }
 
+function saleQuantityControls(sale) {
+  if (sale.direction !== "sell" || /cancel|refund|fail/i.test(sale.status || "")) return "—";
+  const count = Number.isInteger(Number(sale.book_quantity)) && sale.book_quantity != null
+    ? Number(sale.book_quantity) : null;
+  const source = sale.quantity_source === "manual" ? "Manually verified"
+    : sale.quantity_source === "marketplace" ? "From marketplace" : "Unknown · check bundles";
+  return '<div class="sale-quantity-edit"><label class="sub">' + esc(source)
+    + '<input class="sale-quantity-input" type="number" min="1" max="1000" step="1"'
+    + ' value="' + esc(count == null ? "" : count) + '" placeholder="Unknown"'
+    + ' aria-label="Number of books in ' + esc(sale.title || sale.external_order_id) + '"></label>'
+    + '<button class="btn sale-quantity-save" type="button" data-id="' + esc(sale.id)
+    + '">Save books</button></div>';
+}
+
 function saleCostControls(sale) {
   if (sale.direction !== "sell" || /cancel|refund|fail/i.test(sale.status || "")) return "—";
   const recorded = sale.acquisition_cost_cents != null;
@@ -5205,17 +5219,35 @@ function saleCostControls(sale) {
     || sale.acquisition_cost_source === "average_bulk" ? "Estimated"
     : sale.acquisition_cost_source === "manual_sale" ? "Manually recorded"
     : recorded ? "From inventory" : "Cost missing";
-  return '<div class="sale-cost-edit"><label class="sub">' + esc(source)
+  const perBook = sale.acquisition_cost_source === "estimated_bulk"
+    ? ' · ' + money(sale.acquisition_unit_cost_cents, sale.currency) + ' per book' : "";
+  return '<div class="sale-cost-edit"><label class="sub">' + esc(source) + perBook
     + '<input class="sale-cost-input" type="number" min="0" step="0.01" inputmode="decimal"'
     + ' value="' + esc(value) + '" placeholder="e.g. 1.00"'
-    + ' aria-label="Acquisition cost for ' + esc(sale.title || sale.external_order_id) + '"></label>'
+    + ' aria-label="Total acquisition cost for ' + esc(sale.title || sale.external_order_id) + '"></label>'
     + '<button class="btn sale-cost-save" type="button" data-id="' + esc(sale.id) + '">Save cost</button>'
     + '<button class="btn sale-cost-clear" type="button" data-id="' + esc(sale.id)
     + '" title="Clear this sale override and use the linked inventory cost, if available">Use inventory cost</button></div>';
 }
 
 function bindSaleCostEditors(rootSelector) {
-   $$(rootSelector + " .sale-cost-save").forEach(button => {
+  $(rootSelector + " .sale-quantity-save").forEach(button => {
+    button.onclick = async () => {
+      const input = button.closest(".sale-quantity-edit")?.querySelector(".sale-quantity-input");
+      const raw = String(input?.value || "").trim();
+      if (!/^\\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 1000)
+        return flash("Enter a valid number of books (1–1000).", true);
+      button.disabled = true;
+      try {
+        await api("/api/app/sales/" + encodeURIComponent(button.dataset.id) + "/book-quantity",{
+          method:"PATCH",body:JSON.stringify({quantity:Number(raw)}),
+        });
+        flash("Number of books saved; per-book cost totals updated.");
+        await sales();
+      } catch(error) {flash(error.message,true);button.disabled=false;}
+    };
+  });
+  $(rootSelector + " .sale-cost-save").forEach(button => {
     button.onclick = async () => {
       const input = button.closest(".sale-cost-edit")?.querySelector(".sale-cost-input");
       const raw = String(input?.value || "").trim();
@@ -5253,14 +5285,16 @@ function renderSaleCostHistory() {
   const rows = (state.salesRows || []).filter(sale => sale.direction === "sell"
     && !/cancel|refund|fail/i.test(sale.status || "")
     && (filter === "all" || (filter === "missing" ? sale.acquisition_cost_cents == null
+      : filter === "unknown" ? sale.book_quantity == null
       : sale.acquisition_cost_cents != null)));
   $("#sale-cost-history-count").textContent = rows.length + " shown in loaded history.";
   $("#sale-cost-history-table").innerHTML = rows.length
-    ? '<table><thead><tr><th>Date</th><th>Marketplace</th><th>Sold item</th><th>Sale price</th><th>Acquisition cost</th></tr></thead><tbody>'
+    ? '<table><thead><tr><th>Date</th><th>Marketplace</th><th>Sold item</th><th>Sale price</th><th>Books in order</th><th>Total acquisition cost</th></tr></thead><tbody>'
       + rows.map(sale => '<tr><td>' + esc(when(sale.occurred_at))
         + '</td><td>' + esc(sale.channel) + '</td><td>' + esc(sale.title || sale.external_order_id)
         + (sale.inventory_item_id ? '' : '<div class="sub">Not linked to inventory</div>')
         + '</td><td>' + money(sale.total_cents,sale.currency)
+        + '</td><td>' + saleQuantityControls(sale)
         + '</td><td>' + saleCostControls(sale) + '</td></tr>').join("")
       + '</tbody></table>'
     : '<div class="empty">No matching sales. Try “All completed sales”.</div>';
@@ -5281,11 +5315,12 @@ function saleCostBulkPayload(preview=true) {
   return {
     cost_cents:Math.round(Number(raw)*100), currency,
     scope:$("#sale-cost-backfill-scope").value,
-    overwrite_existing:$("#sale-cost-backfill-overwrite").checked,preview,
+    overwrite_existing:$("#sale-cost-backfill-overwrite").checked,
+    assume_one_when_unknown:$("#sale-cost-backfill-assume-one").checked,preview,
   };
 }
 ["sale-cost-backfill-value","sale-cost-backfill-currency","sale-cost-backfill-scope",
-  "sale-cost-backfill-overwrite"].forEach(id=>{
+  "sale-cost-backfill-overwrite","sale-cost-backfill-assume-one"].forEach(id=>{
     $("#"+id).addEventListener("input",invalidateSaleCostBulkPreview);
     $("#"+id).addEventListener("change",invalidateSaleCostBulkPreview);
   });
@@ -5301,10 +5336,13 @@ $("#sale-cost-backfill-preview-btn").onclick = async () => {
     if (JSON.stringify(saleCostBulkPayload())!==JSON.stringify(payload)) return;
     saleCostBulkPreview={payload,result};
     $("#sale-cost-backfill-preview").textContent=
-      result.eligible_sales + " historical sales to update; "
+      (result.eligible_books ?? result.eligible_sales) + " books across "
+      + result.eligible_sales + " historical sales to update; "
       + result.already_costed + " existing costs preserved; "
       + result.other_currency + " other-currency sales excluded. "
-      + money(result.estimated_cost_cents,payload.currency) + " estimated acquisition costs. "
+      + (result.skipped_unknown_quantity_sales || 0) + " orders skipped because book count is unknown. "
+      + (result.assumed_one_quantity_sales || 0) + " unknown orders assumed to contain one book. "
+      + money(result.estimated_cost_cents,payload.currency) + " estimated purchase costs. "
       + result.with_sale_amount + " affected sales have a known selling price.";
     $("#sale-cost-backfill-apply").disabled = result.eligible_sales === 0;
   } catch(error){flash(error.message,true);}
@@ -5317,8 +5355,11 @@ $("#sale-cost-backfill-form").onsubmit=async(event)=>{
   try {payload=saleCostBulkPayload(false);}catch(error){return flash(error.message,true);}
   if(!previous || JSON.stringify({...payload,preview:true})!==JSON.stringify(previous.payload))
     return flash("Preview the current batch settings before applying.",true);
-  if (!window.confirm("Record an estimated "+money(payload.cost_cents,payload.currency)
-      +" acquisition cost for "+previous.result.eligible_sales+" historical sales?"
+  if (!window.confirm("Record "+money(payload.cost_cents,payload.currency)
+      +" PER BOOK for "+(previous.result.eligible_books ?? previous.result.eligible_sales)
+      +" books in "+previous.result.eligible_sales+" orders?"
+      +(previous.result.assumed_one_quantity_sales
+        ? " WARNING: "+previous.result.assumed_one_quantity_sales+" orders have unknown quantities; one book is assumed." : "")
       +(payload.overwrite_existing?" ALL existing costs will be overwritten.":"")))return;
   const button=$("#sale-cost-backfill-apply");button.disabled=true;
   try {
@@ -5326,7 +5367,7 @@ $("#sale-cost-backfill-form").onsubmit=async(event)=>{
       method:"POST",body:JSON.stringify(payload),
     });
     invalidateSaleCostBulkPreview();
-    flash("Historical costs applied to "+result.updated+" sales.");
+    flash("Per-book costs applied to "+result.updated+" sales.");
     await sales();
   }catch(error){flash(error.message,true);invalidateSaleCostBulkPreview();}
 };
@@ -5356,13 +5397,14 @@ function renderSales() {
   renderPurchaseCostSuggestions();
   renderSaleCostHistory();
   const salesMarkup = rows.length
-    ? '<table><thead><tr><th>Date</th><th>Channel</th><th>Item</th><th>Person</th><th>Direction</th><th>Status</th><th>Amount</th><th>Acquisition cost</th></tr></thead><tbody>'
+    ? '<table><thead><tr><th>Date</th><th>Channel</th><th>Item</th><th>Person</th><th>Direction</th><th>Status</th><th>Amount</th><th>Books</th><th>Total acquisition cost</th></tr></thead><tbody>'
       + rows.map((sale) =>
         "<tr><td>" + esc(when(sale.occurred_at)) + '</td><td><span class="pill '
         + esc(sale.channel) + '">' + esc(sale.channel) + "</span></td><td>"
         + esc(sale.title || "—") + "</td><td>" + esc(sale.counterparty || "—")
         + "</td><td>" + esc(sale.direction) + "</td><td>"
         + esc(sale.status || "—") + "</td><td>" + money(sale.total_cents, sale.currency)
+        + "</td><td>" + saleQuantityControls(sale)
         + "</td><td>" + saleCostControls(sale) + "</td></tr>"
       ).join("")
       + "</tbody></table>"

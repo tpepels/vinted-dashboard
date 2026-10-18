@@ -550,10 +550,10 @@
         <div id="sales-costs-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="sales:costs">
         <div class="card form" id="sale-cost-backfill-card">
           <div class="card-head"><h2>Backfill acquisition costs for historical sales</h2></div>
-          <p class="muted">Historical sales can have acquisition costs even when no inventory item is linked. Enter an estimated cost per completed sale (for example €1.00 per book), preview the affected orders, then apply. Existing costs are preserved unless you explicitly choose to overwrite them. This changes neither sale prices nor marketplace data.</p>
+          <p class="muted">Set an estimated <strong>cost per book</strong>, not per order: 5 books × €1 = €5 in acquisition costs. Where Vinted did not provide a reliable book count, first enter the quantity for that order, or explicitly opt into assuming one book per unknown order. Existing costs are preserved unless you choose to overwrite them.</p>
           <form id="sale-cost-backfill-form">
             <div class="form-grid">
-              <label>Purchase cost per sale<input id="sale-cost-backfill-value" type="number" min="0" step="0.01" value="1.00" required></label>
+              <label>Purchase cost per book<input id="sale-cost-backfill-value" type="number" min="0" step="0.01" value="1.00" required></label>
               <label>Currency<input id="sale-cost-backfill-currency" maxlength="3" value="EUR" required></label>
               <label>Apply to<select id="sale-cost-backfill-scope">
                 <option value="all" selected>All historical completed sales</option>
@@ -562,6 +562,7 @@
                 <option value="ytd">Year to date</option>
               </select></label>
               <label class="check"><input id="sale-cost-backfill-overwrite" type="checkbox">Replace existing costs too</label>
+              <label class="check"><input id="sale-cost-backfill-assume-one" type="checkbox">For orders with an unknown book count, assume 1 book (may underestimate bundles)</label>
             </div>
             <p id="sale-cost-backfill-preview" class="muted" role="status">Preview before applying. This includes older orders that are not shown in the table.</p>
             <div class="actions"><button id="sale-cost-backfill-preview-btn" class="btn" type="button">Preview historical costs</button><button id="sale-cost-backfill-apply" class="btn primary" type="submit" disabled>Apply cost to historical sales</button></div>
@@ -569,8 +570,8 @@
         </div>
         <div class="card">
           <div class="card-head"><h2>Edit individual historical sales</h2></div>
-          <p class="muted">Save a different amount on any sale, including unlinked historical orders. Use “Use inventory cost” to clear a sale-specific override. All figures are acquisition cost only, excluding fees and shipping.</p>
-          <label>Show <select id="sale-cost-history-filter"><option value="missing" selected>Sales missing a cost</option><option value="all">All completed sales</option><option value="recorded">Sales with a cost</option></select></label>
+          <p class="muted">Correct the <strong>number of books</strong> for a sale first, including historical bundles. Bulk estimates automatically recalculate when you change quantity. You can also override an order's <strong>total acquisition cost</strong> manually; this total is not multiplied by the number of books. Amounts exclude fees and shipping.</p>
+          <label>Show <select id="sale-cost-history-filter"><option value="missing" selected>Sales missing a cost</option><option value="unknown">Sales with unverified book counts</option><option value="all">All completed sales</option><option value="recorded">Sales with a cost</option></select></label>
           <p id="sale-cost-history-count" class="muted"></p>
           <div id="sale-cost-history-table" class="table-wrap"></div>
         </div>
