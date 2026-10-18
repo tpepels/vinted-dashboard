@@ -1,11 +1,12 @@
 """Bundle quantities must multiply acquisition cost per book, not per order."""
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import db, entry, models
-from app.sale_costs import sale_acquisition_cost
+from app.sale_costs import sale_acquisition_cost, sale_book_quantity, record_sale_book_quantity
 from app.workspace_ingest import record_workspace_snapshot
 
 
@@ -49,6 +50,68 @@ def _prepare():
             session.flush()
             sale_ids[oid] = sale.id
     return client, headers, sale_ids, workspace_id
+
+
+def test_title_inference_and_estimated_costs():
+    for title, expected in [
+        ("Bundle 3 items", (3, "title_bundle")),
+        ("Bundle 7 items", (7, "title_bundle")),
+        ("bundle of 2 books", (2, "title_bundle")),
+        ("Open City - Teju Cole", (1, "title_single")),
+        ("Bundle without count", (None, "unknown")),
+        ("Vinted order", (None, "unknown")),
+        ("Bundle 0 items", (None, "unknown")),
+        ("Bundle 1001 items", (None, "unknown")),
+    ]:
+        sale = SimpleNamespace(channel="vinted", title=title, extra={})
+        assert sale_book_quantity(sale) == expected
+    sale = SimpleNamespace(
+        channel="vinted", title="Bundle 3 items",
+        extra={"acquisition_cost_source": "estimated_bulk", "acquisition_cost_cents": 200},
+    )
+    assert sale_acquisition_cost(sale) == (600, "estimated_bulk")
+    sale.extra["quantity"] = 2
+    assert sale_book_quantity(sale) == (2, "marketplace")
+    record_sale_book_quantity(sale, 4, "test")
+    assert sale_book_quantity(sale) == (4, "manual")
+    assert sale_acquisition_cost(sale) == (800, "estimated_bulk")
+    record_sale_book_quantity(sale, None, "test")
+    assert sale_book_quantity(sale) == (2, "marketplace")
+    assert sale_book_quantity(SimpleNamespace(
+        channel="ebay", title="Bundle 3 items", extra={},
+    )) == (None, "unknown")
+
+
+def test_historical_sales_api_infers_counts_without_vinted_resync():
+    client, headers, _, workspace_id = _prepare()
+    with db.session_scope() as session:
+        for order_id, title in [
+            ("title-bundle", "Bundle 7 items"),
+            ("title-single", "Open City - Teju Cole"),
+            ("title-ambiguous", "Bundle without count"),
+        ]:
+            session.add(models.Sale(
+                workspace_id=workspace_id, channel="vinted",
+                external_order_id=order_id, direction="sell", title=title,
+                total_cents=1500, currency="EUR", status="completed",
+                lifecycle_status="completed", is_closed=True,
+                occurred_at=datetime.now(timezone.utc), extra={},
+            ))
+    rows = {row["external_order_id"]: row
+            for row in client.get("/api/app/sales").json()["sales"]}
+    assert (rows["title-bundle"]["book_quantity"],
+            rows["title-bundle"]["quantity_source"]) == (7, "title_bundle")
+    assert (rows["title-single"]["book_quantity"],
+            rows["title-single"]["quantity_source"]) == (1, "title_single")
+    assert rows["title-ambiguous"]["book_quantity"] is None
+    response = client.post("/api/app/sales/average-cost", headers=headers, json={
+        "currency": "EUR", "cost_cents": 200, "scope": "all",
+    })
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert preview["eligible_books"] == 13
+    assert preview["inferred_quantity_sales"] == 2
+    assert preview["skipped_unknown_quantity_sales"] == 2
 
 
 def test_per_book_bulk_price_and_manual_quantity_repricing():

@@ -3,6 +3,7 @@
 Manual cost overrides are the total for an order; bulk estimates are per book.
 The Vinted order count is not always available, so unknown is never hidden.
 """
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,8 +19,35 @@ def _positive_count(value: Any) -> int | None:
     return None
 
 
+_BUNDLE_TITLE = re.compile(
+    r"^(?:bundle|bundel)\s+(?:of\s+)?(\d{1,4})\s+(?:items?|books?|artikelen)\b",
+    re.IGNORECASE,
+)
+_GENERIC_ORDER_TITLES = {"vinted order", "order", "untitled", "unknown"}
+
+
+def _title_quantity(sale: Any) -> tuple[int | None, str]:
+    """Estimate historical Vinted counts using the sale title, without resync.
+
+    A named non-bundle order is assumed to contain one item. Missing titles
+    and bundles with an unparseable count remain unknown.
+    """
+    if str(getattr(sale, "channel", "") or "").lower() != "vinted":
+        return None, "unknown"
+    title = str(getattr(sale, "title", "") or "").strip()
+    if not title or title.lower() in _GENERIC_ORDER_TITLES:
+        return None, "unknown"
+    bundle = _BUNDLE_TITLE.match(title)
+    if bundle:
+        quantity = _positive_count(bundle.group(1))
+        return (quantity, "title_bundle") if quantity is not None else (None, "unknown")
+    if re.search(r"\b(?:bundle|bundel)\b", title, re.IGNORECASE):
+        return None, "unknown"
+    return 1, "title_single"
+
+
 def sale_book_quantity(sale: Any) -> tuple[int | None, str]:
-    """Return known book count; unknown remains None, not silently one."""
+    """Prefer manual and marketplace counts to title-derived estimates."""
     extra = sale.extra or {}
     manual = _positive_count(extra.get("book_quantity_override"))
     if manual is not None:
@@ -27,7 +55,7 @@ def sale_book_quantity(sale: Any) -> tuple[int | None, str]:
     collected = _positive_count(extra.get("quantity"))
     if collected is not None:
         return collected, "marketplace"
-    return None, "unknown"
+    return _title_quantity(sale)
 
 
 def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | None, str | None]:

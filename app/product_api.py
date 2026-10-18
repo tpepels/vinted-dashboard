@@ -4619,6 +4619,10 @@ def backfill_sale_average_cost(
         "other_currency": len(sold) - len(compatible),
         "with_sale_amount": known_revenue,
         "unknown_quantity_sales": len(unknown),
+        "inferred_quantity_sales": sum(
+            sale_book_quantity(row)[1] in {"title_bundle", "title_single"}
+            for row in eligible
+        ),
         "skipped_unknown_quantity_sales": 0 if payload.assume_one_when_unknown else len(unknown),
         "assumed_one_quantity_sales": len(unknown) if payload.assume_one_when_unknown else 0,
         "eligible_books": affected_books,

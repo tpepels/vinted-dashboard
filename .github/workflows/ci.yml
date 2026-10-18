@@ -36,11 +36,12 @@ jobs:
           COOKIE_SECURE: "true"
 
           DATABASE_URL: postgresql+psycopg2://user:pass@example.invalid/db
-          EXTENSION_LATEST_VERSION: 3.4.6
+          EXTENSION_LATEST_VERSION: 3.4.7
           BACKUP_PROVIDER: ci-managed-snapshot
           BACKUP_RESTORE_DRILL_AT: 2026-10-01
       - run: python -m pytest -q
       - run: node --check app/product_static/app.js
+      - run: node scripts/test_compact_dates.js
       - run: node scripts/test_analytics_monthly_trends.js
       - run: node scripts/test_revenue_average_cost_browser.js
       - run: node scripts/test_simple_ui_language.js
@@ -80,7 +81,7 @@ jobs:
       - run: alembic upgrade head
         env:
           DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
-      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.4.6 --output /tmp/chrome-bridge.zip
+      - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.4.7 --output /tmp/chrome-bridge.zip
       - name: Build Docker image (registry mirror fallback)
         run: |
           # Multiple mirrors avoid transient anonymous-pull limits (HTTP 429)

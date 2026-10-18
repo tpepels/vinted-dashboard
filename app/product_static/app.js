@@ -275,8 +275,8 @@ function when(value) {
   if (!value) return "—";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(undefined, {
-    year:"numeric",month:"2-digit",day:"2-digit",
-    hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23",
+    year:"2-digit",month:"2-digit",day:"2-digit",
+    hour:"2-digit",minute:"2-digit",hourCycle:"h23",
   }).format(date);
 }
 
@@ -4784,7 +4784,9 @@ $("#reconcile-manual").onclick = async () => {
 function dateOnly(value) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(undefined, {
+    year:"2-digit",month:"2-digit",day:"2-digit",
+  }).format(date);
 }
 
 function ageDays(value) {
@@ -5202,8 +5204,11 @@ function saleQuantityControls(sale) {
       || /cancel|refund|fail/i.test(sale.status || "")) return "—";
   const count = Number.isInteger(Number(sale.book_quantity)) && sale.book_quantity != null
     ? Number(sale.book_quantity) : null;
-  const source = sale.quantity_source === "manual" ? "Manually verified"
-    : sale.quantity_source === "marketplace" ? "From marketplace" : "Unknown · check bundles";
+  const source = sale.quantity_source === "manual" ? "Manually entered"
+    : sale.quantity_source === "marketplace" ? "From marketplace"
+    : sale.quantity_source === "title_bundle" ? "Estimated from bundle title"
+    : sale.quantity_source === "title_single" ? "Assumed 1 item from title"
+    : "Unknown · check title";
   return '<div class="sale-quantity-edit"><label class="sub">' + esc(source)
     + '<input class="sale-quantity-input" type="number" min="1" max="1000" step="1"'
     + ' value="' + esc(count == null ? "" : count) + '" placeholder="Unknown"'
@@ -5289,15 +5294,18 @@ function renderSaleCostHistory() {
   const known=priced.filter(s=>s.acquisition_cost_cents!=null);
   const estimates=known.filter(s=>["estimated_bulk","average_bulk"].includes(s.acquisition_cost_source));
   const unknownCounts=valid.filter(s=>s.book_quantity==null);
+  const inferredCounts=valid.filter(s=>["title_bundle","title_single"].includes(s.quantity_source));
   $("#sale-cost-data-quality").textContent=
     known.length+" of "+priced.length+" priced completed orders have acquisition costs · "
-    +estimates.length+" estimated costs · "+unknownCounts.length
-    +" unverified book counts. Complete or correct records below.";
+    +estimates.length+" estimated costs · "+inferredCounts.length
+    +" title-inferred item counts · "+unknownCounts.length
+    +" unknown item counts. Review estimates and correct bundles or sets as needed.";
   const filter = $("#sale-cost-history-filter").value;
   const rows = (state.salesRows || []).filter(sale => sale.direction === "sell"
     && sale.counts_as_sold !== false && !/cancel|refund|fail/i.test(sale.status || "")
     && (filter === "all" || (filter === "missing" ? sale.acquisition_cost_cents == null
-      : filter === "unknown" ? sale.book_quantity == null
+      : filter === "unknown" ? (sale.book_quantity == null
+          || ["title_bundle","title_single"].includes(sale.quantity_source))
       : sale.acquisition_cost_cents != null)));
   $("#sale-cost-history-count").textContent = rows.length + " shown in loaded history.";
   $("#sale-cost-history-table").innerHTML = rows.length
@@ -5354,6 +5362,7 @@ $("#sale-cost-backfill-preview-btn").onclick = async () => {
       + result.other_currency + " other-currency sales excluded. "
       + (result.skipped_unknown_quantity_sales || 0) + " orders skipped because book count is unknown. "
       + (result.assumed_one_quantity_sales || 0) + " unknown orders assumed to contain one book. "
+      + (result.inferred_quantity_sales || 0) + " orders have title-inferred item counts. "
       + money(result.estimated_cost_cents,payload.currency) + " estimated purchase costs. "
       + result.with_sale_amount + " affected sales have a known selling price.";
     $("#sale-cost-backfill-apply").disabled = result.eligible_sales === 0;
@@ -7633,7 +7642,7 @@ async function refreshDiagnostics() {
     state.diagnosticsRows = formatDiagnostics(data);
     renderDiagnosticsRows();
     $("#diagnostics-log-window").scrollTop = $("#diagnostics-log-window").scrollHeight;
-    $("#diagnostics-live-status").textContent = "Updated " + new Intl.DateTimeFormat(undefined, {hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).format(new Date());
+    $("#diagnostics-live-status").textContent = "Updated " + new Intl.DateTimeFormat(undefined, {hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date());
   } catch (error) {
     $("#diagnostics-live-status").textContent = error.message;
   }
