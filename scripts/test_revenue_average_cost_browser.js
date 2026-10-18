@@ -124,9 +124,9 @@ const browserTest=String.raw`
     result.backfillApplyEnabled=!document.querySelector("#sale-cost-backfill-apply").disabled;
     document.querySelector("#sale-cost-backfill-apply").click();
     await sleep(150);
-    result.backfillRecorded=document.querySelector("#sale-cost-history-table").textContent.includes("Estimated");
     document.querySelector("#sale-cost-history-filter").value="all";
     document.querySelector("#sale-cost-history-filter").dispatchEvent(new Event("change"));
+    result.backfillRecorded=document.querySelector("#sale-cost-history-table").textContent.includes("Estimated");
     const historicRow=document.querySelector("#sale-cost-history-table .sale-cost-edit");
     historicRow.querySelector("input").value="2.50";
     historicRow.querySelector(".sale-cost-save").click();
