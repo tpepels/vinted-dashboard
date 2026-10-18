@@ -6,9 +6,18 @@ function show(text, error = false) {
   $("#status").className = "status" + (error ? " error" : "");
 }
 
+function localDateTime(value) {
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime()))return "—";
+  return new Intl.DateTimeFormat(undefined,{
+    year:"numeric",month:"2-digit",day:"2-digit",
+    hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23",
+  }).format(date);
+}
+
 function pausedUntil(status) {
   const until = Number(status?.api_cooldown_until || 0);
-  return until > Date.now() ? new Date(until).toLocaleString() : null;
+  return until > Date.now() ? localDateTime(until) : null;
 }
 
 function syncDetails(status) {
@@ -43,10 +52,13 @@ async function refresh() {
     return show("Not connected. Enter the pairing code shown in your dashboard.");
   }
   const status = response.status || {};
-  const last = status.at ? new Date(status.at).toLocaleString() : null;
+  const last = status.at ? localDateTime(status.at) : null;
   const paused = pausedUntil(status);
-  if (status.ok === false) {
-    show("Last update failed. " + (status.error || "Check the Vinted tab and try later."), true);
+  if (response.vinted_tab_open === false) {
+    const lastSuccess=status.ok===true&&last ? " Last successful check: "+last+"." : "";
+    show("Open Vinted in a browser tab to check for updates."+lastSuccess);
+  } else if (status.ok === false) {
+    show("Last update failed. " + (status.error || "Check the Vinted tab and try again."), true);
   } else if (last) {
     const count = Number(status.listings || 0);
     const summary = count + " Vinted listing" + (count === 1 ? "" : "s") + " synced";

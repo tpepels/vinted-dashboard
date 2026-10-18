@@ -426,14 +426,30 @@ async function processAgeJobWave(){
 }
 
 async function pair(code){const response=await fetch(API_ORIGIN+"/api/extension/pair",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:String(code||"").trim().toUpperCase(),extension_version:chrome.runtime.getManifest().version,device_name:"Chrome"})});let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||"Pairing failed");await chrome.storage.local.set({bridgeToken:body.token,bridgeWorkspace:body.workspace});return body}
-async function unpair(){await stopLegacyAgeScan();await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin","lastSyncAttemptAt",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
-async function connectionStatus(){const data=await stored();if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN};try{const remote=await api("/api/extension/status");return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN}}catch(error){return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN}}}
+async function unpair(){await stopLegacyAgeScan();await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin","lastSyncAttemptAt","lastSuccessfulSyncAt",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
+async function connectionStatus(){
+  const data=await stored();
+  const tabs=await chrome.tabs.query({url:VINTED_PATTERNS}).catch(()=>[]);
+  const vinted_tab_open=tabs.some(tab=>tab?.id!=null);
+  if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN,vinted_tab_open};
+  try{
+    const remote=await api("/api/extension/status");
+    return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN,vinted_tab_open};
+  }catch(error){
+    return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN,vinted_tab_open};
+  }
+}
 async function runSync(reason="manual"){
   if(syncInFlight)return syncInFlight;
-  const statusData=await chrome.storage.local.get(["syncStatus","lastSyncAttemptAt"]);
+  const statusData=await chrome.storage.local.get(["syncStatus","lastSyncAttemptAt","lastSuccessfulSyncAt"]);
   const previousStatus=statusData?.syncStatus||{};
-  const lastAttempt=Number(statusData?.lastSyncAttemptAt||0);
-  const apiCooldownUntil=Number(previousStatus.api_cooldown_until||0);
+  // Previously lastSyncAttemptAt was stored before requests that might fail.
+  const lastSuccess=Number(statusData?.lastSuccessfulSyncAt
+    || (previousStatus.ok===true?statusData?.lastSyncAttemptAt:0)||0);
+  const previousError=String(previousStatus.error||"");
+  // A stale 403 must not keep automatic checks paused.
+  const apiCooldownUntil=/HTTP 403|HTTP 401|challeng|not signed in|access denied/i.test(previousError)
+    ? 0 : Number(previousStatus.api_cooldown_until||0);
   // Automatic polling respects access-denial cooldowns. Explicit user actions
   // must always make a fresh attempt, even while automatic polling is paused.
   if(reason==="periodic"&&apiCooldownUntil>Date.now()){
@@ -445,11 +461,11 @@ async function runSync(reason="manual"){
       api_cooldown_until:apiCooldownUntil,
     };
   }
-  const recentAttempt=lastAttempt>0&&Date.now()-lastAttempt<SYNC_INTERVAL_MS;
-  if(reason==="periodic"&&recentAttempt)return{
-    ...previousStatus,ok:true,reason,
+  const recentSuccess=lastSuccess>0&&Date.now()-lastSuccess<SYNC_INTERVAL_MS;
+  if(reason==="periodic"&&recentSuccess)return{
+    ...previousStatus,reason,
     sync_skipped_for_interval:true,
-    next_sync_at:lastAttempt+SYNC_INTERVAL_MS,
+    next_sync_at:lastSuccess+SYNC_INTERVAL_MS,
   };
   syncInFlight=(async()=>{
     let temporary=null;
@@ -458,7 +474,6 @@ async function runSync(reason="manual"){
       temporary=found.temporary?found.tab.id:null;
       let tab=found.tab;
       tab=await ensureCurrentContentScript(tab);
-      await chrome.storage.local.set({lastSyncAttemptAt:Date.now()});
       const tabUrl=new URL(String(tab.url||""));
       if(!tabUrl.hostname.startsWith("www.vinted."))throw new Error("Open and sign in to Vinted first.");
       await chrome.storage.local.set({vintedOrigin:tabUrl.origin});
@@ -513,19 +528,22 @@ async function runSync(reason="manual"){
         age_scan_failed:ageJob.failed,
         age_scan_skipped:ageJob.skipped,
       };
-      await chrome.storage.local.set({syncStatus:status});
+      const succeededAt=Date.now();
+      await chrome.storage.local.set({
+        syncStatus:status,lastSyncAttemptAt:succeededAt,lastSuccessfulSyncAt:succeededAt,
+      });
       return status;
     }catch(error){
       const message=error instanceof Error?error.message:String(error);
-      const blocked=/rate limit|too many requests|HTTP 403|challenge|access denied|not signed in/i.test(message);
+      const rateLimited=/rate limit|too many requests|HTTP 429/i.test(message)
+        && !/HTTP 403|HTTP 401|challeng|not signed in/i.test(message);
       const status={
         ok:false,at:new Date().toISOString(),reason,error:message,
-        api_rate_limited:blocked,
-        api_cooldown_until:blocked?Date.now()+VINTED_ACCESS_COOLDOWN_MS:0,
+        api_rate_limited:rateLimited,
+        api_cooldown_until:rateLimited?Date.now()+VINTED_ACCESS_COOLDOWN_MS:0,
       };
-      // A deferred automatic sync should not consume the two-hour quota;
-      // only a sync that was actually attempted is counted.
-      await chrome.storage.local.set({syncStatus:status});
+      // Automatic tab/auth failures do not replace the last successful status.
+      if(reason==="manual"||rateLimited)await chrome.storage.local.set({syncStatus:status});
       return status;
     }finally{
       if(temporary!==null){try{await chrome.tabs.remove(temporary)}catch{}}

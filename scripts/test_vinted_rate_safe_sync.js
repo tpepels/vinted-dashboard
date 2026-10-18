@@ -168,6 +168,8 @@ function assert(condition, message) {
     "Current-user 403 did not return a useful signed-in browser API error");
   assert(!String(forbidden.result.error || "").includes("rate limited"),
     "Current-user 403 was incorrectly reported as rate limiting");
+  assert(forbidden.result.rate_limited === false,
+    "HTTP 403 must not set a 24-hour rate-limit cooldown");
 
   console.log("Vinted rate-safe inventory sync: ok");
 })().catch((error) => {

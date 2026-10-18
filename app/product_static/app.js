@@ -216,7 +216,10 @@ function lifetimeCoverage(summary) {
 function when(value) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(undefined, {
+    year:"numeric",month:"2-digit",day:"2-digit",
+    hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23",
+  }).format(date);
 }
 
 const tableNumberFormat = new Intl.NumberFormat();
@@ -6771,7 +6774,7 @@ function renderBiblioPauseState(until, configured = true) {
   $("#biblio-upload-pause-status").textContent = !configured
     ? "Set up BIBLIO before pausing transfers."
     : paused
-      ? "BIBLIO transfers are paused until " + new Date(expiryMs).toLocaleString() + "."
+      ? "BIBLIO transfers are paused until " + when(expiryMs) + "."
       : "BIBLIO transfers are available.";
   if (paused) {
     state.biblioPauseTimer = setTimeout(() => {
@@ -7178,7 +7181,7 @@ async function refreshDiagnostics() {
     state.diagnosticsRows = formatDiagnostics(data);
     renderDiagnosticsRows();
     $("#diagnostics-log-window").scrollTop = $("#diagnostics-log-window").scrollHeight;
-    $("#diagnostics-live-status").textContent = "Updated " + new Date().toLocaleTimeString();
+    $("#diagnostics-live-status").textContent = "Updated " + new Intl.DateTimeFormat(undefined, {hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).format(new Date());
   } catch (error) {
     $("#diagnostics-live-status").textContent = error.message;
   }

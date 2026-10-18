@@ -11,6 +11,8 @@ const tabsReloaded = [];
 const windowsRemoved = [];
 let collectCount = 0;
 let blocked = false;
+let forbidden = false;
+let tabOpen = true;
 let active = false;
 let focused = true;
 const tab = {id:4,windowId:9,status:"complete",url:"https://www.vinted.pt/member/123",active:false};
@@ -27,7 +29,7 @@ const chrome = {
     async remove(keys){for(const key of keys)delete state[key];},
   }},
   tabs:{
-    async query(){return [tab];},
+    async query(){return tabOpen?[tab]:[];},
     async create(args){tabsCreated.push(args);throw Error("Extension must not create tabs");},
     async reload(id){tabsReloaded.push(id);throw Error("Extension must not reload user tabs");},
     async sendMessage(id,payload){
@@ -35,6 +37,7 @@ const chrome = {
       if(payload.type==="collect-vinted-data"){
         collectCount++;
         if(blocked)return {ok:false,rate_limited:true,error:"Vinted API rate limited the inventory sync."};
+        if(forbidden)return {ok:false,error:"Vinted denied the signed-in browser API request (HTTP 403) for /api/v2/users/current."};
         return{ok:true,snapshot:{
           listings:[{id:"1",status:"active"}],orders:[],notifications:[],
           current_user:{id:"42"},age_scan_items:[{id:"1",url:"https://www.vinted.pt/items/1"}],
@@ -82,14 +85,14 @@ vm.runInContext(source,context,{filename:"background.js"});
   assert(second.ok&&collectCount===2&&!second.sync_skipped_for_interval,
     "Manual refresh must bypass the two-hour automatic interval");
 
-  state.lastSyncAttemptAt=Date.now()-2*60*60*1000-1000;
+  state.lastSuccessfulSyncAt=Date.now()-2*60*60*1000-1000;
   tab.active=true;
   const busy=await context.runSync("periodic");
   assert(!busy.ok&&collectCount===2,
     "Automatic update must skip when the Vinted tab is focused and active");
 
   tab.active=false;
-  state.lastSyncAttemptAt=Date.now()-2*60*60*1000-1000;
+  state.lastSuccessfulSyncAt=Date.now()-2*60*60*1000-1000;
   blocked=true;
   const denial=await context.runSync("periodic");
   assert(denial.api_rate_limited&&denial.api_cooldown_until>Date.now()+23*60*60*1000,
@@ -99,10 +102,29 @@ vm.runInContext(source,context,{filename:"background.js"});
     "A deliberate manual sync must attempt Vinted even during an automatic cooldown");
   const pausedAutomatic=await context.runSync("periodic");
   assert(collectCount===4&&pausedAutomatic.sync_skipped_for_api_cooldown,
-    "Automatic sync must remain paused after Vinted denies access");
+    "Automatic sync must remain paused after genuine Vinted rate limiting");
+
+  blocked=false;
+  forbidden=true;
+  state.syncStatus={ok:false,error:"Vinted denied the signed-in browser API request (HTTP 403)",api_cooldown_until:Date.now()+24*60*60*1000};
+  state.lastSuccessfulSyncAt=Date.now()-2*60*60*1000-1000;
+  const beforeFailure=state.lastSuccessfulSyncAt;
+  const forbiddenCheck=await context.runSync("periodic");
+  assert(collectCount===5&&!forbiddenCheck.api_rate_limited&&!forbiddenCheck.api_cooldown_until,
+    "403 authentication error must not activate automatic rate-limit cooldown");
+  assert(state.lastSuccessfulSyncAt===beforeFailure,"Failed check must not move successful timestamp");
+  const retry403=await context.runSync("periodic");
+  assert(collectCount===6&&!retry403.sync_skipped_for_interval,
+    "Failed automatic check must be retryable without a two-hour throttle");
+  tabOpen=false;
+  const absent=await context.runSync("periodic");
+  assert(!absent.ok&&!absent.sync_skipped_for_interval,
+    "Missing Vinted tab must not consume any interval");
+  assert((await context.connectionStatus()).vinted_tab_open===false,
+    "Popup status must report when no Vinted tab is open");
 
   assert(tabsCreated.length===0,"No Vinted tabs should be created");
   assert(tabsReloaded.length===0,"No Vinted tabs should be reloaded");
   assert(windowsRemoved.length===0,"No worker windows should be necessary");
-  console.log("Vinted quiet bridge: manual override and automatic 24h rate-limit cooldown: ok");
+  console.log("Vinted bridge: successful-only schedule, manual override, 403 and missing-tab handling: ok");
 })().catch(error=>{console.error(error);process.exitCode=1;});

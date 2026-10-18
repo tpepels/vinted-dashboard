@@ -43,7 +43,8 @@ function rateLimitDelay(response,attempt){
   if(Number.isFinite(seconds)&&seconds>0)return Math.min(30000,seconds*1000);
   return Math.min(12000,1500*(2**attempt));
 }
-function isRateLimitError(error){return Boolean(error?.vintedRateLimited||error?.vintedForbidden||error?.vintedChallenged)}
+function isRateLimitError(error){return Boolean(error?.vintedRateLimited)}
+function isAccessError(error){return Boolean(error?.vintedRateLimited||error?.vintedForbidden||error?.vintedChallenged)}
 async function fetchJson(path,params={},options={}){
   const url=new URL(path,location.origin);
   for(const[k,v]of Object.entries(params))url.searchParams.set(k,String(v));
@@ -191,7 +192,7 @@ async function enrichListingDetails(listings,reason="periodic"){
   // Incremental enrichment, capped per sync. Never walk the entire
   // wardrobe's detail endpoints in one session.
   const queue=missing.slice(0,3);
-  let enriched=0,rateLimited=false;
+  let enriched=0,rateLimited=false,accessBlocked=false;
   for(const row of queue){
     try{
       const payload=await fetchJson(
@@ -211,7 +212,7 @@ async function enrichListingDetails(listings,reason="periodic"){
       changed=true;
       enriched++;
     }catch(error){
-      if(isRateLimitError(error)){rateLimited=true;break}
+      if(isAccessError(error)){accessBlocked=true;rateLimited=isRateLimitError(error);break}
     }
   }
 
@@ -225,6 +226,7 @@ async function enrichListingDetails(listings,reason="periodic"){
     pending,
     deferred:pending,
     rate_limited:rateLimited,
+    access_blocked:accessBlocked,
   };
 }
 async function paged(path,keys,params={},perPage=96){const rows=[];for(let page=1;page<=10;page++){const payload=await fetchJson(path,{...params,page,per_page:perPage});if(payload===null)return null;const chunk=listFrom(payload,keys);rows.push(...chunk);if(!chunk.length)break;const p=payload?.pagination;if(p&&typeof p==="object"){if(Number.isInteger(p.total_pages)&&page>=p.total_pages)break;if(p.next_page==null&&chunk.length<perPage)break}else if(chunk.length<perPage)break}return rows}
@@ -255,9 +257,9 @@ async function collectVintedData(reason="periodic"){
   };
 
   const listings=new Map();
-  let secondaryRateLimited=false;
+  let secondaryRateLimited=false,secondaryAccessBlocked=false;
   for(const status of["active","sold","reserved","draft","closed"]){
-    if(secondaryRateLimited)break;
+    if(secondaryAccessBlocked)break;
     try{
       const rows=await paged(`/api/v2/users/${userId}/items`,["items","user_items"],{status,order:"newest_first"});
       for(const raw of rows||[]){const row=listingRow(raw,status);if(row.id)listings.set(row.id,row)}
@@ -265,20 +267,20 @@ async function collectVintedData(reason="periodic"){
       // Active listings are authoritative for physical stock. Never upload a
       // snapshot if this endpoint failed or only partially paged.
       if(status==="active")throw error;
-      if(isRateLimitError(error))secondaryRateLimited=true;
+      if(isAccessError(error)){secondaryAccessBlocked=true;secondaryRateLimited=isRateLimitError(error)}
     }
   }
-  if(!secondaryRateLimited){
+  if(!secondaryAccessBlocked){
     try{
       const rows=await paged(`/api/v2/wardrobe/${userId}/items`,["items","user_items"],{order:"newest_first"});
       for(const raw of rows||[]){const row=listingRow(raw,null);if(!row.id)continue;const old=listings.get(row.id);if(!old||row.status==="hidden")listings.set(row.id,row)}
     }catch(error){
-      if(isRateLimitError(error))secondaryRateLimited=true;
+      if(isAccessError(error)){secondaryAccessBlocked=true;secondaryRateLimited=isRateLimitError(error)}
     }
   }
   const detailEligible=[...listings.values()].filter(row=>row?.id&&["active","reserved","hidden","draft"].includes(String(row.status||"active"))).length;
-  const detailSync=secondaryRateLimited
-    ? {enriched:0,attempted:0,pending:detailEligible,deferred:detailEligible,rate_limited:true}
+  const detailSync=secondaryAccessBlocked
+    ? {enriched:0,attempted:0,pending:detailEligible,deferred:detailEligible,rate_limited:secondaryRateLimited,access_blocked:true}
     : await enrichListingDetails(listings,reason);
   // Historical multi-tab page-age scans are disabled; cached values may
   // still be used locally without opening Vinted pages.
@@ -286,8 +288,8 @@ async function collectVintedData(reason="periodic"){
 
   let notifications=[];
   const orders=[];
-  let optionalRateLimited=false;
-  if(!detailSync.rate_limited){
+  let optionalRateLimited=false,optionalAccessBlocked=false;
+  if(!detailSync.rate_limited&&!detailSync.access_blocked){
     for(const path of["/api/v2/notifications","/web/api/notifications/notifications"]){
       try{
         const payload=await fetchJson(path,{page:1,per_page:100});
@@ -296,16 +298,16 @@ async function collectVintedData(reason="periodic"){
           break;
         }
       }catch(error){
-        if(isRateLimitError(error)){optionalRateLimited=true;break}
+        if(isAccessError(error)){optionalAccessBlocked=true;optionalRateLimited=isRateLimitError(error);break}
       }
     }
-    if(!optionalRateLimited){
+    if(!optionalAccessBlocked){
       for(const[type,direction]of[["sold","sell"],["purchased","buy"]]){
         try{
           const rows=await paged("/api/v2/my_orders",["my_orders","orders","items"],{type,status:"all"},100);
           for(const raw of rows||[])orders.push(orderRow(raw,direction));
         }catch(error){
-          if(isRateLimitError(error)){optionalRateLimited=true;break}
+          if(isAccessError(error)){optionalAccessBlocked=true;optionalRateLimited=isRateLimitError(error);break}
         }
       }
     }

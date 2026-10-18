@@ -17,7 +17,7 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   let openedTabs = 0;
   const chrome = {
     runtime:{
-      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.4"}),
+      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.5"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
       onMessage:{addListener(){}},
     },

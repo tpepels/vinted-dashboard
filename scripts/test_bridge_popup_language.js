@@ -38,7 +38,7 @@ const ctx = {
   document: {querySelector: key => elements[key]},
   chrome: {
     runtime: {
-      getManifest: () => ({version:"3.4.4"}),
+      getManifest: () => ({version:"3.4.5"}),
       sendMessage: async () => response,
     },
     tabs: {create() {}},
@@ -56,7 +56,7 @@ vm.createContext(ctx);
   assert.match(elements["#detail-info"].textContent, /280 listings still need optional details/);
   assert.match(elements["#detail-info"].textContent, /basic listing update has already been sent/);
   assert.equal(elements["#sync-details"].classList.contains("hidden"), false);
-  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.4");
+  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.5");
   response = {paired:true,workspace:"Personal Workspace",status:{
     ok:true,at:"2026-10-12T10:28:20Z",listings:280,detail_pending:0,
   }};
@@ -69,6 +69,12 @@ vm.createContext(ctx);
   await ctx.refresh();
   assert.match(elements["#status"].textContent, /Automatic checks paused until/);
   assert.match(elements["#detail-info"].textContent, /Manual checks remain available/);
+  response = {paired:true,vinted_tab_open:false,workspace:"Personal Workspace",status:{
+    ok:false,error:"Vinted denied the signed-in browser API request (HTTP 403)",at:"2026-10-12T10:28:20Z",
+  }};
+  await ctx.refresh();
+  assert.match(elements["#status"].textContent,/Open Vinted in a browser tab/);
+  assert.doesNotMatch(elements["#status"].textContent,/Last update failed|HTTP 403/);
   response = {paired:false};
   await ctx.refresh();
   assert.match(elements["#status"].textContent, /Not connected/);
