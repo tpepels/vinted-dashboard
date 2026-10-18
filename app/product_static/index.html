@@ -548,6 +548,11 @@
         <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="sales-costs-panel" data-workspace-tab="costs">Record purchase costs</button>
         </div>
         <div id="sales-costs-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="sales:costs">
+        <div class="card analytics-sale-data-quality">
+          <h2>Acquisition records</h2>
+          <p id="sale-cost-data-quality" class="muted" role="status">Loading historical sales records…</p>
+          <p class="muted">This check belongs to purchase-cost editing, not Analytics. It covers the orders loaded on this page (up to 1,000).</p>
+        </div>
         <div class="card form" id="sale-cost-backfill-card">
           <div class="card-head"><h2>Backfill acquisition costs for historical sales</h2></div>
           <p class="muted">Set an estimated <strong>cost per book</strong>, not per order: 5 books × €1 = €5 in acquisition costs. Where Vinted did not provide a reliable book count, first enter the quantity for that order, or explicitly opt into assuming one book per unknown order. Existing costs are preserved unless you choose to overwrite them.</p>

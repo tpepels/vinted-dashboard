@@ -5281,6 +5281,16 @@ function bindSaleCostEditors(rootSelector) {
 }
 
 function renderSaleCostHistory() {
+  const valid=(state.salesRows || []).filter(s=>s.direction==="sell"
+    && !/cancel|refund|fail/i.test(s.status || ""));
+  const priced=valid.filter(s=>s.total_cents!=null);
+  const known=priced.filter(s=>s.acquisition_cost_cents!=null);
+  const estimates=known.filter(s=>["estimated_bulk","average_bulk"].includes(s.acquisition_cost_source));
+  const unknownCounts=valid.filter(s=>s.book_quantity==null);
+  $("#sale-cost-data-quality").textContent=
+    known.length+" of "+priced.length+" priced completed orders have acquisition costs · "
+    +estimates.length+" estimated costs · "+unknownCounts.length
+    +" unverified book counts. Complete or correct records below.";
   const filter = $("#sale-cost-history-filter").value;
   const rows = (state.salesRows || []).filter(sale => sale.direction === "sell"
     && !/cancel|refund|fail/i.test(sale.status || "")
