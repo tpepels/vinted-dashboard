@@ -5454,14 +5454,19 @@ function renderVintedBehavior(data) {
     + metric("Linked Vinted sales", summary.linked_sales || 0,
       summary.median_days_to_sale == null ? "" : "median " + summary.median_days_to_sale + " d to sale")
     + metric(
-      "Gross profit",
-      summary.costed_linked_sales ? money(summary.gross_profit_cents, analyticsCurrency) : "—",
-      summary.costed_linked_sales + " of " + (summary.linked_sales || 0) + " sales costed"
+      "Gross profit · linked sales",
+      summary.linked_sales > 0 && summary.costed_linked_sales === summary.linked_sales
+        ? money(summary.gross_profit_cents, analyticsCurrency) : "—",
+      summary.costed_linked_sales + " of " + (summary.linked_sales || 0)
+        + " linked sales costed; missing costs prevent a reliable total"
     )
     + metric(
-      "Gross margin",
-      summary.gross_margin_pct == null ? "—" : summary.gross_margin_pct + "%",
-      summary.roi_pct == null ? "" : "ROI " + summary.roi_pct + "%"
+      "Gross margin · linked sales",
+      summary.linked_sales > 0 && summary.costed_linked_sales === summary.linked_sales
+        && summary.gross_margin_pct != null ? summary.gross_margin_pct + "%" : "—",
+      summary.linked_sales > 0 && summary.costed_linked_sales === summary.linked_sales
+        && summary.roi_pct != null ? "ROI " + summary.roi_pct + "%"
+        : "Complete the acquisition costs in Sales"
     )
     + metric("Price changes", summary.price_changes_window ?? summary.price_changes_30d ?? 0,
       data.period_label || data.days + " days");
