@@ -29,11 +29,12 @@ vm.createContext(context);
 vm.runInContext(app.slice(start,end),context);
 context.renderMarketplaceOperations({operations:[
   {
-    id:"photo-repair", channel:"biblio", type:"photos", target:"listing-id",
+    id:"remote-review", channel:"shopify", type:"update", target:"listing-id",
     status:"attention", verification:"manual_required", can_retry:false,
-    next_step:{kind:"biblio_photos",label:"Inspect book photos",
-      detail:"Review individual file transfer receipts and the seller listing before resending."},
-    result:{photos_uploaded:3,photos_total:5},error:"Two photos need review",
+    can_inspect_remote:true,
+    next_step:{kind:"inspect_remote",label:"Check marketplace",
+      detail:"Review the remote listing without resending the update."},
+    result:{attempted:1},error:"Could not confirm the update",
     created_at:"2026-10-09T12:00:00Z",
   },
   {
@@ -52,8 +53,8 @@ context.renderMarketplaceOperations({operations:[
     created_at:"2026-10-09T10:00:00Z",
   },
 ]});
-assert.match(root.innerHTML,/Check book photos/);
-assert.doesNotMatch(root.innerHTML,/Try sending photos again/);
+assert.match(root.innerHTML,/Check marketplace/);
+assert.doesNotMatch(root.innerHTML,/BIBLIO/);
 const browser = process.env.CHROME_BIN || execFileSync(
   "bash",["-lc","command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser"],
   {encoding:"utf8"},
@@ -87,7 +88,7 @@ for (const width of [360,768,1280]) {
   assert(match,"Browser metrics did not render at "+width);
   const metrics=JSON.parse(decodeURIComponent(match[1]));
   assert(metrics.cards===3 && metrics.actions===2,
-    "Contextual BIBLIO and import buttons must render");
+    "Remote inspection and import buttons must render");
   assert(metrics.pageScroll<=metrics.viewport+2,
     "Horizontal overflow at "+width+"px: "+JSON.stringify(metrics));
   assert(metrics.panel>0 && metrics.panel<=metrics.viewport,
