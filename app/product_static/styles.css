@@ -2357,3 +2357,8 @@ main > header .eyebrow{color:#436e65}
   #analytics .analytics-sales-charts{grid-template-columns:1fr}
   #analytics .analytics-trend-chart svg{max-height:265px}
 }
+
+#analytics .analytics-trend-chart{overflow-x:auto;overscroll-behavior-x:contain}
+#analytics .analytics-trend-chart svg{min-width:555px}
+#analytics .analytics-monthly-details .analytics-detail-hint{margin:12px 16px 0;font-size:12px}
+#analytics .analytics-monthly-details>.table-wrap{padding:10px 14px 16px}

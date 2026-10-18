@@ -674,11 +674,11 @@
                    aria-label="Cumulative sales revenue"></div>
             </div>
           </div>
-          <div class="card">
-            <div class="card-head"><div><h3>Monthly breakdown</h3>
-              <p class="muted">Exact values behind the charts. The first and last month may be partial.</p></div></div>
+          <details class="analytics-report-details analytics-monthly-details">
+            <summary>Monthly breakdown · exact values behind the charts</summary>
+            <p class="muted analytics-detail-hint">The first and last month may be partial.</p>
             <div id="analytics-monthly-table" class="table-wrap"></div>
-          </div>
+          </details>
           <p class="muted analytics-data-note">Revenue is sales value, not cash profit.
             Gross profit excludes fees, shipping and taxes. Historical cost corrections are managed in
             <button id="analytics-edit-sale-costs" type="button" class="link">Sales → Record purchase costs</button>.</p>
