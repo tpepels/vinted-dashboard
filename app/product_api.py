@@ -4526,9 +4526,29 @@ def sales(context: RequestContext = Depends(require_context)):
     }
 
 
+def _analytics_period_window(
+    period: str | None, days: int, now: datetime
+) -> tuple[datetime, int, str]:
+    """One UTC period boundary used by summary, history and Vinted insights."""
+    if period is not None:
+        if period == "ytd":
+            since = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+            return since, (now - since).days + 1, "YTD"
+        if period not in {"30", "90", "180", "365"}:
+            raise HTTPException(status_code=422, detail="Invalid analytics period")
+        days = int(period)
+    days = max(7, min(int(days or 90), 365))
+    return now - timedelta(days=days), days, f"{days} days"
+
+
 @router.get("/api/app/analytics")
-def analytics(context: RequestContext = Depends(require_context)):
-    year_start = datetime(datetime.now(timezone.utc).year, 1, 1, tzinfo=timezone.utc)
+def analytics(
+    period: str | None = None,
+    context: RequestContext = Depends(require_context),
+):
+    now = datetime.now(timezone.utc)
+    year_start = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+    period_since, period_days, period_label = _analytics_period_window(period, 90, now)
     with db.session_scope() as session:
         inventory_count = session.execute(
             select(func.count(models.InventoryItem.id)).where(
@@ -4549,6 +4569,11 @@ def analytics(context: RequestContext = Depends(require_context)):
             )
         ).scalars().all()
         sold_all_time = [row for row in all_time_sale_rows if sale_counts_as_sold(row)]
+        sold_period = [
+            row for row in sold_all_time
+            if row.occurred_at is not None
+            and period_since <= row.occurred_at <= now
+        ]
         sale_rows = session.execute(
             select(models.Sale).where(
                 models.Sale.workspace_id == context.workspace.id,
@@ -4584,7 +4609,7 @@ def analytics(context: RequestContext = Depends(require_context)):
         )
         sold_item_ids = {
             row.inventory_item_id
-            for row in sold_rows
+            for row in (sold_rows + sold_period)
             if row.inventory_item_id is not None
         }
         sold_items = (
@@ -4641,6 +4666,24 @@ def analytics(context: RequestContext = Depends(require_context)):
         all_time_currency_totals[currency] = (
             all_time_currency_totals.get(currency, 0) + int(row.total_cents)
         )
+    period_revenue_sales = [
+        row for row in sold_period if row.total_cents is not None
+    ]
+    period_totals: dict[str, int] = {}
+    for row in period_revenue_sales:
+        currency = str(row.currency or "EUR").upper()
+        period_totals[currency] = period_totals.get(currency, 0) + int(row.total_cents)
+    period_costed = [
+        row for row in period_revenue_sales
+        if row.inventory_item_id in sold_items
+        and sold_items[row.inventory_item_id].cost_cents is not None
+    ]
+    period_cost_cents = sum(
+        int(sold_items[row.inventory_item_id].cost_cents)
+        for row in period_costed
+    )
+    period_costed_revenue_cents = sum(int(row.total_cents) for row in period_costed)
+    period_profit_cents = period_costed_revenue_cents - period_cost_cents
     revenue_known_sales = [
         row for row in sold_rows
         if row.total_cents is not None
@@ -4682,6 +4725,29 @@ def analytics(context: RequestContext = Depends(require_context)):
         "inventory_cost_cents": inventory_cost_cents,
         "inventory_ask_cents": inventory_ask_cents,
         "inventory_potential_margin_cents": inventory_potential_margin_cents,
+        "period": period if period is not None else "90",
+        "period_label": period_label,
+        "period_start": period_since.isoformat(),
+        "period_end": now.isoformat(),
+        "period_days": period_days,
+        "sales_period_count": len(sold_period),
+        "sales_period_revenue_known_count": len(period_revenue_sales),
+        "sales_period_totals": [
+            {"currency": currency, "cents": cents}
+            for currency, cents in sorted(period_totals.items())
+        ],
+        "sales_period_costed_count": len(period_costed),
+        "sales_period_cost_cents": period_cost_cents,
+        "sales_period_costed_revenue_cents": period_costed_revenue_cents,
+        "sales_period_gross_profit_cents": period_profit_cents,
+        "sales_period_gross_margin_pct": (
+            round(period_profit_cents * 100 / period_costed_revenue_cents, 1)
+            if period_costed_revenue_cents > 0 else None
+        ),
+        "sales_period_roi_pct": (
+            round(period_profit_cents * 100 / period_cost_cents, 1)
+            if period_cost_cents > 0 else None
+        ),
         "sales_all_time_count": len(sold_all_time),
         "sales_all_time_revenue_known_count": len(all_time_revenue_known_sales),
         "sales_all_time_totals": [
@@ -4714,11 +4780,11 @@ def analytics(context: RequestContext = Depends(require_context)):
 @router.get("/api/app/analytics/history")
 def analytics_history(
     days: int = 90,
+    period: str | None = None,
     context: RequestContext = Depends(require_context),
 ):
-    days = max(7, min(int(days or 90), 365))
     now = datetime.now(timezone.utc)
-    since = now - timedelta(days=days)
+    since, days, period_label = _analytics_period_window(period, days, now)
     with db.session_scope() as session:
         listings = session.execute(
             select(models.ChannelListing).where(
@@ -4787,7 +4853,8 @@ def analytics_history(
             previous = snap
 
     for sale in sales_rows:
-        if not sale.occurred_at:
+        if (not sale.occurred_at or sale.occurred_at > now
+                or not sale_counts_as_sold(sale)):
             continue
         key = sale.occurred_at.date().isoformat()
         row = daily.setdefault(
@@ -4852,6 +4919,9 @@ def analytics_history(
 
     return {
         "days": days,
+        "period_start": since.isoformat(),
+        "period_end": now.isoformat(),
+        "period_label": period_label,
         "daily": [{"date": key, **daily[key]} for key in sorted(daily)],
         "followers": [profile_by_day[key] for key in sorted(profile_by_day)],
         "top_listings": top[:25],
@@ -4861,15 +4931,19 @@ def analytics_history(
 @router.get("/api/app/analytics/vinted")
 def vinted_behavior_analytics(
     days: int = 90,
+    period: str | None = None,
     context: RequestContext = Depends(require_context),
 ):
-    days = max(7, min(int(days or 90), 365))
+    now = datetime.now(timezone.utc)
+    since, days, _ = _analytics_period_window(period, days, now)
     with db.session_scope() as session:
         return build_vinted_analytics(
             session,
             context.workspace.id,
             days=days,
             strategy=strategy_settings(context.workspace.settings),
+            now=now,
+            window_start_override=since,
         )
 
 

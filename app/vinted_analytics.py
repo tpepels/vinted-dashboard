@@ -271,10 +271,11 @@ def build_vinted_analytics(
     strategy: dict[str, int],
     now: datetime | None = None,
     listing_limit: int | None = 200,
+    window_start_override: datetime | None = None,
 ) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
-    days = max(7, min(int(days or 90), 365))
-    window_start = now - timedelta(days=days)
+    days = max(7, min(int(days or 90), 366))
+    window_start = window_start_override or now - timedelta(days=days)
     analysis_start = now - timedelta(days=max(days, 30))
     week_start = now - timedelta(days=7)
     month_start = now - timedelta(days=30)
@@ -382,6 +383,7 @@ def build_vinted_analytics(
             window.favourites if window else None,
         )
         price_changes_30d = _price_changes(series, month_start)
+        price_changes_window = _price_changes(series, window_start)
         price_delta_30d = (
             int(latest.price_cents) - int(month.price_cents)
             if latest
@@ -454,6 +456,7 @@ def build_vinted_analytics(
                 "views_per_day": views_per_day,
                 "favourite_events_window": events_by_listing.get(listing.id, 0),
                 "price_changes_30d": price_changes_30d,
+                "price_changes_window": price_changes_window,
                 "price_delta_30d": price_delta_30d,
                 "segment": segment,
                 "tracked_since": series[0].captured_at.isoformat() if series else None,
@@ -480,7 +483,7 @@ def build_vinted_analytics(
         if not sale.inventory_item_id:
             continue
         sold_at, sold_at_source = sale_time(sale)
-        if sold_at is None or sold_at < window_start:
+        if sold_at is None or sold_at < window_start or sold_at > now:
             continue
         item_listings = listings_by_item.get(sale.inventory_item_id, [])
         if not item_listings:
@@ -566,7 +569,7 @@ def build_vinted_analytics(
     current_favourites = sum(int(row["favourites"]) for row in rows)
     window_views = sum(int(row["views_gain_window"]) for row in rows)
     window_favourites = sum(int(row["favourites_gain_window"]) for row in rows)
-    price_changes = sum(int(row["price_changes_30d"]) for row in rows)
+    price_changes = sum(int(row["price_changes_window"]) for row in rows)
 
     complete_sold_rows = [row for row in sold_stock if row["economics_complete"]]
     costed_revenue_cents = sum(int(row["revenue_cents"]) for row in complete_sold_rows)
@@ -624,6 +627,7 @@ def build_vinted_analytics(
 
     return {
         "days": days,
+        "period_start": window_start.isoformat(),
         "currency": analytics_currency,
         "strategy": strategy,
         "summary": {
@@ -657,7 +661,8 @@ def build_vinted_analytics(
             "gross_margin_pct": gross_margin_pct,
             "roi_pct": roi_pct,
             "median_days_to_sale": _median(time_to_sale),
-            "price_changes_30d": price_changes,
+            "price_changes_30d": sum(int(row["price_changes_30d"]) for row in rows),
+            "price_changes_window": price_changes,
         },
         "age_buckets": [
             {"label": label, "count": count}

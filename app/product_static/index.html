@@ -583,9 +583,10 @@
       </section>
 
       <section id="analytics" class="view">
-        <div class="toolbar analytics-toolbar"><select id="analytics-days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">1 year</option></select></div>
+        <div class="toolbar analytics-toolbar"><label for="analytics-days">Reporting period</label><select id="analytics-days"><option value="30">Last 30 days</option><option value="90" selected>Last 90 days</option><option value="180">Last 180 days</option><option value="365">Last 365 days</option><option value="ytd">Year to date (YTD)</option></select></div>
         <div id="analytics-revenue-metrics" class="metrics" role="status" aria-live="polite"><p class="muted">Loading sales revenue…</p></div>
         <div id="analytics-metrics" class="metrics"></div>
+        <details class="dashboard-filter-details" id="analytics-snapshot-details"><summary>Current inventory snapshot (not historical)</summary><div id="analytics-inventory-snapshot" class="metrics"></div></details>
         <div class="dashboard-tabbar" role="tablist" aria-label="Analytics sections" data-workspace-tabs="analytics">
           <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="analytics-overview-panel" data-workspace-tab="overview">Trends</button>
           <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="analytics-demand-panel" data-workspace-tab="demand">Vinted activity</button>
