@@ -37,11 +37,12 @@ def is_provisional(item: models.InventoryItem) -> bool:
 
 
 def sale_quantity(sale: models.Sale) -> int:
-    try:
-        value = int((sale.extra or {}).get("quantity") or 1)
-    except (TypeError, ValueError, OverflowError):
-        value = 1
-    return max(1, value)
+    # A corrected historical bundle quantity must also drive the physical
+    # stock reconciliation, not only the acquisition-cost estimate.
+    from app.sale_costs import sale_book_quantity
+
+    count, _source = sale_book_quantity(sale)
+    return count or 1
 
 
 def consuming_quantity(session: Session, item: models.InventoryItem) -> int:
