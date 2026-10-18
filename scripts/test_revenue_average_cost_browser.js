@@ -19,7 +19,6 @@ const bootstrap=String.raw`
   window.addEventListener("error",e=>window.dashboardTestErrors.push(String(e.message)));
   window.addEventListener("unhandledrejection",e=>window.dashboardTestErrors.push(String(e.reason)));
   window.confirm=()=>true;
-  window.location.hash="#/inventory";
   const analytics={
     sales_all_time_count:37, sales_all_time_revenue_known_count:37,
     sales_all_time_totals:[{currency:"EUR",cents:123456}],
@@ -60,6 +59,8 @@ const browserTest=String.raw`
     const result={};
     const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     await sleep(200);
+    document.querySelector('.nav[data-view="inventory"]').click();
+    await sleep(150);
     result.initialView=document.querySelector("#inventory").classList.contains("active");
     const button=document.querySelector("#inventory-average-cost-open");
     result.clickHandler=typeof button.onclick==="function";
