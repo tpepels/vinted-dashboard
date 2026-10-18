@@ -42,7 +42,21 @@ const bootstrap=String.raw`
     if(url.includes("/api/app/inventory?"))return {items:[]};
     if(url.includes("/api/app/analytics/history")||url.includes("/api/app/analytics/vinted")
        ||url.includes("/api/app/purchase-cost-suggestions"))return null;
-    if(url.includes("/api/app/analytics"))return analytics;
+    if(url.includes("/api/app/analytics")) {
+      const period=new URL(url,"https://dashboard.example").searchParams.get("period");
+      if(!period)return analytics; // Sales page intentionally stays lifetime.
+      const qty=period==="30"?2:period==="ytd"?20:9;
+      return {...analytics,
+        period_label:period==="ytd"?"YTD":period+" days",
+        sales_period_count:qty,
+        sales_period_revenue_known_count:qty,
+        sales_period_totals:[{currency:"EUR",cents:qty*1000}],
+        sales_period_costed_count:qty,
+        sales_period_cost_cents:qty*100,
+        sales_period_gross_profit_cents:qty*900,
+        sales_period_gross_margin_pct:90,sales_period_roi_pct:900,
+      };
+    }
     if(url.includes("/api/app/sales"))return {sales:[]};
     return {};
   };
@@ -82,6 +96,18 @@ const browserTest=String.raw`
     document.querySelector('.nav[data-view="analytics"]').click();
     await sleep(200);
     result.statisticsRevenue=document.querySelector("#analytics-revenue-metrics").textContent;
+    result.statisticsProfit=document.querySelector("#analytics-metrics").textContent;
+    const periodSelect=document.querySelector("#analytics-days");
+    periodSelect.value="30";
+    periodSelect.dispatchEvent(new Event("change",{bubbles:true}));
+    await sleep(200);
+    result.revenue30=document.querySelector("#analytics-revenue-metrics").textContent;
+    result.profit30=document.querySelector("#analytics-metrics").textContent;
+    periodSelect.value="ytd";
+    periodSelect.dispatchEvent(new Event("change",{bubbles:true}));
+    await sleep(200);
+    result.revenueYtd=document.querySelector("#analytics-revenue-metrics").textContent;
+    result.profitYtd=document.querySelector("#analytics-metrics").textContent;
     result.reportFailureIsolated=document.querySelector("#sales-chart").textContent.includes("History unavailable");
     result.errors=window.dashboardTestErrors;
     const out=document.createElement("output");
@@ -122,9 +148,17 @@ try {
   assert(result.salesRevenue.includes("1,234.56") || result.salesRevenue.includes("1.234,56")
     || result.salesRevenue.includes("1234,56") || result.salesRevenue.includes("1234.56"),
     "Sales page must display total lifetime revenue: "+result.salesRevenue);
-  assert(result.statisticsRevenue.includes("Total revenue")&&result.statisticsRevenue.includes("37"),
-    "Statistics page must display lifetime sales: "+result.statisticsRevenue);
-  console.log("Browser E2E: average-cost workflow and independent revenue in Sales + Analytics: PASS");
+  assert(result.statisticsRevenue.includes("Sales revenue")&&result.statisticsRevenue.includes("9"),
+    "Analytics default must show 90-day period sales: "+result.statisticsRevenue);
+  assert(result.revenue30.includes("2")&&result.revenue30.includes("30 days"),
+    "Analytics 30d count and label must change: "+result.revenue30);
+  assert(result.revenueYtd.includes("20")&&result.revenueYtd.includes("YTD"),
+    "Analytics YTD count and label must change: "+result.revenueYtd);
+  assert(result.statisticsProfit.includes("90 days")
+      && result.profit30.includes("30 days") && result.profitYtd.includes("YTD"),
+    "Analytics profit cards must follow selected period");
+  assert(result.salesRevenue.includes("37"),"Sales lifetime metrics must remain unchanged");
+  console.log("Browser E2E: average-cost workflow, independent lifetime Sales and period-aware Analytics: PASS");
 } finally {
   fs.rmSync(tmp,{recursive:true,force:true});
 }
