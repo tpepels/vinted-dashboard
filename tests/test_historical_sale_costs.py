@@ -43,7 +43,7 @@ def _seed():
                 channel="vinted", external_order_id=key, direction="sell",
                 title=key, status=order_status, lifecycle_status=order_status,
                 total_cents=price, currency=order_currency, is_closed=True,
-                occurred_at=now, extra={},
+                occurred_at=now, extra={"quantity": 1},
             )
             session.add(sale)
             session.flush()
