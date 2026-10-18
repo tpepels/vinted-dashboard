@@ -5580,6 +5580,139 @@ function renderVintedBehavior(data) {
     : '<div class="empty">No active Vinted listing history yet.</div>';
 }
 
+
+function monthlySalesSeries(history) {
+  // Complete months and partial boundary months, using the server's UTC bounds.
+  const start = new Date(history?.period_start);
+  const end = new Date(history?.period_end);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())
+      || start > end) return [];
+  const firstMonth = start.getUTCFullYear() * 12 + start.getUTCMonth();
+  const lastMonth = end.getUTCFullYear() * 12 + end.getUTCMonth();
+  if (lastMonth - firstMonth > 24) return [];
+  const monthly = [], byKey = new Map();
+  const dateLabel = new Intl.DateTimeFormat(undefined,{
+    month:"short",year:"2-digit",timeZone:"UTC",
+  });
+  for(let m=firstMonth;m<=lastMonth;m++) {
+    const day=new Date(Date.UTC(Math.floor(m/12),m%12,1));
+    const nextMonth=new Date(Date.UTC(day.getUTCFullYear(),day.getUTCMonth()+1,1));
+    const key=day.toISOString().slice(0,7);
+    const row={month:key,label:dateLabel.format(day),sales:0,revenue_cents:0,
+      cumulative_sales:0,cumulative_revenue_cents:0,
+      partial:(m===firstMonth && start.getTime()>day.getTime())
+        ||(m===lastMonth && end.getTime()<nextMonth.getTime()-1)};
+    monthly.push(row);
+    byKey.set(key,row);
+  }
+  const startDay=history.period_start.slice(0,10);
+  const endDay=history.period_end.slice(0,10);
+  for(const row of history.daily || []) {
+    const day=String(row.date || "");
+    if(day<startDay || day>endDay)continue;
+    const target=byKey.get(day.slice(0,7));
+    if(!target)continue;
+    target.sales+=Math.max(0,Number(row.sales || 0));
+    target.revenue_cents+=Number(row.revenue_cents || 0);
+  }
+  let orders=0,revenue=0;
+  for(const row of monthly) {
+    orders+=row.sales;
+    revenue+=row.revenue_cents;
+    row.cumulative_sales=orders;
+    row.cumulative_revenue_cents=revenue;
+  }
+  return monthly;
+}
+
+function salesTrendChart(target,months,key,{currency="EUR",moneyValues=false,cumulative=false}={}) {
+  const node=$(target);
+  if(!months.length) {
+    node.innerHTML='<div class="chart-empty">No period history available.</div>';
+    return;
+  }
+  const width=740,height=260,left=76,right=18,top=22,bottom=50;
+  const plotWidth=width-left-right,plotHeight=height-top-bottom;
+  const values=months.map(m=>Number(m[key] || 0));
+  const max=Math.max(1,...values),min=Math.min(0,...values);
+  const range=Math.max(1,max-min);
+  const y=v=>top+(max-v)/range*plotHeight;
+  const x=i=>left+(i+0.5)*plotWidth/months.length;
+  const label=v=>moneyValues?money(v,currency):String(v);
+  const formatTick=v=>moneyValues?money(Math.round(v),currency):String(Math.round(v));
+  let guides="";
+  for(let tick=0;tick<=4;tick++) {
+    const value=min+(max-min)*tick/4,yy=y(value);
+    guides+='<line x1="'+left+'" x2="'+(width-right)+'" y1="'+yy+'" y2="'+yy
+      +'" class="analytics-chart-gridline"></line>';
+    guides+='<text class="analytics-chart-tick" x="'+(left-10)+'" y="'+(yy+4)
+      +'" text-anchor="end">'+esc(formatTick(value))+'</text>';
+  }
+  const monthsLabels=months.map((m,i)=>
+    '<text class="analytics-chart-month" x="'+x(i)+'" y="'+(height-19)
+      +'" text-anchor="middle">'+esc(m.label)+'</text>').join("");
+  let marks="";
+  if(cumulative) {
+    const points=[[left,y(0)],...months.map((m,i)=>[x(i),y(Number(m[key] || 0))])];
+    marks='<path class="analytics-trend-line" d="'+points.map((pt,i)=>
+      (i?"L":"M")+pt[0].toFixed(1)+" "+pt[1].toFixed(1)).join(" ")+'"></path>'
+      +months.map((m,i)=>
+        '<circle class="analytics-trend-point" cx="'+x(i).toFixed(1)
+        +'" cy="'+y(Number(m[key] || 0)).toFixed(1)+'" r="5"><title>'
+        +esc(m.label+": "+label(Number(m[key] || 0)))+'</title></circle>').join("");
+  } else {
+    const barWidth=Math.min(56,plotWidth/months.length*.64);
+    marks=months.map((m,i)=>{
+      const value=Number(m[key] || 0),heightBar=Math.abs(y(value)-y(0));
+      return '<rect class="analytics-trend-bar" x="'+(x(i)-barWidth/2).toFixed(1)
+        +'" y="'+Math.min(y(value),y(0)).toFixed(1)
+        +'" width="'+barWidth.toFixed(1)
+        +'" height="'+heightBar.toFixed(1)+'" rx="3"><title>'
+        +esc(m.label+": "+label(value))+'</title></rect>';
+    }).join("");
+  }
+  node.innerHTML='<svg viewBox="0 0 '+width+' '+height+'" preserveAspectRatio="xMidYMid meet"'
+    +' role="img" aria-label="'+esc((cumulative?"Cumulative ":"Monthly ")
+      +(moneyValues?"revenue":"completed orders"))+'">'
+    +guides+marks+monthsLabels+'</svg>';
+}
+
+function renderSalesTrends(history,summary) {
+  const months=monthlySalesSeries(history);
+  const totals=summary?.sales_period_totals || [];
+  const currency=totals.length===1?totals[0].currency:(summary?.currency || "EUR");
+  const singleCurrency=totals.length<=1;
+  salesTrendChart("#analytics-monthly-sales-chart",months,"sales");
+  salesTrendChart("#analytics-cumulative-sales-chart",months,"cumulative_sales",{cumulative:true});
+  if(singleCurrency) {
+    salesTrendChart("#analytics-monthly-revenue-chart",months,"revenue_cents",{currency,moneyValues:true});
+    salesTrendChart("#analytics-cumulative-revenue-chart",months,"cumulative_revenue_cents",
+      {currency,moneyValues:true,cumulative:true});
+  } else {
+    // Do not sum dissimilar currencies. Orders remain comparable.
+    for(const id of ["#analytics-monthly-revenue-chart","#analytics-cumulative-revenue-chart"])
+      $(id).innerHTML='<div class="chart-empty">Revenue chart unavailable: more than one currency in this period.</div>';
+  }
+  const displayRevenue=value=>singleCurrency?money(value,currency):"Multiple currencies";
+  $("#analytics-monthly-table").innerHTML=months.length
+    ?'<table><thead><tr><th>Month</th><th>Completed orders</th><th>Revenue</th>'
+      +'<th>Cumulative orders</th><th>Cumulative revenue</th></tr></thead><tbody>'
+      +months.map(m=>'<tr><th scope="row">'+esc(m.label)
+        +(m.partial?'<span class="sub">Partial month</span>':'')+'</th>'
+        +'<td>'+esc(m.sales)+'</td><td>'+esc(displayRevenue(m.revenue_cents))+'</td>'
+        +'<td>'+esc(m.cumulative_sales)+'</td>'
+        +'<td>'+esc(displayRevenue(m.cumulative_revenue_cents))+'</td></tr>').join("")
+      +'</tbody></table>'
+    :'<div class="empty">No monthly history available.</div>';
+  const known=Number(summary?.sales_period_revenue_known_count ?? 0);
+  const sold=Number(summary?.sales_period_count ?? 0);
+  const note=sold && known<sold
+    ?(sold-known)+' completed orders have no recorded selling price. Revenue shows known amounts only.'
+    :"First and last months may be partial; charts reflect the selected reporting period.";
+  for(const id of ["#analytics-monthly-revenue-chart","#analytics-cumulative-revenue-chart"])
+    $(id).insertAdjacentHTML("beforeend",'<p class="muted analytics-chart-note">'+esc(note)+'</p>');
+}
+
 let analyticsLoadSequence = 0;
 async function analytics() {
   const period = $("#analytics-days").value || "90";
