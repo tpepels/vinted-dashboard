@@ -21,8 +21,10 @@ def test_historical_sale_cost_backfill_is_editable_and_profit_coverage_is_explic
         assert marker in html
     assert 'api("/api/app/sales/average-cost"' in APP_JS
     assert '"/acquisition-cost"' in APP_JS
-    assert "economicsReady && summary.sales_period_costed_count" in APP_JS
-    assert "Not a complete profit figure" in APP_JS
+    assert 'id="sale-cost-data-quality"' in html
+    assert "estimates.length" in APP_JS
+    assert "complete && summary.sales_period_costed_count" in APP_JS
+    assert "cost coverage" not in APP_JS.lower().split('async function analytics() {',1)[-1].split('async function loadListingHistory',1)[0]
     assert "Estimated" in APP_JS
 
 
@@ -105,7 +107,7 @@ def test_lifetime_revenue_is_visible_without_opening_an_analytics_disclosure():
     assert 'metric("Total revenue · all time", lifetimeRevenue(summary)' in APP_JS
     assert 'id="analytics-revenue-metrics"' in html
     assert 'showRevenueSummary("#sales-lifetime-metrics")' in APP_JS
-    assert 'showRevenueSummary("#analytics-revenue-metrics", {period, isCurrent})' in APP_JS
+    assert 'showRevenueSummary("#analytics-revenue-metrics",{period,isCurrent})' in APP_JS
     assert 'value="ytd"' in html
     assert "sales_period_gross_profit_cents" in APP_JS
     assert 'api("/api/app/analytics/history?period=" + encodeURIComponent(period))' in APP_JS
@@ -114,20 +116,36 @@ def test_lifetime_revenue_is_visible_without_opening_an_analytics_disclosure():
     assert 'api("/api/app/analytics")' in APP_JS
 
 
-def test_profitability_analytics_exposes_sortable_sale_economics():
-    assert '"Estimated gross margin · "' in APP_JS
-    assert '"Gross margin · "' in APP_JS
-    assert "<th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th>" in APP_JS
-    assert 'row.gross_profit_cents == null ? "" : row.gross_profit_cents' in APP_JS
-    assert 'row.gross_margin_pct == null ? "" : row.gross_margin_pct' in APP_JS
-    assert 'row.roi_pct == null ? "" : row.roi_pct' in APP_JS
+def test_analytics_dashboards_group_topics_instead_of_rendering_an_audit_wall():
+    html = (Path(__file__).resolve().parents[1] / "app" / "product_static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    for panel in ("overview", "demand", "detail"):
+        assert f'id="analytics-{panel}-panel"' in html
+    assert 'Sales performance</button>' in html
+    assert 'Vinted reach</button>' in html
+    assert 'Stock &amp; listings</button>' in html
+    assert 'id="analytics-revenue-metrics"' in html
+    assert 'id="analytics-monthly-sales-chart"' in html
+    assert 'id="analytics-monthly-revenue-chart"' in html
+    assert 'id="analytics-cumulative-sales-chart"' in html
+    assert 'id="analytics-cumulative-revenue-chart"' in html
+    assert 'id="analytics-monthly-table"' in html
+    assert 'id="sale-cost-data-quality"' in html
+    assert 'id="analytics-snapshot-details"' not in html
+    assert 'metric("Cost coverage' not in APP_JS
+    assert 'metric("Gross profit · linked sales"' not in APP_JS
+    assert '<th>Costed</th>' not in APP_JS
+    assert 'monthlySalesSeries(history)' in APP_JS
+    assert 'renderSalesTrends(history,summary)' in APP_JS
+    assert 'complete && summary.sales_period_costed_count' in APP_JS
 
 
-def test_category_profitability_is_rendered_from_complete_sales_only():
-    assert "<th>Costed</th><th>Revenue</th><th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th>" in APP_JS
-    assert 'row.costed_sales + "/" + row.linked_sales' in APP_JS
-    assert 'row.costed_sales ? money(row.gross_profit_cents, analyticsCurrency) : "—"' in APP_JS
-
+def test_analytics_detail_tables_focus_on_demand_not_partial_financial_costs():
+    assert "<th>Linked sales</th>" in APP_JS
+    assert "<th>Days online</th><th>Sale price</th><th>Order</th>" in APP_JS
+    assert '<th>Costed</th><th>Revenue</th><th>Cost</th>' not in APP_JS
+    assert "row.costed_sales + \"/\" + row.linked_sales" not in APP_JS
 
 
 def test_today_is_rendered_as_one_unified_work_queue():
@@ -177,7 +195,7 @@ def test_listing_dates_use_only_real_vinted_timestamp():
 
 def test_vinted_analytics_renders_unknown_age_as_unavailable():
     assert 'row.age_days == null ? "—"' in APP_JS
-    assert "summary.actual_age_count" in APP_JS
+    assert "m.median_active_age_days" in APP_JS
 
 
 
