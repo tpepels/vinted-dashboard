@@ -5643,20 +5643,25 @@ async function analytics() {
   if (!isCurrent()) return;
   if (summary) {
     const economicsReady = summary.sales_period_economics_complete === true;
+    const unknownBooks = Number(summary.sales_period_unknown_quantity_count || 0);
+    const estimatedCosts = Number(summary.sales_period_estimated_count || 0);
+    const economicsEstimated = unknownBooks > 0 || estimatedCosts > 0;
     const coverage = summary.sales_period_costed_count + " of "
       + summary.sales_period_revenue_known_count + " priced sales have a known cost";
+    const dataWarning = (unknownBooks
+      ? unknownBooks + " sales have unverified book counts (assumed one where necessary). " : "")
+      + (estimatedCosts ? estimatedCosts + " acquisition costs are estimated. " : "");
     const caveat = !economicsReady
-      ? "Incomplete data — "+coverage+". Use Sales → Record purchase costs to backfill history."
-      : Number(summary.sales_period_estimated_count || 0)
-        ? summary.sales_period_estimated_count + " costs are estimates, not actual purchase records"
-        : "Acquisition costs recorded for every sale";
+      ? "Incomplete data — "+coverage+". "+dataWarning
+        +"Use Sales → Record purchase costs to backfill history."
+      : dataWarning || "Acquisition costs recorded for every sale";
     $("#analytics-metrics").innerHTML =
       metric("Cost coverage · " + summary.period_label, coverage, caveat)
-      + metric("Gross profit · " + summary.period_label,
+      + metric((economicsEstimated ? "Estimated gross profit · " : "Gross profit · ") + summary.period_label,
         economicsReady && summary.sales_period_costed_count
           ? money(summary.sales_period_gross_profit_cents, summary.currency) : "—",
         economicsReady ? caveat : "Not a complete profit figure — historical costs missing")
-      + metric("Gross margin · " + summary.period_label,
+      + metric((economicsEstimated ? "Estimated gross margin · " : "Gross margin · ") + summary.period_label,
         economicsReady && summary.sales_period_gross_margin_pct != null
           ? summary.sales_period_gross_margin_pct + "%" : "—",
         economicsReady && summary.sales_period_roi_pct != null
