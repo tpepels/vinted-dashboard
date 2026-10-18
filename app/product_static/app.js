@@ -5489,29 +5489,11 @@ function renderVintedBehavior(data) {
     metric("Views gained", summary.views_gained || 0, data.period_label || data.days + " days")
     + metric("Favourites gained", summary.favourites_gained || 0, data.period_label || data.days + " days")
     + metric("Favourites / 100 views",
-      summary.favourites_per_100_views == null ? "—" : summary.favourites_per_100_views)
-    + metric("Median active age",
-      summary.median_active_age_days == null ? "—" : summary.median_active_age_days + " d",
-      (summary.actual_age_count || 0) + " of " + (summary.active_listings || 0) + " exact Vinted dates")
-    + metric("Linked Vinted sales", summary.linked_sales || 0,
-      summary.median_days_to_sale == null ? "" : "median " + summary.median_days_to_sale + " d to sale")
-    + metric(
-      "Gross profit · linked sales",
-      summary.linked_sales > 0 && summary.costed_linked_sales === summary.linked_sales
-        ? money(summary.gross_profit_cents, analyticsCurrency) : "—",
-      summary.costed_linked_sales + " of " + (summary.linked_sales || 0)
-        + " linked sales costed; missing costs prevent a reliable total"
-    )
-    + metric(
-      "Gross margin · linked sales",
-      summary.linked_sales > 0 && summary.costed_linked_sales === summary.linked_sales
-        && summary.gross_margin_pct != null ? summary.gross_margin_pct + "%" : "—",
-      summary.linked_sales > 0 && summary.costed_linked_sales === summary.linked_sales
-        && summary.roi_pct != null ? "ROI " + summary.roi_pct + "%"
-        : "Complete the acquisition costs in Sales"
-    )
-    + metric("Price changes", summary.price_changes_window ?? summary.price_changes_30d ?? 0,
-      data.period_label || data.days + " days");
+      summary.favourites_per_100_views == null ? "—" : summary.favourites_per_100_views,
+      "Across observed listings")
+    + metric("Followers · now",
+      data.profile?.followers == null ? "—" : data.profile.followers,
+      "Current snapshot, not a period total");
 
   $("#vinted-thresholds").textContent =
     "Segments use workspace thresholds: momentum = at least "
@@ -5537,35 +5519,22 @@ function renderVintedBehavior(data) {
 
   const categories = data.categories || [];
   $("#vinted-categories").innerHTML = categories.length
-    ? '<table><thead><tr><th>Category</th><th>Active</th><th>Views</th><th>Views gained</th><th>Favourites</th><th>Favourites gained</th><th>Fav / 100 views</th><th>Linked sales</th><th>Costed</th><th>Revenue</th><th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th></tr></thead><tbody>'
-      + categories.map((row) =>
-        "<tr><td>" + esc(row.category) + "</td><td>" + esc(row.active_listings)
-        + "</td><td>" + esc(row.views) + "</td><td>+" + esc(row.views_gain)
-        + "</td><td>" + esc(row.favourites) + "</td><td>+" + esc(row.favourites_gain)
-        + "</td><td>" + esc(row.favourites_per_100_views == null ? "—" : row.favourites_per_100_views)
-        + "</td><td>" + esc(row.linked_sales)
-        + '</td><td data-sort-value="' + esc(row.cost_coverage_pct == null ? "" : row.cost_coverage_pct) + '">'
-        + (row.linked_sales ? esc(row.costed_sales + "/" + row.linked_sales) : "—")
-        + '</td><td data-sort-value="' + esc(row.costed_sales ? row.costed_revenue_cents : "") + '">'
-        + (row.costed_sales ? money(row.costed_revenue_cents, analyticsCurrency) : "—")
-        + '</td><td data-sort-value="' + esc(row.costed_sales ? row.cost_cents : "") + '">'
-        + (row.costed_sales ? money(row.cost_cents, analyticsCurrency) : "—")
-        + '</td><td data-sort-value="' + esc(row.costed_sales ? row.gross_profit_cents : "") + '">'
-        + (row.costed_sales ? money(row.gross_profit_cents, analyticsCurrency) : "—")
-        + '</td><td data-sort-value="' + esc(row.gross_margin_pct == null ? "" : row.gross_margin_pct) + '">'
-        + (row.gross_margin_pct == null ? "—" : esc(row.gross_margin_pct) + "%")
-        + '</td><td data-sort-value="' + esc(row.roi_pct == null ? "" : row.roi_pct) + '">'
-        + (row.roi_pct == null ? "—" : esc(row.roi_pct) + "%") + "</td></tr>"
-      ).join("")
-      + "</tbody></table>"
+    ? '<table><thead><tr><th>Category</th><th>Active listings</th><th>Views gained</th><th>Favourites gained</th><th>Favourites / 100 views</th><th>Linked sales</th></tr></thead><tbody>'
+      + categories.map(row =>
+        '<tr><td>' + esc(row.category) + '</td><td>' + esc(row.active_listings)
+        + '</td><td>' + esc(row.views_gain)
+        + '</td><td>' + esc(row.favourites_gain)
+        + '</td><td>' + esc(row.favourites_per_100_views == null ? "—" : row.favourites_per_100_views)
+        + '</td><td>' + esc(row.linked_sales) + '</td></tr>'
+      ).join("") + '</tbody></table>'
     : '<div class="empty">No Vinted category history yet.</div>';
 
   const soldRows = data.sold_stock || [];
   $("#vinted-sold-stock").innerHTML = soldRows.length
-    ? '<table><thead><tr><th>Item</th><th>Category</th><th>Listed</th><th>Sold</th><th>Days online</th><th>Sale price</th><th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th><th>Order</th></tr></thead><tbody>'
-      + soldRows.map((row) => {
+    ? '<table><thead><tr><th>Item</th><th>Category</th><th>Listed</th><th>Sold</th><th>Days online</th><th>Sale price</th><th>Order</th></tr></thead><tbody>'
+      + soldRows.map(row => {
         const title = row.url
-          ? '<a href="' + esc(row.url) + '" target="_blank" rel="noreferrer">' + esc(row.title) + "</a>"
+          ? '<a href="' + esc(row.url) + '" target="_blank" rel="noreferrer">' + esc(row.title) + '</a>'
           : esc(row.title);
         return '<tr><td><div class="title">' + title + '</div></td>'
           + '<td>' + esc(row.category) + '</td>'
@@ -5578,23 +5547,8 @@ function renderVintedBehavior(data) {
           + (row.days_online == null ? "—" : esc(row.days_online) + " d") + '</td>'
           + '<td data-sort-value="' + esc(row.sale_total_cents == null ? "" : row.sale_total_cents) + '">'
           + money(row.sale_total_cents, row.currency) + '</td>'
-          + '<td data-sort-value="' + esc(row.cost_cents == null ? "" : row.cost_cents) + '">'
-          + money(row.cost_cents, row.currency)
-          + (row.cost_source ? '<div class="sub">' + esc(
-            row.cost_source === "vinted_purchase"
-              ? "Vinted purchase" + (row.cost_source_adjusted ? " · adjusted" : "")
-              : row.cost_source
-          ) + "</div>" : "")
-          + '</td>'
-          + '<td data-sort-value="' + esc(row.gross_profit_cents == null ? "" : row.gross_profit_cents) + '">'
-          + money(row.gross_profit_cents, row.currency) + '</td>'
-          + '<td data-sort-value="' + esc(row.gross_margin_pct == null ? "" : row.gross_margin_pct) + '">'
-          + (row.gross_margin_pct == null ? "—" : esc(row.gross_margin_pct) + "%") + '</td>'
-          + '<td data-sort-value="' + esc(row.roi_pct == null ? "" : row.roi_pct) + '">'
-          + (row.roi_pct == null ? "—" : esc(row.roi_pct) + "%") + '</td>'
           + '<td>' + esc(row.external_order_id || "—") + '</td></tr>';
-      }).join("")
-      + "</tbody></table>"
+      }).join("") + '</tbody></table>'
     : '<div class="empty">No linked Vinted sales in this period.</div>';
 
   const rows = data.listings || [];
