@@ -68,6 +68,7 @@ jobs:
       - run: node --check app/extension/background.js
       - run: node --check app/extension/vinted_age.js
       - run: node --check app/extension/content.js
+      - run: node scripts/test_vinted_bundle_quantity.js
       - run: node --check app/extension/popup.js
       - run: node scripts/test_bridge_popup_language.js
       - run: node scripts/test_vinted_page_age.js

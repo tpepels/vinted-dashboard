@@ -4530,6 +4530,11 @@ def update_sale_book_quantity(
         record_sale_book_quantity(sale, payload.quantity, str(context.user.id))
         session.flush()
         item = session.get(models.InventoryItem, sale.inventory_item_id) if sale.inventory_item_id else None
+        if item is not None and item.workspace_id == context.workspace.id and is_physical(item):
+            # A corrected bundle size also changes physical stock consumption.
+            from app.connectors.workspace_sync import recompute_inventory_item
+
+            recompute_inventory_item(session, item)
         count, count_source = sale_book_quantity(sale)
         cents, cost_source = sale_acquisition_cost(sale, item)
     return {
