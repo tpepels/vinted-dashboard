@@ -5198,7 +5198,8 @@ function renderPurchaseCostSuggestions() {
 }
 
 function saleQuantityControls(sale) {
-  if (sale.direction !== "sell" || /cancel|refund|fail/i.test(sale.status || "")) return "—";
+  if (sale.direction !== "sell" || sale.counts_as_sold === false
+      || /cancel|refund|fail/i.test(sale.status || "")) return "—";
   const count = Number.isInteger(Number(sale.book_quantity)) && sale.book_quantity != null
     ? Number(sale.book_quantity) : null;
   const source = sale.quantity_source === "manual" ? "Manually verified"
@@ -5212,7 +5213,8 @@ function saleQuantityControls(sale) {
 }
 
 function saleCostControls(sale) {
-  if (sale.direction !== "sell" || /cancel|refund|fail/i.test(sale.status || "")) return "—";
+  if (sale.direction !== "sell" || sale.counts_as_sold === false
+      || /cancel|refund|fail/i.test(sale.status || "")) return "—";
   const recorded = sale.acquisition_cost_cents != null;
   const value = recorded ? (Number(sale.acquisition_cost_cents) / 100).toFixed(2) : "";
   const source = sale.acquisition_cost_source === "estimated_bulk"
@@ -5282,7 +5284,7 @@ function bindSaleCostEditors(rootSelector) {
 
 function renderSaleCostHistory() {
   const valid=(state.salesRows || []).filter(s=>s.direction==="sell"
-    && !/cancel|refund|fail/i.test(s.status || ""));
+    && s.counts_as_sold !== false && !/cancel|refund|fail/i.test(s.status || ""));
   const priced=valid.filter(s=>s.total_cents!=null);
   const known=priced.filter(s=>s.acquisition_cost_cents!=null);
   const estimates=known.filter(s=>["estimated_bulk","average_bulk"].includes(s.acquisition_cost_source));
@@ -5293,7 +5295,7 @@ function renderSaleCostHistory() {
     +" unverified book counts. Complete or correct records below.";
   const filter = $("#sale-cost-history-filter").value;
   const rows = (state.salesRows || []).filter(sale => sale.direction === "sell"
-    && !/cancel|refund|fail/i.test(sale.status || "")
+    && sale.counts_as_sold !== false && !/cancel|refund|fail/i.test(sale.status || "")
     && (filter === "all" || (filter === "missing" ? sale.acquisition_cost_cents == null
       : filter === "unknown" ? sale.book_quantity == null
       : sale.acquisition_cost_cents != null)));

@@ -4653,6 +4653,7 @@ def sales(context: RequestContext = Depends(require_context)):
                 "external_order_id": row.external_order_id,
                 "inventory_item_id": str(row.inventory_item_id) if row.inventory_item_id else None,
                 "direction": row.direction,
+                "counts_as_sold": sale_counts_as_sold(row),
                 "title": row.title,
                 "counterparty": row.counterparty,
                 "total_cents": row.total_cents,
