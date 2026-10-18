@@ -175,9 +175,10 @@ const browserTest=String.raw`
     await sleep(200);
     result.statisticsRevenue=document.querySelector("#analytics-revenue-metrics").textContent;
     result.statisticsProfit=document.querySelector("#analytics-metrics").textContent;
-    result.salesDashboardTabs=document.querySelector('[data-workspace-tab="overview"]').textContent.includes("Sales performance")
-      && document.querySelector('[data-workspace-tab="demand"]').textContent.includes("Vinted reach")
-      && document.querySelector('[data-workspace-tab="detail"]').textContent.includes("Stock");
+    const analyticsTabs=document.querySelector('[data-workspace-tabs="analytics"]');
+    result.salesDashboardTabs=analyticsTabs.querySelector('[data-workspace-tab="overview"]').textContent.includes("Sales performance")
+      && analyticsTabs.querySelector('[data-workspace-tab="demand"]').textContent.includes("Vinted reach")
+      && analyticsTabs.querySelector('[data-workspace-tab="detail"]').textContent.includes("Stock");
     result.costCoverageRemoved=!document.querySelector("#analytics-metrics").textContent.includes("Cost coverage")
       && document.querySelector("#sale-cost-data-quality").textContent.includes("acquisition costs");
     result.monthlyOrders90=document.querySelector("#analytics-monthly-table").textContent;
