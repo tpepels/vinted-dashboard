@@ -548,6 +548,32 @@
         <button class="dashboard-tab" role="tab" type="button" aria-selected="false" aria-controls="sales-costs-panel" data-workspace-tab="costs">Record purchase costs</button>
         </div>
         <div id="sales-costs-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="sales:costs">
+        <div class="card form" id="sale-cost-backfill-card">
+          <div class="card-head"><h2>Backfill acquisition costs for historical sales</h2></div>
+          <p class="muted">Historical sales can have acquisition costs even when no inventory item is linked. Enter an estimated cost per completed sale (for example €1.00 per book), preview the affected orders, then apply. Existing costs are preserved unless you explicitly choose to overwrite them. This changes neither sale prices nor marketplace data.</p>
+          <form id="sale-cost-backfill-form">
+            <div class="form-grid">
+              <label>Purchase cost per sale<input id="sale-cost-backfill-value" type="number" min="0" step="0.01" value="1.00" required></label>
+              <label>Currency<input id="sale-cost-backfill-currency" maxlength="3" value="EUR" required></label>
+              <label>Apply to<select id="sale-cost-backfill-scope">
+                <option value="all" selected>All historical completed sales</option>
+                <option value="30">Last 30 days</option><option value="90">Last 90 days</option>
+                <option value="180">Last 180 days</option><option value="365">Last 365 days</option>
+                <option value="ytd">Year to date</option>
+              </select></label>
+              <label class="check"><input id="sale-cost-backfill-overwrite" type="checkbox">Replace existing costs too</label>
+            </div>
+            <p id="sale-cost-backfill-preview" class="muted" role="status">Preview before applying. This includes older orders that are not shown in the table.</p>
+            <div class="actions"><button id="sale-cost-backfill-preview-btn" class="btn" type="button">Preview historical costs</button><button id="sale-cost-backfill-apply" class="btn primary" type="submit" disabled>Apply cost to historical sales</button></div>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Edit individual historical sales</h2></div>
+          <p class="muted">Save a different amount on any sale, including unlinked historical orders. Use “Use inventory cost” to clear a sale-specific override. All figures are acquisition cost only, excluding fees and shipping.</p>
+          <label>Show <select id="sale-cost-history-filter"><option value="missing" selected>Sales missing a cost</option><option value="all">All completed sales</option><option value="recorded">Sales with a cost</option></select></label>
+          <p id="sale-cost-history-count" class="muted"></p>
+          <div id="sale-cost-history-table" class="table-wrap"></div>
+        </div>
         <div id="purchase-cost-card" class="card form hidden">
           <div class="card-head inline-head">
             <div><p class="eyebrow">PURCHASE COSTS</p><h2>Fill acquisition costs from Vinted purchases</h2></div>
@@ -583,7 +609,7 @@
       </section>
 
       <section id="analytics" class="view">
-        <div class="toolbar analytics-toolbar"><label for="analytics-days">Reporting period</label><select id="analytics-days"><option value="30">Last 30 days</option><option value="90" selected>Last 90 days</option><option value="180">Last 180 days</option><option value="365">Last 365 days</option><option value="ytd">Year to date (YTD)</option></select></div>
+        <div class="toolbar analytics-toolbar"><label for="analytics-days">Reporting period</label><select id="analytics-days"><option value="30">Last 30 days</option><option value="90" selected>Last 90 days</option><option value="180">Last 180 days</option><option value="365">Last 365 days</option><option value="ytd">Year to date (YTD)</option></select><button id="analytics-edit-sale-costs" type="button" class="btn">Complete missing acquisition costs</button></div>
         <div id="analytics-revenue-metrics" class="metrics" role="status" aria-live="polite"><p class="muted">Loading sales revenue…</p></div>
         <div id="analytics-metrics" class="metrics"></div>
         <details class="dashboard-filter-details" id="analytics-snapshot-details"><summary>Current inventory snapshot (not historical)</summary><div id="analytics-inventory-snapshot" class="metrics"></div></details>

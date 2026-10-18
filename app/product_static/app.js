@@ -5197,6 +5197,141 @@ function renderPurchaseCostSuggestions() {
   });
 }
 
+function saleCostControls(sale) {
+  if (sale.direction !== "sell" || /cancel|refund|fail/i.test(sale.status || "")) return "—";
+  const recorded = sale.acquisition_cost_cents != null;
+  const value = recorded ? (Number(sale.acquisition_cost_cents) / 100).toFixed(2) : "";
+  const source = sale.acquisition_cost_source === "estimated_bulk"
+    || sale.acquisition_cost_source === "average_bulk" ? "Estimated"
+    : sale.acquisition_cost_source === "manual_sale" ? "Manually recorded"
+    : recorded ? "From inventory" : "Cost missing";
+  return '<div class="sale-cost-edit"><label class="sub">' + esc(source)
+    + '<input class="sale-cost-input" type="number" min="0" step="0.01" inputmode="decimal"'
+    + ' value="' + esc(value) + '" placeholder="e.g. 1.00"'
+    + ' aria-label="Acquisition cost for ' + esc(sale.title || sale.external_order_id) + '"></label>'
+    + '<button class="btn sale-cost-save" type="button" data-id="' + esc(sale.id) + '">Save cost</button>'
+    + '<button class="btn sale-cost-clear" type="button" data-id="' + esc(sale.id)
+    + '" title="Clear this sale override and use the linked inventory cost, if available">Use inventory cost</button></div>';
+}
+
+function bindSaleCostEditors(rootSelector) {
+  $(rootSelector + " .sale-cost-save").forEach(button => {
+    button.onclick = async () => {
+      const input = button.closest(".sale-cost-edit")?.querySelector(".sale-cost-input");
+      const raw = String(input?.value || "").trim();
+      if (!/^\\d+(?:\\.\\d{1,2})?$/.test(raw)) {
+        return flash("Enter a purchase cost with up to two decimals.", true);
+      }
+      button.disabled = true;
+      try {
+        await api("/api/app/sales/" + encodeURIComponent(button.dataset.id) + "/acquisition-cost", {
+          method: "PATCH",
+          body: JSON.stringify({cost_cents: Math.round(Number(raw) * 100)}),
+        });
+        flash("Historical sale cost saved.");
+        await sales();
+      } catch (error) { flash(error.message, true); button.disabled = false; }
+    };
+  });
+  $(rootSelector + " .sale-cost-clear").forEach(button => {
+    button.onclick = async () => {
+      if (!window.confirm("Clear the cost override for this sale? A linked inventory cost, if present, will be used instead.")) return;
+      button.disabled = true;
+      try {
+        await api("/api/app/sales/" + encodeURIComponent(button.dataset.id) + "/acquisition-cost", {
+          method: "PATCH", body: JSON.stringify({cost_cents: null}),
+        });
+        flash("Sale override cleared.");
+        await sales();
+      } catch (error) { flash(error.message, true); button.disabled = false; }
+    };
+  });
+}
+
+function renderSaleCostHistory() {
+  const filter = $("#sale-cost-history-filter").value;
+  const rows = (state.salesRows || []).filter(sale => sale.direction === "sell"
+    && !/cancel|refund|fail/i.test(sale.status || "")
+    && (filter === "all" || (filter === "missing" ? sale.acquisition_cost_cents == null
+      : sale.acquisition_cost_cents != null)));
+  $("#sale-cost-history-count").textContent = rows.length + " shown in loaded history.";
+  $("#sale-cost-history-table").innerHTML = rows.length
+    ? '<table><thead><tr><th>Date</th><th>Marketplace</th><th>Sold item</th><th>Sale price</th><th>Acquisition cost</th></tr></thead><tbody>'
+      + rows.map(sale => '<tr><td>' + esc(when(sale.occurred_at))
+        + '</td><td>' + esc(sale.channel) + '</td><td>' + esc(sale.title || sale.external_order_id)
+        + (sale.inventory_item_id ? '' : '<div class="sub">Not linked to inventory</div>')
+        + '</td><td>' + money(sale.total_cents,sale.currency)
+        + '</td><td>' + saleCostControls(sale) + '</td></tr>').join("")
+      + '</tbody></table>'
+    : '<div class="empty">No matching sales. Try “All completed sales”.</div>';
+  bindSaleCostEditors("#sale-cost-history-table");
+}
+
+let saleCostBulkPreview = null;
+function invalidateSaleCostBulkPreview() {
+  saleCostBulkPreview = null;
+  $("#sale-cost-backfill-apply").disabled = true;
+  $("#sale-cost-backfill-preview").textContent = "Preview before applying. Existing acquisition costs are kept unless overwrite is selected.";
+}
+function saleCostBulkPayload(preview=true) {
+  const raw=$("#sale-cost-backfill-value").value.trim();
+  const currency=$("#sale-cost-backfill-currency").value.trim().toUpperCase();
+  if (!/^\\d+(?:\\.\\d{1,2})?$/.test(raw)) throw Error("Enter a valid cost per sale.");
+  if (!/^[A-Z]{3}$/.test(currency)) throw Error("Enter a valid three-letter currency.");
+  return {
+    cost_cents:Math.round(Number(raw)*100), currency,
+    scope:$("#sale-cost-backfill-scope").value,
+    overwrite_existing:$("#sale-cost-backfill-overwrite").checked,preview,
+  };
+}
+["sale-cost-backfill-value","sale-cost-backfill-currency","sale-cost-backfill-scope",
+  "sale-cost-backfill-overwrite"].forEach(id=>{
+    $("#"+id).addEventListener("input",invalidateSaleCostBulkPreview);
+    $("#"+id).addEventListener("change",invalidateSaleCostBulkPreview);
+  });
+$("#sale-cost-backfill-preview-btn").onclick = async () => {
+  const button=$("#sale-cost-backfill-preview-btn");
+  let payload;
+  try {payload=saleCostBulkPayload();} catch(error){return flash(error.message,true);}
+  button.disabled=true;
+  try {
+    const result=await api("/api/app/sales/average-cost",{
+      method:"POST",body:JSON.stringify(payload),
+    });
+    if (JSON.stringify(saleCostBulkPayload())!==JSON.stringify(payload)) return;
+    saleCostBulkPreview={payload,result};
+    $("#sale-cost-backfill-preview").textContent=
+      result.eligible_sales + " historical sales to update; "
+      + result.already_costed + " existing costs preserved; "
+      + result.other_currency + " other-currency sales excluded. "
+      + money(result.estimated_cost_cents,payload.currency) + " estimated acquisition costs. "
+      + result.with_sale_amount + " affected sales have a known selling price.";
+    $("#sale-cost-backfill-apply").disabled = result.eligible_sales === 0;
+  } catch(error){flash(error.message,true);}
+  finally {button.disabled=false;}
+};
+$("#sale-cost-backfill-form").onsubmit=async(event)=>{
+  event.preventDefault();
+  const previous=saleCostBulkPreview;
+  let payload;
+  try {payload=saleCostBulkPayload(false);}catch(error){return flash(error.message,true);}
+  if(!previous || JSON.stringify({...payload,preview:true})!==JSON.stringify(previous.payload))
+    return flash("Preview the current batch settings before applying.",true);
+  if (!window.confirm("Record an estimated "+money(payload.cost_cents,payload.currency)
+      +" acquisition cost for "+previous.result.eligible_sales+" historical sales?"
+      +(payload.overwrite_existing?" ALL existing costs will be overwritten.":"")))return;
+  const button=$("#sale-cost-backfill-apply");button.disabled=true;
+  try {
+    const result=await api("/api/app/sales/average-cost",{
+      method:"POST",body:JSON.stringify(payload),
+    });
+    invalidateSaleCostBulkPreview();
+    flash("Historical costs applied to "+result.updated+" sales.");
+    await sales();
+  }catch(error){flash(error.message,true);invalidateSaleCostBulkPreview();}
+};
+$("#sale-cost-history-filter").onchange=renderSaleCostHistory;
+
 function renderSales() {
   const direction = $("#sales-direction").value;
   const stateFilter = $("#sales-state").value;
@@ -5219,18 +5354,21 @@ function renderSales() {
 
   $("#sales-count").textContent = rows.length + " of " + state.salesRows.length;
   renderPurchaseCostSuggestions();
+  renderSaleCostHistory();
   const salesMarkup = rows.length
-    ? '<table><thead><tr><th>Date</th><th>Channel</th><th>Item</th><th>Person</th><th>Direction</th><th>Status</th><th>Amount</th></tr></thead><tbody>'
+    ? '<table><thead><tr><th>Date</th><th>Channel</th><th>Item</th><th>Person</th><th>Direction</th><th>Status</th><th>Amount</th><th>Acquisition cost</th></tr></thead><tbody>'
       + rows.map((sale) =>
         "<tr><td>" + esc(when(sale.occurred_at)) + '</td><td><span class="pill '
         + esc(sale.channel) + '">' + esc(sale.channel) + "</span></td><td>"
         + esc(sale.title || "—") + "</td><td>" + esc(sale.counterparty || "—")
         + "</td><td>" + esc(sale.direction) + "</td><td>"
-        + esc(sale.status || "—") + "</td><td>" + money(sale.total_cents, sale.currency) + "</td></tr>"
+        + esc(sale.status || "—") + "</td><td>" + money(sale.total_cents, sale.currency)
+        + "</td><td>" + saleCostControls(sale) + "</td></tr>"
       ).join("")
       + "</tbody></table>"
     : '<div class="empty">No matching orders.</div>';
   replaceStableTable("#sales-table", salesMarkup);
+  bindSaleCostEditors("#sales-table");
 }
 
 ["#sales-direction", "#sales-state", "#sales-channel"].forEach((selector) => {
@@ -5457,20 +5595,29 @@ async function analytics() {
   const summary = await revenueTask;
   if (!isCurrent()) return;
   if (summary) {
+    const economicsReady = summary.sales_period_economics_complete === true;
+    const coverage = summary.sales_period_costed_count + " of "
+      + summary.sales_period_revenue_known_count + " priced sales have a known cost";
+    const caveat = !economicsReady
+      ? "Incomplete data — "+coverage+". Use Sales → Record purchase costs to backfill history."
+      : Number(summary.sales_period_estimated_count || 0)
+        ? summary.sales_period_estimated_count + " costs are estimates, not actual purchase records"
+        : "Acquisition costs recorded for every sale";
     $("#analytics-metrics").innerHTML =
-      metric("Gross profit · " + summary.period_label,
-        summary.sales_period_costed_count
+      metric("Cost coverage · " + summary.period_label, coverage, caveat)
+      + metric("Gross profit · " + summary.period_label,
+        economicsReady && summary.sales_period_costed_count
           ? money(summary.sales_period_gross_profit_cents, summary.currency) : "—",
-        summary.sales_period_costed_count + " of "
-          + summary.sales_period_revenue_known_count + " revenue-known sales costed")
+        economicsReady ? caveat : "Not a complete profit figure — historical costs missing")
       + metric("Gross margin · " + summary.period_label,
-        summary.sales_period_gross_margin_pct == null
-          ? "—" : summary.sales_period_gross_margin_pct + "%",
-        summary.sales_period_roi_pct == null ? "" : "ROI " + summary.sales_period_roi_pct + "%")
+        economicsReady && summary.sales_period_gross_margin_pct != null
+          ? summary.sales_period_gross_margin_pct + "%" : "—",
+        economicsReady && summary.sales_period_roi_pct != null
+          ? "ROI " + summary.sales_period_roi_pct + "%" : caveat)
       + metric("Acquisition costs · " + summary.period_label,
-        summary.sales_period_costed_count
+        economicsReady && summary.sales_period_costed_count
           ? money(summary.sales_period_cost_cents, summary.currency) : "—",
-        "Only sales with a recorded acquisition cost");
+        economicsReady ? caveat : "Missing historical costs; no reliable period total");
 
     const active = Number(summary.active_inventory || 0);
     const costed = Number(summary.costed_inventory_count || 0);
@@ -5540,6 +5687,11 @@ async function analytics() {
 }
 
 $("#analytics-days").onchange = () => analytics().catch((error) => flash(error.message, true));
+$("#analytics-edit-sale-costs").onclick = async () => {
+  await selectView("sales");
+  activateWorkspaceTab("sales","costs");
+  $("#sale-cost-backfill-card").scrollIntoView({behavior:"smooth",block:"start"});
+};
 
 async function loadListingHistory(listingId) {
   try {
