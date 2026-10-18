@@ -87,13 +87,17 @@ def test_lifetime_revenue_is_visible_without_opening_an_analytics_disclosure():
     assert 'metric("Total revenue · all time", lifetimeRevenue(summary)' in APP_JS
     assert 'id="analytics-revenue-metrics"' in html
     assert 'showRevenueSummary("#sales-lifetime-metrics")' in APP_JS
-    assert 'showRevenueSummary("#analytics-revenue-metrics")' in APP_JS
+    assert 'showRevenueSummary("#analytics-revenue-metrics", {period, isCurrent})' in APP_JS
+    assert 'value="ytd"' in html
+    assert "sales_period_gross_profit_cents" in APP_JS
+    assert 'api("/api/app/analytics/history?period=" + encodeURIComponent(period))' in APP_JS
+    assert 'api("/api/app/analytics/vinted?period=" + encodeURIComponent(period))' in APP_JS
     assert 'Promise.allSettled([' in APP_JS
     assert 'api("/api/app/analytics")' in APP_JS
 
 
 def test_profitability_analytics_exposes_sortable_sale_economics():
-    assert '"Gross margin YTD"' in APP_JS
+    assert '"Gross margin · " + summary.period_label' in APP_JS
     assert "<th>Cost</th><th>Profit</th><th>Margin</th><th>ROI</th>" in APP_JS
     assert 'row.gross_profit_cents == null ? "" : row.gross_profit_cents' in APP_JS
     assert 'row.gross_margin_pct == null ? "" : row.gross_margin_pct' in APP_JS
