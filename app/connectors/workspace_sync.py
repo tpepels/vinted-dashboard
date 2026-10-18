@@ -649,13 +649,17 @@ def record_workspace_channel_orders(
             sale.is_closed = bool(raw.get("is_closed"))
             sale.occurred_at = occurred_at or sale.occurred_at
             sale.last_seen_at = synced_at
-            sale.extra = {
+            updated_extra = {
                 **(sale.extra or {}),
                 **dict(raw.get("extra") or {}),
                 "sku": sku,
                 "listing_external_id": listing_external_id or None,
-                "quantity": raw.get("quantity"),
             }
+            # Do not discard a previously collected order count when a later
+            # marketplace response omits it. Manual overrides live separately.
+            if raw.get("quantity") is not None:
+                updated_extra["quantity"] = raw["quantity"]
+            sale.extra = updated_extra
             written += 1
             if sale.inventory_item_id is not None:
                 linked += 1

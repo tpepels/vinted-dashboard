@@ -132,7 +132,10 @@ from app.reconciliation import apply_reconciliation_merges, reconciliation_sugge
 from app.purchase_costs import apply_purchase_cost, purchase_cost_suggestions
 from app.runtime_config import is_production, public_app_origin, safe_runtime_summary
 from app.stock_policy import sale_counts_as_sold
-from app.sale_costs import sale_acquisition_cost, record_sale_acquisition_cost
+from app.sale_costs import (
+    sale_acquisition_cost, sale_book_quantity, record_sale_acquisition_cost,
+    record_sale_book_quantity,
+)
 from app.strategy import strategy_settings
 from app.vinted_analytics import build_vinted_analytics, daily_snapshot_series
 import json
@@ -393,11 +396,16 @@ class SaleAcquisitionCostRequest(BaseModel):
     cost_cents: int | None = Field(default=None, ge=0)
 
 
+class SaleBookQuantityRequest(BaseModel):
+    quantity: int | None = Field(default=None, ge=1, le=1000)
+
+
 class SaleAverageCostRequest(BaseModel):
     cost_cents: int = Field(ge=0)
     currency: str = "EUR"
     scope: str = "all"
     overwrite_existing: bool = False
+    assume_one_when_unknown: bool = False
     preview: bool = True
 
 
@@ -4509,6 +4517,28 @@ def apply_purchase_cost_to_inventory(
     return {"ok": True, **result}
 
 
+@router.patch("/api/app/sales/{sale_id}/book-quantity")
+def update_sale_book_quantity(
+    sale_id: uuid.UUID,
+    payload: SaleBookQuantityRequest,
+    context: RequestContext = Depends(require_write_context),
+):
+    with db.session_scope() as session:
+        sale = session.get(models.Sale, sale_id)
+        if sale is None or sale.workspace_id != context.workspace.id or not sale_counts_as_sold(sale):
+            raise HTTPException(status_code=404, detail="Sale not found")
+        record_sale_book_quantity(sale, payload.quantity, str(context.user.id))
+        session.flush()
+        item = session.get(models.InventoryItem, sale.inventory_item_id) if sale.inventory_item_id else None
+        count, count_source = sale_book_quantity(sale)
+        cents, cost_source = sale_acquisition_cost(sale, item)
+    return {
+        "ok": True, "sale_id": str(sale_id),
+        "book_quantity": count, "quantity_source": count_source,
+        "cost_cents": cents, "cost_source": cost_source,
+    }
+
+
 @router.patch("/api/app/sales/{sale_id}/acquisition-cost")
 def update_sale_acquisition_cost(
     sale_id: uuid.UUID,
@@ -4558,11 +4588,17 @@ def backfill_sale_average_cost(
         compatible = [
             row for row in sold if str(row.currency or "EUR").upper() == currency
         ]
-        eligible = [
+        uncosted = [
             row for row in compatible
             if payload.overwrite_existing
             or sale_acquisition_cost(row, items.get(row.inventory_item_id))[0] is None
         ]
+        unknown = [row for row in uncosted if sale_book_quantity(row)[0] is None]
+        eligible = [
+            row for row in uncosted
+            if payload.assume_one_when_unknown or sale_book_quantity(row)[0] is not None
+        ]
+        affected_books = sum(sale_book_quantity(row)[0] or 1 for row in eligible)
         if not payload.preview:
             for row in eligible:
                 record_sale_acquisition_cost(
@@ -4577,7 +4613,11 @@ def backfill_sale_average_cost(
         "already_costed": len(compatible) - len(eligible),
         "other_currency": len(sold) - len(compatible),
         "with_sale_amount": known_revenue,
-        "estimated_cost_cents": len(eligible) * payload.cost_cents,
+        "unknown_quantity_sales": len(unknown),
+        "skipped_unknown_quantity_sales": 0 if payload.assume_one_when_unknown else len(unknown),
+        "assumed_one_quantity_sales": len(unknown) if payload.assume_one_when_unknown else 0,
+        "eligible_books": affected_books,
+        "estimated_cost_cents": affected_books * payload.cost_cents,
         "updated": 0 if payload.preview else len(eligible),
     }
 
@@ -4618,6 +4658,13 @@ def sales(context: RequestContext = Depends(require_context)):
                 "acquisition_cost_source": sale_acquisition_cost(
                     row, items.get(row.inventory_item_id),
                 )[1] if sale_counts_as_sold(row) else None,
+                "book_quantity": sale_book_quantity(row)[0] if sale_counts_as_sold(row) else None,
+                "quantity_source": sale_book_quantity(row)[1] if sale_counts_as_sold(row) else None,
+                "acquisition_unit_cost_cents": (
+                    (row.extra or {}).get("acquisition_unit_cost_cents")
+                    if (row.extra or {}).get("acquisition_cost_source") == "estimated_bulk"
+                    else None
+                ),
                 "status": row.status,
                 "is_closed": row.is_closed,
                 "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
@@ -4835,6 +4882,9 @@ def analytics(
             {"currency": currency, "cents": cents}
             for currency, cents in sorted(period_totals.items())
         ],
+        "sales_period_unknown_quantity_count": sum(
+            sale_book_quantity(row)[0] is None for row in sold_period
+        ),
         "sales_period_costed_count": len(period_costed),
         "sales_period_uncosted_count": len(period_revenue_sales) - len(period_costed),
         "sales_period_economics_complete": (len(period_costed) == len(sold_period)),

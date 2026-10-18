@@ -1,36 +1,101 @@
-"""Historical acquisition costs stored on a sale independent from stock links."""
+"""Acquisition costs per historical sale and book quantities.
+
+Manual cost overrides are the total for an order; bulk estimates are per book.
+The Vinted order count is not always available, so unknown is never hidden.
+"""
 from datetime import datetime, timezone
 from typing import Any
 
 
+def _positive_count(value: Any) -> int | None:
+    # Reject booleans, fractions, malformed strings, and impossible quantities.
+    if type(value) is int and 1 <= value <= 1000:
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        number = int(value)
+        if 1 <= number <= 1000:
+            return number
+    return None
+
+
+def sale_book_quantity(sale: Any) -> tuple[int | None, str]:
+    """Return known book count; unknown remains None, not silently one."""
+    extra = sale.extra or {}
+    manual = _positive_count(extra.get("book_quantity_override"))
+    if manual is not None:
+        return manual, "manual"
+    collected = _positive_count(extra.get("quantity"))
+    if collected is not None:
+        return collected, "marketplace"
+    return None, "unknown"
+
+
 def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | None, str | None]:
     extra = dict(sale.extra or {})
+    source = str(extra.get("acquisition_cost_source") or "")
+    count, _ = sale_book_quantity(sale)
+    unit_cost = extra.get("acquisition_unit_cost_cents")
+    # Every estimated_bulk value represents a per-book rate. Legacy bulk
+    # overrides predate this field and stored that rate under cost_cents.
+    if source == "estimated_bulk":
+        if type(unit_cost) is not int:
+            unit_cost = extra.get("acquisition_cost_cents")
+        if type(unit_cost) is int and unit_cost >= 0:
+            return unit_cost * (count or 1), source
     override = extra.get("acquisition_cost_cents")
     if type(override) is int and override >= 0:
-        return override, str(extra.get("acquisition_cost_source") or "manual_sale")
+        return override, source or "manual_sale"
     if item is not None and item.cost_cents is not None:
         if str(item.currency or "EUR").upper() == str(sale.currency or "EUR").upper():
-            attributes = dict(item.attributes or {})
-            return int(item.cost_cents), str(attributes.get("cost_source") or "inventory")
+            attrs = dict(item.attributes or {})
+            return int(item.cost_cents) * (count or 1), str(attrs.get("cost_source") or "inventory")
     return None, None
+
+
+def _history(sale: Any, kind: str, before: Any, after: Any, actor: str) -> dict:
+    extra = dict(sale.extra or {})
+    log = list(extra.get("acquisition_cost_history") or [])[-19:]
+    log.append({
+        "kind": kind,
+        "before": before,
+        "after": after,
+        "changed_at": datetime.now(timezone.utc).isoformat(),
+        "changed_by": actor,
+    })
+    extra["acquisition_cost_history"] = log
+    return extra
+
+
+def record_sale_book_quantity(sale: Any, quantity: int | None, actor: str) -> None:
+    old_quantity, old_source = sale_book_quantity(sale)
+    extra = _history(sale, "quantity", {"quantity": old_quantity, "source": old_source}, quantity, actor)
+    if quantity is None:
+        extra.pop("book_quantity_override", None)
+    else:
+        extra["book_quantity_override"] = quantity
+    sale.extra = extra
 
 
 def record_sale_acquisition_cost(sale: Any, cents: int | None, source: str, actor: str) -> None:
     extra = dict(sale.extra or {})
-    history = list(extra.get("acquisition_cost_history") or [])[-19:]
-    history.append({
-        "previous_cents": extra.get("acquisition_cost_cents"),
-        "previous_source": extra.get("acquisition_cost_source"),
-        "new_cents": cents,
-        "new_source": source if cents is not None else None,
-        "changed_at": datetime.now(timezone.utc).isoformat(),
-        "changed_by": actor,
-    })
-    extra["acquisition_cost_history"] = history
+    previous = {
+        "cents": extra.get("acquisition_cost_cents"),
+        "unit_cents": extra.get("acquisition_unit_cost_cents"),
+        "source": extra.get("acquisition_cost_source"),
+    }
+    extra = _history(sale, "cost", previous, {"cents": cents, "source": source}, actor)
     if cents is None:
         extra.pop("acquisition_cost_cents", None)
+        extra.pop("acquisition_unit_cost_cents", None)
         extra.pop("acquisition_cost_source", None)
+    elif source == "estimated_bulk":
+        # Preserve the per-book rate so later quantity corrections reprice
+        # the order automatically; never rewrite a real/manual order total.
+        extra["acquisition_unit_cost_cents"] = cents
+        extra["acquisition_cost_cents"] = cents
+        extra["acquisition_cost_source"] = source
     else:
         extra["acquisition_cost_cents"] = cents
+        extra.pop("acquisition_unit_cost_cents", None)
         extra["acquisition_cost_source"] = source
     sale.extra = extra
