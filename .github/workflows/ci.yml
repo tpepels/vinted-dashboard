@@ -79,11 +79,20 @@ jobs:
         env:
           DATABASE_URL: sqlite:////tmp/vinted-dashboard-ci.sqlite3
       - run: python scripts/build_extension.py --mode store --api-origin https://example.invalid --version 3.4.5 --output /tmp/chrome-bridge.zip
-      - name: Build Docker image (retry registry throttling)
+      - name: Build Docker image (registry mirror fallback)
         run: |
-          for attempt in 1 2 3; do
-            if docker build --build-arg PYTHON_BASE_IMAGE=public.ecr.aws/docker/library/python:3.13-slim -t vinted-dashboard:test .; then exit 0; fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            echo "Docker image retrieval failed; retrying after registry cooldown"
-            sleep 30
+          # Multiple mirrors avoid transient anonymous-pull limits (HTTP 429)
+          # without weakening the test or treating a failed build as success.
+          for base in \
+            mirror.gcr.io/library/python:3.13-slim \
+            python:3.13-slim \
+            public.ecr.aws/docker/library/python:3.13-slim; do
+            echo "Building using $base"
+            if docker build --build-arg PYTHON_BASE_IMAGE="$base" -t vinted-dashboard:test .; then
+              exit 0
+            fi
+            echo "Base unavailable, trying next registry mirror"
+            sleep 5
           done
+          echo "Docker build failed for all base image sources" >&2
+          exit 1
