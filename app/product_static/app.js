@@ -5522,13 +5522,13 @@ async function analytics() {
   seriesChart("#sales-chart", history.daily, "revenue_cents", {moneyValues: true});
 
   $("#analytics-listings").innerHTML = history.top_listings.length
-    ? '<table><thead><tr><th>Listing</th><th>Views</th><th>+7d</th><th>Favourites</th><th>+7d</th><th>Status</th></tr></thead><tbody>'
+    ? '<table><thead><tr><th>Listing</th><th>Views (total)</th><th>Views + selected period</th><th>Favourites (total)</th><th>Favourites + selected period</th><th>Status</th></tr></thead><tbody>'
       + history.top_listings.map((row) =>
         '<tr class="analytics-listing" data-id="' + row.listing_id + '"><td><div class="title">'
         + esc(row.title) + '</div></td><td>' + esc(row.views == null ? "—" : row.views)
-        + '</td><td class="gain">+' + esc(row.views_gain_7d || 0)
+        + '</td><td class="gain">+' + esc(row.views_gain_period || 0)
         + '</td><td>' + esc(row.favourites == null ? "—" : row.favourites)
-        + '</td><td class="gain">+' + esc(row.favourites_gain_7d || 0)
+        + '</td><td class="gain">+' + esc(row.favourites_gain_period || 0)
         + "</td><td>" + esc(row.status) + "</td></tr>"
       ).join("")
       + "</tbody></table>"

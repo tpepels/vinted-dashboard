@@ -4880,6 +4880,17 @@ def analytics_history(
             continue
         latest = series[-1]
         baseline = next((row for row in reversed(series) if row.captured_at <= week_cutoff), series[0])
+        period_baseline = next((row for row in reversed(series) if row.captured_at <= since), series[0])
+        views_gain_period = (
+            latest.views - period_baseline.views
+            if latest.views is not None and period_baseline.views is not None
+            and latest.views >= period_baseline.views else 0
+        )
+        favourites_gain_period = (
+            latest.favourites - period_baseline.favourites
+            if latest.favourites is not None and period_baseline.favourites is not None
+            and latest.favourites >= period_baseline.favourites else 0
+        )
         views_gain = (
             latest.views - baseline.views
             if latest.views is not None and baseline.views is not None and latest.views >= baseline.views
@@ -4906,12 +4917,14 @@ def analytics_history(
                 "favourites": latest.favourites,
                 "views_gain_7d": views_gain,
                 "favourites_gain_7d": fav_gain,
+                "views_gain_period": views_gain_period,
+                "favourites_gain_period": favourites_gain_period,
             }
         )
     top.sort(
         key=lambda row: (
-            int(row["views_gain_7d"] or 0),
-            int(row["favourites_gain_7d"] or 0),
+            int(row["views_gain_period"] or 0),
+            int(row["favourites_gain_period"] or 0),
             int(row["views"] or 0),
         ),
         reverse=True,
