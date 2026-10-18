@@ -76,10 +76,7 @@ context.renderMarketplaceOperations({
 });
 assert.match(root.innerHTML, /Check needed/);
 assert.match(root.innerHTML, /marketplace-activity-row/);
-assert.match(root.innerHTML, /Check book photos/);
-assert.match(root.innerHTML, /Example Book/);
-assert.match(root.innerHTML, /data-book="BOOK-1"/);
-assert.match(root.innerHTML, /Photos were sent, but we cannot tell/);
+assert.doesNotMatch(root.innerHTML, /BIBLIO|Check book photos|Example Book/);
 assert.match(root.innerHTML, /Try import again/);
 assert.match(root.innerHTML,/Check marketplace/);
 assert.match(root.innerHTML,/marketplace-operation-inspect/);
@@ -94,12 +91,12 @@ assert.match(root.innerHTML, /Inspect the remote listing/);
 assert.match(root.innerHTML, /data-id="2"/);
 assert.doesNotMatch(root.innerHTML, /data-id="1"/);
 assert.doesNotMatch(root.innerHTML, /data-id="3"/);
-assert.match(root.innerHTML, /Needs attention \(4\)/);
+assert.match(root.innerHTML, /Needs attention \(3\)/);
 assert.match(root.innerHTML, /data-filter="review"/);
 assert.match(root.innerHTML, /aria-pressed="true"/);
 context.state.marketplaceActivityFilter = "all";
 context.renderMarketplaceOperations({operations:[
-  {id:"done",channel:"biblio",type:"sync",target:"all",
+  {id:"done",channel:"etsy",type:"sync",target:"all",
    status:"succeeded",verification:"no_remote_changes",result:{},created_at:"2026-10-10"},
 ]});
 assert.match(root.innerHTML, /Nothing needed updating/);
