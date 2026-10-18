@@ -213,6 +213,36 @@ function lifetimeCoverage(summary) {
     + Number(summary.sales_all_time_count || 0) + " sale amounts known";
 }
 
+function revenueMetricCards(summary) {
+  const totalCount = Number(summary.sales_all_time_count || 0);
+  const knownCount = Number(summary.sales_all_time_revenue_known_count || 0);
+  const status = totalCount === 0
+    ? "No completed sales have been imported yet"
+    : knownCount === 0
+      ? "Sale amounts are missing from the imported order history"
+      : lifetimeCoverage(summary) + " · completed sales across all marketplaces";
+  return metric("Total revenue · all time", lifetimeRevenue(summary), status)
+    + metric("Revenue · this year", money(summary.sales_ytd_cents, summary.currency),
+      Number(summary.sales_ytd_revenue_known_count || 0) + " sale amounts known this year")
+    + metric("Total completed sales", totalCount,
+      "All marketplaces · cancelled and refunded excluded");
+}
+
+async function showRevenueSummary(target) {
+  const node = $(target);
+  node.innerHTML = '<p class="muted">Loading sales revenue…</p>';
+  try {
+    const summary = await api("/api/app/analytics");
+    node.innerHTML = revenueMetricCards(summary);
+    return summary;
+  } catch (error) {
+    node.innerHTML = '<article class="card metric"><span>Sales revenue</span>'
+      + '<strong>Unavailable</strong><div class="sub">'
+      + esc("Could not load revenue: " + error.message) + '</div></article>';
+    return null;
+  }
+}
+
 function when(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -3267,11 +3297,17 @@ function invalidateAverageCostPreview() {
   $("#inventory-average-cost-preview").textContent = "Preview the affected items before applying.";
 }
 $("#inventory-average-cost-open").onclick = () => {
-  $("#inventory-average-cost-form").classList.remove("hidden");
+  const form = $("#inventory-average-cost-form");
+  form.classList.remove("hidden");
+  $("#inventory-average-cost-open").setAttribute("aria-expanded", "true");
   invalidateAverageCostPreview();
-  $("#inventory-average-cost-form").scrollIntoView({behavior:"smooth",block:"start"});
+  form.scrollIntoView({behavior:"smooth",block:"start"});
+  $("#inventory-average-cost-value").focus({preventScroll:true});
 };
-$("#inventory-average-cost-close").onclick = () => $("#inventory-average-cost-form").classList.add("hidden");
+$("#inventory-average-cost-close").onclick = () => {
+  $("#inventory-average-cost-form").classList.add("hidden");
+  $("#inventory-average-cost-open").setAttribute("aria-expanded", "false");
+};
 ["inventory-average-cost-value", "inventory-average-cost-currency",
  "inventory-average-cost-scope", "inventory-average-cost-overwrite"].forEach((id) => {
   $("#" + id).addEventListener("input", invalidateAverageCostPreview);
@@ -3319,6 +3355,7 @@ $("#inventory-average-cost-form").onsubmit = async (event) => {
     flash("Assigned average cost to " + result.updated + " items.");
     invalidateAverageCostPreview();
     $("#inventory-average-cost-form").classList.add("hidden");
+    $("#inventory-average-cost-open").setAttribute("aria-expanded", "false");
     await inventory();
   } catch (error) {
     flash(error.message, true);
@@ -5058,20 +5095,21 @@ $("#listing-reset").onclick = () => {
 };
 
 async function sales() {
-  const [data, purchaseCosts, summary] = await Promise.all([
+  // Revenue must display even if order rows or optional cost suggestions fail.
+  const revenueTask = showRevenueSummary("#sales-lifetime-metrics");
+  const [rowsResult, costsResult] = await Promise.allSettled([
     api("/api/app/sales"),
     api("/api/app/purchase-cost-suggestions"),
-    api("/api/app/analytics"),
   ]);
-  state.salesRows = data.sales || [];
-  state.salesSummary = summary;
-  state.purchaseCostSuggestions = purchaseCosts || {
-    suggestions: [],
-    count: 0,
-    ambiguous_count: 0,
-    unmatched_count: 0,
-  };
+  state.salesSummary = await revenueTask;
+  state.salesRows = rowsResult.status === "fulfilled" ? (rowsResult.value.sales || []) : [];
+  state.purchaseCostSuggestions = costsResult.status === "fulfilled"
+    ? costsResult.value : {suggestions:[],count:0,ambiguous_count:0,unmatched_count:0};
   renderSales();
+  if (rowsResult.status === "rejected") {
+    $("#sales-table").innerHTML = '<div class="empty">Could not load order rows: '
+      + esc(rowsResult.reason?.message || "Unknown error") + '</div>';
+  }
 }
 
 function renderPurchaseCostSuggestions() {
@@ -5151,15 +5189,6 @@ function renderSales() {
     return true;
   });
 
-  const summary = state.salesSummary || {};
-  $("#sales-lifetime-metrics").innerHTML =
-    metric("Total revenue · all time", lifetimeRevenue(summary), lifetimeCoverage(summary))
-    + metric("Sales · all time", Number(summary.sales_all_time_count || 0), "All marketplaces · cancelled/refunded excluded")
-    + metric(
-      "Revenue this year",
-      money(summary.sales_ytd_cents, summary.currency),
-      Number(summary.sales_ytd_count || 0) + " sales this calendar year"
-    );
   $("#sales-count").textContent = rows.length + " of " + state.salesRows.length;
   renderPurchaseCostSuggestions();
   const salesMarkup = rows.length
@@ -5385,19 +5414,20 @@ function renderVintedBehavior(data) {
 
 async function analytics() {
   const days = Number($("#analytics-days").value || 90);
-  const [summary, history, vinted] = await Promise.all([
-    api("/api/app/analytics"),
+  // Independent of the optional Vinted activity and history endpoints.
+  const revenueTask = showRevenueSummary("#analytics-revenue-metrics");
+  const reportsTask = Promise.allSettled([
     api("/api/app/analytics/history?days=" + days),
     api("/api/app/analytics/vinted?days=" + days),
   ]);
+  const summary = await revenueTask;
+  if (summary) {
   const activeInventory = Number(summary.active_inventory || 0);
   const pricedInventory = Number(summary.priced_inventory_count || 0);
   const costedInventory = Number(summary.costed_inventory_count || 0);
   const marginInventory = Number(summary.margin_inventory_count || 0);
   $("#analytics-metrics").innerHTML =
-    metric("Total revenue · all time", lifetimeRevenue(summary), lifetimeCoverage(summary))
-    + metric("Sales · all time", Number(summary.sales_all_time_count || 0), "All marketplaces · cancelled/refunded excluded")
-    + metric("Active inventory", activeInventory)
+    metric("Active inventory", activeInventory)
     + metric(
       "Inventory cost",
       costedInventory ? money(summary.inventory_cost_cents, summary.currency) : "—",
@@ -5432,8 +5462,24 @@ async function analytics() {
       summary.sales_ytd_roi_pct == null ? "" : "ROI " + summary.sales_ytd_roi_pct + "%"
     )
     + metric("Followers", summary.followers == null ? "—" : summary.followers, summary.following == null ? "" : summary.following + " following");
+  } else {
+    $("#analytics-metrics").innerHTML = "";
+  }
 
-  renderVintedBehavior(vinted);
+  const [historyResult, vintedResult] = await reportsTask;
+  if (vintedResult.status === "fulfilled") {
+    renderVintedBehavior(vintedResult.value);
+  } else {
+    $("#vinted-metrics").innerHTML = '<p class="muted">Vinted activity unavailable.</p>';
+  }
+  if (historyResult.status !== "fulfilled") {
+    ["#views-chart", "#favourites-chart", "#followers-chart", "#sales-chart"].forEach(target => {
+      $(target).innerHTML = '<div class="chart-empty">History unavailable.</div>';
+    });
+    $("#analytics-listings").innerHTML = '<div class="empty">Listing history unavailable.</div>';
+    return;
+  }
+  const history = historyResult.value;
 
   seriesChart("#views-chart", history.daily, "views_gained");
   seriesChart("#favourites-chart", history.daily, "favourites_gained");

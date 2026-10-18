@@ -85,6 +85,10 @@ def test_lifetime_revenue_is_visible_without_opening_an_analytics_disclosure():
     assert '"sales_all_time_totals": [' in api
     assert 'sold_all_time = [row for row in all_time_sale_rows if sale_counts_as_sold(row)]' in api
     assert 'metric("Total revenue · all time", lifetimeRevenue(summary)' in APP_JS
+    assert 'id="analytics-revenue-metrics"' in html
+    assert 'showRevenueSummary("#sales-lifetime-metrics")' in APP_JS
+    assert 'showRevenueSummary("#analytics-revenue-metrics")' in APP_JS
+    assert 'Promise.allSettled([' in APP_JS
     assert 'api("/api/app/analytics")' in APP_JS
 
 

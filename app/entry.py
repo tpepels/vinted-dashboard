@@ -8,6 +8,7 @@ runtime API surface.
 from __future__ import annotations
 
 import os
+import hashlib
 from html import escape
 from pathlib import Path
 
@@ -62,6 +63,8 @@ async def production_security_headers(request: Request, call_next):
         "img-src 'self' data: https:; connect-src 'self'; object-src 'none'; "
         "base-uri 'self'; frame-ancestors 'none'",
     )
+    if request.url.path == "/" or request.url.path.startswith("/app-static/"):
+        response.headers["Cache-Control"] = "no-store"
     if is_production():
         response.headers.setdefault(
             "Strict-Transport-Security",
@@ -72,7 +75,17 @@ async def production_security_headers(request: Request, call_next):
 
 @app.get("/")
 def index():
-    return FileResponse(BASE_DIR / "product_static" / "index.html")
+    # Fingerprint the actual assets, so newly deployed HTML cannot pair with
+    # an older browser-cached JS bundle (unbound controls / missing KPI cards).
+    root = BASE_DIR / "product_static"
+    markup = (root / "index.html").read_text(encoding="utf-8")
+    for name in ("app.js", "styles.css"):
+        digest = hashlib.sha256((root / name).read_bytes()).hexdigest()[:12]
+        markup = markup.replace(
+            f"/app-static/{name}\"",
+            f"/app-static/{name}?v={digest}\"",
+        )
+    return HTMLResponse(markup, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/privacy")

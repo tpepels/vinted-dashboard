@@ -137,7 +137,7 @@
           <span id="inventory-count" class="toolbar-count"></span>
           <span id="inventory-selected" class="toolbar-count">0 selected</span>
           <button id="bulk-edit" class="btn" type="button" disabled>Bulk edit</button>
-          <button id="inventory-average-cost-open" class="btn" type="button">Set average cost</button>
+          <button id="inventory-average-cost-open" class="btn" type="button" aria-controls="inventory-average-cost-form" aria-expanded="false">Set average cost</button>
           <button id="inventory-refresh" class="btn" type="button" title="Reload current inventory without resetting filters">Refresh stock</button>
           <button id="add-stock" class="btn primary" type="button">Add stock</button>
         </div>
@@ -148,7 +148,7 @@
             <button id="inventory-reset" class="btn" type="button">Reset filters</button>
           </div>
         </details>
-                <form id="inventory-average-cost-form" class="card form hidden">
+                <form id="inventory-average-cost-form" class="card form hidden" aria-label="Set an average purchase cost for inventory">
           <div class="card-head inline-head"><div><p class="eyebrow">BULK PURCHASE COST</p><h2>Assign an average cost per unit</h2></div><button id="inventory-average-cost-close" class="btn" type="button">Close</button></div>
           <p class="muted">Apply one estimated purchase cost to every item in the chosen scope, including items not visible in the table. Marketplace listings and sale prices remain unchanged.</p>
           <div class="form-grid">
@@ -541,7 +541,7 @@
       </section>
 
       <section id="sales" class="view">
-        <div id="sales-lifetime-metrics" class="metrics"></div>
+        <div id="sales-lifetime-metrics" class="metrics" role="status" aria-live="polite"><p class="muted">Loading sales revenue…</p></div>
         <p class="muted sales-summary-note">Lifetime totals cover all marketplaces and are independent of order-table filters. Cancelled and refunded orders are excluded; missing amounts are reported separately.</p>
         <div class="dashboard-tabbar dashboard-section-tabs" role="tablist" aria-label="Sales" data-workspace-tabs="sales">
         <button class="dashboard-tab active" role="tab" type="button" aria-selected="true" aria-controls="sales-orders-panel" data-workspace-tab="orders">Orders</button>
@@ -584,6 +584,7 @@
 
       <section id="analytics" class="view">
         <div class="toolbar analytics-toolbar"><select id="analytics-days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">1 year</option></select></div>
+        <div id="analytics-revenue-metrics" class="metrics" role="status" aria-live="polite"><p class="muted">Loading sales revenue…</p></div>
         <div id="analytics-metrics" class="metrics"></div>
         <div class="dashboard-tabbar" role="tablist" aria-label="Analytics sections" data-workspace-tabs="analytics">
           <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="analytics-overview-panel" data-workspace-tab="overview">Trends</button>
