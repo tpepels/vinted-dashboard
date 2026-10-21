@@ -38,7 +38,7 @@ const ctx = {
   document: {querySelector: key => elements[key]},
   chrome: {
     runtime: {
-      getManifest: () => ({version:"3.4.7"}),
+      getManifest: () => ({version:"3.4.8"}),
       sendMessage: async () => response,
     },
     tabs: {create() {}},
@@ -56,7 +56,7 @@ vm.createContext(ctx);
   assert.match(elements["#detail-info"].textContent, /280 listings still need optional details/);
   assert.match(elements["#detail-info"].textContent, /basic listing update has already been sent/);
   assert.equal(elements["#sync-details"].classList.contains("hidden"), false);
-  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.7");
+  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.8");
   const dateLabel=ctx.localDateTime("2026-10-17T21:21:50Z");
   assert.match(dateLabel, /\b26\b/);
   assert.doesNotMatch(dateLabel, /2026|:\d\d:\d\d/);
@@ -76,7 +76,7 @@ vm.createContext(ctx);
     ok:false,error:"Vinted denied the signed-in browser API request (HTTP 403)",at:"2026-10-12T10:28:20Z",
   }};
   await ctx.refresh();
-  assert.match(elements["#status"].textContent,/Open Vinted in a browser tab/);
+  assert.match(elements["#status"].textContent,/Click Check Vinted for updates to open it/);
   assert.doesNotMatch(elements["#status"].textContent,/Last update failed|HTTP 403/);
   response = {paired:false};
   await ctx.refresh();
