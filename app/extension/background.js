@@ -29,7 +29,8 @@ async function authHeaders(){const data=await stored();if(!data.bridgeToken)thro
 async function api(path,options={}){const headers=Object.assign({},await authHeaders(),options.headers||{});const response=await fetch(API_ORIGIN+path,Object.assign({},options,{headers}));let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||("Dashboard returned HTTP "+response.status));return body}
 async function waitForTab(tabId,timeout=20000){const start=Date.now();while(Date.now()-start<timeout){const tab=await chrome.tabs.get(tabId);if(tab.status==="complete")return tab;await sleep(300)}throw new Error("Vinted tab did not finish loading.")}
 async function message(tabId,payload){try{return await chrome.tabs.sendMessage(tabId,payload)}catch(error){if(!String(error?.message||error).includes("Receiving end does not exist"))throw error;await chrome.scripting.executeScript({target:{tabId},files:["vinted_age.js","content.js"]});await sleep(250);return await chrome.tabs.sendMessage(tabId,payload)}}
-// Automatic checks are quiet; a user-initiated check can prepare its own tab.
+// Both scheduled and manual checks can own a short-lived background tab.
+// A scheduled check always uses its own tab to avoid interfering with browsing.
 function allowedVintedOrigin(raw){
   try{
     const url=new URL(String(raw||""));
@@ -38,27 +39,7 @@ function allowedVintedOrigin(raw){
     return allowed?url.origin:null;
   }catch{return null}
 }
-async function vintedTab(reason="periodic"){
-  const tabs=await chrome.tabs.query({url:VINTED_PATTERNS});
-  const candidates=tabs.filter(tab=>tab?.id!=null);
-  const complete=candidates.filter(tab=>tab.status==="complete");
-  if(reason==="periodic"){
-    if(!complete.length)throw new Error("No ready Vinted tab; automatic sync postponed.");
-    // Do not run background API requests while someone is using Vinted.
-    const windows=await chrome.windows.getAll({populate:false});
-    const focusedIds=new Set(windows.filter(win=>win.focused).map(win=>win.id));
-    const inactive=complete.find(tab=>!tab.active||!focusedIds.has(tab.windowId));
-    if(!inactive)throw new Error("Vinted is in use; automatic sync postponed.");
-    return{tab:inactive,temporary:false};
-  }
-  // Prefer an already loaded tab, even if it is in another window.
-  const ready=complete.find(tab=>tab.active)||complete[0];
-  if(ready)return{tab:ready,temporary:false};
-  // A Vinted tab may already be navigating. Wait rather than opening a duplicate.
-  if(candidates.length){
-    const loading=candidates.find(tab=>tab.active)||candidates[0];
-    return{tab:await waitForTab(loading.id,30000),temporary:false};
-  }
+async function createSyncTab(){
   const data=await chrome.storage.local.get(["vintedOrigin"]);
   const origin=allowedVintedOrigin(data?.vintedOrigin)||"https://www.vinted.pt";
   const created=await chrome.tabs.create({url:origin+"/",active:false});
@@ -66,10 +47,24 @@ async function vintedTab(reason="periodic"){
   try{
     return{tab:await waitForTab(created.id,30000),temporary:true};
   }catch(error){
-    // An unsuccessful temporary navigation should not leave a blank tab behind.
+    // Never leave an unsuccessful temporary navigation behind.
     try{await chrome.tabs.remove(created.id)}catch{}
     throw error;
   }
+}
+async function vintedTab(reason="periodic"){
+  if(reason==="periodic")return createSyncTab();
+  const tabs=await chrome.tabs.query({url:VINTED_PATTERNS});
+  const candidates=tabs.filter(tab=>tab?.id!=null);
+  const complete=candidates.filter(tab=>tab.status==="complete");
+  // Manual sync can reuse the user's tab, but scheduled sync leaves it untouched.
+  const ready=complete.find(tab=>tab.active)||complete[0];
+  if(ready)return{tab:ready,temporary:false};
+  if(candidates.length){
+    const loading=candidates.find(tab=>tab.active)||candidates[0];
+    return{tab:await waitForTab(loading.id,30000),temporary:false};
+  }
+  return createSyncTab();
 }
 async function probeCurrentContentScript(tab){
   let response=null;
@@ -89,11 +84,12 @@ async function probeCurrentContentScript(tab){
   if(Number(response?.protocol)===CONTENT_PROTOCOL)return tab;
   throw new Error("Vinted tab is using an older extension script.");
 }
-async function ensureCurrentContentScript(tab,reason="periodic"){
+async function ensureCurrentContentScript(tab,reason="periodic",temporary=false){
   try{return await probeCurrentContentScript(tab)}
   catch(error){
-    if(reason!=="manual")throw error;
-    // User explicitly requested an update: refresh a stale or disconnected
+    if(reason!=="manual"&&!temporary)throw error;
+    // The caller explicitly requested an update or owns this temporary tab:
+    // refresh a stale or disconnected
     // content script once, without requiring a separate browser action.
     await chrome.tabs.reload(tab.id);
     // Allow Chrome to enter the loading state before polling for completion.
@@ -515,10 +511,11 @@ async function runSync(reason="manual"){
   syncInFlight=(async()=>{
     let temporary=null;
     try{
+      if(!(await stored()).bridgeToken)throw new Error("Pair this extension with your dashboard first.");
       const found=await vintedTab(reason);
       temporary=found.temporary?found.tab.id:null;
       let tab=found.tab;
-      tab=await ensureCurrentContentScript(tab,reason);
+      tab=await ensureCurrentContentScript(tab,reason,temporary!==null);
       const tabUrl=new URL(String(tab.url||""));
       if(!tabUrl.hostname.startsWith("www.vinted."))throw new Error("Open and sign in to Vinted first.");
       await chrome.storage.local.set({vintedOrigin:tabUrl.origin});
