@@ -56,7 +56,7 @@ async function refresh() {
   const paused = pausedUntil(status);
   if (response.vinted_tab_open === false) {
     const lastSuccess=status.ok===true&&last ? " Last successful check: "+last+"." : "";
-    show("Open Vinted in a browser tab to check for updates."+lastSuccess);
+    show("Vinted is not open. Click Check Vinted for updates to open it and sync automatically."+lastSuccess);
   } else if (status.ok === false) {
     show("Last update failed. " + (status.error || "Check the Vinted tab and try again."), true);
   } else if (last) {
