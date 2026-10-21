@@ -73,11 +73,20 @@ vm.createContext(ctx);
   assert.match(elements["#status"].textContent, /Automatic checks paused until/);
   assert.match(elements["#detail-info"].textContent, /Manual checks remain available/);
   response = {paired:true,vinted_tab_open:false,workspace:"Personal Workspace",status:{
+    ok:true,at:"2026-10-12T10:28:20Z",listings:280,
+  }};
+  await ctx.refresh();
+  assert.match(elements["#status"].textContent,/280 Vinted listings synced/,
+    "A finished manual sync must show success even if its temporary tab closed");
+  response = {paired:true,vinted_tab_open:false,workspace:"Personal Workspace",status:{
     ok:false,error:"Vinted denied the signed-in browser API request (HTTP 403)",at:"2026-10-12T10:28:20Z",
   }};
   await ctx.refresh();
+  assert.match(elements["#status"].textContent,/Last update failed.*HTTP 403/,
+    "Do not hide a failed manual update just because the temporary tab closed");
+  response = {paired:true,vinted_tab_open:false,workspace:"Personal Workspace",status:{}};
+  await ctx.refresh();
   assert.match(elements["#status"].textContent,/Click Check Vinted for updates to open it/);
-  assert.doesNotMatch(elements["#status"].textContent,/Last update failed|HTTP 403/);
   response = {paired:false};
   await ctx.refresh();
   assert.match(elements["#status"].textContent, /Not connected/);
