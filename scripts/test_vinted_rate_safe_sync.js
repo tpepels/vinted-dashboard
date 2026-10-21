@@ -164,8 +164,10 @@ function assert(condition, message) {
 
   const forbidden = await scenario("core403");
   assert(forbidden.result.ok === false, "Current-user 403 should abort the sync");
-  assert(String(forbidden.result.error || "").includes("signed-in browser API request"),
-    "Current-user 403 did not return a useful signed-in browser API error");
+  assert(String(forbidden.result.error || "").includes("inventory API request (HTTP 403)"),
+    "Current-user 403 must identify the rejected API request");
+  assert(String(forbidden.result.error || "").includes("Reloading or opening more tabs will not resolve"),
+    "A forbidden API response must not be presented as a browser login failure");
   assert(!String(forbidden.result.error || "").includes("rate limited"),
     "Current-user 403 was incorrectly reported as rate limiting");
   assert(forbidden.result.rate_limited === false,
