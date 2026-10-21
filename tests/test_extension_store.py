@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "3.4.7"
+    assert manifest["version"] == "3.4.8"
 
 
 
@@ -197,8 +197,11 @@ def test_vinted_quiet_bridge_does_not_scan_pages_or_reload_browser():
     assert "await stopLegacyAgeScan()" in background or "stopLegacyAgeScan();" in background
     assert "await startAgeJob(ageScanItems,reason)" not in background
     assert 'if(a.name===AGE_JOB_ALARM)return stopLegacyAgeScan();' in background
-    assert "chrome.tabs.reload(" not in background
-    assert "chrome.tabs.create(" not in background
+    assert 'if(reason==="periodic"){' in background
+    assert "chrome.tabs.reload(" in background
+    assert "chrome.tabs.create(" in background
+    assert 'if(reason!=="manual")throw error;' in background
+    assert 'url:origin+"/",active:false' in background
     assert "const ageScanItems=[];" in content
     assert "const queue=missing.slice(0,3);" in content
     assert "const maxRetries=0;" in content
@@ -273,13 +276,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.7.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.8.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.7"
+    assert response.headers["x-bridge-version"] == "3.4.8"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.7.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.8.zip")
     assert versioned.status_code == 200
-    assert "v3.4.7.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.8.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
