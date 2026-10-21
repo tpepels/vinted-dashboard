@@ -38,7 +38,7 @@ const ctx = {
   document: {querySelector: key => elements[key]},
   chrome: {
     runtime: {
-      getManifest: () => ({version:"3.4.9"}),
+      getManifest: () => ({version:"3.4.10"}),
       sendMessage: async () => response,
     },
     tabs: {create() {}},
@@ -56,7 +56,7 @@ vm.createContext(ctx);
   assert.match(elements["#detail-info"].textContent, /280 listings still need optional details/);
   assert.match(elements["#detail-info"].textContent, /basic listing update has already been sent/);
   assert.equal(elements["#sync-details"].classList.contains("hidden"), false);
-  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.9");
+  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.10");
   const dateLabel=ctx.localDateTime("2026-10-17T21:21:50Z");
   assert.match(dateLabel, /\b26\b/);
   assert.doesNotMatch(dateLabel, /2026|:\d\d:\d\d/);
