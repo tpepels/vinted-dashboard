@@ -96,6 +96,8 @@ async function ensureCurrentContentScript(tab,reason="periodic"){
     // User explicitly requested an update: refresh a stale or disconnected
     // content script once, without requiring a separate browser action.
     await chrome.tabs.reload(tab.id);
+    // Allow Chrome to enter the loading state before polling for completion.
+    await sleep(300);
     const reloaded=await waitForTab(tab.id,30000);
     return await probeCurrentContentScript(reloaded);
   }
