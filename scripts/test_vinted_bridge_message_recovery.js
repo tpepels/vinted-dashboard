@@ -32,12 +32,12 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
       async query(){return [tab];},
       async get(id){assert.equal(id,tab.id);return tab;},
       async create(){openedTabs++;throw Error("Must not open a Vinted tab");},
-      async reload(){reloads++;throw Error("Must not reload a Vinted tab");},
+      async reload(){reloads++;if(mode!=="old")throw Error("Unexpected Vinted tab reload");},
       async sendMessage(id,payload){
         assert.equal(id,tab.id);
         if(payload.type==="bridge-content-protocol"){
           if(mode==="missing" && !injections)throw Error("Could not establish connection. Receiving end does not exist.");
-          return {protocol:mode==="old"?9:10};
+          return {protocol:mode==="old"&&!reloads?9:10};
         }
         if(payload.type==="collect-vinted-data"){
           collections++;
@@ -110,9 +110,14 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   assert.match(deferred.result.error,/automatic check/);
 
   const stale=await scenario("old","manual");
-  assert.equal(stale.result.ok,false);
+  assert.equal(stale.result.ok,true,"Manual sync should repair an old content script");
+  assert.equal(stale.reloads,1,"Reload a stale Vinted tab exactly once on manual sync");
   assert.equal(stale.injections,0,"Do not create two content listeners on protocol mismatch");
-  assert.match(stale.result.error,/older extension script/);
+  assert.equal(stale.sentToDashboard,1);
+  const stalePeriodic=await scenario("old","periodic",0);
+  assert.equal(stalePeriodic.result.ok,false,"Automatic sync must leave stale tabs alone");
+  assert.equal(stalePeriodic.reloads,0);
+  assert.match(stalePeriodic.result.error,/older extension script/);
 
   const limited=await scenario("limited","manual");
   assert.equal(limited.result.api_rate_limited,true);
