@@ -12,6 +12,9 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
     syncStatus:lastAttempt>0?{ok:true}:{},
     lastSyncAttemptAt:lastAttempt,lastSuccessfulSyncAt:lastAttempt};
   const tab = {id:24,windowId:9,status:"complete",active:false,url:"https://www.vinted.pt/member/42"};
+  const worker = {id:25,windowId:9,status:"complete",active:false,url:"https://www.vinted.pt/"};
+  let workerOpen = false;
+  let closedWorkers = 0;
   let sentToDashboard = 0;
   let collections = 0;
   let injections = 0;
@@ -30,14 +33,24 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
     }},
     tabs:{
       async query(){return [tab];},
-      async get(id){assert.equal(id,tab.id);return tab;},
-      async create(){openedTabs++;throw Error("Must not open a Vinted tab");},
+      async get(id){assert([tab.id,worker.id].includes(id));return id===tab.id?tab:worker;},
+      async create(args){
+        assert.equal(args.active,false,"Unattended checks should not steal focus");
+        openedTabs++;
+        workerOpen=true;
+        return worker;
+      },
+      async remove(id){
+        assert.equal(id,worker.id,"Never close the user tab");
+        workerOpen=false;
+        closedWorkers++;
+      },
       async reload(){reloads++;if(mode!=="old")throw Error("Unexpected Vinted tab reload");},
       async sendMessage(id,payload){
-        assert.equal(id,tab.id);
+        assert([tab.id,worker.id].includes(id));
         if(payload.type==="bridge-content-protocol"){
           if(mode==="missing" && !injections)throw Error("Could not establish connection. Receiving end does not exist.");
-          return {protocol:mode==="old"&&!reloads?9:10};
+          return {protocol:mode==="old"&&id===tab.id&&!reloads?9:10};
         }
         if(payload.type==="collect-vinted-data"){
           collections++;
@@ -71,7 +84,7 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   vm.createContext(ctx);
   vm.runInContext(source,ctx,{filename:"background.js"});
   const result=await ctx.runSync(reason);
-  return {result,state,collections,injections,sentToDashboard,reloads,openedTabs};
+  return {result,state,collections,injections,sentToDashboard,reloads,openedTabs,closedWorkers,workerOpen};
 }
 
 (async()=>{
@@ -115,9 +128,11 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   assert.equal(stale.injections,0,"Do not create two content listeners on protocol mismatch");
   assert.equal(stale.sentToDashboard,1);
   const stalePeriodic=await scenario("old","periodic",0);
-  assert.equal(stalePeriodic.result.ok,false,"Automatic sync must leave stale tabs alone");
+  assert.equal(stalePeriodic.result.ok,true,
+    "Automatic sync should use a fresh tab rather than the stale user tab");
   assert.equal(stalePeriodic.reloads,0);
-  assert.match(stalePeriodic.result.error,/older extension script/);
+  assert.equal(stalePeriodic.openedTabs,1);
+  assert.equal(stalePeriodic.closedWorkers,1);
 
   const limited=await scenario("limited","manual");
   assert.equal(limited.result.api_rate_limited,true);
