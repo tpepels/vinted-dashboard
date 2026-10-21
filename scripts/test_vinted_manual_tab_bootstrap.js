@@ -1,6 +1,6 @@
 "use strict";
-// Clicking Check Vinted for updates must prepare the browser without asking
-// the user to open/reload Vinted. Automatic checks remain quiet.
+// Manual updates can use existing tabs. Automatic updates always create and
+// clean up their own background tab without disturbing the user's Vinted tab.
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const vm=require("node:vm");
@@ -57,7 +57,7 @@ async function scenario(mode,reason="manual",rememberedOrigin=null){
       async sendMessage(id,request){
         assert(tabs.some(t=>t.id===id),"Messages must target a real tab");
         if(request.type==="bridge-content-protocol"){
-          return {protocol:mode==="stale"&&!reloaded.length?9:10};
+          return {protocol:mode==="stale"&&id===10&&!reloaded.length?9:10};
         }
         assert.equal(request.type,"collect-vinted-data");
         collections++;
@@ -121,9 +121,28 @@ async function scenario(mode,reason="manual",rememberedOrigin=null){
   assert.equal(stale.created.length,0);
 
   const periodic=await scenario("absent","periodic");
-  assert.equal(periodic.result.ok,false);
-  assert.equal(periodic.created.length,0,
-    "Two-hour automatic sync must never open Vinted itself");
+  assert.equal(periodic.result.ok,true,
+    "Automatic sync must succeed even when no Vinted tab is open");
+  assert.equal(periodic.created.length,1);
+  assert.equal(periodic.created[0].active,false);
+  assert.deepEqual(periodic.removed,[20],"Automatically opened tab must be closed");
+  assert.equal(periodic.posted,1);
 
-  console.log("Manual Vinted tab opening, reuse, stale repair and quiet background: ok");
+  const periodicWithExisting=await scenario("existing","periodic");
+  assert.equal(periodicWithExisting.result.ok,true);
+  assert.equal(periodicWithExisting.created.length,1,
+    "Scheduled sync must use its own background tab even when the user has Vinted open");
+  assert.equal(periodicWithExisting.removed.length,1);
+  assert.equal(periodicWithExisting.tabs.length,1,
+    "Do not close the user's Vinted tab");
+
+  const periodicWithStaleTab=await scenario("stale","periodic");
+  assert.equal(periodicWithStaleTab.result.ok,true,
+    "A stale user's content listener cannot block an unattended sync");
+  assert.equal(periodicWithStaleTab.reloaded.length,0,
+    "Do not reload the user's Vinted tab on automatic sync");
+  assert.equal(periodicWithStaleTab.posted,1);
+  assert.deepEqual(periodicWithStaleTab.removed,[20]);
+
+  console.log("Vinted manual and unattended two-hour tab bootstrap: ok");
 })().catch(error=>{console.error(error);process.exitCode=1;});
