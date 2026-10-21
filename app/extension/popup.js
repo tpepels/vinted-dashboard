@@ -62,7 +62,7 @@ async function refresh() {
     show(summary + "\nLast checked: " + last
       + (paused ? "\nAutomatic checks paused until " + paused + " (manual check available)" : ""));
   } else if (response.vinted_tab_open === false) {
-    show("Vinted is not open. Click Check Vinted for updates to open it and sync automatically.");
+    show("Automatic Vinted checks run every two hours while Chrome is running. You can also check now.");
   } else {
     show("Connected to " + (response.workspace || "your dashboard") + ". No update yet.");
   }
