@@ -21,7 +21,7 @@ async function scenario(mode,reason="manual",rememberedOrigin=null){
     runtime:{
       getManifest:()=>({content_scripts:[{matches:[
         "https://www.vinted.pt/*","https://www.vinted.nl/*",
-      ]}],version:"3.4.9"}),
+      ]}],version:"3.4.10"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
       onMessage:{addListener(){}},
     },
