@@ -477,7 +477,13 @@ async function connectionStatus(){
   }
 }
 async function runSync(reason="manual"){
-  if(syncInFlight)return syncInFlight;
+  if(syncInFlight){
+    if(reason!=="manual")return syncInFlight;
+    // A click during an automatic check must still make a deliberate,
+    // unrestricted check after the automatic check finishes.
+    await syncInFlight;
+    return runSync("manual");
+  }
   const statusData=await chrome.storage.local.get(["syncStatus","lastSyncAttemptAt","lastSuccessfulSyncAt"]);
   const previousStatus=statusData?.syncStatus||{};
   // Previously lastSyncAttemptAt was stored before requests that might fail.
