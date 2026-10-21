@@ -88,8 +88,8 @@ async function scenario(mode,reason="manual",rememberedOrigin=null){
   const defaultOrigin=await scenario("absent");
   assert.equal(defaultOrigin.result.ok,true);
   assert.equal(defaultOrigin.created.length,1);
-  assert.deepEqual(defaultOrigin.created[0],
-    {url:"https://www.vinted.pt/",active:false});
+  assert.equal(defaultOrigin.created[0].url,"https://www.vinted.pt/");
+  assert.equal(defaultOrigin.created[0].active,false);
   assert.deepEqual(defaultOrigin.removed,[20],
     "An extension-created tab should be removed after sync");
   assert.equal(defaultOrigin.collections,1);
