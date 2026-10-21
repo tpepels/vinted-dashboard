@@ -97,7 +97,7 @@ async function fetchJson(path,params={},options={}){
       const error=new Error(
         challenged
           ?`Vinted/Cloudflare challenged the browser API request for ${url.pathname}. Reload Vinted, confirm you are signed in, complete any browser check, then sync again.`
-          :`Vinted denied the signed-in browser API request (HTTP 403) for ${url.pathname}. Reload Vinted and confirm the website itself is signed in before syncing again.`
+          :`Vinted refused the inventory API request (HTTP ${r.status}) for ${url.pathname}. The website may still be signed in. Reloading or opening more tabs will not resolve an API access denial. No inventory was uploaded; automatic checks will try again later.`
       );
       error.vintedForbidden=true;
       error.vintedChallenged=challenged;
