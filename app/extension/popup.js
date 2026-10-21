@@ -54,16 +54,15 @@ async function refresh() {
   const status = response.status || {};
   const last = status.at ? localDateTime(status.at) : null;
   const paused = pausedUntil(status);
-  if (response.vinted_tab_open === false) {
-    const lastSuccess=status.ok===true&&last ? " Last successful check: "+last+"." : "";
-    show("Vinted is not open. Click Check Vinted for updates to open it and sync automatically."+lastSuccess);
-  } else if (status.ok === false) {
-    show("Last update failed. " + (status.error || "Check the Vinted tab and try again."), true);
-  } else if (last) {
+  if (status.ok === false) {
+    show("Last update failed. " + (status.error || "Could not check Vinted."), true);
+  } else if (status.ok === true && last) {
     const count = Number(status.listings || 0);
     const summary = count + " Vinted listing" + (count === 1 ? "" : "s") + " synced";
     show(summary + "\nLast checked: " + last
       + (paused ? "\nAutomatic checks paused until " + paused + " (manual check available)" : ""));
+  } else if (response.vinted_tab_open === false) {
+    show("Vinted is not open. Click Check Vinted for updates to open it and sync automatically.");
   } else {
     show("Connected to " + (response.workspace || "your dashboard") + ". No update yet.");
   }
