@@ -317,7 +317,8 @@ def test_vinted_cooldown_and_dormant_age_job_are_not_reenabled():
     assert "lastSuccessfulSyncAt" in background
     assert 'if(a.name===AGE_JOB_ALARM)return stopLegacyAgeScan();' in background
     assert 'reason==="periodic"' in background
-    assert "Vinted is in use; automatic sync postponed." in background
+    assert 'if(reason==="periodic")return createSyncTab();' in background
+    assert 'active:false' in background
 
 
 def test_vinted_fetches_are_paced_and_rate_limit_safe():
