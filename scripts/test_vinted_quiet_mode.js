@@ -9,6 +9,8 @@ const alarms = [];
 const tabsCreated = [];
 const tabsReloaded = [];
 const windowsRemoved = [];
+const tabsRemoved = [];
+let temporaryTab = null;
 let collectCount = 0;
 let blocked = false;
 let forbidden = false;
@@ -19,7 +21,7 @@ const tab = {id:4,windowId:9,status:"complete",url:"https://www.vinted.pt/member
 
 const chrome = {
   runtime:{
-    getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.2"}),
+    getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.9"}),
     onInstalled:{addListener(){}},onStartup:{addListener(){}},
     onMessage:{addListener(){}},
   },
@@ -30,7 +32,13 @@ const chrome = {
   }},
   tabs:{
     async query(){return tabOpen?[tab]:[];},
-    async create(args){tabsCreated.push(args);throw Error("Extension must not create tabs");},
+    async create(args){
+      tabsCreated.push(args);
+      temporaryTab={id:5,windowId:9,status:"complete",url:args.url,active:args.active};
+      return temporaryTab;
+    },
+    async get(id){if(temporaryTab?.id===id)return temporaryTab;throw Error("Unknown tab");},
+    async remove(id){tabsRemoved.push(id);temporaryTab=null;},
     async reload(id){tabsReloaded.push(id);throw Error("Extension must not reload user tabs");},
     async sendMessage(id,payload){
       if(payload.type==="bridge-content-protocol")return{protocol:10};
@@ -88,8 +96,10 @@ vm.runInContext(source,context,{filename:"background.js"});
   state.lastSuccessfulSyncAt=Date.now()-2*60*60*1000-1000;
   tab.active=true;
   const busy=await context.runSync("periodic");
-  assert(!busy.ok&&collectCount===2,
-    "Automatic update must skip when the Vinted tab is focused and active");
+  assert(busy.ok&&collectCount===3,
+    "Automatic update must use a background tab even when the user is browsing Vinted");
+  assert(tabsCreated[0].active===false,
+    "Automatic tab must not take focus from the user");
 
   tab.active=false;
   state.lastSuccessfulSyncAt=Date.now()-2*60*60*1000-1000;
@@ -98,10 +108,10 @@ vm.runInContext(source,context,{filename:"background.js"});
   assert(denial.api_rate_limited&&denial.api_cooldown_until>Date.now()+23*60*60*1000,
     "A Vinted denial must trigger at least 23 hours remaining cooldown");
   const blockedAgain=await context.runSync("manual");
-  assert(collectCount===4&&blockedAgain.api_rate_limited&&!blockedAgain.sync_skipped_for_api_cooldown,
+  assert(collectCount===5&&blockedAgain.api_rate_limited&&!blockedAgain.sync_skipped_for_api_cooldown,
     "A deliberate manual sync must attempt Vinted even during an automatic cooldown");
   const pausedAutomatic=await context.runSync("periodic");
-  assert(collectCount===4&&pausedAutomatic.sync_skipped_for_api_cooldown,
+  assert(collectCount===5&&pausedAutomatic.sync_skipped_for_api_cooldown,
     "Automatic sync must remain paused after genuine Vinted rate limiting");
 
   blocked=false;
@@ -110,21 +120,26 @@ vm.runInContext(source,context,{filename:"background.js"});
   state.lastSuccessfulSyncAt=Date.now()-2*60*60*1000-1000;
   const beforeFailure=state.lastSuccessfulSyncAt;
   const forbiddenCheck=await context.runSync("periodic");
-  assert(collectCount===5&&!forbiddenCheck.api_rate_limited&&!forbiddenCheck.api_cooldown_until,
+  assert(collectCount===6&&!forbiddenCheck.api_rate_limited&&!forbiddenCheck.api_cooldown_until,
     "403 authentication error must not activate automatic rate-limit cooldown");
   assert(state.lastSuccessfulSyncAt===beforeFailure,"Failed check must not move successful timestamp");
   const retry403=await context.runSync("periodic");
-  assert(collectCount===6&&!retry403.sync_skipped_for_interval,
+  assert(collectCount===7&&!retry403.sync_skipped_for_interval,
     "Failed automatic check must be retryable without a two-hour throttle");
   tabOpen=false;
+  forbidden=false;
   const absent=await context.runSync("periodic");
-  assert(!absent.ok&&!absent.sync_skipped_for_interval,
-    "Missing Vinted tab must not consume any interval");
+  assert(absent.ok&&collectCount===8&&!absent.sync_skipped_for_interval,
+    "Scheduled check must work without any existing Vinted tab");
   assert((await context.connectionStatus()).vinted_tab_open===false,
-    "Popup status must report when no Vinted tab is open");
+    "Temporary tabs must be gone after an automatic check");
 
-  assert(tabsCreated.length===0,"No Vinted tabs should be created");
-  assert(tabsReloaded.length===0,"No Vinted tabs should be reloaded");
+  assert(tabsCreated.length===5,"Each due scheduled check should create its own tab");
+  assert(tabsCreated.every(args=>args.active===false),
+    "Scheduled checks must never take focus");
+  assert.deepEqual(tabsRemoved,[5,5,5,5,5],
+    "Clean up every temporary tab, including after failed checks");
+  assert(tabsReloaded.length===0,"No existing Vinted tabs should be reloaded");
   assert(windowsRemoved.length===0,"No worker windows should be necessary");
-  console.log("Vinted bridge: successful-only schedule, manual override, 403 and missing-tab handling: ok");
+  console.log("Vinted bridge: unattended periodic sync, successful-only schedule, manual override and cooldown: ok");
 })().catch(error=>{console.error(error);process.exitCode=1;});
