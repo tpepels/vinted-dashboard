@@ -64,7 +64,7 @@ def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | Non
     The default is calculated at read time, so a relisted book or a new sale
     does not need another cost entry. A manual sale override is an order total.
     """
-    from app.book_costs import default_book_cost_cents, effective_item_cost, is_book_item
+    from app.book_costs import default_book_cost_cents, effective_item_cost
 
     extra = dict(sale.extra or {})
     source = str(extra.get("acquisition_cost_source") or "")
@@ -95,7 +95,7 @@ def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | Non
     # Vinted sales are books; price them from the workspace book default.
     if (workspace is not None and currency == "EUR"
             and str(getattr(sale, "channel", "") or "").lower() == "vinted"
-            and (item is None or is_book_item(item))):
+            ):
         return default_book_cost_cents(settings) * (count or 1), (
             "default_book_assumed_quantity" if count is None else "default_book"
         )
