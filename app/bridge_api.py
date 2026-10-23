@@ -50,6 +50,7 @@ class WorkspaceBrowserSyncPayload(BaseModel):
     orders: list[dict[str, Any]]
     market_results: list[dict[str, Any]] = Field(default_factory=list)
     extension_version: str | None = None
+    inventory_complete: bool = False
 
 
 class ListingAgeUpdate(BaseModel):
