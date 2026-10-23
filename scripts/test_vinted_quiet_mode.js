@@ -21,7 +21,7 @@ const tab = {id:4,windowId:9,status:"complete",url:"https://www.vinted.pt/member
 
 const chrome = {
   runtime:{
-    getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.12"}),
+    getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.13"}),
     onInstalled:{addListener(){}},onStartup:{addListener(){}},
     onMessage:{addListener(){}},
   },
@@ -49,7 +49,7 @@ const chrome = {
         return{ok:true,snapshot:{
           listings:[{id:"1",status:"active"}],orders:[],notifications:[],
           current_user:{id:"42"},age_scan_items:[{id:"1",url:"https://www.vinted.pt/items/1"}],
-          detail_sync:{enriched:0,pending:3},
+          detail_sync:{enriched:0,pending:3},inventory_complete:true,
         }};
       }
       throw Error("Unexpected page message");
