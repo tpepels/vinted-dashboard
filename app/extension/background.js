@@ -85,9 +85,11 @@ function allowedVintedOrigin(raw){
   }catch{return null}
 }
 async function createSyncTab(){
-  const data=await chrome.storage.local.get(["vintedOrigin"]);
+  const data=await chrome.storage.local.get(["vintedOrigin","vintedAccountId"]);
   const origin=allowedVintedOrigin(data?.vintedOrigin)||"https://www.vinted.pt";
-  const created=await chrome.tabs.create({url:origin+"/",active:false});
+  const id=String(data?.vintedAccountId||"");
+  const path=/^[0-9]{1,20}$/.test(id)?"/member/"+id:"/";
+  const created=await chrome.tabs.create({url:origin+path,active:false});
   if(created?.id==null)throw new Error("Chrome could not open a Vinted tab for this update.");
   try{
     return{tab:await waitForTab(created.id,30000),temporary:true};
@@ -173,6 +175,13 @@ async function collectFromVintedTab(tab,reason){
       throw new Error("Vinted collection connection was interrupted: "+String(error?.message||error));
     }
     if(response?.ok&&response.state==="running")continue;
+    if(!response?.ok&&/lost its context/.test(String(response?.error||""))){
+      try{
+        const live=await chrome.tabs.get(tab.id);
+        const location=new URL(String(live?.url||""));
+        await logDiagnostic("collect.context.lost","tab="+tab.id+" path="+location.pathname+" status="+live?.status,"error");
+      }catch(error){await logDiagnostic("collect.context.lost","tab missing: "+String(error?.message||error),"error")}
+    }
     await logDiagnostic(response?.ok?"collect.reply.ok":"collect.reply.error",
       response?.ok?"Snapshot received":response?.error||"Empty reply",
       response?.ok?"info":"error");
@@ -513,7 +522,7 @@ async function processAgeJobWave(){
 }
 
 async function pair(code){const response=await fetch(API_ORIGIN+"/api/extension/pair",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:String(code||"").trim().toUpperCase(),extension_version:chrome.runtime.getManifest().version,device_name:"Chrome"})});let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||"Pairing failed");await chrome.storage.local.set({bridgeToken:body.token,bridgeWorkspace:body.workspace});return body}
-async function unpair(){await stopLegacyAgeScan();await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","manualSyncProgress","vintedOrigin","lastSyncAttemptAt","lastSuccessfulSyncAt",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
+async function unpair(){await stopLegacyAgeScan();await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","manualSyncProgress","vintedAccountId","vintedOrigin","lastSyncAttemptAt","lastSuccessfulSyncAt",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
 async function connectionStatus(){
   const data=await stored();
   const progress=(await chrome.storage.local.get(["manualSyncProgress"])).manualSyncProgress;
@@ -599,8 +608,8 @@ async function runSync(reason="manual"){
       delete snapshot.age_scan_items;
       delete snapshot.detail_sync;
       snapshot.extension_version=chrome.runtime.getManifest().version;
-      if(!Array.isArray(snapshot.listings)||!snapshot.listings.length)
-        throw new Error("Refusing an empty Vinted inventory snapshot; existing active listings would be deactivated.");
+      if(!Array.isArray(snapshot.listings)||!snapshot.listings.length||snapshot.inventory_complete!==true)
+        throw new Error("Refusing an empty or incomplete Vinted inventory snapshot; existing active listings are protected.");
       await logDiagnostic("sync.dashboard.upload","listings="+snapshot.listings.length+" orders="+snapshot.orders.length);
 
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
