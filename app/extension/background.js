@@ -16,6 +16,8 @@ const API_RATE_LIMIT_COOLDOWN_MS=60*60*1000;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
 const AGE_JOB_WATCHDOG_MS=240000;
 const CONTENT_PROTOCOL=10;
+const DIAGNOSTIC_LOG_KEY="bridgeDiagnosticLogV1";
+const DIAGNOSTIC_LOG_LIMIT=160;
 const LOST_MESSAGE_CHANNEL=/A listener indicated an asynchronous response|message (?:port|channel) closed|The message port closed before a response was received/i;
 const MISSING_MESSAGE_RECEIVER=/Receiving end does not exist|Could not establish connection/i;
 let syncInFlight=null;
@@ -23,10 +25,53 @@ let ageJobInFlight=null;
 let lastAgeNavigationAt=0;
 let ageNavigationChain=Promise.resolve();
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+// Temporary local-only diagnostic trace; never store request/response bodies or credentials.
+let diagnosticWrite=Promise.resolve();
+function safeDiagnosticText(value){
+  return String(value??"")
+    .replace(/Bearer\s+[^\s]+/gi,"Bearer [redacted]")
+    .replace(/(authorization|cookie|password|bridgeToken|access_token|pairing.?code|token)\s*[:=]\s*["']?[^\s,"'}]+/gi,"$1=[redacted]")
+    .replace(/https?:\/\/[^\s"'<>]+/gi,raw=>{
+      try{
+        const url=new URL(raw);
+        return url.origin+url.pathname.replace(/\/(items|users|member|inbox)\/\d+/g,"/$1/[id]");
+      }catch{return "[url]"}
+    }).slice(0,600);
+}
+function logDiagnostic(stage,detail="",level="info"){
+  const line=new Date().toISOString()+" ["+level.toUpperCase()+"] "
+    +safeDiagnosticText(stage)+(detail?": "+safeDiagnosticText(detail):"");
+  diagnosticWrite=diagnosticWrite.catch(()=>{}).then(async()=>{
+    const saved=await chrome.storage.local.get([DIAGNOSTIC_LOG_KEY]);
+    const lines=Array.isArray(saved?.[DIAGNOSTIC_LOG_KEY])?saved[DIAGNOSTIC_LOG_KEY]:[];
+    await chrome.storage.local.set({[DIAGNOSTIC_LOG_KEY]:[...lines,line].slice(-DIAGNOSTIC_LOG_LIMIT)});
+  }).catch(()=>{});
+  return diagnosticWrite;
+}
+async function getDiagnostics(){
+  await diagnosticWrite;
+  const data=await chrome.storage.local.get([DIAGNOSTIC_LOG_KEY]);
+  return Array.isArray(data?.[DIAGNOSTIC_LOG_KEY])?data[DIAGNOSTIC_LOG_KEY]:[];
+}
+async function clearDiagnostics(){
+  diagnosticWrite=diagnosticWrite.catch(()=>{}).then(()=>chrome.storage.local.remove([DIAGNOSTIC_LOG_KEY]));
+  await diagnosticWrite;
+}
 
 async function stored(){return await chrome.storage.local.get(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin",AGE_FAILURES_KEY,AGE_JOB_KEY])}
 async function authHeaders(){const data=await stored();if(!data.bridgeToken)throw new Error("Pair this extension with your dashboard first.");return{"Authorization":"Bearer "+data.bridgeToken,"Content-Type":"application/json"}}
-async function api(path,options={}){const headers=Object.assign({},await authHeaders(),options.headers||{});const response=await fetch(API_ORIGIN+path,Object.assign({},options,{headers}));let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||("Dashboard returned HTTP "+response.status));return body}
+async function api(path,options={}){
+  const headers=Object.assign({},await authHeaders(),options.headers||{});
+  let response;
+  try{response=await fetch(API_ORIGIN+path,Object.assign({},options,{headers}));}
+  catch(error){await logDiagnostic("dashboard.network.error",path+" "+String(error?.message||error),"error");throw error}
+  let body={};try{body=await response.json()}catch{}
+  if(!response.ok){
+    await logDiagnostic("dashboard.http.error",path+" HTTP "+response.status,"error");
+    throw new Error(body.detail||("Dashboard returned HTTP "+response.status));
+  }
+  return body;
+}
 async function waitForTab(tabId,timeout=20000){const start=Date.now();while(Date.now()-start<timeout){const tab=await chrome.tabs.get(tabId);if(tab.status==="complete")return tab;await sleep(300)}throw new Error("Vinted tab did not finish loading.")}
 async function message(tabId,payload){try{return await chrome.tabs.sendMessage(tabId,payload)}catch(error){if(!String(error?.message||error).includes("Receiving end does not exist"))throw error;await chrome.scripting.executeScript({target:{tabId},files:["vinted_age.js","content.js"]});await sleep(250);return await chrome.tabs.sendMessage(tabId,payload)}}
 // Both scheduled and manual checks can own a short-lived background tab.
@@ -72,8 +117,10 @@ async function probeCurrentContentScript(tab){
     response=await chrome.tabs.sendMessage(tab.id,{type:"bridge-content-protocol"});
   }catch(error){
     if(!MISSING_MESSAGE_RECEIVER.test(String(error?.message||error))){
+      await logDiagnostic("content.probe.error",error?.stack||error?.message||error,"error");
       throw new Error("The Vinted tab's bridge could not respond.");
     }
+    await logDiagnostic("content.probe.missing","Injecting current listener");
     // Inject only when there is no listener. Never inject alongside an old
     // listener, since that can duplicate requests and responses.
     await chrome.scripting.executeScript({
@@ -87,6 +134,7 @@ async function probeCurrentContentScript(tab){
 async function ensureCurrentContentScript(tab,reason="periodic",temporary=false){
   try{return await probeCurrentContentScript(tab)}
   catch(error){
+    await logDiagnostic("content.probe.retry",error?.message||error,"warn");
     if(reason!=="manual"&&!temporary)throw error;
     // The caller explicitly requested an update or owns this temporary tab:
     // refresh a stale or disconnected
@@ -100,13 +148,15 @@ async function ensureCurrentContentScript(tab,reason="periodic",temporary=false)
 }
 async function collectFromVintedTab(tab,reason){
   const payload={type:"collect-vinted-data",reason};
+  await logDiagnostic("collect.request","tab="+tab.id+" reason="+reason);
   try{
-    return await message(tab.id,payload);
+    const response=await message(tab.id,payload);
+    await logDiagnostic(response?.ok?"collect.reply.ok":"collect.reply.error",
+      response?.ok?"Snapshot received":response?.error||"No response",response?.ok?"info":"error");
+    return response;
   }catch(error){
+    await logDiagnostic("collect.channel.error",error?.stack||error?.message||error,"error");
     if(!LOST_MESSAGE_CHANNEL.test(String(error?.message||error)))throw error;
-    // Chrome discards pending content-script replies when a tab navigates or
-    // reloads. The dashboard was never sent this snapshot, so one bounded
-    // manual retry is safe. Periodic checks wait for their next alarm.
     if(reason!=="manual"){
       throw new Error("Vinted changed or closed its tab during the automatic check. Next automatic check will retry; you can also check manually.");
     }
@@ -116,13 +166,20 @@ async function collectFromVintedTab(tab,reason){
       ready=await waitForTab(tab.id,15000);
       const url=new URL(String(ready.url||""));
       if(!url.hostname.startsWith("www.vinted."))throw Error("Vinted tab was replaced");
+      await logDiagnostic("collect.retry.prepare","tab="+tab.id+" origin="+url.origin);
       await ensureCurrentContentScript(ready,reason);
-    }catch{
+    }catch(recoveryError){
+      await logDiagnostic("collect.retry.prepare.error",recoveryError?.stack||recoveryError?.message||recoveryError,"error");
       throw new Error("Vinted tab lost its connection during the update. Open Vinted, keep that tab open, and try Check now again.");
     }
     try{
-      return await message(ready.id,payload);
+      await logDiagnostic("collect.retry.request","tab="+ready.id);
+      const response=await message(ready.id,payload);
+      await logDiagnostic(response?.ok?"collect.retry.reply.ok":"collect.retry.reply.error",
+        response?.ok?"Snapshot received":response?.error||"No response",response?.ok?"info":"error");
+      return response;
     }catch(retryError){
+      await logDiagnostic("collect.retry.channel.error",retryError?.stack||retryError?.message||retryError,"error");
       if(!LOST_MESSAGE_CHANNEL.test(String(retryError?.message||retryError)))throw retryError;
       throw new Error("Vinted tab stopped responding during the update. Keep the tab open without navigating, reload it once, and try Check now again.");
     }
@@ -510,12 +567,15 @@ async function runSync(reason="manual"){
   };
   syncInFlight=(async()=>{
     let temporary=null;
+    await logDiagnostic("sync.start","reason="+reason+" bridge="+chrome.runtime.getManifest().version);
     try{
       if(!(await stored()).bridgeToken)throw new Error("Pair this extension with your dashboard first.");
       const found=await vintedTab(reason);
       temporary=found.temporary?found.tab.id:null;
       let tab=found.tab;
+      await logDiagnostic("sync.tab","tab="+tab.id+" temporary="+Boolean(found.temporary));
       tab=await ensureCurrentContentScript(tab,reason,temporary!==null);
+      await logDiagnostic("sync.content.ready","tab="+tab.id);
       const tabUrl=new URL(String(tab.url||""));
       if(!tabUrl.hostname.startsWith("www.vinted."))throw new Error("Open and sign in to Vinted first.");
       await chrome.storage.local.set({vintedOrigin:tabUrl.origin});
@@ -543,6 +603,7 @@ async function runSync(reason="manual"){
       delete snapshot.age_scan_items;
       delete snapshot.detail_sync;
       snapshot.extension_version=chrome.runtime.getManifest().version;
+      await logDiagnostic("sync.dashboard.upload","listings="+snapshot.listings.length+" orders="+snapshot.orders.length);
 
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
       const apiRateLimited=Boolean(detailSync.api_rate_limited??detailSync.rate_limited);
@@ -574,9 +635,11 @@ async function runSync(reason="manual"){
       await chrome.storage.local.set({
         syncStatus:status,lastSyncAttemptAt:succeededAt,lastSuccessfulSyncAt:succeededAt,
       });
+      await logDiagnostic("sync.success","listings="+status.listings+" orders="+status.orders);
       return status;
     }catch(error){
       const message=error instanceof Error?error.message:String(error);
+      await logDiagnostic("sync.failed",error?.stack||message,"error");
       const rateLimited=/rate limit|too many requests|HTTP 429/i.test(message)
         && !/HTTP 403|HTTP 401|challeng|not signed in/i.test(message);
       const status={
@@ -589,6 +652,7 @@ async function runSync(reason="manual"){
       return status;
     }finally{
       if(temporary!==null){try{await chrome.tabs.remove(temporary)}catch{}}
+      await logDiagnostic("sync.finished","temporary tab closed="+(temporary!==null));
       syncInFlight=null;
     }
   })();
@@ -614,6 +678,14 @@ chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
     if(msg?.type==="pair")return sendResponse(await pair(msg.code));
     if(msg?.type==="unpair"){await unpair();return sendResponse({ok:true})}
     if(msg?.type==="sync-now")return sendResponse(await runSync("manual"));
+    if(msg?.type==="diagnostics")return sendResponse({ok:true,lines:await getDiagnostics()});
+    if(msg?.type==="diagnostics-clear"){await clearDiagnostics();return sendResponse({ok:true})}
+    if(msg?.type==="bridge-diagnostic-event"){
+      if(allowedVintedOrigin(_sender?.tab?.url)){
+        await logDiagnostic("vinted."+String(msg.stage||"step"),msg.detail||"",msg.level==="error"?"error":"info");
+      }
+      return sendResponse({ok:true});
+    }
     if(msg?.type==="status")return sendResponse(await connectionStatus());
     if(msg?.type==="age-job-step")return sendResponse({ok:false,error:"Page-age scans are disabled to protect normal Vinted browsing."});
     sendResponse({ok:false,error:"Unknown message"});
