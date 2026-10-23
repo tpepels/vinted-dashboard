@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "3.4.12"
+    assert manifest["version"] == "3.4.13"
 
 
 
@@ -276,13 +276,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.12.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.13.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.12"
+    assert response.headers["x-bridge-version"] == "3.4.13"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.12.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.13.zip")
     assert versioned.status_code == 200
-    assert "v3.4.12.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.13.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
@@ -335,7 +335,8 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert 'if(required&&!valid)' in content
     assert 'if(!listings.size)' in content
     assert "secondaryRateLimited=isRateLimitError(error)" in content
-    assert "secondaryAccessBlocked=true" in content
+    assert "inventory_complete:true" in content
+    assert '"/api/v2/wardrobe/"+userId+"/items"' in content
     assert "const queue=missing.slice(0,3);" in content
     assert "if(!detailSync.rate_limited&&!detailSync.access_blocked)" in content
 
