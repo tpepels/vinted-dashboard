@@ -154,7 +154,7 @@ def test_today_unifies_operational_work_types(monkeypatch):
     assert body["purchase_cost_suggestion_count"] == 1
     assert body["unlinked_sell_count"] == 1
     assert body["open_sell_order_count"] == 1
-    assert body["work_queue_count"] >= 5
+    assert body["work_queue_count"] >= 4  # No unnecessary purchase-cost task
 
     titles = [row["title"] for row in body["work_queue"]]
     assert any("ambiguous sold order" in title for title in titles)
