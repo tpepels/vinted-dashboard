@@ -6,9 +6,9 @@ const fs=require("node:fs");
 const vm=require("node:vm");
 const source=fs.readFileSync("app/extension/background.js","utf8");
 
-async function scenario(mode,reason="manual",rememberedOrigin=null){
+async function scenario(mode,reason="manual",rememberedOrigin=null,accountId=null){
   const state={bridgeToken:"test-token",bridgeWorkspace:"Personal",
-    syncStatus:{},lastSuccessfulSyncAt:0,vintedOrigin:rememberedOrigin};
+    syncStatus:{},lastSuccessfulSyncAt:0,vintedOrigin:rememberedOrigin,vintedAccountId:accountId};
   const tabs=[];
   if(mode==="existing"||mode==="loading"||mode==="stale"){
     tabs.push({id:10,windowId:1,active:false,
@@ -21,7 +21,7 @@ async function scenario(mode,reason="manual",rememberedOrigin=null){
     runtime:{
       getManifest:()=>({content_scripts:[{matches:[
         "https://www.vinted.pt/*","https://www.vinted.nl/*",
-      ]}],version:"3.4.12"}),
+      ]}],version:"3.4.13"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
       onMessage:{addListener(){}},
     },
@@ -64,7 +64,7 @@ async function scenario(mode,reason="manual",rememberedOrigin=null){
         return {ok:true,snapshot:{
           listings:[{id:"123",status:"active"}],orders:[],notifications:[],
           current_user:{id:"42"},age_scan_items:[],
-          detail_sync:{enriched:0,pending:0},
+          detail_sync:{enriched:0,pending:0},inventory_complete:true,
         }};
       },
     },
@@ -102,6 +102,10 @@ async function scenario(mode,reason="manual",rememberedOrigin=null){
   const untrusted=await scenario("absent","manual","https://www.vinted.pt.evil.test");
   assert.equal(untrusted.created[0].url,"https://www.vinted.pt/",
     "Stored origin must never redirect sync to an unapproved domain");
+
+  const stable=await scenario("absent","manual","https://www.vinted.pt","42");
+  assert.equal(stable.created[0].url,"https://www.vinted.pt/member/42",
+    "Temporary sync tab should load a stable member page once account is known");
 
   const existing=await scenario("existing");
   assert.equal(existing.result.ok,true);
