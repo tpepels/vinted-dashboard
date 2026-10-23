@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "3.4.13"
+    assert manifest["version"] == "3.4.14"
 
 
 
@@ -203,18 +203,18 @@ def test_vinted_quiet_bridge_does_not_scan_pages_or_reload_browser():
     assert 'if(reason!=="manual"&&!temporary)throw error;' in background
     assert 'url:origin+path,active:false' in background
     assert "const ageScanItems=[];" in content
-    assert "const queue=missing.slice(0,3);" in content
+    assert "const queue=missing.filter(row=>" in content
     assert "const maxRetries=0;" in content
-    assert "const BRIDGE_CONTENT_PROTOCOL=11;" in content
-    assert "const CONTENT_PROTOCOL=11;" in background
+    assert "const BRIDGE_CONTENT_PROTOCOL=12;" in content
+    assert "const CONTENT_PROTOCOL=12;" in background
 
 
 def test_content_script_has_reinjection_guard():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "(() => {" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 11" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 11" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 12" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 12" in content
     assert content.rstrip().endswith("})();")
     assert "node scripts/test_vinted_content_idempotent.js" in workflow
 
@@ -230,10 +230,13 @@ def test_content_script_caches_rich_vinted_listing_details_for_cross_listing():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     assert 'LISTING_DETAIL_CACHE_KEY="vintedListingDetailCacheV4"' in content
     assert 'function enrichListingDetails(listings,reason="periodic")' in content
-    assert "image_urls:images" in content
+    assert "image_urls:detail.images.slice(0,20)" in content
     assert ": await enrichListingDetails(listings,reason);" in content
-    assert "const queue=missing.slice(0,3);" in content
-    assert '{minDelayMs:6000,maxRetries:0}' in content
+    assert "const queue=missing.filter(row=>" in content
+    assert "async function fetchItemPage(row)" in content
+    assert "function itemPageData(html,id)" in content
+    assert "vintedListingDetailRetryV1" in content
+    assert '"/api/v2/items/"' not in content
     assert '["active","reserved","hidden","draft"]' in content
 
 
@@ -276,13 +279,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.13.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.14.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.13"
+    assert response.headers["x-bridge-version"] == "3.4.14"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.13.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.14.zip")
     assert versioned.status_code == 200
-    assert "v3.4.13.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.14.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
@@ -337,7 +340,7 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert '"/api/v2/wardrobe/"+userId+"/items"' in content
     assert "inventory_complete:true" in content
     assert '"/api/v2/wardrobe/"+userId+"/items"' in content
-    assert "const queue=missing.slice(0,3);" in content
+    assert "const queue=missing.filter(row=>" in content
     assert "if(!detailSync.rate_limited&&!detailSync.access_blocked)" in content
 
 
