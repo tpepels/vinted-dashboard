@@ -7258,9 +7258,12 @@ def update_settings(
             workspace.name = payload.name.strip()[:200]
         if payload.settings is not None:
             workspace.settings = payload.settings
-        if payload.default_book_cost_cents is not None:
+        if "default_book_cost_cents" in payload.model_fields_set:
             prefs = dict(workspace.settings or {})
-            prefs[BOOK_COST_SETTING] = payload.default_book_cost_cents
+            if payload.default_book_cost_cents is None:
+                prefs.pop(BOOK_COST_SETTING, None)
+            else:
+                prefs[BOOK_COST_SETTING] = payload.default_book_cost_cents
             workspace.settings = prefs
         session.flush()
         result = _serialize_workspace(workspace)
