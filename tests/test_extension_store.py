@@ -276,13 +276,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.10.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.11.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.10"
+    assert response.headers["x-bridge-version"] == "3.4.11"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.10.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.11.zip")
     assert versioned.status_code == 200
-    assert "v3.4.10.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.11.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
