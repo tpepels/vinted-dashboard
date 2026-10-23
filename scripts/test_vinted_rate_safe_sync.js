@@ -13,6 +13,7 @@ function response(status, body) {
     status,
     headers: { get() { return null; } },
     async json() { return body; },
+    async text() { return String(body||""); },
   };
 }
 
@@ -20,6 +21,8 @@ async function scenario(mode) {
   const listeners = [];
   const storage = {};
   let detailRequests = 0;
+  const detailIds=[];
+  const diagnosticEvents=[];
   let optionalRequests = 0;
   let currentRequestOptions = null;
 
@@ -42,6 +45,7 @@ async function scenario(mode) {
     clearTimeout() {},
     chrome: {
       runtime: {
+        sendMessage(event) { diagnosticEvents.push(event); return Promise.resolve(); },
         onMessage: {
           addListener(listener) { listeners.push(listener); },
         },
@@ -90,19 +94,25 @@ async function scenario(mode) {
         });
       }
       if (/^\/api\/v2\/items\/\d+$/.test(pathname)) {
+        throw new Error("Removed item JSON endpoint must not be requested");
+      }
+      if (/^\/items\/\d+/.test(pathname)) {
+        const id = pathname.match(/^\/items\/(\d+)/)?.[1];
         detailRequests += 1;
-        if (mode === "detail429" && detailRequests > 1) {
-          return response(429, {});
-        }
-        const id = pathname.split("/").pop();
-        return response(200, {
-          item: {
-            id,
-            description: "Description " + id,
-            catalog_title: "Books",
-            photos: [{ url: "https://images1.vinted.net/t/" + id + ".jpg" }],
-          },
-        });
+        detailIds.push(id);
+        if (mode === "detail429" && detailRequests > 1) return response(429, {});
+        if (mode === "page404") return response(404, "");
+        if (mode === "unrecognizedPage") return response(200, "<html><body>No item data here</body></html>");
+        if (mode === "detail403") return response(403, "");
+        const item = {
+          id, title:"Item " + id, description: "Description " + id,
+          catalog_title: "Books",
+          photos: [{ url: "https://images1.vinted.net/t/" + id + ".jpg" }],
+        };
+        // A Next.js hydration script is a JSON string containing item JSON.
+        const hydration = '4:{"item":'+JSON.stringify(item)+'}';
+        return response(200, "<html><head><script>self.__next_f.push([1,"+
+          JSON.stringify(hydration)+"])</script></head><body></body></html>");
       }
       if (pathname.includes("notifications") || pathname === "/api/v2/my_orders") {
         optionalRequests += 1;
@@ -116,13 +126,18 @@ async function scenario(mode) {
   vm.runInContext(source, context, { filename: "content.js" });
   if (listeners.length !== 1) throw new Error("content listener not installed");
 
-  return await new Promise((resolve) => {
-    listeners[0](
+  function collect() {
+    return new Promise((resolve) => listeners[0](
       { type: "collect-vinted-data", reason: "manual" },
       {},
-      (result) => resolve({ result, detailRequests, optionalRequests, currentRequestOptions }),
-    );
-  });
+      (result) => resolve(result),
+    ));
+  }
+  const result=await collect();
+  const firstIds=[...detailIds];
+  const second=(mode==="page404"||mode==="unrecognizedPage")?await collect():null;
+  return {result,second,firstIds,detailIds,detailRequests,
+    optionalRequests,currentRequestOptions,diagnosticEvents};
 }
 
 function assert(condition, message) {
@@ -171,6 +186,30 @@ function assert(condition, message) {
     "Detail endpoint 429 was not distinguished from page rate limiting");
   assert(detailLimited.optionalRequests === 0,
     "Optional notification/order requests continued after detail rate limiting");
+
+  const gone = await scenario("page404");
+  assert(gone.result.ok===true && gone.second.ok===true,
+    "A removed item page must never abort the successfully collected wardrobe");
+  assert(gone.result.snapshot.detail_sync.enriched===0
+      && gone.result.snapshot.detail_sync.failed===3,
+    "404 item pages must be recorded as failures, not enrichment successes");
+  assert(gone.firstIds.join(",")==="1,2,3"
+      && gone.detailIds.slice(3).join(",")==="4,5,6",
+    "Failed items must cool down so subsequent syncs try different items");
+  assert(gone.diagnosticEvents.filter(x=>x.stage==="details.item.failed")
+    .some(x=>String(x.detail).includes("reason=http_404")),
+    "404 responses must appear in diagnostic events");
+  const unexpectedPage = await scenario("unrecognizedPage");
+  assert(unexpectedPage.result.ok === true
+      && unexpectedPage.result.snapshot.detail_sync.failed === 3,
+    "Empty hydration responses must not be marked enriched");
+  assert(unexpectedPage.detailIds.slice(3).join(",")==="4,5,6",
+    "Unrecognized HTML pages must have a retry cooldown");
+  const pageForbidden=await scenario("detail403");
+  assert(pageForbidden.result.ok===true && pageForbidden.result.snapshot.detail_sync.access_blocked,
+    "An item-page 403 must preserve inventory while stopping optional requests");
+  assert(pageForbidden.detailRequests===1 && pageForbidden.optionalRequests===0,
+    "A denied item page must not trigger more requests");
 
   const zero=await scenario("zero");
   assert(zero.result.ok===false,"Empty wardrobes must abort rather than deactivate stock");
