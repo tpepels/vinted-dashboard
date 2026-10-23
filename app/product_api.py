@@ -4605,6 +4605,8 @@ def backfill_sale_average_cost(
             row for row in compatible
             if payload.overwrite_existing
             or sale_acquisition_cost(row, items.get(row.inventory_item_id))[0] is None
+            or sale_acquisition_cost(row, items.get(row.inventory_item_id))[1]
+            in {"default_book", "default_book_assumed_quantity"}
         ]
         unknown = [row for row in uncosted if sale_book_quantity(row)[0] is None]
         eligible = [
