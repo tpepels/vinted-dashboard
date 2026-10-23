@@ -7,19 +7,18 @@ from __future__ import annotations
 
 from typing import Any
 
-DEFAULT_BOOK_COST_CENTS = 100
-DEFAULT_BOOK_CURRENCY = "EUR"
 BOOK_COST_SETTING = "default_book_cost_cents"
 
 
-def default_book_cost_cents(settings: Any) -> int:
+def default_book_cost_cents(settings: Any) -> int | None:
+    """No implicit €1 (or any other price): the owner must set this value."""
     values = settings if isinstance(settings, dict) else getattr(settings, "settings", None)
     if not isinstance(values, dict):
-        return DEFAULT_BOOK_COST_CENTS
-    value = values.get(BOOK_COST_SETTING, DEFAULT_BOOK_COST_CENTS)
+        return None
+    value = values.get(BOOK_COST_SETTING)
     if type(value) is int and 0 <= value <= 10_000_000:
         return value
-    return DEFAULT_BOOK_COST_CENTS
+    return None
 
 
 def is_book_item(item: Any) -> bool:
@@ -42,5 +41,7 @@ def effective_item_cost(item: Any, settings: Any) -> tuple[int | None, str | Non
         attributes = dict(getattr(item, "attributes", None) or {})
         return int(explicit), str(attributes.get("cost_source") or "inventory")
     if is_book_item(item) and str(getattr(item, "currency", None) or "EUR").upper() == "EUR":
-        return default_book_cost_cents(settings), "default_book"
+        default = default_book_cost_cents(settings)
+        if default is not None:
+            return default, "default_book"
     return None, None
