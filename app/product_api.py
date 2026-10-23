@@ -130,6 +130,7 @@ from app.product_models import (
 )
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
 from app.purchase_costs import apply_purchase_cost, purchase_cost_suggestions
+from app.book_costs import BOOK_COST_SETTING, default_book_cost_cents, effective_item_cost
 from app.runtime_config import is_production, public_app_origin, safe_runtime_summary
 from app.stock_policy import sale_counts_as_sold
 from app.sale_costs import (
@@ -424,6 +425,7 @@ class ConnectorCredentialsRequest(BaseModel):
 class SettingsRequest(BaseModel):
     name: str | None = None
     settings: dict[str, Any] | None = None
+    default_book_cost_cents: int | None = Field(default=None, ge=0, le=10_000_000)
 
 
 class DeleteWorkspaceRequest(BaseModel):
@@ -499,9 +501,12 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
         None,
     ) or next((row for row in rows if row.channel == Channel.VINTED), None)
     biblio_publishable = publishing.is_biblio_book_candidate(item, vinted_source)
+    cost, cost_source = effective_item_cost(item, item.workspace.settings)
+    if item.cost_cents is None and cost_source == "default_book":
+        attributes["cost_source"] = "default_book"
     potential_margin = (
-        int(effective_ask) - int(item.cost_cents)
-        if effective_ask is not None and item.cost_cents is not None
+        int(effective_ask) - int(cost)
+        if effective_ask is not None and cost is not None
         else None
     )
     return {
@@ -513,7 +518,9 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
         "stock_authority": ("physical" if is_physical(item) else "provisional" if is_provisional(item) else "legacy"),
         "relation_confirmed_at": attributes.get("relationship_confirmed_at"),
         "condition": item.condition,
-        "cost_cents": item.cost_cents,
+        "cost_cents": cost,
+        "recorded_cost_cents": item.cost_cents,
+        "cost_source": cost_source,
         "default_price_cents": default_price,
         "effective_ask_cents": effective_ask,
         "effective_ask_source": effective_ask_source,
@@ -4798,13 +4805,15 @@ def analytics(
         )
         if effective_ask is not None and source is not None:
             ask_rows.append((item, effective_ask, source))
-        if item.cost_cents is not None:
+        cost, _ = effective_item_cost(item, item.workspace.settings)
+        if cost is not None:
             costed_items.append(item)
-        if effective_ask is not None and item.cost_cents is not None:
+        if effective_ask is not None and cost is not None:
             margin_rows.append((item, effective_ask))
 
     inventory_cost_cents = sum(
-        int(item.cost_cents or 0) * max(0, int(item.quantity or 0))
+        int(effective_item_cost(item, item.workspace.settings)[0] or 0)
+        * max(0, int(item.quantity or 0))
         for item in costed_items
     )
     inventory_ask_cents = sum(
@@ -4812,7 +4821,8 @@ def analytics(
         for item, ask, _source in ask_rows
     )
     inventory_potential_margin_cents = sum(
-        (int(ask) - int(item.cost_cents or 0)) * max(0, int(item.quantity or 0))
+        (int(ask) - int(effective_item_cost(item, item.workspace.settings)[0] or 0))
+        * max(0, int(item.quantity or 0))
         for item, ask in margin_rows
     )
     all_time_revenue_known_sales = [
@@ -7244,6 +7254,10 @@ def update_settings(
             workspace.name = payload.name.strip()[:200]
         if payload.settings is not None:
             workspace.settings = payload.settings
+        if payload.default_book_cost_cents is not None:
+            prefs = dict(workspace.settings or {})
+            prefs[BOOK_COST_SETTING] = payload.default_book_cost_cents
+            workspace.settings = prefs
         session.flush()
         result = _serialize_workspace(workspace)
     return {"ok": True, "workspace": result}
