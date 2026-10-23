@@ -22,7 +22,7 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   let openedTabs = 0;
   const chrome = {
     runtime:{
-      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.12"}),
+      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.13"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
       onMessage:{addListener(){}},
     },
@@ -62,7 +62,7 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
           return {ok:true,snapshot:{
             listings:[{id:"1",status:"active"}],
             orders:[],notifications:[],current_user:{id:"42"},
-            age_scan_items:[],detail_sync:{pending:1,enriched:0},
+            age_scan_items:[],detail_sync:{pending:1,enriched:0},inventory_complete:true,
           }};
         }
         throw Error("Unexpected message "+payload.type);
