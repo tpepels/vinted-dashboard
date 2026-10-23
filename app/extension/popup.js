@@ -82,7 +82,36 @@ $("#pair-btn").onclick = async () => {
   if (response?.ok === false || response?.error) {
     return show(response.error || "Could not connect browser.", true);
   }
-  await async function loadDiagnostics() {
+  await refresh();
+};
+
+$("#sync").onclick = async () => {
+  const button = $("#sync");
+  button.disabled = true;
+  show("Checking Vinted for changes…");
+  try {
+    const result = await send({type:"sync-now"});
+    if (!result?.ok) return show(result?.error || "Could not check Vinted.", true);
+    await refresh();
+  } catch (error) {
+    show("Could not check Vinted: " + String(error.message || error), true);
+  } finally {
+    button.disabled = false;
+    if ($("#diagnostics").open) await loadDiagnostics();
+  }
+};
+
+$("#dashboard").onclick = async () => {
+  const response = await send({type:"status"});
+  chrome.tabs.create({url:response.apiOrigin});
+};
+
+$("#unpair").onclick = async () => {
+  await send({type:"unpair"});
+  await refresh();
+};
+
+async function loadDiagnostics() {
   const area = $("#diagnostic-console");
   try {
     const response = await send({type:"diagnostics"});
@@ -121,33 +150,5 @@ $("#clear-logs").onclick = async () => {
   }
 };
 
-refresh();
-};
-
-$("#sync").onclick = async () => {
-  const button = $("#sync");
-  button.disabled = true;
-  show("Checking Vinted for changes…");
-  try {
-    const result = await send({type:"sync-now"});
-    if (!result?.ok) return show(result?.error || "Could not check Vinted.", true);
-    await refresh();
-  } catch (error) {
-    show("Could not check Vinted: " + String(error.message || error), true);
-  } finally {
-    button.disabled = false;
-    if ($("#diagnostics").open) await loadDiagnostics();
-  }
-};
-
-$("#dashboard").onclick = async () => {
-  const response = await send({type:"status"});
-  chrome.tabs.create({url:response.apiOrigin});
-};
-
-$("#unpair").onclick = async () => {
-  await send({type:"unpair"});
-  await refresh();
-};
 
 refresh();
