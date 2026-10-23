@@ -1,4 +1,4 @@
-"""Books cost €1 by default; a single workspace setting and explicit exceptions win."""
+"""No default until the owner configures one; explicit overrides always win."""
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
@@ -60,18 +60,18 @@ def test_default_book_cost_follows_items_and_sales_without_per_sale_editing():
         return {row["external_order_id"]: row for row in reply.json()["sales"]}
 
     initial = current_sales()
-    assert initial["unlinked"]["acquisition_cost_cents"] == 100
-    assert initial["unlinked"]["acquisition_cost_source"] == "default_book"
-    assert initial["bundle"]["acquisition_cost_cents"] == 300
-    assert initial["linked"]["acquisition_cost_cents"] == 100
+    assert initial["unlinked"]["acquisition_cost_cents"] is None
+    assert initial["unlinked"]["acquisition_cost_source"] is None
+    assert initial["bundle"]["acquisition_cost_cents"] is None
+    assert initial["linked"]["acquisition_cost_cents"] is None
     assert initial["exception"]["acquisition_cost_cents"] == 625
     assert initial["other"]["acquisition_cost_cents"] is None
 
     inventory = client.get("/api/app/inventory").json()["items"]
     items = {item["sku"]: item for item in inventory}
-    assert items["BOOK-DEFAULT"]["cost_cents"] == 100
+    assert items["BOOK-DEFAULT"]["cost_cents"] is None
     assert items["BOOK-DEFAULT"]["recorded_cost_cents"] is None
-    assert items["BOOK-DEFAULT"]["cost_source"] == "default_book"
+    assert items["BOOK-DEFAULT"]["cost_source"] is None
     assert items["BOOK-EXCEPTION"]["cost_cents"] == 625
     assert items["GENERAL"]["cost_cents"] is None
 
@@ -109,6 +109,15 @@ def test_default_book_cost_follows_items_and_sales_without_per_sale_editing():
     assert client.patch("/api/app/settings", headers=headers,
         json={"default_book_cost_cents": -1}).status_code == 422
 
+    # Explicitly clearing the workspace setting turns off default estimates.
+    cleared_default = client.patch("/api/app/settings", headers=headers,
+        json={"default_book_cost_cents": None})
+    assert cleared_default.status_code == 200
+    assert "default_book_cost_cents" not in cleared_default.json()["workspace"]["settings"]
+    assert current_sales()["unlinked"]["acquisition_cost_cents"] is None
+    assert current_sales()["linked"]["acquisition_cost_cents"] == 435
+    assert current_sales()["exception"]["acquisition_cost_cents"] == 625
+
 
 def test_unknown_vinted_bundle_quantity_is_explicitly_labeled_as_estimated():
     client = TestClient(entry.app)
@@ -131,6 +140,11 @@ def test_unknown_vinted_bundle_quantity_is_explicitly_labeled_as_estimated():
         session.add(row)
         session.flush()
         sale_id = row.id
+    rows = client.get("/api/app/sales").json()["sales"]
+    assert rows[0]["acquisition_cost_cents"] is None
+    configured = client.patch("/api/app/settings", headers=headers,
+        json={"default_book_cost_cents": 100})
+    assert configured.status_code == 200
     rows = client.get("/api/app/sales").json()["sales"]
     assert rows[0]["acquisition_cost_cents"] == 100
     assert rows[0]["acquisition_cost_source"] == "default_book_assumed_quantity"
