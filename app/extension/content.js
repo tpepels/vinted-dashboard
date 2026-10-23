@@ -259,10 +259,13 @@ async function enrichListingDetails(listings,reason="periodic"){
     access_blocked:accessBlocked,
   };
 }
+// A wardrobe snapshot is authoritative only if every reported page arrived.
 async function paged(path,keys,params={},perPage=96,required=false){
   const rows=[];
-  let finished=false;
-  for(let page=1;page<=10;page++){
+  let completed=false;
+  let expectedTotal=null;
+  const seenIds=new Set();
+  for(let page=1;page<=30;page++){
     const payload=await fetchJson(path,{...params,page,per_page:perPage});
     if(payload===null){
       if(required)throw new Error("Vinted returned HTTP 404 for required endpoint "+path);
@@ -283,16 +286,40 @@ async function paged(path,keys,params={},perPage=96,required=false){
       throw new Error("Vinted returned unexpected inventory response for "+path+" (keys: "+shape+").");
     }
     const chunk=listFrom(payload,keys);
+    const p=payload?.pagination||payload?.data?.pagination;
+    const rawTotal=p?.total_entries??p?.totalEntries;
+    if(rawTotal!=null&&Number.isInteger(Number(rawTotal))&&Number(rawTotal)>=0){
+      if(expectedTotal!==null&&expectedTotal!==Number(rawTotal)&&required)
+        throw new Error("Vinted wardrobe reported inconsistent total item counts.");
+      expectedTotal=Number(rawTotal);
+    }
+    if(required){
+      for(const item of chunk){
+        const id=idOf(item);
+        if(!id)throw new Error("Vinted wardrobe returned an item without an ID.");
+        if(seenIds.has(id))throw new Error("Vinted wardrobe repeated a listing across pages. No snapshot uploaded.");
+        seenIds.add(id);
+      }
+    }
     rows.push(...chunk);
-    const p=payload?.pagination;
-    if(!chunk.length){finished=true;break}
-    if(p&&typeof p==="object"){
-      const totalPages=Number(p.total_pages??p.totalPages);
-      if(Number.isInteger(totalPages)&&page>=totalPages){finished=true;break}
-      if((p.next_page===null||p.nextPage===null)&&chunk.length<perPage){finished=true;break}
-    }else if(chunk.length<perPage){finished=true;break}
+    traceBridge("inventory.page","page="+page+" rows="+chunk.length+" total="+rows.length);
+    if(!chunk.length){completed=true;break}
+    const totalPages=Number(p?.total_pages??p?.totalPages);
+    if(Number.isInteger(totalPages)&&totalPages>0&&page>=totalPages){
+      completed=true;break;
+    }
+    if(p?.has_more===false||p?.hasMore===false){
+      completed=true;break;
+    }
+    if(chunk.length<perPage&&!(Number.isInteger(totalPages)&&totalPages>page)
+      &&p?.has_more!==true&&p?.hasMore!==true
+      &&!(Number(p?.next_page??p?.nextPage)>page)){
+      completed=true;break;
+    }
   }
-  if(required&&!finished)throw new Error("Vinted inventory exceeds ten pages. Refusing a partial snapshot.");
+  if(required&&!completed)throw new Error("Vinted wardrobe pagination did not complete; no snapshot uploaded.");
+  if(required&&expectedTotal!==null&&rows.length!==expectedTotal)
+    throw new Error("Vinted wardrobe returned "+rows.length+" items but reports "+expectedTotal+"; no snapshot uploaded.");
   return rows;
 }
 
@@ -303,6 +330,7 @@ async function collectVintedData(reason="periodic"){
   const userId=idOf(currentRaw);
   if(!userId)throw new Error("This Vinted tab is not signed in.");
   traceBridge("account.ready");
+  try{await chrome.storage.local.set({vintedAccountId:userId})}catch{}
 
   let profileRaw=currentRaw;
   try{
@@ -325,45 +353,22 @@ async function collectVintedData(reason="periodic"){
 
   const listings=new Map();
   let secondaryRateLimited=false,secondaryAccessBlocked=false;
-  // The basic wardrobe endpoint is unfiltered: status=active can return empty.
-  traceBridge("listings.active.start","unfiltered wardrobe");
-  const activeRows=await paged("/api/v2/users/"+userId+"/items",
-    ["items","user_items"],{order:"newest_first"},96,true);
-  for(const raw of activeRows){const row=listingRow(raw,null);if(row.id)listings.set(row.id,row)}
+  // The user's live wardrobe is /wardrobe/{id}/items. The old
+  // /users/{id}/items route is not available for all marketplaces.
+  traceBridge("listings.active.start","wardrobe API");
+  const activeRows=await paged("/api/v2/wardrobe/"+userId+"/items",
+    ["items","user_items"],{},96,true);
+  for(const raw of activeRows){
+    const row=listingRow(raw,null);
+    if(row.id)listings.set(row.id,row);
+  }
   traceBridge("listings.active.done","rows="+activeRows.length);
-  // A zero result must not deactivate existing listings in the dashboard.
-  if(!listings.size){
-    traceBridge("inventory.empty","cross-checking wardrobe endpoint","warn");
-    try{
-      const fallback=await paged("/api/v2/wardrobe/"+userId+"/items",
-        ["items","user_items"],{order:"newest_first"},96,true);
-      for(const raw of fallback||[]){
-        const row=listingRow(raw,null);
-        if(row.id)listings.set(row.id,row);
-      }
-    }catch(error){traceBridge("inventory.fallback.error",error?.message||error,"error")}
-    if(!listings.size)throw new Error(
-      "Vinted returned no listings from either wardrobe endpoint. Nothing was uploaded to protect your existing inventory."
-    );
-  }
-  // Status-filtered endpoints are undocumented and returned empty; sales are
-  // obtained through the order API instead of re-querying the same wardrobe.
-  try{
-    const wardrobe=await paged("/api/v2/wardrobe/"+userId+"/items",
-      ["items","user_items"],{order:"newest_first"});
-    for(const raw of wardrobe||[]){
-      const row=listingRow(raw,null);
-      if(!row.id)continue;
-      const old=listings.get(row.id);
-      if(!old||row.status==="hidden")listings.set(row.id,row);
-    }
-    traceBridge("wardrobe.done","rows="+(wardrobe||[]).length);
-  }catch(error){
-    traceBridge("wardrobe.optional.error",error?.message||error,"error");
-    if(isAccessError(error)){
-      secondaryAccessBlocked=true;secondaryRateLimited=isRateLimitError(error);
-    }
-  }
+  if(!listings.size)throw new Error(
+    "Vinted's wardrobe returned no listings. No inventory was uploaded to protect existing stock."
+  );
+  // Save the account identifier locally so subsequent unattended checks can
+  // use the stable profile URL instead of the redirecting Vinted homepage.
+  try{await chrome.storage.local.set({vintedAccountId:userId})}catch{}
   const detailEligible=[...listings.values()].filter(row=>row?.id&&["active","reserved","hidden","draft"].includes(String(row.status||"active"))).length;
   const detailSync=secondaryAccessBlocked
     ? {enriched:0,attempted:0,pending:detailEligible,deferred:detailEligible,rate_limited:secondaryRateLimited,access_blocked:true}
@@ -403,7 +408,7 @@ async function collectVintedData(reason="periodic"){
 
   const apiRateLimited=Boolean(detailSync.rate_limited||secondaryRateLimited||optionalRateLimited);
   traceBridge("snapshot.ready","listings="+listings.size+" orders="+orders.length+" rateLimited="+apiRateLimited);
-  return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems,detail_sync:{...detailSync,api_rate_limited:apiRateLimited,detail_endpoint_rate_limited:Boolean(detailSync.rate_limited),rate_limited:apiRateLimited,secondary_rate_limited:secondaryRateLimited,optional_rate_limited:optionalRateLimited}};
+  return{collected_at:Date.now()/1000,inventory_complete:true,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems,detail_sync:{...detailSync,api_rate_limited:apiRateLimited,detail_endpoint_rate_limited:Boolean(detailSync.rate_limited),rate_limited:apiRateLimited,secondary_rate_limited:secondaryRateLimited,optional_rate_limited:optionalRateLimited}};
 }
 
 
