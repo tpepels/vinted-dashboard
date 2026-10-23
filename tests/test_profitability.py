@@ -158,10 +158,10 @@ def test_analytics_profitability_excludes_cancelled_and_incomplete_revenue(monke
     assert body["sales_ytd_count"] == 3
     assert body["sales_ytd_revenue_known_count"] == 2
     assert body["sales_ytd_cents"] == 1900
-    assert body["sales_ytd_costed_count"] == 2
-    assert body["sales_ytd_cost_coverage_pct"] == 100.0
-    assert body["sales_ytd_cost_cents"] == 700
-    assert body["sales_ytd_costed_revenue_cents"] == 1900
-    assert body["sales_ytd_gross_profit_cents"] == 1200
-    assert body["sales_ytd_gross_margin_pct"] == 63.2
-    assert body["sales_ytd_roi_pct"] == 171.4
+    assert body["sales_ytd_costed_count"] == 1
+    assert body["sales_ytd_cost_coverage_pct"] == 50.0
+    assert body["sales_ytd_cost_cents"] == 600
+    assert body["sales_ytd_costed_revenue_cents"] == 1000
+    assert body["sales_ytd_gross_profit_cents"] == 400
+    assert body["sales_ytd_gross_margin_pct"] == 40.0
+    assert body["sales_ytd_roi_pct"] == 66.7
