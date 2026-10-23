@@ -78,6 +78,9 @@ async function scenario(mode) {
         if (mode === "core429" && status === null) {
           return response(429, {});
         }
+        if (mode === "core404") return response(404, {});
+        if (mode === "coreMalformed") return response(200, {success:true, data:{}});
+        if (mode === "zero") return response(200, {items:[]});
         return response(200, { items: status === null ? items : [] });
       }
       if (pathname === "/api/v2/wardrobe/42/items") {
@@ -156,6 +159,21 @@ function assert(condition, message) {
     "Detail endpoint 429 was not distinguished from page rate limiting");
   assert(detailLimited.optionalRequests === 0,
     "Optional notification/order requests continued after detail rate limiting");
+
+  const zero=await scenario("zero");
+  assert(zero.result.ok===false,"Empty wardrobes must abort rather than deactivate stock");
+  assert(String(zero.result.error).includes("Nothing was uploaded"),
+    "An empty result must display the data-protection reason");
+
+  const missingEndpoint=await scenario("core404");
+  assert(missingEndpoint.result.ok===false);
+  assert(String(missingEndpoint.result.error).includes("HTTP 404"),
+    "Required inventory endpoint failure must not be mistaken for empty inventory");
+
+  const malformed=await scenario("coreMalformed");
+  assert(malformed.result.ok===false);
+  assert(String(malformed.result.error).includes("unexpected inventory response"),
+    "Unexpected response shapes must fail closed");
 
   const coreLimited = await scenario("core429");
   assert(coreLimited.result.ok === false, "Core inventory 429 should abort the sync");
