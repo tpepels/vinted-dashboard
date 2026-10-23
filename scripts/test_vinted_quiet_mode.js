@@ -21,7 +21,7 @@ const tab = {id:4,windowId:9,status:"complete",url:"https://www.vinted.pt/member
 
 const chrome = {
   runtime:{
-    getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.13"}),
+    getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.14"}),
     onInstalled:{addListener(){}},onStartup:{addListener(){}},
     onMessage:{addListener(){}},
   },
@@ -41,7 +41,7 @@ const chrome = {
     async remove(id){tabsRemoved.push(id);temporaryTab=null;},
     async reload(id){tabsReloaded.push(id);throw Error("Extension must not reload user tabs");},
     async sendMessage(id,payload){
-      if(payload.type==="bridge-content-protocol")return{protocol:11};
+      if(payload.type==="bridge-content-protocol")return{protocol:12};
       if(payload.type==="collect-vinted-start"){collectCount++;return {ok:true,started:true}}
       if(payload.type==="collect-vinted-result"){
         if(blocked)return {ok:false,rate_limited:true,error:"Vinted API rate limited the inventory sync."};
