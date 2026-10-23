@@ -545,22 +545,25 @@ def record_workspace_snapshot(
                 seen.add(listing.external_id)
                 listing_by_external[listing.external_id] = listing
 
-        active_missing = session.execute(
-            select(models.ChannelListing).where(
-                models.ChannelListing.workspace_id == workspace.id,
-                models.ChannelListing.channel == Channel.VINTED,
-                models.ChannelListing.status == ListingStatus.ACTIVE,
-            )
-        ).scalars().all()
-        for listing in active_missing:
-            if listing.external_id not in seen:
-                listing.status = ListingStatus.INACTIVE
-                listing.quantity = 0
-                listing.last_seen_at = captured_at
-                if listing.inventory_item_id:
-                    item = session.get(models.InventoryItem, listing.inventory_item_id)
-                    if item is not None:
-                        recompute_inventory_item(session, item)
+        # Do not retire listings on older/partial extension snapshots. Only a
+        # verified, paginated wardrobe may authoritatively mark missing stock.
+        if snapshot.get("inventory_complete") is True and seen:
+            active_missing = session.execute(
+                select(models.ChannelListing).where(
+                    models.ChannelListing.workspace_id == workspace.id,
+                    models.ChannelListing.channel == Channel.VINTED,
+                    models.ChannelListing.status == ListingStatus.ACTIVE,
+                )
+            ).scalars().all()
+            for listing in active_missing:
+                if listing.external_id not in seen:
+                    listing.status = ListingStatus.INACTIVE
+                    listing.quantity = 0
+                    listing.last_seen_at = captured_at
+                    if listing.inventory_item_id:
+                        item = session.get(models.InventoryItem, listing.inventory_item_id)
+                        if item is not None:
+                            recompute_inventory_item(session, item)
 
         current = snapshot.get("current_user") or {}
         profile_exists = session.execute(
