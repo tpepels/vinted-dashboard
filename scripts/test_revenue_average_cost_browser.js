@@ -149,6 +149,8 @@ const browserTest=String.raw`
     document.querySelector('[data-workspace-tabs="sales"] [data-workspace-tab="costs"]').click();
     await sleep(80);
     result.backfillFormVisible=!document.querySelector("#sales-costs-panel").classList.contains("hidden");
+    // No hard-coded purchase-cost preset; owner supplies the amount explicitly.
+    document.querySelector("#sale-cost-backfill-value").value="1.00";
     document.querySelector("#sale-cost-backfill-preview-btn").click();
     await sleep(80);
     result.backfillPreview=document.querySelector("#sale-cost-backfill-preview").textContent.includes("5 books across 1 historical sales");
