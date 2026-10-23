@@ -4535,6 +4535,8 @@ $("#item-form").onsubmit = async (event) => {
   const raw = Object.fromEntries(new FormData(form));
   const existing = state.inventoryItems.find((item) => item.id === state.editItemId);
   const attributes = Object.assign({}, existing?.attributes || {});
+  if (existing?.recorded_cost_cents == null && attributes.cost_source === "default_book")
+    delete attributes.cost_source;
   const attributeKeys = [
     "description", "barcode", "author", "isbn", "subtitle", "publisher", "edition",
     "binding", "language", "publish_date", "publication_year", "pages",
@@ -4552,6 +4554,8 @@ $("#item-form").onsubmit = async (event) => {
   raw.attributes = attributes;
   raw.quantity = Number(raw.quantity || 0);
   raw.cost_cents = raw.cost ? Math.round(Number(raw.cost) * 100) : null;
+  if (raw.cost_cents != null) attributes.cost_source = "manual_item";
+  else if (attributes.cost_source === "manual_item") delete attributes.cost_source;
   delete raw.cost;
   raw.currency = String(raw.currency || "EUR").toUpperCase();
 
