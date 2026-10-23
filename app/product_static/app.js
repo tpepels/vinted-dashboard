@@ -5295,11 +5295,12 @@ function bindSaleCostEditors(rootSelector) {
 }
 
 function renderSaleCostHistory() {
-  const defaultCents = state.me?.workspace?.settings?.default_book_cost_cents ?? 100;
-  $("#sales-default-book-cost").textContent =
-    "Your default purchase cost is " + money(defaultCents, "EUR")
-    + " per book, automatically used for new listings and completed sales without a recorded exception. "
-    + "Bundles use their book count; unknown quantities are provisionally treated as one book.";
+  const defaultCents = state.me?.workspace?.settings?.default_book_cost_cents;
+  $("#sales-default-book-cost").textContent = defaultCents == null
+    ? "No default book purchase cost set. Choose your own amount in Settings → Account. Until then, costs remain unknown unless individually recorded."
+    : "Your default purchase cost is " + money(defaultCents, "EUR")
+      + " per book, used automatically for new listings and completed sales without recorded exceptions. "
+      + "Bundles use their book count; unknown quantities are provisionally treated as one book.";
   const valid=(state.salesRows || []).filter(s=>s.direction==="sell"
     && s.counts_as_sold !== false && !/cancel|refund|fail/i.test(s.status || ""));
   const priced=valid.filter(s=>s.total_cents!=null);
@@ -7711,7 +7712,8 @@ async function downloadDiagnostics() {
 async function settings() {
   const data = await api("/api/app/settings");
   $("#settings-name").value = data.workspace.name;
-  $("#settings-book-cost").value = ((data.workspace.settings?.default_book_cost_cents ?? 100) / 100).toFixed(2);
+  const bookCost = data.workspace.settings?.default_book_cost_cents;
+  $("#settings-book-cost").value = bookCost == null ? "" : (bookCost / 100).toFixed(2);
   renderBillingLock(data.billing);
   $("#delete-workspace-slug").textContent = data.workspace.slug;
   $("#delete-workspace-confirm").value = "";
@@ -7792,14 +7794,14 @@ $("#delete-workspace").onclick = async () => {
 $("#settings-form").onsubmit = async (event) => {
   event.preventDefault();
   const cost = $("#settings-book-cost").value.trim();
-  if (!/^\d+(?:\.\d{1,2})?$/.test(cost) || Number(cost) > 100000)
-    return flash("Enter a valid book cost between €0 and €100,000.", true);
+  if (cost !== "" && (!/^\d+(?:\.\d{1,2})?$/.test(cost) || Number(cost) > 100000))
+    return flash("Enter a valid book cost between €0 and €100,000, or leave blank to disable.", true);
   try {
     const result = await api("/api/app/settings", {
       method: "PATCH",
       body: JSON.stringify({
         name: $("#settings-name").value.trim(),
-        default_book_cost_cents: Math.round(Number(cost) * 100),
+        default_book_cost_cents: cost === "" ? null : Math.round(Number(cost) * 100),
       }),
     });
     state.me.workspace = result.workspace;
