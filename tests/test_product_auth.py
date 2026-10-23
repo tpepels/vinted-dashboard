@@ -67,7 +67,7 @@ def test_average_cost_sweep_previews_and_preserves_existing_costs():
     assert preview.json()["affected_units"] == 2
     assert preview.json()["estimated_cost_cents"] == 200
     assert preview.json()["other_currency"] == 1
-    assert [row["cost_cents"] for row in client.get("/api/app/inventory").json()["items"] if row["sku"] == "A"] == [None]
+    assert [row["cost_cents"] for row in client.get("/api/app/inventory").json()["items"] if row["sku"] == "A"] == [100]
 
     apply = client.post(endpoint, headers=_write_headers(csrf), json={**payload, "preview": False})
     assert apply.status_code == 200, apply.text
