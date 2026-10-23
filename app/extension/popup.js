@@ -54,7 +54,10 @@ async function refresh() {
   const status = response.status || {};
   const last = status.at ? localDateTime(status.at) : null;
   const paused = pausedUntil(status);
-  if (status.ok === false) {
+  $("#sync").disabled = response.manualSyncProgress?.state === "running";
+  if (response.manualSyncProgress?.state === "running") {
+    show("Checking Vinted for changes… Keep the browser running. You can reopen this popup to check progress.");
+  } else if (status.ok === false) {
     show("Last update failed. " + (status.error || "Could not check Vinted."), true);
     $("#diagnostics").open = true;
   } else if (status.ok === true && last) {
@@ -90,11 +93,23 @@ $("#sync").onclick = async () => {
   button.disabled = true;
   show("Checking Vinted for changes…");
   try {
-    const result = await send({type:"sync-now"});
-    if (!result?.ok) return show(result?.error || "Could not check Vinted.", true);
+    const response = await send({type:"sync-now"});
+    if (!response?.ok) return show(response?.error || "Could not start Vinted sync.", true);
     await refresh();
+    const startedAt = Date.now();
+    // Poll the short-lived status response; never wait for the collection on
+    // a single Chrome message channel. Closing the popup does not cancel it.
+    while (Date.now() - startedAt < 12 * 60 * 1000) {
+      const reply = await send({type:"sync-progress"});
+      if (reply?.progress?.state === "done") {
+        await refresh();
+        if (!reply.progress.result?.ok) $("#diagnostics").open = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
   } catch (error) {
-    show("Could not check Vinted: " + String(error.message || error), true);
+    show("Could not check Vinted: " + String(error?.message || error), true);
   } finally {
     button.disabled = false;
     if ($("#diagnostics").open) await loadDiagnostics();
