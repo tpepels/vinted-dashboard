@@ -145,7 +145,7 @@ class InventoryItem(TimestampMixin, Base):
     #: books or {"brand": ..., "size": ...} for clothing.
     attributes: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
 
-    workspace: Mapped[Workspace] = relationship(back_populates="inventory_items")
+    workspace: Mapped[Workspace] = relationship(back_populates="inventory_items", lazy="selectin")
     listings: Mapped[list["ChannelListing"]] = relationship(back_populates="inventory_item")
     sales: Mapped[list["Sale"]] = relationship(back_populates="inventory_item")
 
@@ -314,7 +314,7 @@ class Sale(TimestampMixin, Base):
     last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_utcnow)
     extra: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
 
-    workspace: Mapped[Workspace] = relationship()
+    workspace: Mapped[Workspace] = relationship(lazy="selectin")
     inventory_item: Mapped[Optional[InventoryItem]] = relationship(back_populates="sales")
 
 
