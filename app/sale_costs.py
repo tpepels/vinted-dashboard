@@ -59,12 +59,12 @@ def sale_book_quantity(sale: Any) -> tuple[int | None, str]:
 
 
 def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | None, str | None]:
-    """Resolve order cost: manual sale > old per-book estimate > item > default.
+    """Resolve order cost: manual sale > historical per-book estimate > item > listing default.
 
     The default is calculated at read time, so a relisted book or a new sale
     does not need another cost entry. A manual sale override is an order total.
     """
-    from app.book_costs import default_book_cost_cents, effective_item_cost
+    from app.book_costs import default_listing_cost_cents, effective_item_cost
 
     extra = dict(sale.extra or {})
     source = str(extra.get("acquisition_cost_source") or "")
@@ -90,15 +90,16 @@ def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | Non
             # A default estimate only applies to books, never unclassified
             # general stock from other marketplace connectors.
             if cents is not None and (item.cost_cents is not None or workspace is not None):
-                return cents * (count or 1), item_source
-    # Historical Vinted orders often predate item linkage. This dashboard's
-    # Vinted sales are books; price them from the workspace book default.
+                return cents * (count or 1), ("default_listing_assumed_quantity" if item_source == "default_listing" and count is None else item_source)
+    # Historical Vinted orders may have no linked stock item. The order
+    # quantity counts separately sold Vinted listings, not books inside one
+    # listing. Each listing incurs exactly one default acquisition cost.
     if (workspace is not None and currency == "EUR"
             and str(getattr(sale, "channel", "") or "").lower() == "vinted"):
-        default = default_book_cost_cents(settings)
+        default = default_listing_cost_cents(settings)
         if default is not None:
             return default * (count or 1), (
-                "default_book_assumed_quantity" if count is None else "default_book"
+                "default_listing_assumed_quantity" if count is None else "default_listing"
             )
     return None, None
 
