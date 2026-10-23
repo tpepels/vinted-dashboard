@@ -147,7 +147,7 @@ def test_today_unifies_operational_work_types(monkeypatch):
     kinds = {row["kind"] for row in body["work_queue"]}
 
     assert "listing" in kinds
-    assert "purchase_cost" in kinds
+    assert "purchase_cost" not in kinds  # Book cost defaults do not require daily manual review
     assert "reconcile" in kinds
     assert "open_sales" in kinds
     assert "connector_error" in kinds
