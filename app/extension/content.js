@@ -1,7 +1,7 @@
 (() => {
-if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 10) return;
-globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 10;
-const BRIDGE_CONTENT_PROTOCOL=10;
+if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 11) return;
+globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 11;
+const BRIDGE_CONTENT_PROTOCOL=11;
 // Diagnostic events contain only step names, counts and errors, never account data.
 function traceBridge(stage,detail="",level="info"){
   try{
@@ -259,7 +259,42 @@ async function enrichListingDetails(listings,reason="periodic"){
     access_blocked:accessBlocked,
   };
 }
-async function paged(path,keys,params={},perPage=96){const rows=[];for(let page=1;page<=10;page++){const payload=await fetchJson(path,{...params,page,per_page:perPage});if(payload===null)return null;const chunk=listFrom(payload,keys);rows.push(...chunk);if(!chunk.length)break;const p=payload?.pagination;if(p&&typeof p==="object"){if(Number.isInteger(p.total_pages)&&page>=p.total_pages)break;if(p.next_page==null&&chunk.length<perPage)break}else if(chunk.length<perPage)break}return rows}
+async function paged(path,keys,params={},perPage=96,required=false){
+  const rows=[];
+  let finished=false;
+  for(let page=1;page<=10;page++){
+    const payload=await fetchJson(path,{...params,page,per_page:perPage});
+    if(payload===null){
+      if(required)throw new Error("Vinted returned HTTP 404 for required endpoint "+path);
+      return null;
+    }
+    if(payload?.code!=null&&Number(payload.code)!==0)
+      throw new Error("Vinted returned application error code "+String(payload.code).slice(0,60)+" for "+path);
+    const source=payload?.data;
+    const valid=Array.isArray(payload)||
+      Boolean(payload&&typeof payload==="object"&&(
+        keys.some(key=>Array.isArray(payload[key]))||
+        Array.isArray(source)||
+        (source&&typeof source==="object"&&keys.some(key=>Array.isArray(source[key])))
+      ));
+    if(required&&!valid){
+      const shape=Object.keys(payload||{}).slice(0,12).join(",");
+      traceBridge("inventory.unexpected.response","keys="+shape,"error");
+      throw new Error("Vinted returned unexpected inventory response for "+path+" (keys: "+shape+").");
+    }
+    const chunk=listFrom(payload,keys);
+    rows.push(...chunk);
+    const p=payload?.pagination;
+    if(!chunk.length){finished=true;break}
+    if(p&&typeof p==="object"){
+      const totalPages=Number(p.total_pages??p.totalPages);
+      if(Number.isInteger(totalPages)&&page>=totalPages){finished=true;break}
+      if((p.next_page===null||p.nextPage===null)&&chunk.length<perPage){finished=true;break}
+    }else if(chunk.length<perPage){finished=true;break}
+  }
+  if(required&&!finished)throw new Error("Vinted inventory exceeds ten pages. Refusing a partial snapshot.");
+  return rows;
+}
 
 async function collectVintedData(reason="periodic"){
   traceBridge("collect.start","reason="+reason);
@@ -290,27 +325,43 @@ async function collectVintedData(reason="periodic"){
 
   const listings=new Map();
   let secondaryRateLimited=false,secondaryAccessBlocked=false;
-  for(const status of["active","sold","reserved","draft","closed"]){
-    if(secondaryAccessBlocked)break;
-    traceBridge("listings."+status+".start");
+  // The basic wardrobe endpoint is unfiltered: status=active can return empty.
+  traceBridge("listings.active.start","unfiltered wardrobe");
+  const activeRows=await paged("/api/v2/users/"+userId+"/items",
+    ["items","user_items"],{order:"newest_first"},96,true);
+  for(const raw of activeRows){const row=listingRow(raw,null);if(row.id)listings.set(row.id,row)}
+  traceBridge("listings.active.done","rows="+activeRows.length);
+  // A zero result must not deactivate existing listings in the dashboard.
+  if(!listings.size){
+    traceBridge("inventory.empty","cross-checking wardrobe endpoint","warn");
     try{
-      const rows=await paged(`/api/v2/users/${userId}/items`,["items","user_items"],{status,order:"newest_first"});
-      for(const raw of rows||[]){const row=listingRow(raw,status);if(row.id)listings.set(row.id,row)}
-      traceBridge("listings."+status+".done","rows="+(rows||[]).length);
-    }catch(error){
-      traceBridge("listings."+status+".error",error?.message||error,"error");
-      // Active listings are authoritative for physical stock. Never upload a
-      // snapshot if this endpoint failed or only partially paged.
-      if(status==="active")throw error;
-      if(isAccessError(error)){secondaryAccessBlocked=true;secondaryRateLimited=isRateLimitError(error)}
-    }
+      const fallback=await paged("/api/v2/wardrobe/"+userId+"/items",
+        ["items","user_items"],{order:"newest_first"},96,true);
+      for(const raw of fallback||[]){
+        const row=listingRow(raw,null);
+        if(row.id)listings.set(row.id,row);
+      }
+    }catch(error){traceBridge("inventory.fallback.error",error?.message||error,"error")}
+    if(!listings.size)throw new Error(
+      "Vinted returned no listings from either wardrobe endpoint. Nothing was uploaded to protect your existing inventory."
+    );
   }
-  if(!secondaryAccessBlocked){
-    try{
-      const rows=await paged(`/api/v2/wardrobe/${userId}/items`,["items","user_items"],{order:"newest_first"});
-      for(const raw of rows||[]){const row=listingRow(raw,null);if(!row.id)continue;const old=listings.get(row.id);if(!old||row.status==="hidden")listings.set(row.id,row)}
-    }catch(error){
-      if(isAccessError(error)){secondaryAccessBlocked=true;secondaryRateLimited=isRateLimitError(error)}
+  // Status-filtered endpoints are undocumented and returned empty; sales are
+  // obtained through the order API instead of re-querying the same wardrobe.
+  try{
+    const wardrobe=await paged("/api/v2/wardrobe/"+userId+"/items",
+      ["items","user_items"],{order:"newest_first"});
+    for(const raw of wardrobe||[]){
+      const row=listingRow(raw,null);
+      if(!row.id)continue;
+      const old=listings.get(row.id);
+      if(!old||row.status==="hidden")listings.set(row.id,row);
+    }
+    traceBridge("wardrobe.done","rows="+(wardrobe||[]).length);
+  }catch(error){
+    traceBridge("wardrobe.optional.error",error?.message||error,"error");
+    if(isAccessError(error)){
+      secondaryAccessBlocked=true;secondaryRateLimited=isRateLimitError(error);
     }
   }
   const detailEligible=[...listings.values()].filter(row=>row?.id&&["active","reserved","hidden","draft"].includes(String(row.status||"active"))).length;
@@ -377,7 +428,43 @@ function renderedPageAccessState(){
   return{rate_limited:rateLimited,challenged};
 }
 
+// A collection may take minutes. Never hold a Chrome message port open.
+let collectionJob=null;
+function startCollection(reason,id){
+  if(collectionJob?.status==="running")
+    return {ok:false,error:"A Vinted collection is already running."};
+  collectionJob={id,status:"running",startedAt:Date.now()};
+  const job=collectionJob;
+  collectVintedData(reason).then(snapshot=>{
+    job.result={ok:true,snapshot};
+    job.status="done";
+  }).catch(error=>{
+    traceBridge("collect.failed",error?.stack||error?.message||error,"error");
+    job.result={ok:false,error:error instanceof Error?error.message:String(error),
+      rate_limited:isRateLimitError(error)};
+    job.status="done";
+  });
+  return {ok:true,started:true};
+}
 chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
+  if(message?.type==="collect-vinted-start"){
+    sendResponse(startCollection(message.reason||"periodic",String(message.job_id||"")));
+    return;
+  }
+  if(message?.type==="collect-vinted-result"){
+    if(!collectionJob||collectionJob.id!==String(message.job_id||"")){
+      sendResponse({ok:false,error:"Vinted collection lost its context (tab reloaded or replaced). No data was uploaded."});
+      return;
+    }
+    if(collectionJob.status==="running"){
+      sendResponse({ok:true,state:"running"});
+      return;
+    }
+    const result=collectionJob.result;
+    collectionJob=null;
+    sendResponse(result);
+    return;
+  }
   if(message?.type==="bridge-content-protocol"){
     sendResponse({ok:true,protocol:BRIDGE_CONTENT_PROTOCOL});
     return;
