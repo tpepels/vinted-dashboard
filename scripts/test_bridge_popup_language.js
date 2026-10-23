@@ -43,7 +43,7 @@ const ctx = {
   navigator:{clipboard:{async writeText(value){copiedText=value}}},
   chrome: {
     runtime: {
-      getManifest: () => ({version:"3.4.11"}),
+      getManifest: () => ({version:"3.4.12"}),
       sendMessage: async msg => msg.type==="diagnostics"
         ? {ok:true,lines:["2026-10-23 [ERROR] collect.channel.error: Chrome port closed"]}
         : msg.type==="diagnostics-clear" ? {ok:true} : response,
@@ -63,7 +63,7 @@ vm.createContext(ctx);
   assert.match(elements["#detail-info"].textContent, /280 listings still need optional details/);
   assert.match(elements["#detail-info"].textContent, /basic listing update has already been sent/);
   assert.equal(elements["#sync-details"].classList.contains("hidden"), false);
-  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.11");
+  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.12");
   const dateLabel=ctx.localDateTime("2026-10-17T21:21:50Z");
   assert.match(dateLabel, /\b26\b/);
   assert.doesNotMatch(dateLabel, /2026|:\d\d:\d\d/);
