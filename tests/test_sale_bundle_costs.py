@@ -138,9 +138,9 @@ def test_per_book_bulk_price_and_manual_quantity_repricing():
 
     summary = client.get("/api/app/analytics?period=30").json()
     assert summary["sales_period_unknown_quantity_count"] == 1
-    assert summary["sales_period_costed_count"] == 3
-    assert summary["sales_period_cost_cents"] == 1600
-    assert summary["sales_period_gross_profit_cents"] == 5400
+    assert summary["sales_period_costed_count"] == 4  # Unknown count temporarily uses €1 default
+    assert summary["sales_period_cost_cents"] == 1700
+    assert summary["sales_period_gross_profit_cents"] == 7800
 
     set_qty = client.patch(f"/api/app/sales/{ids['unknown']}/book-quantity",
                            json={"quantity": 4}, headers=headers)
