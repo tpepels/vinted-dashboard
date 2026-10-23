@@ -57,7 +57,7 @@ def test_bulk_historical_cost_preview_preserves_recorded_and_manual_override():
     payload = {"cost_cents": 100, "currency": "EUR", "scope": "all"}
     previous = client.get("/api/app/analytics?period=30").json()
     assert previous["sales_period_count"] == 4
-    assert previous["sales_period_costed_count"] == 1
+    assert previous["sales_period_costed_count"] == 2  # Unlinked Vinted book has €1 default
     assert previous["sales_period_economics_complete"] is False
     response = client.post(url, headers=headers, json=payload)
     assert response.status_code == 200, response.text
@@ -66,7 +66,7 @@ def test_bulk_historical_cost_preview_preserves_recorded_and_manual_override():
     assert response.json()["other_currency"] == 1
     assert response.json()["with_sale_amount"] == 1
     rows = {x["external_order_id"]: x for x in client.get("/api/app/sales").json()["sales"]}
-    assert rows["unlinked"]["acquisition_cost_cents"] is None
+    assert rows["unlinked"]["acquisition_cost_cents"] == 100
 
     applied = client.post(url, headers=headers, json={**payload, "preview": False})
     assert applied.status_code == 200, applied.text
@@ -100,7 +100,7 @@ def test_bulk_historical_cost_preview_preserves_recorded_and_manual_override():
         headers=headers, json={"cost_cents": None},
     )
     assert cleared.status_code == 200, cleared.text
-    assert cleared.json()["cost_cents"] is None
+    assert cleared.json()["cost_cents"] == 100  # Reverts to the book-wide default
 
     inventory_override = client.patch(
         f"/api/app/sales/{ids['linked']}/acquisition-cost",
