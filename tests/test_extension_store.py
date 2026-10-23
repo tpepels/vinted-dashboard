@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "3.4.11"
+    assert manifest["version"] == "3.4.12"
 
 
 
@@ -205,15 +205,15 @@ def test_vinted_quiet_bridge_does_not_scan_pages_or_reload_browser():
     assert "const ageScanItems=[];" in content
     assert "const queue=missing.slice(0,3);" in content
     assert "const maxRetries=0;" in content
-    assert "const BRIDGE_CONTENT_PROTOCOL=10;" in content
-    assert "const CONTENT_PROTOCOL=10;" in background
+    assert "const BRIDGE_CONTENT_PROTOCOL=11;" in content
+    assert "const CONTENT_PROTOCOL=11;" in background
 
 
 def test_content_script_has_reinjection_guard():
     content = (ROOT / "app" / "extension" / "content.js").read_text(encoding="utf-8")
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "(() => {" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 10" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 11" in content
     assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 10" in content
     assert content.rstrip().endswith("})();")
     assert "node scripts/test_vinted_content_idempotent.js" in workflow
@@ -276,13 +276,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.11.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.12.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.11"
+    assert response.headers["x-bridge-version"] == "3.4.12"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.11.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.12.zip")
     assert versioned.status_code == 200
-    assert "v3.4.11.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.12.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
