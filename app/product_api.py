@@ -130,7 +130,7 @@ from app.product_models import (
 )
 from app.reconciliation import apply_reconciliation_merges, reconciliation_suggestions
 from app.purchase_costs import apply_purchase_cost, purchase_cost_suggestions
-from app.book_costs import BOOK_COST_SETTING, default_book_cost_cents, effective_item_cost
+from app.book_costs import LISTING_COST_SETTING, LEGACY_BOOK_COST_SETTING, effective_item_cost
 from app.runtime_config import is_production, public_app_origin, safe_runtime_summary
 from app.stock_policy import sale_counts_as_sold
 from app.sale_costs import (
@@ -425,6 +425,8 @@ class ConnectorCredentialsRequest(BaseModel):
 class SettingsRequest(BaseModel):
     name: str | None = None
     settings: dict[str, Any] | None = None
+    default_listing_cost_cents: int | None = Field(default=None, ge=0, le=10_000_000)
+    # Older clients may still submit the previous field until they refresh.
     default_book_cost_cents: int | None = Field(default=None, ge=0, le=10_000_000)
 
 
@@ -502,8 +504,8 @@ def _serialize_item(item: models.InventoryItem, listings: list[models.ChannelLis
     ) or next((row for row in rows if row.channel == Channel.VINTED), None)
     biblio_publishable = publishing.is_biblio_book_candidate(item, vinted_source)
     cost, cost_source = effective_item_cost(item, item.workspace.settings)
-    if item.cost_cents is None and cost_source == "default_book":
-        attributes["cost_source"] = "default_book"
+    if item.cost_cents is None and cost_source == "default_listing":
+        attributes["cost_source"] = "default_listing"
     potential_margin = (
         int(effective_ask) - int(cost)
         if effective_ask is not None and cost is not None
@@ -1488,7 +1490,7 @@ def update_inventory_item(
             # Editing a purchase cost is an explicit exception, never an
             # accidental reapplication of the book-wide estimated default.
             if values["cost_cents"] is None:
-                if attributes.get("cost_source") in {"manual_item", "default_book"}:
+                if attributes.get("cost_source") in {"manual_item", "default_book", "default_listing"}:
                     attributes.pop("cost_source", None)
             else:
                 attributes["cost_source"] = "manual_item"
@@ -4913,7 +4915,7 @@ def analytics(
         "sales_period_economics_complete": (len(period_costed) == len(sold_period)),
         "sales_period_estimated_count": sum(
             sale_acquisition_cost(row, sold_items.get(row.inventory_item_id))[1]
-            in {"default_book", "default_book_assumed_quantity", "estimated_bulk"}
+            in {"default_listing", "default_listing_assumed_quantity", "default_book", "default_book_assumed_quantity", "estimated_bulk"}
             or (
                 (row.extra or {}).get("acquisition_cost_cents") is None
                 and (sold_items.get(row.inventory_item_id) is not None)
@@ -7258,12 +7260,17 @@ def update_settings(
             workspace.name = payload.name.strip()[:200]
         if payload.settings is not None:
             workspace.settings = payload.settings
-        if "default_book_cost_cents" in payload.model_fields_set:
+        if {"default_listing_cost_cents", "default_book_cost_cents"} & payload.model_fields_set:
             prefs = dict(workspace.settings or {})
-            if payload.default_book_cost_cents is None:
-                prefs.pop(BOOK_COST_SETTING, None)
+            # Migrate existing stored book-setting values whenever the user saves.
+            cents = (payload.default_listing_cost_cents
+                     if "default_listing_cost_cents" in payload.model_fields_set
+                     else payload.default_book_cost_cents)
+            prefs.pop(LEGACY_BOOK_COST_SETTING, None)
+            if cents is None:
+                prefs.pop(LISTING_COST_SETTING, None)
             else:
-                prefs[BOOK_COST_SETTING] = payload.default_book_cost_cents
+                prefs[LISTING_COST_SETTING] = cents
             workspace.settings = prefs
         session.flush()
         result = _serialize_workspace(workspace)
