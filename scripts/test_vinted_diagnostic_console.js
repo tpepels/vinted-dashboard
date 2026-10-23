@@ -35,7 +35,7 @@ function send(message,url) {
   const first=(await ctx.getDiagnostics()).join("\n");
   assert.match(first,/test.secret/);
   assert.doesNotMatch(first,/secret123|anotherSecret|credential=hush|4387/);
-  assert.match(first,/Bearer \[redacted\]/);
+  assert.match(first,/Authorization=\[redacted\]/);
   assert.match(first,/\/users\/\[id\]/);
 
   await send({type:"bridge-diagnostic-event",stage:"collect.start",detail:"reason=manual"},
