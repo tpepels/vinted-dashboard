@@ -179,28 +179,151 @@ async function enrichListingDates(listings){
   return missing;
 }
 
+// Public item pages carry Product JSON-LD and/or Next.js hydration data.
+// Vinted's old /api/v2/items/{id} JSON endpoint returns 404 on current sites.
+const LISTING_DETAIL_RETRY_KEY="vintedListingDetailRetryV1";
+function embeddedJsonObject(source,start){
+  if(source[start]!=="{")return null;
+  let depth=0,inString=false,escaped=false;
+  for(let i=start;i<source.length&&i<start+750000;i++){
+    const c=source[i];
+    if(inString){
+      if(escaped)escaped=false;
+      else if(c==="\\")escaped=true;
+      else if(c==='"')inString=false;
+      continue;
+    }
+    if(c==='"'){inString=true;continue}
+    if(c==="{")depth++;
+    if(c==="}"&&!--depth){
+      try{return JSON.parse(source.slice(start,i+1))}catch{return null}
+    }
+  }
+  return null;
+}
+function itemPageData(html,id){
+  if(typeof html!=="string"||html.length<40)return null;
+  const expected=String(id);
+  let chosen=null,source=null;
+  // Prefer the item represented in the Next.js React Server Component
+  // payload, whose object shape resembles the original JSON API.
+  const pieces=[];
+  const pushes=/self\.__next_f\.push\(\[\s*\d+\s*,\s*("(?:\\.|[^"\\])*")\s*\]\s*\)/g;
+  for(const match of html.matchAll(pushes)){
+    try{pieces.push(JSON.parse(match[1]))}catch{}
+  }
+  const hydration=pieces.join("");
+  const keys=/"(?:item|item_details|itemDetails)"\s*:\s*\{/g;
+  for(const match of hydration.matchAll(keys)){
+    const raw=embeddedJsonObject(hydration,match.index+match[0].lastIndexOf("{"));
+    if(!raw||String(first(raw,"id","item_id")||"")!==expected)continue;
+    if(!chosen||Object.keys(raw).length>Object.keys(chosen).length){
+      chosen=raw;source="next_page";
+    }
+  }
+  const productScripts=/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let product=null;
+  for(const match of html.matchAll(productScripts)){
+    try{
+      const objects=[JSON.parse(match[1])];
+      for(let i=0;i<objects.length&&i<30;i++){
+        const node=objects[i];
+        if(Array.isArray(node)){objects.push(...node);continue}
+        if(!node||typeof node!=="object")continue;
+        if(Array.isArray(node["@graph"])){objects.push(...node["@graph"]);continue}
+        const kinds=[].concat(node["@type"]||[]).map(x=>String(x).toLowerCase());
+        if(kinds.includes("product")){
+          const url=String(first(node,"url","@id")||"");
+          const matchId=url.match(/\/items\/(\d+)/);
+          if(matchId&&matchId[1]!==expected)continue;
+          product=node;break;
+        }
+      }
+      if(product)break;
+    }catch{}
+  }
+  let metadata=chosen?listingMetadata(chosen):{};
+  let images=chosen?imageUrls(chosen):[];
+  let created=chosen?exactStamp(first(chosen,"created_at_ts","created_timestamp_ts","uploaded_ts","upload_date_dte")):null;
+  if(product){
+    if(!metadata.description&&typeof product.description==="string")
+      metadata.description=product.description.slice(0,2000);
+    if(!metadata.category&&typeof product.category==="string")
+      metadata.category=product.category;
+    if(!metadata.condition&&typeof product.itemCondition==="string")
+      metadata.condition=product.itemCondition.split("/").pop();
+    if(!metadata.isbn&&typeof product.isbn==="string")metadata.isbn=product.isbn;
+    if(!metadata.author){
+      const author=product.author;
+      if(author)metadata.author=metaText(author);
+    }
+    const photos=[].concat(product.image||[]).map(x=>typeof x==="string"?x:first(x,"url","contentUrl")).filter(x=>typeof x==="string"&&/^https:\/\//i.test(x));
+    if(!images.length)images=photos;
+    if(!source)source="json_ld";
+  }
+  if(!source||(!Object.keys(metadata).length&&!images.length&&!created))return null;
+  return {metadata,images,created,source};
+}
+async function fetchItemPage(row){
+  const numericId=String(row.id||"");
+  if(!/^\d+$/.test(numericId))throw Object.assign(new Error("Invalid item identifier"),{detailReason:"invalid_id"});
+  let path="/items/"+numericId;
+  try{
+    const supplied=new URL(row.vinted_url||path,location.origin);
+    if(supplied.origin===location.origin&&new RegExp("^/items/"+numericId+"(?:-|$)").test(supplied.pathname)){
+      path=supplied.pathname;
+    }
+  }catch{}
+  const delay=6000-(Date.now()-lastVintedFetchAt);
+  if(delay>0)await wait(delay);
+  lastVintedFetchAt=Date.now();
+  const response=await fetch(new URL(path,location.origin),{
+    method:"GET",credentials:"include",cache:"no-store",
+    referrer:location.origin+"/",headers:{"Accept":"text/html,application/xhtml+xml"},
+  });
+  const status=Number(response.status);
+  if(status===401||status===403||status===429){
+    const error=new Error("Vinted item page HTTP "+status);
+    error.detailReason="http_"+status;
+    error.vintedRateLimited=status===429;
+    error.vintedForbidden=status===401||status===403;
+    error.vintedChallenged=String(response.headers?.get?.("cf-mitigated")||"").toLowerCase()==="challenge";
+    throw error;
+  }
+  if(!response.ok){
+    const error=new Error("Vinted item page HTTP "+status);
+    error.detailReason="http_"+status;
+    throw error;
+  }
+  const body=await response.text();
+  const detail=itemPageData(body,numericId);
+  if(!detail)throw Object.assign(new Error("No item metadata in Vinted page"),{detailReason:"unrecognized_page"});
+  return detail;
+}
 async function enrichListingDetails(listings,reason="periodic"){
-  let stored={};try{stored=await chrome.storage.local.get([LISTING_DETAIL_CACHE_KEY])}catch{}
+  let stored={};
+  try{stored=await chrome.storage.local.get([LISTING_DETAIL_CACHE_KEY,LISTING_DETAIL_RETRY_KEY])}catch{}
   const cache=(stored&&typeof stored[LISTING_DETAIL_CACHE_KEY]==="object"&&stored[LISTING_DETAIL_CACHE_KEY])||{};
+  const retries=(stored&&typeof stored[LISTING_DETAIL_RETRY_KEY]==="object"&&stored[LISTING_DETAIL_RETRY_KEY])||{};
   const eligible=[...listings.values()].filter(row=>row?.id&&["active","reserved","hidden","draft"].includes(String(row.status||"active")));
-  const missing=[];let changed=false;
-
+  const missing=[];let changed=false,retryChanged=false;
+  const now=Date.now();
   function applyCached(row,cached){
     row.metadata={...(cached.metadata||{}),...(row.metadata||{})};
     const images=Array.isArray(cached.image_urls)?cached.image_urls.filter(Boolean):[];
     if(images.length){row.image_urls=images;row.image_url=images[0]}
-    if(!row.listed_at&&cached.listed_at){const exact=exactStamp(cached.listed_at);if(exact){row.listed_at=exact;row.listed_at_source="vinted_detail_cache"}}
+    if(!row.listed_at&&cached.listed_at){
+      const exact=exactStamp(cached.listed_at);
+      if(exact){row.listed_at=exact;row.listed_at_source="vinted_detail_cache"}
+    }
   }
   function needsDetail(row){
     const metadata=row.metadata||{};
     const images=Array.isArray(row.image_urls)?row.image_urls.filter(Boolean):[];
-    const category=String(metadata.category||"").toLowerCase();
-    const bookLike=/\b(book|books|fiction|literature|novel|crime|thriller|biograph|memoir|poetry|comic|manga)\b/.test(category);
-    if(!metadata.description||!metadata.category||!images.length)return true;
-    if(bookLike&&(!metadata.isbn||!metadata.author))return true;
-    return false;
+    // ISBN and author are not guaranteed fields on Vinted, even for books:
+    // do not retry complete listings indefinitely just to obtain them.
+    return !metadata.description||!metadata.category||!images.length;
   }
-
   for(const row of eligible){
     const cached=cache[row.id];
     if(cached&&typeof cached==="object"){
@@ -218,45 +341,68 @@ async function enrichListingDetails(listings,reason="periodic"){
     }
     missing.push(row);
   }
-
-  // Incremental enrichment, capped per sync. Never walk the entire
-  // wardrobe's detail endpoints in one session.
-  const queue=missing.slice(0,3);
-  let enriched=0,rateLimited=false,accessBlocked=false;
-  for(const row of queue){
+  const queue=missing.filter(row=>{
+    const attempt=retries[row.id];
+    return !attempt||Number(attempt.next_retry_at||0)<=now;
+  }).slice(0,3);
+  let enriched=0,rateLimited=false,accessBlocked=false,failures=0;
+  for(const [index,row] of queue.entries()){
     try{
-      const payload=await fetchJson(
-        `/api/v2/items/${row.id}`,
-        {localize:"false"},
-        {minDelayMs:6000,maxRetries:0},
-      );
-      if(payload===null)continue;
-      const raw=payload?.item||payload?.data?.item||payload?.data||payload||{};
-      const metadata=listingMetadata(raw);
-      const images=imageUrls(raw);
-      const created=exactStamp(first(raw,"created_at_ts","created_timestamp_ts","uploaded_ts","upload_date_dte"));
-      row.metadata={...metadata,...(row.metadata||{})};
-      if(images.length){row.image_urls=images;row.image_url=images[0]}
-      if(created&&!row.listed_at){row.listed_at=created;row.listed_at_source="vinted_detail"}
-      cache[row.id]={metadata,image_urls:images,listed_at:created||null};
+      const detail=await fetchItemPage(row);
+      row.metadata={...detail.metadata,...(row.metadata||{})};
+      if(detail.images.length){row.image_urls=detail.images;row.image_url=detail.images[0]}
+      if(detail.created&&!row.listed_at){row.listed_at=detail.created;row.listed_at_source="vinted_page"}
+      cache[row.id]={
+        metadata:detail.metadata,
+        image_urls:detail.images.slice(0,20),
+        listed_at:detail.created||null,
+      };
       changed=true;
+      if(retries[row.id]){delete retries[row.id];retryChanged=true}
       enriched++;
+      traceBridge("details.item.ok","attempt="+(index+1)+" source="+detail.source);
     }catch(error){
-      if(isAccessError(error)){accessBlocked=true;rateLimited=isRateLimitError(error);break}
+      failures++;
+      const label=String(error?.detailReason||"fetch_error").slice(0,50);
+      const previous=retries[row.id]||{};
+      const failureCount=Math.min(10,Math.max(0,Number(previous.failures||0))+1);
+      // Failed pages are deferred, not repeatedly requested in every manual
+      // or scheduled sync. Retry other items in the wardrobe next time.
+      const hours=label==="http_404"?168:Math.min(168,2**failureCount);
+      retries[row.id]={
+        failures:failureCount,next_retry_at:Date.now()+hours*3600000,
+        reason:label,
+      };
+      retryChanged=true;
+      traceBridge("details.item.failed","attempt="+(index+1)+" reason="+label+" retry_hours="+hours,"warning");
+      if(isAccessError(error)){
+        accessBlocked=true;
+        rateLimited=isRateLimitError(error);
+        break;
+      }
     }
   }
-
-  const eligibleIds=new Set(eligible.map(row=>String(row.id)));
-  for(const key of Object.keys(cache)){if(!eligibleIds.has(String(key))){delete cache[key];changed=true}}
-  if(changed){try{await chrome.storage.local.set({[LISTING_DETAIL_CACHE_KEY]:cache})}catch{}}
+  const ids=new Set(eligible.map(row=>String(row.id)));
+  for(const key of Object.keys(cache)){
+    if(!ids.has(String(key))){delete cache[key];changed=true}
+  }
+  for(const key of Object.keys(retries)){
+    if(!ids.has(String(key))){delete retries[key];retryChanged=true}
+  }
+  if(changed||retryChanged){
+    try{
+      const data={};
+      if(changed)data[LISTING_DETAIL_CACHE_KEY]=cache;
+      if(retryChanged)data[LISTING_DETAIL_RETRY_KEY]=retries;
+      await chrome.storage.local.set(data);
+    }catch{}
+  }
   const pending=Math.max(0,missing.length-enriched);
-  return{
-    enriched,
-    attempted:queue.length,
-    pending,
-    deferred:pending,
-    rate_limited:rateLimited,
-    access_blocked:accessBlocked,
+  return {
+    enriched,attempted:queue.length,failed:failures,
+    pending,deferred:pending,
+    cooldown:Math.max(0,missing.length-queue.length),
+    rate_limited:rateLimited,access_blocked:accessBlocked,
   };
 }
 // A wardrobe snapshot is authoritative only if every reported page arrived.
@@ -373,7 +519,7 @@ async function collectVintedData(reason="periodic"){
   const detailSync=secondaryAccessBlocked
     ? {enriched:0,attempted:0,pending:detailEligible,deferred:detailEligible,rate_limited:secondaryRateLimited,access_blocked:true}
     : await enrichListingDetails(listings,reason);
-  traceBridge("details.done","enriched="+detailSync.enriched+" pending="+detailSync.pending+" blocked="+Boolean(detailSync.access_blocked));
+  traceBridge("details.done","enriched="+detailSync.enriched+" attempted="+detailSync.attempted+" failed="+(detailSync.failed||0)+" pending="+detailSync.pending+" cooldown="+(detailSync.cooldown||0)+" blocked="+Boolean(detailSync.access_blocked));
   // Historical multi-tab page-age scans are disabled; cached values may
   // still be used locally without opening Vinted pages.
   const ageScanItems=[];
