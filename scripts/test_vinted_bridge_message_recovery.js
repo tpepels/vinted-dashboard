@@ -22,7 +22,7 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   let openedTabs = 0;
   const chrome = {
     runtime:{
-      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.5"}),
+      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.12"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
       onMessage:{addListener(){}},
     },
@@ -50,12 +50,14 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
         assert([tab.id,worker.id].includes(id));
         if(payload.type==="bridge-content-protocol"){
           if(mode==="missing" && !injections)throw Error("Could not establish connection. Receiving end does not exist.");
-          return {protocol:mode==="old"&&id===tab.id&&!reloads?9:10};
+          return {protocol:mode==="old"&&id===tab.id&&!reloads?10:11};
         }
-        if(payload.type==="collect-vinted-data"){
+        if(payload.type==="collect-vinted-start"){
           collections++;
-          if(["recover","periodic-lost"].includes(mode)&&collections===1)throw Error(LOST);
-          if(mode==="double-lost")throw Error(LOST);
+          return {ok:true,started:true};
+        }
+        if(payload.type==="collect-vinted-result"){
+          if(["recover","periodic-lost","double-lost"].includes(mode))throw Error(LOST);
           if(mode==="limited")return {ok:false,rate_limited:true,error:"Vinted API rate limited the inventory sync."};
           return {ok:true,snapshot:{
             listings:[{id:"1",status:"active"}],
@@ -97,35 +99,32 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   assert.equal(background.result.sync_skipped_for_interval,true);
   assert.equal(background.collections,0,"Automatic refresh must retain two-hour interval");
 
-  const healed=await scenario("recover","manual");
-  assert.equal(healed.result.ok,true);
-  assert.equal(healed.collections,2,"Only one manual retry on lost message channel");
-  assert.equal(healed.sentToDashboard,1,"Never send a partial or duplicate snapshot");
-  assert.equal(healed.injections,0,"Do not inject duplicate listeners into a working tab");
-  assert.equal(healed.reloads,0);
-  assert.equal(healed.openedTabs,0);
+  const lost=await scenario("recover","manual");
+  assert.equal(lost.result.ok,false,"Lost polling channel must fail without restarting");
+  assert.equal(lost.collections,1,"A lost channel must not duplicate API collection");
+  assert.equal(lost.sentToDashboard,0,"Never upload a partial inventory");
+  assert.equal(lost.injections,0);
+  assert.equal(lost.reloads,0);
+  assert.equal(lost.openedTabs,0);
 
   const missing=await scenario("missing","manual");
   assert.equal(missing.result.ok,true);
-  assert.equal(missing.injections,1,"Recover missing content listener without reloading page");
+  assert.equal(missing.injections,1,"Recover missing content listener before starting");
 
   const failed=await scenario("double-lost","manual");
   assert.equal(failed.result.ok,false);
-  assert.match(failed.result.error,/Vinted tab stopped responding/);
-  assert.doesNotMatch(failed.result.error,/A listener indicated an asynchronous response/);
-  assert.equal(failed.collections,2);
+  assert.match(failed.result.error,/collection connection was interrupted/);
+  assert.equal(failed.collections,1,"Never restart a failed collection");
   assert.equal(failed.sentToDashboard,0);
-  assert.equal(failed.result.api_rate_limited,false,"Tab disconnections are not a Vinted rate limit");
+  assert.equal(failed.result.api_rate_limited,false);
   const trace=(failed.state.bridgeDiagnosticLogV1||[]).join("\n");
-  assert.match(trace,/collect.channel.error/);
-  assert.match(trace,/collect.retry.channel.error/);
-  assert.match(trace,/A listener indicated an asynchronous response/,
-    "Retain the original Chrome error in the copyable diagnostic trace");
+  assert.match(trace,/collect.poll.channel.error/);
+  assert.match(trace,/A listener indicated an asynchronous response/);
 
   const deferred=await scenario("periodic-lost","periodic",0);
   assert.equal(deferred.result.ok,false);
-  assert.equal(deferred.collections,1,"Do not perform repeated automatic Vinted API collections");
-  assert.match(deferred.result.error,/automatic check/);
+  assert.equal(deferred.collections,1);
+  assert.match(deferred.result.error,/collection connection was interrupted/);
 
   const stale=await scenario("old","manual");
   assert.equal(stale.result.ok,true,"Manual sync should repair an old content script");
