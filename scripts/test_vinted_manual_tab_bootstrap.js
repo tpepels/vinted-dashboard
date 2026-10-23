@@ -21,7 +21,7 @@ async function scenario(mode,reason="manual",rememberedOrigin=null,accountId=nul
     runtime:{
       getManifest:()=>({content_scripts:[{matches:[
         "https://www.vinted.pt/*","https://www.vinted.nl/*",
-      ]}],version:"3.4.13"}),
+      ]}],version:"3.4.14"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
       onMessage:{addListener(){}},
     },
@@ -57,7 +57,7 @@ async function scenario(mode,reason="manual",rememberedOrigin=null,accountId=nul
       async sendMessage(id,request){
         assert(tabs.some(t=>t.id===id),"Messages must target a real tab");
         if(request.type==="bridge-content-protocol"){
-          return {protocol:mode==="stale"&&id===10&&!reloaded.length?9:11};
+          return {protocol:mode==="stale"&&id===10&&!reloaded.length?9:12};
         }
         if(request.type==="collect-vinted-start"){collections++;return {ok:true,started:true}}
         assert.equal(request.type,"collect-vinted-result");
