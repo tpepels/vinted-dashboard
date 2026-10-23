@@ -30,6 +30,17 @@
         <button id="unpair">Disconnect this browser</button>
       </details>
     </div>
+    <details id="diagnostics" class="info-panel secondary">
+      <summary>Diagnostic console (temporary)</summary>
+      <p>Local sync trace. No passwords, cookies, pairing codes or inventory are logged. Copy this after a failed check.</p>
+      <textarea id="diagnostic-console" readonly spellcheck="false" aria-label="Vinted sync diagnostics">Open to load diagnostic entries.</textarea>
+      <div class="diagnostic-actions">
+        <button id="refresh-logs" type="button">Refresh log</button>
+        <button id="copy-logs" type="button">Copy log</button>
+        <button id="clear-logs" type="button">Clear log</button>
+      </div>
+      <small id="diagnostic-feedback" role="status" aria-live="polite"></small>
+    </details>
     <details class="info-panel secondary">
       <summary>How automatic updates work</summary>
       <p>When Chrome is running, the bridge checks Vinted every two hours. It opens a temporary background tab, synchronizes your signed-in account and closes the tab. Vinted does not need to be open. Failed checks can retry at the next interval; successful checks are spaced at least two hours apart. You can also check manually at any time.</p>
