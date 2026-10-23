@@ -116,6 +116,11 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   assert.equal(failed.collections,2);
   assert.equal(failed.sentToDashboard,0);
   assert.equal(failed.result.api_rate_limited,false,"Tab disconnections are not a Vinted rate limit");
+  const trace=(failed.state.bridgeDiagnosticLogV1||[]).join("\n");
+  assert.match(trace,/collect.channel.error/);
+  assert.match(trace,/collect.retry.channel.error/);
+  assert.match(trace,/A listener indicated an asynchronous response/,
+    "Retain the original Chrome error in the copyable diagnostic trace");
 
   const deferred=await scenario("periodic-lost","periodic",0);
   assert.equal(deferred.result.ok,false);
