@@ -15,6 +15,7 @@ function element() {
   const classes = new Set();
   return {
     textContent: "", className: "", disabled: false, onclick: null,
+    value:"",open:false,scrollTop:0,scrollHeight:0,addEventListener() {},
     classList: {
       add: name => classes.add(name),
       remove: name => classes.delete(name),
@@ -26,7 +27,10 @@ function element() {
 const elements = Object.fromEntries([
   "#status", "#bridge-version", "#sync-details", "#detail-info",
   "#pair", "#paired", "#sync", "#pair-btn", "#code", "#dashboard", "#unpair",
+  "#diagnostics", "#diagnostic-console", "#diagnostic-feedback",
+  "#refresh-logs", "#copy-logs", "#clear-logs",
 ].map(id => [id, element()]));
+let copiedText = null;
 let response = {
   paired:true, workspace:"Personal Workspace",
   status: {
@@ -36,10 +40,13 @@ let response = {
 };
 const ctx = {
   document: {querySelector: key => elements[key]},
+  navigator:{clipboard:{async writeText(value){copiedText=value}}},
   chrome: {
     runtime: {
-      getManifest: () => ({version:"3.4.10"}),
-      sendMessage: async () => response,
+      getManifest: () => ({version:"3.4.11"}),
+      sendMessage: async msg => msg.type==="diagnostics"
+        ? {ok:true,lines:["2026-10-23 [ERROR] collect.channel.error: Chrome port closed"]}
+        : msg.type==="diagnostics-clear" ? {ok:true} : response,
     },
     tabs: {create() {}},
   },
@@ -56,7 +63,7 @@ vm.createContext(ctx);
   assert.match(elements["#detail-info"].textContent, /280 listings still need optional details/);
   assert.match(elements["#detail-info"].textContent, /basic listing update has already been sent/);
   assert.equal(elements["#sync-details"].classList.contains("hidden"), false);
-  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.10");
+  assert.equal(elements["#bridge-version"].textContent, "Chrome Bridge v3.4.11");
   const dateLabel=ctx.localDateTime("2026-10-17T21:21:50Z");
   assert.match(dateLabel, /\b26\b/);
   assert.doesNotMatch(dateLabel, /2026|:\d\d:\d\d/);
@@ -84,6 +91,10 @@ vm.createContext(ctx);
   await ctx.refresh();
   assert.match(elements["#status"].textContent,/Last update failed.*HTTP 403/,
     "Do not hide a failed manual update just because the temporary tab closed");
+  assert.equal(elements["#diagnostics"].open,true,"Show the console automatically on errors");
+  assert.match(elements["#diagnostic-console"].value,/Chrome port closed/);
+  await elements["#copy-logs"].onclick();
+  assert.match(copiedText,/Chrome port closed/);
   response = {paired:true,vinted_tab_open:false,workspace:"Personal Workspace",status:{}};
   await ctx.refresh();
   assert.match(elements["#status"].textContent,/Automatic Vinted checks run every two hours/);
