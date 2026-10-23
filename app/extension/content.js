@@ -2,6 +2,15 @@
 if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 10) return;
 globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 10;
 const BRIDGE_CONTENT_PROTOCOL=10;
+// Diagnostic events contain only step names, counts and errors, never account data.
+function traceBridge(stage,detail="",level="info"){
+  try{
+    const pending=chrome.runtime.sendMessage({
+      type:"bridge-diagnostic-event",stage,detail:String(detail||"").slice(0,600),level,
+    });
+    if(pending&&typeof pending.catch==="function")pending.catch(()=>{});
+  }catch{}
+}
 function first(obj,...keys){if(!obj||typeof obj!=="object")return null;for(const key of keys){const v=obj[key];if(v!==undefined&&v!==null&&v!=="")return v}return null}
 function idOf(v){if(v&&typeof v==="object")v=first(v,"id","user_id");return v==null||v===""?null:String(v)}
 function nameOf(v){if(v&&typeof v==="object")v=first(v,"login","username","name","display_name");return v==null||v===""?null:String(v)}
@@ -253,10 +262,12 @@ async function enrichListingDetails(listings,reason="periodic"){
 async function paged(path,keys,params={},perPage=96){const rows=[];for(let page=1;page<=10;page++){const payload=await fetchJson(path,{...params,page,per_page:perPage});if(payload===null)return null;const chunk=listFrom(payload,keys);rows.push(...chunk);if(!chunk.length)break;const p=payload?.pagination;if(p&&typeof p==="object"){if(Number.isInteger(p.total_pages)&&page>=p.total_pages)break;if(p.next_page==null&&chunk.length<perPage)break}else if(chunk.length<perPage)break}return rows}
 
 async function collectVintedData(reason="periodic"){
+  traceBridge("collect.start","reason="+reason);
   const currentPayload=await fetchJson("/api/v2/users/current");
   const currentRaw=currentPayload?.user||currentPayload||{};
   const userId=idOf(currentRaw);
   if(!userId)throw new Error("This Vinted tab is not signed in.");
+  traceBridge("account.ready");
 
   let profileRaw=currentRaw;
   try{
@@ -281,10 +292,13 @@ async function collectVintedData(reason="periodic"){
   let secondaryRateLimited=false,secondaryAccessBlocked=false;
   for(const status of["active","sold","reserved","draft","closed"]){
     if(secondaryAccessBlocked)break;
+    traceBridge("listings."+status+".start");
     try{
       const rows=await paged(`/api/v2/users/${userId}/items`,["items","user_items"],{status,order:"newest_first"});
       for(const raw of rows||[]){const row=listingRow(raw,status);if(row.id)listings.set(row.id,row)}
+      traceBridge("listings."+status+".done","rows="+(rows||[]).length);
     }catch(error){
+      traceBridge("listings."+status+".error",error?.message||error,"error");
       // Active listings are authoritative for physical stock. Never upload a
       // snapshot if this endpoint failed or only partially paged.
       if(status==="active")throw error;
@@ -303,6 +317,7 @@ async function collectVintedData(reason="periodic"){
   const detailSync=secondaryAccessBlocked
     ? {enriched:0,attempted:0,pending:detailEligible,deferred:detailEligible,rate_limited:secondaryRateLimited,access_blocked:true}
     : await enrichListingDetails(listings,reason);
+  traceBridge("details.done","enriched="+detailSync.enriched+" pending="+detailSync.pending+" blocked="+Boolean(detailSync.access_blocked));
   // Historical multi-tab page-age scans are disabled; cached values may
   // still be used locally without opening Vinted pages.
   const ageScanItems=[];
@@ -311,6 +326,7 @@ async function collectVintedData(reason="periodic"){
   const orders=[];
   let optionalRateLimited=false,optionalAccessBlocked=false;
   if(!detailSync.rate_limited&&!detailSync.access_blocked){
+    traceBridge("optional.start");
     for(const path of["/api/v2/notifications","/web/api/notifications/notifications"]){
       try{
         const payload=await fetchJson(path,{page:1,per_page:100});
@@ -335,6 +351,7 @@ async function collectVintedData(reason="periodic"){
   }
 
   const apiRateLimited=Boolean(detailSync.rate_limited||secondaryRateLimited||optionalRateLimited);
+  traceBridge("snapshot.ready","listings="+listings.size+" orders="+orders.length+" rateLimited="+apiRateLimited);
   return{collected_at:Date.now()/1000,current_user:currentUser,listings:[...listings.values()],notifications,orders,market_results:[],age_scan_items:ageScanItems,detail_sync:{...detailSync,api_rate_limited:apiRateLimited,detail_endpoint_rate_limited:Boolean(detailSync.rate_limited),rate_limited:apiRateLimited,secondary_rate_limited:secondaryRateLimited,optional_rate_limited:optionalRateLimited}};
 }
 
@@ -368,11 +385,14 @@ chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
   if(message?.type==="collect-vinted-data"){
     collectVintedData(message.reason||"periodic")
       .then(snapshot=>sendResponse({ok:true,snapshot}))
-      .catch(error=>sendResponse({
+      .catch(error=>{
+        traceBridge("collect.failed",error?.stack||error?.message||error,"error");
+        sendResponse({
         ok:false,
         error:error instanceof Error?error.message:String(error),
         rate_limited:isRateLimitError(error),
-      }));
+      });
+      });
     return true;
   }
   if(message?.type==="read-vinted-uploaded-age"){
