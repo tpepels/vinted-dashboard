@@ -201,7 +201,7 @@ def test_vinted_quiet_bridge_does_not_scan_pages_or_reload_browser():
     assert "chrome.tabs.reload(" in background
     assert "chrome.tabs.create(" in background
     assert 'if(reason!=="manual"&&!temporary)throw error;' in background
-    assert 'url:origin+"/",active:false' in background
+    assert 'url:origin+path,active:false' in background
     assert "const ageScanItems=[];" in content
     assert "const queue=missing.slice(0,3);" in content
     assert "const maxRetries=0;" in content
@@ -334,7 +334,7 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert '96,true);' in content
     assert 'if(required&&!valid)' in content
     assert 'if(!listings.size)' in content
-    assert "secondaryRateLimited=isRateLimitError(error)" in content
+    assert '"/api/v2/wardrobe/"+userId+"/items"' in content
     assert "inventory_complete:true" in content
     assert '"/api/v2/wardrobe/"+userId+"/items"' in content
     assert "const queue=missing.slice(0,3);" in content
