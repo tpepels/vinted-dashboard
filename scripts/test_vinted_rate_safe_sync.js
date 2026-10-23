@@ -75,10 +75,10 @@ async function scenario(mode) {
       }
       if (pathname === "/api/v2/users/42/items") {
         const status = url.searchParams.get("status");
-        if (mode === "core429" && status === "active") {
+        if (mode === "core429" && status === null) {
           return response(429, {});
         }
-        return response(200, { items: status === "active" ? items : [] });
+        return response(200, { items: status === null ? items : [] });
       }
       if (pathname === "/api/v2/wardrobe/42/items") {
         return response(200, { items: [] });
