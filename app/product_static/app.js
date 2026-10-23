@@ -5219,7 +5219,7 @@ function saleQuantityControls(sale) {
     + ' value="' + esc(count == null ? "" : count) + '" placeholder="Unknown"'
     + ' aria-label="Number of listings in ' + esc(sale.title || sale.external_order_id) + '"></label>'
     + '<button class="btn sale-quantity-save" type="button" data-id="' + esc(sale.id)
-    + '">Save books</button></div>';
+    + '">Save listing count</button></div>';
 }
 
 function saleCostControls(sale) {
@@ -5242,7 +5242,7 @@ function saleCostControls(sale) {
     + ' aria-label="Total acquisition cost for ' + esc(sale.title || sale.external_order_id) + '"></label>'
     + '<button class="btn sale-cost-save" type="button" data-id="' + esc(sale.id) + '">Save cost</button>'
     + '<button class="btn sale-cost-clear" type="button" data-id="' + esc(sale.id)
-    + '" title="Clear the sale override and return to the inventory or default book cost">Use default</button></div>';
+    + '" title="Clear the sale override and return to the inventory or default listing cost">Use default</button></div>';
 }
 
 function bindSaleCostEditors(rootSelector) {
@@ -5251,7 +5251,7 @@ function bindSaleCostEditors(rootSelector) {
       const input = button.closest(".sale-quantity-edit")?.querySelector(".sale-quantity-input");
       const raw = String(input?.value || "").trim();
       if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 1000)
-        return flash("Enter a valid number of books (1–1000).", true);
+        return flash("Enter a valid number of listings (1–1000).", true);
       button.disabled = true;
       try {
         await api("/api/app/sales/" + encodeURIComponent(button.dataset.id) + "/book-quantity",{
@@ -5282,7 +5282,7 @@ function bindSaleCostEditors(rootSelector) {
   });
    $$(rootSelector + " .sale-cost-clear").forEach(button => {
     button.onclick = async () => {
-      if (!window.confirm("Clear this sale exception? The item cost or default book cost will be used instead.")) return;
+      if (!window.confirm("Clear this sale exception? The item cost or default listing cost will be used instead.")) return;
       button.disabled = true;
       try {
         await api("/api/app/sales/" + encodeURIComponent(button.dataset.id) + "/acquisition-cost", {
@@ -5324,7 +5324,7 @@ function renderSaleCostHistory() {
       : sale.acquisition_cost_cents != null)));
   $("#sale-cost-history-count").textContent = rows.length + " shown in loaded history.";
   $("#sale-cost-history-table").innerHTML = rows.length
-    ? '<table><thead><tr><th>Date</th><th>Marketplace</th><th>Sold item</th><th>Sale price</th><th>Books in order</th><th>Total acquisition cost</th></tr></thead><tbody>'
+    ? '<table><thead><tr><th>Date</th><th>Marketplace</th><th>Sold item</th><th>Sale price</th><th>Listings in order</th><th>Total acquisition cost</th></tr></thead><tbody>'
       + rows.map(sale => '<tr><td>' + esc(when(sale.occurred_at))
         + '</td><td>' + esc(sale.channel) + '</td><td>' + esc(sale.title || sale.external_order_id)
         + (sale.inventory_item_id ? '' : '<div class="sub">Not linked to inventory</div>')
@@ -5345,7 +5345,7 @@ function invalidateSaleCostBulkPreview() {
 function saleCostBulkPayload(preview=true) {
   const raw=$("#sale-cost-backfill-value").value.trim();
   const currency=$("#sale-cost-backfill-currency").value.trim().toUpperCase();
-  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) throw Error("Enter a valid cost per sale.");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) throw Error("Enter a valid cost per listing.");
   if (!/^[A-Z]{3}$/.test(currency)) throw Error("Enter a valid three-letter currency.");
   return {
     cost_cents:Math.round(Number(raw)*100), currency,
@@ -5371,12 +5371,12 @@ $("#sale-cost-backfill-preview-btn").onclick = async () => {
     if (JSON.stringify(saleCostBulkPayload())!==JSON.stringify(payload)) return;
     saleCostBulkPreview={payload,result};
     $("#sale-cost-backfill-preview").textContent=
-      (result.eligible_books ?? result.eligible_sales) + " books across "
+      (result.eligible_books ?? result.eligible_sales) + " listings across "
       + result.eligible_sales + " historical sales to update; "
       + result.already_costed + " existing costs preserved; "
       + result.other_currency + " other-currency sales excluded. "
-      + (result.skipped_unknown_quantity_sales || 0) + " orders skipped because book count is unknown. "
-      + (result.assumed_one_quantity_sales || 0) + " unknown orders assumed to contain one book. "
+      + (result.skipped_unknown_quantity_sales || 0) + " orders skipped because listing count is unknown. "
+      + (result.assumed_one_quantity_sales || 0) + " unknown orders assumed to contain one listing. "
       + (result.inferred_quantity_sales || 0) + " orders have title-inferred item counts. "
       + money(result.estimated_cost_cents,payload.currency) + " estimated purchase costs. "
       + result.with_sale_amount + " affected sales have a known selling price.";
@@ -5392,10 +5392,10 @@ $("#sale-cost-backfill-form").onsubmit=async(event)=>{
   if(!previous || JSON.stringify({...payload,preview:true})!==JSON.stringify(previous.payload))
     return flash("Preview the current batch settings before applying.",true);
   if (!window.confirm("Record "+money(payload.cost_cents,payload.currency)
-      +" PER BOOK for "+(previous.result.eligible_books ?? previous.result.eligible_sales)
-      +" books in "+previous.result.eligible_sales+" orders?"
+      +" PER LISTING for "+(previous.result.eligible_books ?? previous.result.eligible_sales)
+      +" listings in "+previous.result.eligible_sales+" orders?"
       +(previous.result.assumed_one_quantity_sales
-        ? " WARNING: "+previous.result.assumed_one_quantity_sales+" orders have unknown quantities; one book is assumed." : "")
+        ? " WARNING: "+previous.result.assumed_one_quantity_sales+" orders have unknown quantities; one listing is assumed." : "")
       +(payload.overwrite_existing?" ALL existing costs will be overwritten.":"")))return;
   const button=$("#sale-cost-backfill-apply");button.disabled=true;
   try {
@@ -5403,7 +5403,7 @@ $("#sale-cost-backfill-form").onsubmit=async(event)=>{
       method:"POST",body:JSON.stringify(payload),
     });
     invalidateSaleCostBulkPreview();
-    flash("Per-book costs applied to "+result.updated+" sales.");
+    flash("Per-listing costs applied to "+result.updated+" sales.");
     await sales();
   }catch(error){flash(error.message,true);invalidateSaleCostBulkPreview();}
 };
