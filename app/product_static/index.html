@@ -209,7 +209,7 @@
             <div class="stock-defaults">
               <label>Current location<input id="stock-default-location" placeholder="BOX-17"></label>
               <label>Condition<input id="stock-default-condition" placeholder="Good"></label>
-              <label>Cost exception per item<input id="stock-default-cost" type="number" min="0" step="0.01" placeholder="Use book default"></label>
+              <label>Cost exception per listing<input id="stock-default-cost" type="number" min="0" step="0.01" placeholder="Use listing default"></label>
               <label>Asking price<input id="stock-default-price" type="number" min="0" step="0.01" placeholder="Optional"></label>
               <label>Currency<input id="stock-default-currency" maxlength="3" value="EUR"></label>
             </div>
@@ -550,8 +550,8 @@
         <div id="sales-costs-panel" class="dashboard-tab-panel hidden" role="tabpanel" data-workspace-panel="sales:costs">
         <div class="card">
           <h2>Automatic purchase cost</h2>
-          <p id="sales-default-book-cost" class="muted">No default purchase cost configured. Set your own amount in Settings → Account.</p>
-          <p class="muted">For exceptions, edit the book's purchase cost in Inventory, or enter a total acquisition cost for a specific sale below. Existing manual values are preserved.</p>
+          <p id="sales-default-listing-cost" class="muted">No default purchase cost configured. Set your own amount in Settings → Account.</p>
+          <p class="muted">For exceptions, edit the listing's acquisition cost in Inventory or enter the total cost for a specific sale below. Existing manual values are preserved.</p>
         </div>
         <div class="card analytics-sale-data-quality">
           <h2>Acquisition records</h2>
@@ -560,10 +560,10 @@
         </div>
         <div class="card form" id="sale-cost-backfill-card">
           <div class="card-head"><h2>Backfill acquisition costs for historical sales</h2></div>
-          <p class="muted">Set an estimated <strong>cost per book</strong>, not per order: the amount you enter is multiplied by the number of books. Historical titles such as "Bundle 3 items" are used to estimate item counts automatically. Named single-item sales default to one; sets and ambiguous titles may still need manual correction below. Unknown quantities can use the optional one-item assumption. Existing costs are preserved unless you choose to overwrite them.</p>
+          <p class="muted">Set an estimated <strong>cost per listing</strong>, not per order: the amount you enter is multiplied by the number of separate listings in an order, not by the books inside a listing. Historical titles such as "Bundle 3 items" are used to estimate item counts automatically. Named single-listing sales default to one; ambiguous orders may still need manual correction below. Unknown counts can use the optional one-listing assumption. Existing costs are preserved unless you choose to overwrite them.</p>
           <form id="sale-cost-backfill-form">
             <div class="form-grid">
-              <label>Purchase cost per book<input id="sale-cost-backfill-value" type="number" min="0" step="0.01" placeholder="Enter amount" required></label>
+              <label>Purchase cost per listing<input id="sale-cost-backfill-value" type="number" min="0" step="0.01" placeholder="Enter amount" required></label>
               <label>Currency<input id="sale-cost-backfill-currency" maxlength="3" value="EUR" required></label>
               <label>Apply to<select id="sale-cost-backfill-scope">
                 <option value="all" selected>All historical completed sales</option>
@@ -572,7 +572,7 @@
                 <option value="ytd">Year to date</option>
               </select></label>
               <label class="check"><input id="sale-cost-backfill-overwrite" type="checkbox">Replace existing costs too</label>
-              <label class="check"><input id="sale-cost-backfill-assume-one" type="checkbox">For orders with an unknown book count, assume 1 book (may underestimate bundles)</label>
+              <label class="check"><input id="sale-cost-backfill-assume-one" type="checkbox">For orders with an unknown listing count, assume 1 listing (may underestimate bundles)</label>
             </div>
             <p id="sale-cost-backfill-preview" class="muted" role="status">Preview before applying. This includes older orders that are not shown in the table.</p>
             <div class="actions"><button id="sale-cost-backfill-preview-btn" class="btn" type="button">Preview historical costs</button><button id="sale-cost-backfill-apply" class="btn primary" type="submit" disabled>Apply cost to historical sales</button></div>
@@ -580,7 +580,7 @@
         </div>
         <div class="card">
           <div class="card-head"><h2>Edit individual historical sales</h2></div>
-          <p class="muted">Correct the <strong>number of books</strong> for a sale first, including historical bundles. Bulk estimates automatically recalculate when you change quantity. You can also override an order's <strong>total acquisition cost</strong> manually; this total is not multiplied by the number of books. Amounts exclude fees and shipping.</p>
+          <p class="muted">Correct the <strong>number of listings</strong> in an order first, including historical bundles of separate listings. A listing containing multiple books counts as one. Bulk estimates automatically recalculate when you change quantity. You can also override an order's <strong>total acquisition cost</strong> manually; this total is not multiplied by the number of books. Amounts exclude fees and shipping.</p>
           <label>Show <select id="sale-cost-history-filter"><option value="missing" selected>Sales missing a cost</option><option value="unknown">Sales with estimated or unknown item counts</option><option value="all">All completed sales</option><option value="recorded">Sales with a cost</option></select></label>
           <p id="sale-cost-history-count" class="muted"></p>
           <div id="sale-cost-history-table" class="table-wrap"></div>
@@ -914,10 +914,10 @@
           <form id="settings-form" class="card form">
             <h2>Workspace</h2>
             <label>Name<input id="settings-name"></label>
-            <label>Default purchase cost per book (€)
-              <input id="settings-book-cost" type="number" min="0" max="100000" step="0.01" inputmode="decimal" placeholder="Enter your amount">
+            <label>Default purchase cost per listing (€)
+              <input id="settings-listing-cost" type="number" min="0" max="100000" step="0.01" inputmode="decimal" placeholder="Enter your amount">
             </label>
-            <p class="muted">You choose the default purchase cost yourself. Until you save an amount, no default applies. Leave it empty and save to turn off the default. A recorded item or sale cost always takes precedence. The default is an estimate, not an actual purchase receipt.</p>
+            <p class="muted">Choose an estimated acquisition cost for each Vinted listing, not for each book. A listing of several books counts once; an order containing three separate listings counts three times. Leave blank and save to disable the default. Explicit item and sale costs take precedence.</p>
             <button class="btn primary">Save</button>
           </form>
           <div class="card form"><h2>Billing</h2><div id="billing"></div></div>
