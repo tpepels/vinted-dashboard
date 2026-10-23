@@ -631,18 +631,18 @@ def test_vinted_profitability_keeps_incomplete_sales_out_of_profit_math():
         )
 
     assert data["summary"]["linked_sales"] == 3
-    assert data["summary"]["costed_linked_sales"] == 2
-    assert data["summary"]["cost_coverage_pct"] == 66.7
-    assert data["summary"]["costed_revenue_cents"] == 2300
-    assert data["summary"]["acquisition_cost_cents"] == 1100
-    assert data["summary"]["gross_profit_cents"] == 1200
-    assert data["summary"]["gross_margin_pct"] == 52.2
-    assert data["summary"]["roi_pct"] == 109.1
+    assert data["summary"]["costed_linked_sales"] == 1
+    assert data["summary"]["cost_coverage_pct"] == 33.3
+    assert data["summary"]["costed_revenue_cents"] == 800
+    assert data["summary"]["acquisition_cost_cents"] == 1000
+    assert data["summary"]["gross_profit_cents"] == -200
+    assert data["summary"]["gross_margin_pct"] == -25.0
+    assert data["summary"]["roi_pct"] == -20.0
 
     sold = {row["external_order_id"]: row for row in data["sold_stock"]}
-    assert sold["NO-COST-SALE"]["economics_complete"] is True
-    assert sold["NO-COST-SALE"]["cost_cents"] == 100
-    assert sold["NO-COST-SALE"]["gross_profit_cents"] == 1400
+    assert sold["NO-COST-SALE"]["economics_complete"] is False
+    assert sold["NO-COST-SALE"]["cost_cents"] is None
+    assert sold["NO-COST-SALE"]["gross_profit_cents"] is None
     assert sold["NO-REVENUE-SALE"]["economics_complete"] is False
     assert sold["NO-REVENUE-SALE"]["revenue_cents"] is None
     assert sold["NO-REVENUE-SALE"]["gross_profit_cents"] is None
