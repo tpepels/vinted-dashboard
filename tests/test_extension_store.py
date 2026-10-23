@@ -214,7 +214,7 @@ def test_content_script_has_reinjection_guard():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "(() => {" in content
     assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 11" in content
-    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 10" in content
+    assert "globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 11" in content
     assert content.rstrip().endswith("})();")
     assert "node scripts/test_vinted_content_idempotent.js" in workflow
 
