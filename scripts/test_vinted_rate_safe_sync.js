@@ -23,7 +23,7 @@ async function scenario(mode) {
   let optionalRequests = 0;
   let currentRequestOptions = null;
 
-  const items = Array.from({ length: 50 }, (_, index) => ({
+  const items = Array.from({ length: mode === "multiPage" ? 202 : 50 }, (_, index) => ({
     id: String(index + 1),
     title: "Item " + (index + 1),
     price: { amount: "5.00", currency_code: "EUR" },
@@ -74,17 +74,20 @@ async function scenario(mode) {
         return response(200, { user: { id: "42", login: "seller" } });
       }
       if (pathname === "/api/v2/users/42/items") {
-        const status = url.searchParams.get("status");
-        if (mode === "core429" && status === null) {
-          return response(429, {});
-        }
+        throw new Error("Removed endpoint must never be requested");
+      }
+      if (pathname === "/api/v2/wardrobe/42/items") {
+        if (mode === "core429") return response(429, {});
         if (mode === "core404") return response(404, {});
         if (mode === "coreMalformed") return response(200, {success:true, data:{}});
         if (mode === "zero") return response(200, {items:[]});
-        return response(200, { items: status === null ? items : [] });
-      }
-      if (pathname === "/api/v2/wardrobe/42/items") {
-        return response(200, { items: [] });
+        if (mode === "incomplete") return response(200, {items:items.slice(0,20), pagination:{total_entries:50,total_pages:1}});
+        const page=Number(url.searchParams.get("page")||1);
+        const perPage=Number(url.searchParams.get("per_page")||96);
+        return response(200, {
+          items:items.slice((page-1)*perPage,page*perPage),
+          pagination:{total_entries:items.length,total_pages:Math.ceil(items.length/perPage)}
+        });
       }
       if (/^\/api\/v2\/items\/\d+$/.test(pathname)) {
         detailRequests += 1;
@@ -145,6 +148,15 @@ function assert(condition, message) {
   assert(!("X-Platform" in (unlimited.currentRequestOptions?.headers || {})),
     "Vinted browser API request still sends the synthetic X-Platform header");
 
+  assert(unlimited.result.snapshot.inventory_complete === true,
+    "Success must explicitly confirm complete wardrobe pagination");
+  const multipage = await scenario("multiPage");
+  assert(multipage.result.ok === true && multipage.result.snapshot.listings.length === 202,
+    "All wardrobe pages must be collected without duplicates");
+  const incomplete = await scenario("incomplete");
+  assert(incomplete.result.ok === false && String(incomplete.result.error).includes("reports 50"),
+    "A truncated first page must never mark missing stock inactive");
+
   const detailLimited = await scenario("detail429");
   assert(detailLimited.result.ok === true, "Detail 429 should not fail core inventory sync");
   assert(detailLimited.result.snapshot.listings.length === 50,
@@ -162,7 +174,7 @@ function assert(condition, message) {
 
   const zero=await scenario("zero");
   assert(zero.result.ok===false,"Empty wardrobes must abort rather than deactivate stock");
-  assert(String(zero.result.error).includes("Nothing was uploaded"),
+  assert(String(zero.result.error).includes("No inventory was uploaded"),
     "An empty result must display the data-protection reason");
 
   const missingEndpoint=await scenario("core404");
