@@ -22,7 +22,7 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   let openedTabs = 0;
   const chrome = {
     runtime:{
-      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.13"}),
+      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.14"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
       onMessage:{addListener(){}},
     },
@@ -50,7 +50,7 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
         assert([tab.id,worker.id].includes(id));
         if(payload.type==="bridge-content-protocol"){
           if(mode==="missing" && !injections)throw Error("Could not establish connection. Receiving end does not exist.");
-          return {protocol:mode==="old"&&id===tab.id&&!reloads?10:11};
+          return {protocol:mode==="old"&&id===tab.id&&!reloads?10:12};
         }
         if(payload.type==="collect-vinted-start"){
           collections++;
