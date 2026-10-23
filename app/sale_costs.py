@@ -59,12 +59,17 @@ def sale_book_quantity(sale: Any) -> tuple[int | None, str]:
 
 
 def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | None, str | None]:
+    """Resolve order cost: manual sale > old per-book estimate > item > default.
+
+    The default is calculated at read time, so a relisted book or a new sale
+    does not need another cost entry. A manual sale override is an order total.
+    """
+    from app.book_costs import default_book_cost_cents, effective_item_cost, is_book_item
+
     extra = dict(sale.extra or {})
     source = str(extra.get("acquisition_cost_source") or "")
-    count, _ = sale_book_quantity(sale)
+    count, count_source = sale_book_quantity(sale)
     unit_cost = extra.get("acquisition_unit_cost_cents")
-    # Every estimated_bulk value represents a per-book rate. Legacy bulk
-    # overrides predate this field and stored that rate under cost_cents.
     if source == "estimated_bulk":
         if type(unit_cost) is not int:
             unit_cost = extra.get("acquisition_cost_cents")
@@ -73,10 +78,27 @@ def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | Non
     override = extra.get("acquisition_cost_cents")
     if type(override) is int and override >= 0:
         return override, source or "manual_sale"
-    if item is not None and item.cost_cents is not None:
-        if str(item.currency or "EUR").upper() == str(sale.currency or "EUR").upper():
-            attrs = dict(item.attributes or {})
-            return int(item.cost_cents) * (count or 1), str(attrs.get("cost_source") or "inventory")
+
+    currency = str(getattr(sale, "currency", None) or "EUR").upper()
+    workspace = getattr(sale, "workspace", None)
+    if workspace is None and item is not None:
+        workspace = getattr(item, "workspace", None)
+    settings = getattr(workspace, "settings", {}) if workspace is not None else {}
+    if item is not None:
+        if str(item.currency or "EUR").upper() == currency:
+            cents, item_source = effective_item_cost(item, settings)
+            # A default estimate only applies to books, never unclassified
+            # general stock from other marketplace connectors.
+            if cents is not None and (item.cost_cents is not None or workspace is not None):
+                return cents * (count or 1), item_source
+    # Historical Vinted orders often predate item linkage. This dashboard's
+    # Vinted sales are books; price them from the workspace book default.
+    if (workspace is not None and currency == "EUR"
+            and str(getattr(sale, "channel", "") or "").lower() == "vinted"
+            and (item is None or is_book_item(item))):
+        return default_book_cost_cents(settings) * (count or 1), (
+            "default_book_assumed_quantity" if count is None else "default_book"
+        )
     return None, None
 
 
