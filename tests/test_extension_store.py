@@ -331,7 +331,9 @@ def test_vinted_fetches_are_paced_and_rate_limit_safe():
     assert "function rateLimitDelay(response,attempt)" in content
     assert "Vinted rate limited the API sync." in content
     assert "error.vintedRateLimited=true" in content
-    assert 'if(status==="active")throw error;' in content
+    assert '96,true);' in content
+    assert 'if(required&&!valid)' in content
+    assert 'if(!listings.size)' in content
     assert "secondaryRateLimited=isRateLimitError(error)" in content
     assert "secondaryAccessBlocked=true" in content
     assert "const queue=missing.slice(0,3);" in content
