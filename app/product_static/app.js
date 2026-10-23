@@ -3197,7 +3197,7 @@ async function inventory() {
           ? '<div class="sub">' + esc(
             item.attributes.cost_source === "vinted_purchase"
               ? "Vinted purchase" + (item.attributes.cost_source_adjusted ? " · adjusted" : "")
-              : item.attributes.cost_source === "default_book" ? "Book default (estimated)"
+              : ["default_listing","default_book"].includes(item.attributes.cost_source) ? "Listing default (estimated)"
               : item.attributes.cost_source
           ) + "</div>"
           : "")
@@ -4535,7 +4535,7 @@ $("#item-form").onsubmit = async (event) => {
   const raw = Object.fromEntries(new FormData(form));
   const existing = state.inventoryItems.find((item) => item.id === state.editItemId);
   const attributes = Object.assign({}, existing?.attributes || {});
-  if (existing?.recorded_cost_cents == null && attributes.cost_source === "default_book")
+  if (existing?.recorded_cost_cents == null && ["default_listing","default_book"].includes(attributes.cost_source))
     delete attributes.cost_source;
   const attributeKeys = [
     "description", "barcode", "author", "isbn", "subtitle", "publisher", "edition",
@@ -5217,7 +5217,7 @@ function saleQuantityControls(sale) {
   return '<div class="sale-quantity-edit"><label class="sub">' + esc(source)
     + '<input class="sale-quantity-input" type="number" min="1" max="1000" step="1"'
     + ' value="' + esc(count == null ? "" : count) + '" placeholder="Unknown"'
-    + ' aria-label="Number of books in ' + esc(sale.title || sale.external_order_id) + '"></label>'
+    + ' aria-label="Number of listings in ' + esc(sale.title || sale.external_order_id) + '"></label>'
     + '<button class="btn sale-quantity-save" type="button" data-id="' + esc(sale.id)
     + '">Save books</button></div>';
 }
@@ -5227,15 +5227,16 @@ function saleCostControls(sale) {
       || /cancel|refund|fail/i.test(sale.status || "")) return "—";
   const recorded = sale.acquisition_cost_cents != null;
   const value = recorded ? (Number(sale.acquisition_cost_cents) / 100).toFixed(2) : "";
-  const source = sale.acquisition_cost_source === "default_book"
-    || sale.acquisition_cost_source === "default_book_assumed_quantity" ? "Book default (estimated)"
+  const source = ["default_listing","default_listing_assumed_quantity",
+    "default_book","default_book_assumed_quantity"].includes(sale.acquisition_cost_source)
+    ? "Listing default (estimated)"
     : sale.acquisition_cost_source === "estimated_bulk"
     || sale.acquisition_cost_source === "average_bulk" ? "Estimated"
     : sale.acquisition_cost_source === "manual_sale" ? "Manually recorded"
     : recorded ? "From inventory" : "Cost missing";
-  const perBook = sale.acquisition_cost_source === "estimated_bulk"
-    ? ' · ' + money(sale.acquisition_unit_cost_cents, sale.currency) + ' per book' : "";
-  return '<div class="sale-cost-edit"><label class="sub">' + esc(source) + perBook
+  const perListing = sale.acquisition_cost_source === "estimated_bulk"
+    ? ' · ' + money(sale.acquisition_unit_cost_cents, sale.currency) + ' per listing' : "";
+  return '<div class="sale-cost-edit"><label class="sub">' + esc(source) + perListing
     + '<input class="sale-cost-input" type="number" min="0" step="0.01" inputmode="decimal"'
     + ' value="' + esc(value) + '" placeholder="e.g. 1.00"'
     + ' aria-label="Total acquisition cost for ' + esc(sale.title || sale.external_order_id) + '"></label>'
@@ -5256,7 +5257,7 @@ function bindSaleCostEditors(rootSelector) {
         await api("/api/app/sales/" + encodeURIComponent(button.dataset.id) + "/book-quantity",{
           method:"PATCH",body:JSON.stringify({quantity:Number(raw)}),
         });
-        flash("Number of books saved; per-book cost totals updated.");
+        flash("Order item count saved; any per-item historical estimates updated.");
         await sales();
       } catch(error) {flash(error.message,true);button.disabled=false;}
     };
@@ -5295,17 +5296,18 @@ function bindSaleCostEditors(rootSelector) {
 }
 
 function renderSaleCostHistory() {
-  const defaultCents = state.me?.workspace?.settings?.default_book_cost_cents;
-  $("#sales-default-book-cost").textContent = defaultCents == null
-    ? "No default book purchase cost set. Choose your own amount in Settings → Account. Until then, costs remain unknown unless individually recorded."
-    : "Your default purchase cost is " + money(defaultCents, "EUR")
-      + " per book, used automatically for new listings and completed sales without recorded exceptions. "
-      + "Bundles use their book count; unknown quantities are provisionally treated as one book.";
+  const defaultCents = (state.me?.workspace?.settings?.default_listing_cost_cents ?? state.me?.workspace?.settings?.default_book_cost_cents);
+  $("#sales-default-listing-cost").textContent = defaultCents == null
+    ? "No default listing purchase cost set. Choose an amount in Settings → Account; until then, unrecorded acquisition costs remain unknown."
+    : "Your default acquisition cost is " + money(defaultCents, "EUR")
+      + " per listing. A listing containing several books counts once. "
+      + "An order containing several separate listings counts once for each listing; "
+      + "unknown order quantities are provisionally treated as one listing.";
   const valid=(state.salesRows || []).filter(s=>s.direction==="sell"
     && s.counts_as_sold !== false && !/cancel|refund|fail/i.test(s.status || ""));
   const priced=valid.filter(s=>s.total_cents!=null);
   const known=priced.filter(s=>s.acquisition_cost_cents!=null);
-  const estimates=known.filter(s=>["estimated_bulk","average_bulk","default_book","default_book_assumed_quantity"].includes(s.acquisition_cost_source));
+  const estimates=known.filter(s=>["estimated_bulk","average_bulk","default_listing","default_listing_assumed_quantity","default_book","default_book_assumed_quantity"].includes(s.acquisition_cost_source));
   const unknownCounts=valid.filter(s=>s.book_quantity==null);
   const inferredCounts=valid.filter(s=>["title_bundle","title_single"].includes(s.quantity_source));
   $("#sale-cost-data-quality").textContent=
@@ -7712,8 +7714,8 @@ async function downloadDiagnostics() {
 async function settings() {
   const data = await api("/api/app/settings");
   $("#settings-name").value = data.workspace.name;
-  const bookCost = data.workspace.settings?.default_book_cost_cents;
-  $("#settings-book-cost").value = bookCost == null ? "" : (bookCost / 100).toFixed(2);
+  const bookCost = (data.workspace.settings?.default_listing_cost_cents ?? data.workspace.settings?.default_book_cost_cents);
+  $("#settings-listing-cost").value = bookCost == null ? "" : (bookCost / 100).toFixed(2);
   renderBillingLock(data.billing);
   $("#delete-workspace-slug").textContent = data.workspace.slug;
   $("#delete-workspace-confirm").value = "";
@@ -7793,7 +7795,7 @@ $("#delete-workspace").onclick = async () => {
 
 $("#settings-form").onsubmit = async (event) => {
   event.preventDefault();
-  const cost = $("#settings-book-cost").value.trim();
+  const cost = $("#settings-listing-cost").value.trim();
   if (cost !== "" && (!/^\d+(?:\.\d{1,2})?$/.test(cost) || Number(cost) > 100000))
     return flash("Enter a valid book cost between €0 and €100,000, or leave blank to disable.", true);
   try {
@@ -7801,7 +7803,7 @@ $("#settings-form").onsubmit = async (event) => {
       method: "PATCH",
       body: JSON.stringify({
         name: $("#settings-name").value.trim(),
-        default_book_cost_cents: cost === "" ? null : Math.round(Number(cost) * 100),
+        default_listing_cost_cents: cost === "" ? null : Math.round(Number(cost) * 100),
       }),
     });
     state.me.workspace = result.workspace;
