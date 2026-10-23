@@ -94,11 +94,12 @@ def sale_acquisition_cost(sale: Any, item: Any | None = None) -> tuple[int | Non
     # Historical Vinted orders often predate item linkage. This dashboard's
     # Vinted sales are books; price them from the workspace book default.
     if (workspace is not None and currency == "EUR"
-            and str(getattr(sale, "channel", "") or "").lower() == "vinted"
-            ):
-        return default_book_cost_cents(settings) * (count or 1), (
-            "default_book_assumed_quantity" if count is None else "default_book"
-        )
+            and str(getattr(sale, "channel", "") or "").lower() == "vinted"):
+        default = default_book_cost_cents(settings)
+        if default is not None:
+            return default * (count or 1), (
+                "default_book_assumed_quantity" if count is None else "default_book"
+            )
     return None, None
 
 
