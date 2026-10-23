@@ -20,3 +20,8 @@ button:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid
 .info-panel p{color:#566c64;font-size:12px;line-height:1.55;margin:9px 0 0}
 .info-panel.secondary{margin-top:14px}
 .info-panel.secondary button{background:#fff;color:#873d30}
+
+#diagnostic-console{display:block;width:100%;height:185px;resize:vertical;margin-top:10px;padding:9px;background:#15211f;color:#d5ede3;border:1px solid #3b5b51;border-radius:7px;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre;overflow:auto}
+.diagnostic-actions{display:flex;gap:6px;margin-top:7px}
+.diagnostic-actions button{width:auto;flex:1;min-width:0;min-height:34px;padding:6px 4px;margin:0;font-size:11px;font-weight:650}
+#diagnostic-feedback{display:block;color:#566c64;min-height:1.5em;margin-top:6px}
