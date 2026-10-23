@@ -1,7 +1,7 @@
 (() => {
-if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 11) return;
-globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 11;
-const BRIDGE_CONTENT_PROTOCOL=11;
+if (globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ === 12) return;
+globalThis.__RESELLER_DASHBOARD_VINTED_CONTENT_PROTOCOL__ = 12;
+const BRIDGE_CONTENT_PROTOCOL=12;
 // Diagnostic events contain only step names, counts and errors, never account data.
 function traceBridge(stage,detail="",level="info"){
   try{
