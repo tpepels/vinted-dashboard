@@ -142,3 +142,56 @@ def test_empty_later_metadata_does_not_erase_previous_listing_metadata():
         ).scalars().one()
         assert listing.extra["metadata"]["condition"] == "Good"
         assert listing.extra["metadata"]["brand"] == "Vintage"
+
+
+def test_incomplete_browser_snapshot_never_deactivates_missing_stock():
+    workspace_id = _workspace("metadata-partial-guard")
+    complete = _snapshot({})
+    complete["inventory_complete"] = True
+    complete["listings"].append({
+        "id": "V-2", "title": "Second listing", "status": "active",
+        "price_cents": 550, "currency": "EUR", "metadata": {},
+    })
+    record_workspace_snapshot(workspace_id, complete)
+
+    partial = _snapshot({})
+    # Old extensions and partial API responses cannot retire unseen stock.
+    record_workspace_snapshot(workspace_id, partial)
+    with db.session_scope() as session:
+        second = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-2",
+            )
+        ).scalar_one()
+        assert second.status == "active"
+        assert second.quantity == 1
+
+    partial["inventory_complete"] = True
+    record_workspace_snapshot(workspace_id, partial)
+    with db.session_scope() as session:
+        second = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-2",
+            )
+        ).scalar_one()
+        assert second.status == "inactive"
+        assert second.quantity == 0
+
+
+def test_even_flagged_empty_snapshot_cannot_deactivate_everything():
+    workspace_id = _workspace("metadata-empty-guard")
+    full = _snapshot({})
+    full["inventory_complete"] = True
+    record_workspace_snapshot(workspace_id, full)
+    empty = {**full, "listings": []}
+    record_workspace_snapshot(workspace_id, empty)
+    with db.session_scope() as session:
+        existing = session.execute(
+            select(models.ChannelListing).where(
+                models.ChannelListing.workspace_id == workspace_id,
+                models.ChannelListing.external_id == "V-1",
+            )
+        ).scalar_one()
+        assert existing.status == "active"
