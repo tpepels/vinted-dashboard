@@ -314,6 +314,7 @@ class Sale(TimestampMixin, Base):
     last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=_utcnow)
     extra: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
 
+    workspace: Mapped[Workspace] = relationship()
     inventory_item: Mapped[Optional[InventoryItem]] = relationship(back_populates="sales")
 
 
