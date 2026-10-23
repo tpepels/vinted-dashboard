@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app import db, entry, models
 
 
-def test_default_book_cost_follows_items_and_sales_without_per_sale_editing():
+def test_default_listing_cost_follows_items_and_sales_without_per_sale_editing():
     client = TestClient(entry.app)
     response = client.post("/api/auth/register", json={
         "email": "default-book-cost@example.test",
@@ -76,14 +76,14 @@ def test_default_book_cost_follows_items_and_sales_without_per_sale_editing():
     assert items["GENERAL"]["cost_cents"] is None
 
     changed = client.patch("/api/app/settings", headers=headers, json={
-        "default_book_cost_cents": 250,
+        "default_listing_cost_cents": 250,
     })
     assert changed.status_code == 200, changed.text
-    assert changed.json()["workspace"]["settings"]["default_book_cost_cents"] == 250
-    assert client.get("/api/app/settings").json()["workspace"]["settings"]["default_book_cost_cents"] == 250
+    assert changed.json()["workspace"]["settings"]["default_listing_cost_cents"] == 250
+    assert client.get("/api/app/settings").json()["workspace"]["settings"]["default_listing_cost_cents"] == 250
     after = current_sales()
     assert after["unlinked"]["acquisition_cost_cents"] == 250
-    assert after["bundle"]["acquisition_cost_cents"] == 750
+    assert after["bundle"]["acquisition_cost_cents"] == 750  # 3 distinct Vinted listings in order
     assert after["linked"]["acquisition_cost_cents"] == 250
     assert after["exception"]["acquisition_cost_cents"] == 625
 
@@ -107,19 +107,19 @@ def test_default_book_cost_follows_items_and_sales_without_per_sale_editing():
     assert current_sales()["bundle"]["acquisition_cost_cents"] == 750
 
     assert client.patch("/api/app/settings", headers=headers,
-        json={"default_book_cost_cents": -1}).status_code == 422
+        json={"default_listing_cost_cents": -1}).status_code == 422
 
     # Explicitly clearing the workspace setting turns off default estimates.
     cleared_default = client.patch("/api/app/settings", headers=headers,
-        json={"default_book_cost_cents": None})
+        json={"default_listing_cost_cents": None})
     assert cleared_default.status_code == 200
-    assert "default_book_cost_cents" not in cleared_default.json()["workspace"]["settings"]
+    assert "default_listing_cost_cents" not in cleared_default.json()["workspace"]["settings"]
     assert current_sales()["unlinked"]["acquisition_cost_cents"] is None
     assert current_sales()["linked"]["acquisition_cost_cents"] == 435
     assert current_sales()["exception"]["acquisition_cost_cents"] == 625
 
 
-def test_unknown_vinted_bundle_quantity_is_explicitly_labeled_as_estimated():
+def test_unknown_vinted_listing_quantity_is_explicitly_labeled_as_estimated():
     client = TestClient(entry.app)
     response = client.post("/api/auth/register", json={
         "email": "default-unknown-quantity@example.test",
@@ -143,13 +143,45 @@ def test_unknown_vinted_bundle_quantity_is_explicitly_labeled_as_estimated():
     rows = client.get("/api/app/sales").json()["sales"]
     assert rows[0]["acquisition_cost_cents"] is None
     configured = client.patch("/api/app/settings", headers=headers,
-        json={"default_book_cost_cents": 100})
+        json={"default_listing_cost_cents": 100})
     assert configured.status_code == 200
     rows = client.get("/api/app/sales").json()["sales"]
     assert rows[0]["acquisition_cost_cents"] == 100
-    assert rows[0]["acquisition_cost_source"] == "default_book_assumed_quantity"
+    assert rows[0]["acquisition_cost_source"] == "default_listing_assumed_quantity"
+    # One listing may contain many physical books; Vinted item count = 1.
+    with db.session_scope() as session:
+        sale = session.get(models.Sale, sale_id)
+        sale.title = "Set of 4 books in one listing"
+        sale.extra = {"quantity": 1}
+    assert client.get("/api/app/sales").json()["sales"][0]["acquisition_cost_cents"] == 100
     response = client.patch(f"/api/app/sales/{sale_id}/book-quantity",
         headers=headers, json={"quantity": 4})
     assert response.status_code == 200
     assert response.json()["cost_cents"] == 400
-    assert response.json()["cost_source"] == "default_book"
+    assert response.json()["cost_source"] == "default_listing"
+
+def test_existing_saved_book_setting_migrates_to_listing_setting():
+    client = TestClient(entry.app)
+    response = client.post("/api/auth/register", json={
+        "email": "migrate-old-listing-cost@example.test",
+        "password": "a-long-test-password",
+        "workspace_name": "Legacy cost preference",
+    })
+    assert response.status_code == 200
+    headers = {"X-CSRF-Token": response.json()["csrf_token"]}
+    with db.session_scope() as session:
+        workspace = session.execute(select(models.Workspace)).scalars().one()
+        workspace.settings = {"default_book_cost_cents": 375, "keep_other_setting": True}
+    read = client.get("/api/app/settings").json()["workspace"]["settings"]
+    assert read["default_book_cost_cents"] == 375
+    changed = client.patch("/api/app/settings", headers=headers,
+        json={"default_listing_cost_cents": 250})
+    assert changed.status_code == 200, changed.text
+    settings = changed.json()["workspace"]["settings"]
+    assert settings["default_listing_cost_cents"] == 250
+    assert "default_book_cost_cents" not in settings
+    assert settings["keep_other_setting"] is True
+    clear = client.patch("/api/app/settings", headers=headers,
+        json={"default_listing_cost_cents": None})
+    assert clear.status_code == 200, clear.text
+    assert "default_listing_cost_cents" not in clear.json()["workspace"]["settings"]
