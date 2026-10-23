@@ -15,7 +15,7 @@ const AGE_RATE_LIMIT_MAX_COOLDOWN_MS=6*60*60*1000;
 const API_RATE_LIMIT_COOLDOWN_MS=60*60*1000;
 const AGE_FAILURE_COOLDOWN_MS=24*60*60*1000;
 const AGE_JOB_WATCHDOG_MS=240000;
-const CONTENT_PROTOCOL=10;
+const CONTENT_PROTOCOL=11;
 const DIAGNOSTIC_LOG_KEY="bridgeDiagnosticLogV1";
 const DIAGNOSTIC_LOG_LIMIT=160;
 const LOST_MESSAGE_CHANNEL=/A listener indicated an asynchronous response|message (?:port|channel) closed|The message port closed before a response was received/i;
@@ -147,43 +147,38 @@ async function ensureCurrentContentScript(tab,reason="periodic",temporary=false)
   }
 }
 async function collectFromVintedTab(tab,reason){
-  const payload={type:"collect-vinted-data",reason};
-  await logDiagnostic("collect.request","tab="+tab.id+" reason="+reason);
+  // Long-lived sendMessage replies are dropped after the Vinted fetch has
+  // taken about 25 seconds. Each IPC request now returns immediately; the
+  // actual scrape continues once in the content script and can be polled.
+  const jobId=String(Date.now())+"-"+String(Math.random()).slice(2);
+  await logDiagnostic("collect.start","tab="+tab.id+" job="+jobId+" reason="+reason);
+  let started;
   try{
-    const response=await message(tab.id,payload);
-    await logDiagnostic(response?.ok?"collect.reply.ok":"collect.reply.error",
-      response?.ok?"Snapshot received":response?.error||"No response",response?.ok?"info":"error");
-    return response;
+    started=await message(tab.id,{type:"collect-vinted-start",reason,job_id:jobId});
   }catch(error){
-    await logDiagnostic("collect.channel.error",error?.stack||error?.message||error,"error");
-    if(!LOST_MESSAGE_CHANNEL.test(String(error?.message||error)))throw error;
-    if(reason!=="manual"){
-      throw new Error("Vinted changed or closed its tab during the automatic check. Next automatic check will retry; you can also check manually.");
-    }
-    await sleep(500);
-    let ready;
-    try{
-      ready=await waitForTab(tab.id,15000);
-      const url=new URL(String(ready.url||""));
-      if(!url.hostname.startsWith("www.vinted."))throw Error("Vinted tab was replaced");
-      await logDiagnostic("collect.retry.prepare","tab="+tab.id+" origin="+url.origin);
-      await ensureCurrentContentScript(ready,reason);
-    }catch(recoveryError){
-      await logDiagnostic("collect.retry.prepare.error",recoveryError?.stack||recoveryError?.message||recoveryError,"error");
-      throw new Error("Vinted tab lost its connection during the update. Open Vinted, keep that tab open, and try Check now again.");
-    }
-    try{
-      await logDiagnostic("collect.retry.request","tab="+ready.id);
-      const response=await message(ready.id,payload);
-      await logDiagnostic(response?.ok?"collect.retry.reply.ok":"collect.retry.reply.error",
-        response?.ok?"Snapshot received":response?.error||"No response",response?.ok?"info":"error");
-      return response;
-    }catch(retryError){
-      await logDiagnostic("collect.retry.channel.error",retryError?.stack||retryError?.message||retryError,"error");
-      if(!LOST_MESSAGE_CHANNEL.test(String(retryError?.message||retryError)))throw retryError;
-      throw new Error("Vinted tab stopped responding during the update. Keep the tab open without navigating, reload it once, and try Check now again.");
-    }
+    await logDiagnostic("collect.start.channel.error",error?.message||error,"error");
+    throw error;
   }
+  if(!started?.ok)throw new Error(started?.error||"Could not start Vinted collection");
+  const limit=Date.now()+12*60*1000;
+  while(Date.now()<limit){
+    await sleep(1200);
+    let response;
+    try{
+      response=await message(tab.id,{type:"collect-vinted-result",job_id:jobId});
+    }catch(error){
+      await logDiagnostic("collect.poll.channel.error",error?.stack||error?.message||error,"error");
+      // Never start a second collection after a lost response: it can double
+      // the requests to Vinted and trigger access limits.
+      throw new Error("Vinted collection connection was interrupted: "+String(error?.message||error));
+    }
+    if(response?.ok&&response.state==="running")continue;
+    await logDiagnostic(response?.ok?"collect.reply.ok":"collect.reply.error",
+      response?.ok?"Snapshot received":response?.error||"Empty reply",
+      response?.ok?"info":"error");
+    return response;
+  }
+  throw new Error("Vinted collection exceeded 12 minutes; no partial inventory was uploaded.");
 }
 async function stopLegacyAgeScan(){
   // Older versions may have stored an aggressive multi-tab scan. Cancel it
@@ -518,17 +513,18 @@ async function processAgeJobWave(){
 }
 
 async function pair(code){const response=await fetch(API_ORIGIN+"/api/extension/pair",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:String(code||"").trim().toUpperCase(),extension_version:chrome.runtime.getManifest().version,device_name:"Chrome"})});let body={};try{body=await response.json()}catch{}if(!response.ok)throw new Error(body.detail||"Pairing failed");await chrome.storage.local.set({bridgeToken:body.token,bridgeWorkspace:body.workspace});return body}
-async function unpair(){await stopLegacyAgeScan();await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","vintedOrigin","lastSyncAttemptAt","lastSuccessfulSyncAt",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
+async function unpair(){await stopLegacyAgeScan();await chrome.storage.local.remove(["bridgeToken","bridgeWorkspace","syncStatus","manualSyncProgress","vintedOrigin","lastSyncAttemptAt","lastSuccessfulSyncAt",AGE_CACHE_KEY,AGE_FAILURES_KEY,AGE_JOB_KEY])}
 async function connectionStatus(){
   const data=await stored();
+  const progress=(await chrome.storage.local.get(["manualSyncProgress"])).manualSyncProgress;
   const tabs=await chrome.tabs.query({url:VINTED_PATTERNS}).catch(()=>[]);
   const vinted_tab_open=tabs.some(tab=>tab?.id!=null);
-  if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN,vinted_tab_open};
+  if(!data.bridgeToken)return{paired:false,status:data.syncStatus||null,apiOrigin:API_ORIGIN,vinted_tab_open,manualSyncProgress:progress};
   try{
     const remote=await api("/api/extension/status");
-    return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN,vinted_tab_open};
+    return{paired:true,workspace:data.bridgeWorkspace,remote,status:data.syncStatus||null,apiOrigin:API_ORIGIN,vinted_tab_open,manualSyncProgress:progress};
   }catch(error){
-    return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN,vinted_tab_open};
+    return{paired:true,workspace:data.bridgeWorkspace,status:data.syncStatus||null,error:error instanceof Error?error.message:String(error),apiOrigin:API_ORIGIN,vinted_tab_open,manualSyncProgress:progress};
   }
 }
 async function runSync(reason="manual"){
@@ -603,6 +599,8 @@ async function runSync(reason="manual"){
       delete snapshot.age_scan_items;
       delete snapshot.detail_sync;
       snapshot.extension_version=chrome.runtime.getManifest().version;
+      if(!Array.isArray(snapshot.listings)||!snapshot.listings.length)
+        throw new Error("Refusing an empty Vinted inventory snapshot; existing active listings would be deactivated.");
       await logDiagnostic("sync.dashboard.upload","listings="+snapshot.listings.length+" orders="+snapshot.orders.length);
 
       const result=await api("/api/extension/browser-sync",{method:"POST",body:JSON.stringify(snapshot)});
@@ -658,6 +656,27 @@ async function runSync(reason="manual"){
   })();
   return syncInFlight;
 }
+async function startManualSync(){
+  const previous=(await chrome.storage.local.get(["manualSyncProgress"])).manualSyncProgress;
+  if(previous?.state==="running"&&Date.now()-Number(previous.started_at||0)<12*60*1000)
+    return {ok:true,started:true,already_running:true};
+  const progress={state:"running",started_at:Date.now()};
+  await chrome.storage.local.set({manualSyncProgress:progress});
+  // Reply to the popup immediately rather than holding its Chrome message
+  // channel open while a lengthy Vinted collection runs.
+  void runSync("manual").then(async result=>{
+    await chrome.storage.local.set({manualSyncProgress:{
+      state:"done",started_at:progress.started_at,finished_at:Date.now(),result,
+    }});
+  }).catch(async error=>{
+    const result={ok:false,error:String(error?.message||error)};
+    await logDiagnostic("sync.unexpected.error",result.error,"error");
+    await chrome.storage.local.set({manualSyncProgress:{
+      state:"done",started_at:progress.started_at,finished_at:Date.now(),result,
+    }});
+  });
+  return {ok:true,started:true};
+}
 function alarms(){
   // No catch-up sync on browser launch or extension installation.
   chrome.alarms.create(SYNC_ALARM,{
@@ -677,7 +696,8 @@ chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
   (async()=>{
     if(msg?.type==="pair")return sendResponse(await pair(msg.code));
     if(msg?.type==="unpair"){await unpair();return sendResponse({ok:true})}
-    if(msg?.type==="sync-now")return sendResponse(await runSync("manual"));
+    if(msg?.type==="sync-now")return sendResponse(await startManualSync());
+    if(msg?.type==="sync-progress")return sendResponse({ok:true,progress:(await chrome.storage.local.get(["manualSyncProgress"])).manualSyncProgress||null});
     if(msg?.type==="diagnostics")return sendResponse({ok:true,lines:await getDiagnostics()});
     if(msg?.type==="diagnostics-clear"){await clearDiagnostics();return sendResponse({ok:true})}
     if(msg?.type==="bridge-diagnostic-event"){
