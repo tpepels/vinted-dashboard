@@ -56,6 +56,7 @@ async function refresh() {
   const paused = pausedUntil(status);
   if (status.ok === false) {
     show("Last update failed. " + (status.error || "Could not check Vinted."), true);
+    $("#diagnostics").open = true;
   } else if (status.ok === true && last) {
     const count = Number(status.listings || 0);
     const summary = count + " Vinted listing" + (count === 1 ? "" : "s") + " synced";
@@ -67,6 +68,7 @@ async function refresh() {
     show("Connected to " + (response.workspace || "your dashboard") + ". No update yet.");
   }
   syncDetails(status);
+  if ($("#diagnostics").open) await loadDiagnostics();
   if (response.error) {
     // Cached status may still be usable, but we could not check the server.
     show("Cannot reach the dashboard right now. Last saved update: "
@@ -80,7 +82,46 @@ $("#pair-btn").onclick = async () => {
   if (response?.ok === false || response?.error) {
     return show(response.error || "Could not connect browser.", true);
   }
-  await refresh();
+  await async function loadDiagnostics() {
+  const area = $("#diagnostic-console");
+  try {
+    const response = await send({type:"diagnostics"});
+    if (!response?.ok) throw new Error(response?.error || "Diagnostic log unavailable.");
+    const lines = Array.isArray(response.lines) ? response.lines : [];
+    area.value = lines.join("\n") || "No diagnostic entries yet.";
+    area.scrollTop = area.scrollHeight;
+    $("#diagnostic-feedback").textContent = lines.length + " entries (last 160 kept locally).";
+  } catch (error) {
+    $("#diagnostic-feedback").textContent = "Could not load log: " + String(error?.message || error);
+  }
+}
+$("#diagnostics").addEventListener("toggle", () => {
+  if ($("#diagnostics").open) loadDiagnostics();
+});
+$("#refresh-logs").onclick = loadDiagnostics;
+$("#copy-logs").onclick = async () => {
+  const area = $("#diagnostic-console");
+  try {
+    await navigator.clipboard.writeText(area.value);
+    $("#diagnostic-feedback").textContent = "Log copied.";
+  } catch {
+    area.focus();
+    area.select();
+    $("#diagnostic-feedback").textContent = document.execCommand("copy")
+      ? "Log copied." : "Select the text above and copy it manually.";
+  }
+};
+$("#clear-logs").onclick = async () => {
+  try {
+    const result = await send({type:"diagnostics-clear"});
+    if (!result?.ok) throw new Error(result?.error || "Clear failed.");
+    await loadDiagnostics();
+  } catch (error) {
+    $("#diagnostic-feedback").textContent = "Could not clear log: " + String(error?.message || error);
+  }
+};
+
+refresh();
 };
 
 $("#sync").onclick = async () => {
@@ -95,6 +136,7 @@ $("#sync").onclick = async () => {
     show("Could not check Vinted: " + String(error.message || error), true);
   } finally {
     button.disabled = false;
+    if ($("#diagnostics").open) await loadDiagnostics();
   }
 };
 
