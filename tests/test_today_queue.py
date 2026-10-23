@@ -158,7 +158,7 @@ def test_today_unifies_operational_work_types(monkeypatch):
 
     titles = [row["title"] for row in body["work_queue"]]
     assert any("ambiguous sold order" in title for title in titles)
-    assert any("purchase cost match" in title for title in titles)
+    assert not any("purchase cost match" in title for title in titles)
     assert any("Ebay" in title and "attention" in title for title in titles)
 
 
