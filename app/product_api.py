@@ -1483,6 +1483,17 @@ def update_inventory_item(
             }
         for key, value in values.items():
             setattr(item, key, value)
+        if "cost_cents" in values:
+            attributes = dict(item.attributes or {})
+            # Editing a purchase cost is an explicit exception, never an
+            # accidental reapplication of the book-wide estimated default.
+            if values["cost_cents"] is None:
+                if attributes.get("cost_source") in {"manual_item", "default_book"}:
+                    attributes.pop("cost_source", None)
+            else:
+                attributes["cost_source"] = "manual_item"
+                attributes.pop("cost_source_adjusted", None)
+            item.attributes = attributes
         if "quantity" in values and values["quantity"] is not None:
             record_physical_quantity(session, item, int(item.quantity or 0))
         session.flush()
