@@ -4342,20 +4342,10 @@ def today(context: RequestContext = Depends(require_context)):
                 }
             )
 
+        # Real purchase matching remains available in Sales as an optional
+        # exception workflow. A default €1/book estimate must not create a
+        # recurring Today task demanding costs for every new stock item.
         cost_matches = purchase_cost_suggestions(session, context.workspace.id)
-        if cost_matches["count"]:
-            count = int(cost_matches["count"])
-            work_queue.append(
-                {
-                    "id": "costs:purchases",
-                    "kind": "purchase_cost",
-                    "priority": 85,
-                    "title": f'Review {count} purchase cost match' + ("" if count == 1 else "es"),
-                    "label": "Record acquisition costs",
-                    "detail": "Vinted purchases can fill missing inventory cost after review.",
-                    "view": "sales",
-                }
-            )
 
         recent_open_sales = session.execute(
             select(models.Sale)
