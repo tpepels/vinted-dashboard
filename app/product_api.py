@@ -4912,7 +4912,8 @@ def analytics(
         "sales_period_uncosted_count": len(period_revenue_sales) - len(period_costed),
         "sales_period_economics_complete": (len(period_costed) == len(sold_period)),
         "sales_period_estimated_count": sum(
-            (row.extra or {}).get("acquisition_cost_source") == "estimated_bulk"
+            sale_acquisition_cost(row, sold_items.get(row.inventory_item_id))[1]
+            in {"default_book", "default_book_assumed_quantity", "estimated_bulk"}
             or (
                 (row.extra or {}).get("acquisition_cost_cents") is None
                 and (sold_items.get(row.inventory_item_id) is not None)
