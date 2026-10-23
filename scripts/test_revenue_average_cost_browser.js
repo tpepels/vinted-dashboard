@@ -153,7 +153,7 @@ const browserTest=String.raw`
     document.querySelector("#sale-cost-backfill-value").value="1.00";
     document.querySelector("#sale-cost-backfill-preview-btn").click();
     await sleep(80);
-    result.backfillPreview=document.querySelector("#sale-cost-backfill-preview").textContent.includes("5 books across 1 historical sales");
+    result.backfillPreview=document.querySelector("#sale-cost-backfill-preview").textContent.includes("5 listings across 1 historical sales");
     result.backfillApplyEnabled=!document.querySelector("#sale-cost-backfill-apply").disabled;
     document.querySelector("#sale-cost-backfill-apply").click();
     await sleep(150);
