@@ -398,10 +398,14 @@ async function enrichListingDetails(listings,reason="periodic"){
     }catch{}
   }
   const pending=Math.max(0,missing.length-enriched);
+  // Only failed requests with a future retry deadline are cooling down.
+  // Items waiting for the three-per-sync budget are pending but NOT blocked.
+  const cooldown=missing.filter(row=>
+    !cache[row.id]&&Number(retries[row.id]?.next_retry_at||0)>Date.now()
+  ).length;
   return {
     enriched,attempted:queue.length,failed:failures,
-    pending,deferred:pending,
-    cooldown:Math.max(0,missing.length-queue.length),
+    pending,deferred:pending,cooldown,
     rate_limited:rateLimited,access_blocked:accessBlocked,
   };
 }
