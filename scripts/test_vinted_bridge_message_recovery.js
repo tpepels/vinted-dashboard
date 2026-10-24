@@ -23,7 +23,7 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   let onMessage = null;
   const chrome = {
     runtime:{
-      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.15"}),
+      getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.16"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
       onMessage:{addListener(listener){onMessage=listener;}},
     },
