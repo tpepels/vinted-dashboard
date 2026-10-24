@@ -20,11 +20,12 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   let injections = 0;
   let reloads = 0;
   let openedTabs = 0;
+  let onMessage = null;
   const chrome = {
     runtime:{
       getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.14"}),
       onInstalled:{addListener(){}},onStartup:{addListener(){}},
-      onMessage:{addListener(){}},
+      onMessage:{addListener(listener){onMessage=listener;}},
     },
     storage:{local:{
       async get(keys){return Object.fromEntries((keys||[]).map(key=>[key,state[key]]));},
@@ -57,6 +58,17 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
           return {ok:true,started:true};
         }
         if(payload.type==="collect-vinted-result"){
+          if(mode==="reported401"||mode==="foreign401"){
+            // The content script reports the API error, then Chrome navigates
+            // its tab to an error page and drops the polling port.
+            await new Promise(resolve=>onMessage({
+              type:"bridge-diagnostic-event",
+              stage:"collect.failed",
+              detail:"Error: Vinted refused the inventory API request (HTTP 401) for /api/v2/users/current.\n    at fetchJson",
+              level:"error",
+            },{tab:{id:mode==="foreign401"?999:id,url:"https://www.vinted.pt/member/42"}},resolve));
+            throw Error("Frame with ID 0 is showing error page");
+          }
           if(["recover","periodic-lost","double-lost"].includes(mode))throw Error(LOST);
           if(mode==="limited")return {ok:false,rate_limited:true,error:"Vinted API rate limited the inventory sync."};
           return {ok:true,snapshot:{
@@ -120,6 +132,20 @@ async function scenario(mode, reason = "manual", lastAttempt = Date.now()) {
   const trace=(failed.state.bridgeDiagnosticLogV1||[]).join("\n");
   assert.match(trace,/collect.poll.channel.error/);
   assert.match(trace,/A listener indicated an asynchronous response/);
+
+  const preserved=await scenario("reported401","periodic",0);
+  assert.equal(preserved.result.ok,false);
+  assert.match(preserved.result.error,/HTTP 401/);
+  assert.match(preserved.result.error,/users\/current/);
+  assert.doesNotMatch(preserved.result.error,/^Vinted collection connection was interrupted:/);
+  assert.equal(preserved.sentToDashboard,0,"Never upload a partial inventory after a 401");
+  assert.equal(preserved.collections,1,"A collection failure must not trigger another attempt");
+  assert.equal(preserved.closedWorkers,1,"The temporary tab must be closed");
+
+  const foreign=await scenario("foreign401","periodic",0);
+  assert.doesNotMatch(foreign.result.error,/HTTP 401/,
+    "Diagnostics from another tab must not contaminate active collection errors");
+  assert.match(foreign.result.error,/collection connection was interrupted/);
 
   const deferred=await scenario("periodic-lost","periodic",0);
   assert.equal(deferred.result.ok,false);
