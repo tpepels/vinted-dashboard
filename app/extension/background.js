@@ -727,7 +727,7 @@ chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
           activeCollectionContext.reportedFailure=
             safeDiagnosticText(String(msg.detail||"").split("\n")[0].replace(/^Error:\s*/,"")).slice(0,400);
         }
-        await logDiagnostic("vinted."+String(msg.stage||"step"),msg.detail||"",msg.level==="error"?"info");
+        await logDiagnostic("vinted."+String(msg.stage||"step"),msg.detail||"",msg.level==="error"?"error":"info");
       }
       return sendResponse({ok:true});
     }
