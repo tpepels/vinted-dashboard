@@ -183,7 +183,7 @@ def test_host_permission_drops_port_but_keeps_scheme():
 
 def test_source_extension_version_is_bumped_for_local_download():
     manifest = json.loads((ROOT / "app" / "extension" / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "3.4.14"
+    assert manifest["version"] == "3.4.15"
 
 
 
@@ -279,13 +279,13 @@ def test_dashboard_download_uses_versioned_bridge_filename(monkeypatch):
     assert response.status_code == 200
     assert (
         response.headers["content-disposition"]
-        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.14.zip"'
+        == 'attachment; filename="reseller-dashboard-chrome-bridge-v3.4.15.zip"'
     )
-    assert response.headers["x-bridge-version"] == "3.4.14"
+    assert response.headers["x-bridge-version"] == "3.4.15"
 
-    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.14.zip")
+    versioned = client.get("/downloads/reseller-chrome-bridge-v3.4.15.zip")
     assert versioned.status_code == 200
-    assert "v3.4.14.zip" in versioned.headers["content-disposition"]
+    assert "v3.4.15.zip" in versioned.headers["content-disposition"]
 
     wrong = client.get("/downloads/reseller-chrome-bridge-v0.0.1.zip")
     assert wrong.status_code == 404
