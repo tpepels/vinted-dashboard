@@ -21,6 +21,8 @@ const DIAGNOSTIC_LOG_LIMIT=160;
 const LOST_MESSAGE_CHANNEL=/A listener indicated an asynchronous response|message (?:port|channel) closed|The message port closed before a response was received/i;
 const MISSING_MESSAGE_RECEIVER=/Receiving end does not exist|Could not establish connection/i;
 let syncInFlight=null;
+// Keep the actual Vinted error if the page disappears before polling completes.
+let activeCollectionContext=null;
 let ageJobInFlight=null;
 let lastAgeNavigationAt=0;
 let ageNavigationChain=Promise.resolve();
@@ -153,6 +155,7 @@ async function collectFromVintedTab(tab,reason){
   // taken about 25 seconds. Each IPC request now returns immediately; the
   // actual scrape continues once in the content script and can be polled.
   const jobId=String(Date.now())+"-"+String(Math.random()).slice(2);
+  activeCollectionContext={tabId:tab.id,reportedFailure:null};
   await logDiagnostic("collect.start","tab="+tab.id+" job="+jobId+" reason="+reason);
   let started;
   try{
@@ -170,8 +173,15 @@ async function collectFromVintedTab(tab,reason){
       response=await message(tab.id,{type:"collect-vinted-result",job_id:jobId});
     }catch(error){
       await logDiagnostic("collect.poll.channel.error",error?.stack||error?.message||error,"error");
-      // Never start a second collection after a lost response: it can double
-      // the requests to Vinted and trigger access limits.
+      // Never restart after losing a port: a second scrape doubles requests.
+      // If the Vinted script already reported an API error, preserve that
+      // instead of replacing HTTP 401 with the subsequent Chrome frame error.
+      const reported=activeCollectionContext?.tabId===tab.id
+        ? activeCollectionContext.reportedFailure:null;
+      if(reported){
+        await logDiagnostic("collect.reported.failure",reported,"error");
+        throw new Error(reported+" (Vinted tab connection also closed.)");
+      }
       throw new Error("Vinted collection connection was interrupted: "+String(error?.message||error));
     }
     if(response?.ok&&response.state==="running")continue;
@@ -660,6 +670,7 @@ async function runSync(reason="manual"){
     }finally{
       if(temporary!==null){try{await chrome.tabs.remove(temporary)}catch{}}
       await logDiagnostic("sync.finished","temporary tab closed="+(temporary!==null));
+      activeCollectionContext=null;
       syncInFlight=null;
     }
   })();
@@ -711,7 +722,12 @@ chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
     if(msg?.type==="diagnostics-clear"){await clearDiagnostics();return sendResponse({ok:true})}
     if(msg?.type==="bridge-diagnostic-event"){
       if(allowedVintedOrigin(_sender?.tab?.url)){
-        await logDiagnostic("vinted."+String(msg.stage||"step"),msg.detail||"",msg.level==="error"?"error":"info");
+        if(msg.stage==="collect.failed"&&activeCollectionContext?.tabId===_sender?.tab?.id){
+          // Only accept failure metadata from the exact tab being collected.
+          activeCollectionContext.reportedFailure=
+            safeDiagnosticText(String(msg.detail||"").split("\n")[0].replace(/^Error:\s*/,"")).slice(0,400);
+        }
+        await logDiagnostic("vinted."+String(msg.stage||"step"),msg.detail||"",msg.level==="error"?"info");
       }
       return sendResponse({ok:true});
     }
