@@ -6734,6 +6734,13 @@ async function connections() {
         + esc(devices.download_url || "/downloads/reseller-chrome-bridge.zip")
         + '">Download Chrome extension v' + esc(devices.latest_version || state.me?.bridge_version || "unknown") + '</a>'
         + '<button class="btn vinted-open-browsers" type="button">Manage browsers</button></div>'
+        + '<details class="connection-technical-help connector-account-help">'
+        + '<summary>Update the Chrome extension without reconnecting</summary>'
+        + '<p>Keep the existing extension installed. Extract the new ZIP over the files in the '
+        + '<strong>same folder</strong> that is already loaded in Chrome, then click <strong>Reload</strong> '
+        + 'in chrome://extensions. Your saved browser connection is preserved.</p>'
+        + '<p>Do not remove the extension, choose Load unpacked again, or move it to a new versioned folder. '
+        + 'Those actions can create a different extension ID and require a new pairing.</p></details>'
         + '<div class="pairing-inline hidden"><p>Enter this code in the Chrome extension within 10 minutes:</p>'
         + '<strong class="pair-code pair-code-inline"></strong></div>'
         + '<p class="connector-workflow-hint">Updates are deliberately limited to at most once every two hours. '
