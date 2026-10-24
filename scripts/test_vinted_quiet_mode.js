@@ -21,7 +21,7 @@ const tab = {id:4,windowId:9,status:"complete",url:"https://www.vinted.pt/member
 
 const chrome = {
   runtime:{
-    getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.15"}),
+    getManifest:()=>({content_scripts:[{matches:["https://www.vinted.pt/*"]}],version:"3.4.16"}),
     onInstalled:{addListener(){}},onStartup:{addListener(){}},
     onMessage:{addListener(){}},
   },
