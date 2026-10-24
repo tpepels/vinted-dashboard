@@ -153,6 +153,8 @@ function assert(condition, message) {
     "Normal API detail enrichment did not drain the full queue");
   assert(unlimited.result.snapshot.detail_sync.pending === 47,
     "Unfinished enrichment must remain queued for future two-hour syncs");
+  assert(unlimited.result.snapshot.detail_sync.cooldown === 0,
+    "Waiting for the per-sync budget must not count as a cooldown");
   assert(unlimited.result.snapshot.detail_sync.api_rate_limited === false,
     "Normal detail enrichment was incorrectly marked rate limited");
 
@@ -193,9 +195,13 @@ function assert(condition, message) {
   assert(gone.result.snapshot.detail_sync.enriched===0
       && gone.result.snapshot.detail_sync.failed===3,
     "404 item pages must be recorded as failures, not enrichment successes");
+  assert(gone.result.snapshot.detail_sync.cooldown===3,
+    "Only the three failed item pages should be on cooldown");
   assert(gone.firstIds.join(",")==="1,2,3"
       && gone.detailIds.slice(3).join(",")==="4,5,6",
     "Failed items must cool down so subsequent syncs try different items");
+  assert(gone.second.snapshot.detail_sync.cooldown===6,
+    "Repeated failures should cool down only the six attempted item pages");
   assert(gone.diagnosticEvents.filter(x=>x.stage==="details.item.failed")
     .some(x=>String(x.detail).includes("reason=http_404")),
     "404 responses must appear in diagnostic events");
