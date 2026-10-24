@@ -145,8 +145,37 @@ The downloaded artifact itself is always versioned, for example:
 reseller-dashboard-chrome-bridge-v3.4.1.zip
 ```
 
-Extract it, open `chrome://extensions`, enable Developer mode, choose **Load
-unpacked**, then use **Connections -> Vinted -> Pair Chrome** in the web app.
+**First installation only:** Extract the ZIP to a folder you will keep (for
+example `~/Applications/vinted-chrome-bridge`). Open `chrome://extensions`,
+enable Developer mode, choose **Load unpacked** and select that folder.
+Use **Connections → Vinted → Pair Chrome** in the dashboard once.
+
+**Updating without pairing again:** Keep that exact extension and its original
+folder. Download the new bridge ZIP, replace the files *inside the existing
+folder*, and click **Reload** on that extension in `chrome://extensions`.
+Never click **Remove** or **Load unpacked** for an update, and do not switch
+to a version-numbered extraction directory. Those actions can change the
+extension ID and lose the `chrome.storage.local` pairing. Chrome stores the
+pairing outside the extension folder, so overwriting its files is safe.
+
+On Linux, the included updater validates the ZIP and dashboard origin, updates
+the current extension folder in place, and remembers the folder for next time:
+
+```bash
+# First update: specify the folder ALREADY loaded in Chrome:
+python scripts/update_chrome_bridge.py \
+  ~/Downloads/reseller-dashboard-chrome-bridge-v3.4.16.zip \
+  --extension-dir /path/to/your/current/extension
+
+# Later versions: only supply the new downloaded ZIP:
+python scripts/update_chrome_bridge.py \
+  ~/Downloads/reseller-dashboard-chrome-bridge-vNEXT.zip
+```
+
+After each run, click **Reload** in `chrome://extensions`. The updater does
+not remove or re-pair the extension, and the pairing token is never exported.
+If the original extension was already removed, pair once after installing in
+a permanent directory; subsequent in-place updates preserve the connection.
 
 The bridge supports the principal European Vinted web origins. On its first
 sync it uses an already-open signed-in Vinted tab and remembers that origin for
